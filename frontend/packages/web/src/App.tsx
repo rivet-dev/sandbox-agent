@@ -713,12 +713,6 @@ export default function App() {
             <div className="logo">SA</div>
             <span className="header-title">Sandbox Agent</span>
           </div>
-          <div className="header-right">
-            <div className="status-indicator disconnected">
-              <span className="status-dot" />
-              Disconnected
-            </div>
-          </div>
         </header>
 
         <main className="landing">
@@ -872,7 +866,7 @@ export default function App() {
                 <p className="empty-state-text">
                   Create a new session to start chatting with an agent.
                 </p>
-                <button className="button primary" onClick={createNewSession} style={{ marginTop: 16 }}>
+                <button className="button primary" onClick={createNewSession}>
                   <Plus className="button-icon" />
                   Create Session
                 </button>
