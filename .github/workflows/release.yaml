@@ -1,0 +1,152 @@
+name: release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version (e.g. 0.1.0 or v0.1.0)"
+        required: true
+        type: string
+
+defaults:
+  run:
+    shell: bash -e {0}
+
+env:
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  setup:
+    name: "Setup"
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.vars.outputs.version }}
+      latest: ${{ steps.latest.outputs.latest }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version
+        id: vars
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            VERSION="${{ github.event.release.tag_name }}"
+          else
+            VERSION="${{ inputs.version }}"
+          fi
+
+          VERSION="${VERSION#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Determine latest
+        id: latest
+        run: |
+          node scripts/release/main.js --version "${{ steps.vars.outputs.version }}" --print-latest --output "$GITHUB_OUTPUT"
+
+  binaries:
+    name: "Build & Upload Binaries"
+    needs: [setup]
+    strategy:
+      matrix:
+        include:
+          - platform: linux
+            target: x86_64-unknown-linux-musl
+            binary_ext: ""
+            arch: x86_64
+          - platform: windows
+            target: x86_64-pc-windows-gnu
+            binary_ext: ".exe"
+            arch: x86_64
+          - platform: macos
+            target: x86_64-apple-darwin
+            binary_ext: ""
+            arch: x86_64
+          - platform: macos
+            target: aarch64-apple-darwin
+            binary_ext: ""
+            arch: aarch64
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build binary
+        run: |
+          docker/release/build.sh ${{ matrix.target }}
+          ls -la dist/
+
+      - name: Install AWS CLI
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y unzip curl
+
+          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+          unzip awscliv2.zip
+          sudo ./aws/install --update
+
+      - name: Upload binaries
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_RELEASES_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_RELEASES_SECRET_ACCESS_KEY }}
+        run: |
+          VERSION="${{ needs.setup.outputs.version }}"
+          BINARY_NAME="sandbox-daemon-${{ matrix.target }}${{ matrix.binary_ext }}"
+
+          aws s3 cp \
+            "dist/${BINARY_NAME}" \
+            "s3://rivet-releases/sandbox-daemon/${VERSION}/${BINARY_NAME}" \
+            --region auto \
+            --endpoint-url https://2a94c6a0ced8d35ea63cddc86c2681e7.r2.cloudflarestorage.com \
+            --checksum-algorithm CRC32
+
+          if [ "${{ needs.setup.outputs.latest }}" = "true" ]; then
+            aws s3 cp \
+              "dist/${BINARY_NAME}" \
+              "s3://rivet-releases/sandbox-daemon/latest/${BINARY_NAME}" \
+              --region auto \
+              --endpoint-url https://2a94c6a0ced8d35ea63cddc86c2681e7.r2.cloudflarestorage.com \
+              --checksum-algorithm CRC32
+          fi
+
+  artifacts:
+    name: "TypeScript + Install Script"
+    needs: [setup]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install AWS CLI
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y unzip curl
+
+          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+          unzip awscliv2.zip
+          sudo ./aws/install --update
+
+      - name: Upload TypeScript artifacts and install script
+        env:
+          R2_RELEASES_ACCESS_KEY_ID: ${{ secrets.R2_RELEASES_ACCESS_KEY_ID }}
+          R2_RELEASES_SECRET_ACCESS_KEY: ${{ secrets.R2_RELEASES_SECRET_ACCESS_KEY }}
+        run: |
+          VERSION="${{ needs.setup.outputs.version }}"
+          if [ "${{ needs.setup.outputs.latest }}" = "true" ]; then
+            LATEST_FLAG="--latest"
+          else
+            LATEST_FLAG="--no-latest"
+          fi
+
+          node scripts/release/main.js --version "$VERSION" $LATEST_FLAG --upload-typescript --upload-install

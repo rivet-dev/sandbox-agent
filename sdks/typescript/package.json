@@ -1,0 +1,17 @@
+{
+  "name": "sandbox-daemon-typescript",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate:openapi": "cargo run -p sandbox-daemon-openapi-gen -- --out src/generated/openapi.json",
+    "generate:types": "openapi-typescript src/generated/openapi.json -o src/generated/openapi.ts",
+    "generate": "npm run generate:openapi && npm run generate:types",
+    "build": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "openapi-typescript": "^6.7.0",
+    "typescript": "^5.7.0"
+  }
+}

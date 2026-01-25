@@ -1,4 +1,4 @@
-# Claude Code Instructions
+# Instructions
 
 ## Agent Schemas
 
@@ -12,10 +12,11 @@ Universal schema guidance:
 
 ## Spec Tracking
 
-- Track required tests in `spec/required-tests.md` as you write code.
-- Capture unresolved questions/ambiguities in `spec/im-not-sure.md`.
 - Update `todo.md` as work progresses; add new tasks as they arise.
 - Keep CLI subcommands in sync with every HTTP endpoint.
+- Update `CLAUDE.md` to keep CLI endpoints in sync with HTTP API changes.
+- When changing the HTTP API, update the TypeScript SDK and CLI together.
+- Do not make breaking changes to API endpoints.
 
 ## Git Commits
 

@@ -1,0 +1,13 @@
+{
+  "name": "sandbox-daemon-workspace",
+  "private": true,
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev --parallel",
+    "generate": "turbo run generate"
+  },
+  "devDependencies": {
+    "turbo": "^2.4.0"
+  }
+}
