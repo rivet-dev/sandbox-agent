@@ -1,5 +1,12 @@
 # Instructions
 
+## SDK Modes
+
+There are two ways to work with the SDKs:
+
+- **Embedded**: Spawns the `sandbox-agent` server as a subprocess on a unique port and communicates with it locally. Useful for local development or when running the SDK and agent in the same environment.
+- **Server**: Connects to a remotely running `sandbox-agent` server. The server is typically running inside a sandbox (e.g., Docker, E2B, Daytona, Vercel Sandboxes) and the SDK connects to it over HTTP.
+
 ## Agent Schemas
 
 Agent schemas (Claude Code, Codex, OpenCode, Amp) are available for reference in `resources/agent-schemas/dist/`.
