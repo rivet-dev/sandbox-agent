@@ -1,22 +1,11 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "dark",
+  "theme": "almond",
   "name": "Sandbox Agent SDK",
   "colors": {
     "primary": "#ff4f00",
-    "light": "#ff6a2a",
-    "dark": "#cc3f00",
-    "background": "#000000",
-    "card": "#1c1c1e",
-    "border": "#2c2c2e",
-    "inputBackground": "#2c2c2e",
-    "inputBorder": "#3a3a3c",
-    "text": "#ffffff",
-    "muted": "#8e8e93",
-    "success": "#30d158",
-    "warning": "#ff4f00",
-    "danger": "#ff3b30",
-    "purple": "#bf5af2"
+    "light": "#000000",
+    "dark": "#ffffff"
   },
   "favicon": "/favicon.svg",
   "logo": {
