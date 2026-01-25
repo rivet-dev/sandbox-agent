@@ -233,7 +233,7 @@ export default function App() {
   const logIdRef = useRef(1);
   const [copiedLogId, setCopiedLogId] = useState<number | null>(null);
 
-  const [debugTab, setDebugTab] = useState<DebugTab>("log");
+  const [debugTab, setDebugTab] = useState<DebugTab>("events");
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -1008,13 +1008,6 @@ export default function App() {
         <div className="debug-panel">
           <div className="debug-tabs">
             <button
-              className={`debug-tab ${debugTab === "log" ? "active" : ""}`}
-              onClick={() => setDebugTab("log")}
-            >
-              <Terminal className="button-icon" style={{ marginRight: 4, width: 12, height: 12 }} />
-              Log
-            </button>
-            <button
               className={`debug-tab ${debugTab === "events" ? "active" : ""}`}
               onClick={() => setDebugTab("events")}
             >
@@ -1023,6 +1016,13 @@ export default function App() {
               {events.length > 0 && (
                 <span className="debug-tab-badge">{events.length}</span>
               )}
+            </button>
+            <button
+              className={`debug-tab ${debugTab === "log" ? "active" : ""}`}
+              onClick={() => setDebugTab("log")}
+            >
+              <Terminal className="button-icon" style={{ marginRight: 4, width: 12, height: 12 }} />
+              Request Log
             </button>
             <button
               className={`debug-tab ${debugTab === "approvals" ? "active" : ""}`}
@@ -1096,7 +1096,7 @@ export default function App() {
                   <div className="card-meta">No events yet. Start streaming to receive events.</div>
                 ) : (
                   <div className="event-list">
-                    {events.map((event) => {
+                    {[...events].reverse().map((event) => {
                       const type = getEventType(event);
                       return (
                         <div key={event.id} className="event-item">
