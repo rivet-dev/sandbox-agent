@@ -62,7 +62,12 @@ POST /sessions/{} (will install agent if not already installed)
 	model?:string,
 	variant?:string,
     token?: string,
-    validateToken?: boolean
+    validateToken?: boolean,
+    dangerouslySkipPermissions?: boolean,
+    agentVersion?: string
+}
+<
+{
     healthy: boolean,
     error?: AgentError
 }
@@ -80,11 +85,27 @@ GET /sessions/{}/events?offset=x&limit=x
 }
 
 GET /sessions/{}/events/sse?offset=x
-- same as bove but using sse
+- same as above but using sse
+
+POST /sessions/{}/questions/{questionId}/reply
+{ answers: string[][] }  // Array per question of selected option labels
+
+POST /sessions/{}/questions/{questionId}/reject
+{}
+
+POST /sessions/{}/permissions/{permissionId}/reply
+{ reply: "once" | "always" | "reject" }
 
 types:
 
-type UniversalEvent = { message: UniversalMessage } | { started: Started } | { error: CrashInfo };
+type UniversalEvent =
+    | { message: UniversalMessage }
+    | { started: Started }
+    | { error: CrashInfo }
+    | { questionAsked: QuestionRequest }
+    | { permissionAsked: PermissionRequest };
+
+// See research/human-in-the-loop.md for QuestionRequest/PermissionRequest details
 
 type AgentError = { tokenError: ... } | { processExisted: ... } | { installFailed: ... } | etc
 
@@ -105,10 +126,10 @@ for messages, we need to have a sepcial universal message type for failed to par
 
 | Agent | Provider | Binary | Install Method | Session ID | Streaming Format |
 |-------|----------|--------|----------------|------------|------------------|
-| Claude Code | Anthropic | `claude` | curl installer (native binary) | `session_id` (string) | JSONL via stdout |
-| Codex | OpenAI | `codex` | GitHub releases / Homebrew (Rust binary) | `thread_id` (string) | JSONL via stdout |
-| OpenCode | Multi-provider | `opencode` | curl installer (Go binary) | `session_id` (string) | SSE or JSONL |
-| Amp | Sourcegraph | `amp` | curl installer (bundled Bun) | `session_id` (string) | JSONL via stdout |
+| Claude Code | Anthropic | `claude` | curl raw binary from GCS | `session_id` (string) | JSONL via stdout |
+| Codex | OpenAI | `codex` | curl tarball from GitHub releases | `thread_id` (string) | JSONL via stdout |
+| OpenCode | Multi-provider | `opencode` | curl tarball from GitHub releases | `session_id` (string) | SSE or JSONL |
+| Amp | Sourcegraph | `amp` | curl raw binary from GCS | `session_id` (string) | JSONL via stdout |
 
 #### spawning approaches
 
@@ -177,20 +198,120 @@ A single long-running server handles multiple sessions. The daemon connects to t
 
 #### installation
 
-Before spawning, agents must be installed. **Prefer native installers over npm** - they have no Node.js dependency and are simpler to manage.
+Before spawning, agents must be installed. **We curl raw binaries directly** - no npm, brew, install scripts, or other package managers.
 
-| Agent | Native Install (preferred) | Fallback (npm) | Verify |
-|-------|---------------------------|----------------|--------|
-| Claude Code | `curl -fsSL https://claude.ai/install.sh \| bash` | `npm i -g @anthropic-ai/claude-code` | `claude --version` |
-| Codex | `brew install --cask codex` or [GitHub Releases](https://github.com/openai/codex/releases) | `npm i -g @openai/codex` | `codex --version` |
-| OpenCode | `curl -fsSL https://opencode.ai/install \| bash` | `npm i -g opencode-ai` | `opencode --version` |
-| Amp | `curl -fsSL https://ampcode.com/install.sh \| bash` | `npm i -g @sourcegraph/amp` | `amp --version` |
+##### Claude Code
 
-**Notes:**
-- Claude Code native installer: signed by Anthropic, notarized by Apple on macOS
-- Codex: Rust binary, download from GitHub releases and rename to `codex`
-- OpenCode: Go binary, also available via Homebrew (`brew install anomalyco/tap/opencode`), Scoop, Nix
-- Amp: bundles its own Bun runtime, no prerequisites needed
+```bash
+# Get latest version
+VERSION=$(curl -s https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/claude-code-releases/latest)
+
+# Linux x64
+curl -fsSL "https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/claude-code-releases/${VERSION}/linux-x64/claude" -o /usr/local/bin/claude && chmod +x /usr/local/bin/claude
+
+# Linux x64 (musl)
+curl -fsSL "https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/claude-code-releases/${VERSION}/linux-x64-musl/claude" -o /usr/local/bin/claude && chmod +x /usr/local/bin/claude
+
+# Linux ARM64
+curl -fsSL "https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/claude-code-releases/${VERSION}/linux-arm64/claude" -o /usr/local/bin/claude && chmod +x /usr/local/bin/claude
+
+# macOS ARM64 (Apple Silicon)
+curl -fsSL "https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/claude-code-releases/${VERSION}/darwin-arm64/claude" -o /usr/local/bin/claude && chmod +x /usr/local/bin/claude
+
+# macOS x64 (Intel)
+curl -fsSL "https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/claude-code-releases/${VERSION}/darwin-x64/claude" -o /usr/local/bin/claude && chmod +x /usr/local/bin/claude
+```
+
+##### Codex
+
+```bash
+# Linux x64 (musl for max compatibility)
+curl -fsSL https://github.com/openai/codex/releases/latest/download/codex-x86_64-unknown-linux-musl.tar.gz | tar -xz
+mv codex-x86_64-unknown-linux-musl /usr/local/bin/codex
+
+# Linux ARM64
+curl -fsSL https://github.com/openai/codex/releases/latest/download/codex-aarch64-unknown-linux-musl.tar.gz | tar -xz
+mv codex-aarch64-unknown-linux-musl /usr/local/bin/codex
+
+# macOS ARM64 (Apple Silicon)
+curl -fsSL https://github.com/openai/codex/releases/latest/download/codex-aarch64-apple-darwin.tar.gz | tar -xz
+mv codex-aarch64-apple-darwin /usr/local/bin/codex
+
+# macOS x64 (Intel)
+curl -fsSL https://github.com/openai/codex/releases/latest/download/codex-x86_64-apple-darwin.tar.gz | tar -xz
+mv codex-x86_64-apple-darwin /usr/local/bin/codex
+```
+
+##### OpenCode
+
+```bash
+# Linux x64
+curl -fsSL https://github.com/anomalyco/opencode/releases/latest/download/opencode-linux-x64.tar.gz | tar -xz
+mv opencode /usr/local/bin/opencode
+
+# Linux x64 (musl)
+curl -fsSL https://github.com/anomalyco/opencode/releases/latest/download/opencode-linux-x64-musl.tar.gz | tar -xz
+mv opencode /usr/local/bin/opencode
+
+# Linux ARM64
+curl -fsSL https://github.com/anomalyco/opencode/releases/latest/download/opencode-linux-arm64.tar.gz | tar -xz
+mv opencode /usr/local/bin/opencode
+
+# macOS ARM64 (Apple Silicon)
+curl -fsSL https://github.com/anomalyco/opencode/releases/latest/download/opencode-darwin-arm64.zip -o opencode.zip && unzip -o opencode.zip && rm opencode.zip
+mv opencode /usr/local/bin/opencode
+
+# macOS x64 (Intel)
+curl -fsSL https://github.com/anomalyco/opencode/releases/latest/download/opencode-darwin-x64.zip -o opencode.zip && unzip -o opencode.zip && rm opencode.zip
+mv opencode /usr/local/bin/opencode
+```
+
+##### Amp
+
+```bash
+# Get latest version
+VERSION=$(curl -s https://storage.googleapis.com/amp-public-assets-prod-0/cli/cli-version.txt)
+
+# Linux x64
+curl -fsSL "https://storage.googleapis.com/amp-public-assets-prod-0/cli/${VERSION}/amp-linux-x64" -o /usr/local/bin/amp && chmod +x /usr/local/bin/amp
+
+# Linux ARM64
+curl -fsSL "https://storage.googleapis.com/amp-public-assets-prod-0/cli/${VERSION}/amp-linux-arm64" -o /usr/local/bin/amp && chmod +x /usr/local/bin/amp
+
+# macOS ARM64 (Apple Silicon)
+curl -fsSL "https://storage.googleapis.com/amp-public-assets-prod-0/cli/${VERSION}/amp-darwin-arm64" -o /usr/local/bin/amp && chmod +x /usr/local/bin/amp
+
+# macOS x64 (Intel)
+curl -fsSL "https://storage.googleapis.com/amp-public-assets-prod-0/cli/${VERSION}/amp-darwin-x64" -o /usr/local/bin/amp && chmod +x /usr/local/bin/amp
+```
+
+##### binary URL summary
+
+| Agent | Version URL | Binary URL Pattern |
+|-------|-------------|-------------------|
+| Claude Code | `https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/claude-code-releases/latest` | `.../{version}/{platform}/claude` |
+| Codex | `https://api.github.com/repos/openai/codex/releases/latest` | `https://github.com/openai/codex/releases/latest/download/codex-{target}.tar.gz` |
+| OpenCode | `https://api.github.com/repos/anomalyco/opencode/releases/latest` | `https://github.com/anomalyco/opencode/releases/latest/download/opencode-{platform}.tar.gz` |
+| Amp | `https://storage.googleapis.com/amp-public-assets-prod-0/cli/cli-version.txt` | `.../{version}/amp-{platform}` |
+
+##### platform mappings
+
+| Platform | Claude Code | Codex | OpenCode | Amp |
+|----------|-------------|-------|----------|-----|
+| Linux x64 | `linux-x64` | `x86_64-unknown-linux-musl` | `linux-x64` | `linux-x64` |
+| Linux x64 musl | `linux-x64-musl` | `x86_64-unknown-linux-musl` | `linux-x64-musl` | N/A |
+| Linux ARM64 | `linux-arm64` | `aarch64-unknown-linux-musl` | `linux-arm64` | `linux-arm64` |
+| macOS ARM64 | `darwin-arm64` | `aarch64-apple-darwin` | `darwin-arm64` | `darwin-arm64` |
+| macOS x64 | `darwin-x64` | `x86_64-apple-darwin` | `darwin-x64` | `darwin-x64` |
+
+##### versioning
+
+| Agent | Get Latest Version | Specific Version |
+|-------|-------------------|------------------|
+| Claude Code | `curl -s https://storage.googleapis.com/claude-code-dist-.../latest` | Replace `${VERSION}` in URL |
+| Codex | `curl -s https://api.github.com/repos/openai/codex/releases/latest \| jq -r .tag_name` | Replace `latest` with `download/{tag}` |
+| OpenCode | `curl -s https://api.github.com/repos/anomalyco/opencode/releases/latest \| jq -r .tag_name` | Replace `latest` with `download/{tag}` |
+| Amp | `curl -s https://storage.googleapis.com/amp-public-assets-prod-0/cli/cli-version.txt` | Replace `${VERSION}` in URL |
 
 #### communication
 
@@ -237,10 +358,11 @@ we need to auto-generate types from our json schema for these languages
 ## spec todo
 
 - generate common denominator with conversion functions
-- how do we handle HIL
-- how do you run each of these agents
 - what else do we need, like todo, etc?
 - how can we dump the spec for all of the agents somehow
+- generate an example ui for this
+- architecture document
+- how should we handle the tokens for auth?
 
 ## future problems to visit
 
@@ -263,6 +385,8 @@ we need to auto-generate types from our json schema for these languages
 - management ui
 - skill
 - pre-package these as bun binaries instead of npm installations
+- build & release pipeline with musl
+- agent feature matrix for api features
 
 ## future work
 
