@@ -1,0 +1,24 @@
+---
+import Layout from '../layouts/Layout.astro';
+import { Navigation } from '../components/Navigation';
+import { Hero } from '../components/Hero';
+import { PainPoints } from '../components/PainPoints';
+import { FeatureGrid } from '../components/FeatureGrid';
+import { Integrations } from '../components/Integrations';
+import { CTASection } from '../components/CTASection';
+import { Footer } from '../components/Footer';
+---
+
+<Layout title="Sandbox Agent SDK - API for Coding Agents">
+  <div class="min-h-screen bg-black text-white selection:bg-accent/30">
+    <Navigation client:load />
+    <main>
+      <Hero client:load />
+      <PainPoints client:visible />
+      <FeatureGrid client:visible />
+      <Integrations client:visible />
+      <CTASection client:visible />
+    </main>
+    <Footer client:visible />
+  </div>
+</Layout>

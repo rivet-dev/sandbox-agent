@@ -45,9 +45,12 @@ Want support for another agent? [Open an issue](https://github.com/anthropics/sa
 
 ## Architecture
 
-- Run the `sandbox-agent` daemon locally or inside a sandbox.
-- The daemon spawns agents, normalizes their event streams into a universal schema, and exposes a single HTTP/SSE API.
-- Clients (SDK, CLI, Inspector UI) all use the same `/v1` API for sessions and events.
+![Agent Architecture Diagram](./agent-diagram.gif)
+
+The Sandbox Agent acts as a universal adapter between your client application and various coding agents (Claude Code, Codex, OpenCode, Amp). Each agent has its own adapter (e.g., `claude_adapter.rs`) that handles the translation between the universal API and the agent-specific interface.
+
+- **Embedded Mode**: Runs agents locally as subprocesses
+- **Server Mode**: Runs as HTTP server from any sandbox provider
 
 See https://rivet.dev/docs/architecture for a deeper walkthrough.
 
