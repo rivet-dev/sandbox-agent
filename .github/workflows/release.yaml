@@ -41,6 +41,11 @@ jobs:
       - name: Install tsx
         run: npm install -g tsx
 
+      - name: Install release script dependencies
+        run: |
+          cd scripts/release
+          pnpm install --ignore-workspace
+
       - name: Run setup phase
         run: |
           CMD="./scripts/release/main.ts --version '${{ inputs.version }}' --phase setup-ci"
@@ -124,6 +129,11 @@ jobs:
 
       - name: Install tsx
         run: npm install -g tsx
+
+      - name: Install release script dependencies
+        run: |
+          cd scripts/release
+          pnpm install --ignore-workspace
 
       - name: Install AWS CLI
         run: |
