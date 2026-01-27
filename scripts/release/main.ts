@@ -197,13 +197,13 @@ async function runLocalChecks(opts: ReleaseOpts) {
 		throw err;
 	}
 
-	// TypeScript type check
-	console.log("Running TypeScript type check...");
+	// TypeScript SDK type check
+	console.log("Running TypeScript SDK type check...");
 	try {
-		await $({ stdio: "inherit", cwd: opts.root })`pnpm check-types`;
-		console.log("✅ TypeScript type check passed");
+		await $({ stdio: "inherit", cwd: opts.root })`pnpm --filter sandbox-agent run typecheck`;
+		console.log("✅ TypeScript SDK type check passed");
 	} catch (err) {
-		console.error("❌ TypeScript type check failed");
+		console.error("❌ TypeScript SDK type check failed");
 		throw err;
 	}
 
@@ -213,13 +213,13 @@ async function runLocalChecks(opts: ReleaseOpts) {
 async function runCiChecks(opts: ReleaseOpts) {
 	console.log("Running CI checks...");
 
-	// TypeScript type check
-	console.log("Running TypeScript type check...");
+	// TypeScript SDK type check
+	console.log("Running TypeScript SDK type check...");
 	try {
-		await $({ stdio: "inherit", cwd: opts.root })`pnpm check-types`;
-		console.log("✅ TypeScript type check passed");
+		await $({ stdio: "inherit", cwd: opts.root })`pnpm --filter sandbox-agent run typecheck`;
+		console.log("✅ TypeScript SDK type check passed");
 	} catch (err) {
-		console.error("❌ TypeScript type check failed");
+		console.error("❌ TypeScript SDK type check failed");
 		throw err;
 	}
 
