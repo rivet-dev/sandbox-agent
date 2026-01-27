@@ -47,6 +47,8 @@ const STEPS = [
   "upload-typescript",
   "upload-install",
   "upload-binaries",
+  "push-tag",
+  "create-github-release",
 ] as const;
 
 const PHASES = ["setup-local", "setup-ci", "complete-ci"] as const;
@@ -71,6 +73,8 @@ const PHASE_MAP: Record<Phase, Step[]> = {
     "upload-typescript",
     "upload-install",
     "upload-binaries",
+    "push-tag",
+    "create-github-release",
   ],
 };
 
@@ -205,6 +209,79 @@ function shouldTagAsLatest(version: string) {
   }
 
   return compareSemver(parsed, parseSemver(latestStable)) > 0;
+}
+
+function npmVersionExists(packageName: string, version: string): boolean {
+  const result = spawnSync("npm", ["view", `${packageName}@${version}`, "version"], {
+    stdio: ["ignore", "pipe", "pipe"],
+    encoding: "utf8",
+  });
+  if (result.status === 0) {
+    return true;
+  }
+  const stderr = result.stderr || "";
+  if (
+    stderr.includes(`No match found for version ${version}`) ||
+    stderr.includes(`'${packageName}@${version}' is not in this registry`)
+  ) {
+    return false;
+  }
+  // If it's an unexpected error, assume version doesn't exist to allow publish attempt
+  return false;
+}
+
+function crateVersionExists(crateName: string, version: string): boolean {
+  const result = spawnSync("cargo", ["search", crateName, "--limit", "1"], {
+    stdio: ["ignore", "pipe", "pipe"],
+    encoding: "utf8",
+  });
+  if (result.status !== 0) {
+    return false;
+  }
+  // Output format: "crate_name = \"version\""
+  const output = result.stdout || "";
+  const match = output.match(new RegExp(`^${crateName}\\s*=\\s*"([^"]+)"`));
+  if (match && match[1] === version) {
+    return true;
+  }
+  return false;
+}
+
+function createAndPushTag(rootDir: string, version: string) {
+  console.log(`==> Creating tag v${version}`);
+  run("git", ["tag", "-f", `v${version}`], { cwd: rootDir });
+  run("git", ["push", "origin", `v${version}`, "-f"], { cwd: rootDir });
+  console.log(`Tag v${version} created and pushed`);
+}
+
+function createGitHubRelease(rootDir: string, version: string) {
+  console.log(`==> Creating GitHub release for v${version}`);
+
+  // Check if release already exists
+  const listResult = spawnSync("gh", ["release", "list", "--json", "tagName"], {
+    cwd: rootDir,
+    stdio: ["ignore", "pipe", "pipe"],
+    encoding: "utf8",
+  });
+
+  if (listResult.status === 0) {
+    const releases = JSON.parse(listResult.stdout || "[]");
+    const exists = releases.some((r: { tagName: string }) => r.tagName === `v${version}`);
+    if (exists) {
+      console.log(`Release v${version} already exists, updating...`);
+      run("gh", ["release", "edit", `v${version}`, "--tag", `v${version}`], { cwd: rootDir });
+      return;
+    }
+  }
+
+  // Create new release
+  const isPrerelease = parseSemver(version).prerelease.length > 0;
+  const releaseArgs = ["release", "create", `v${version}`, "--title", version, "--generate-notes"];
+  if (isPrerelease) {
+    releaseArgs.push("--prerelease");
+  }
+  run("gh", releaseArgs, { cwd: rootDir });
+  console.log(`GitHub release v${version} created`);
 }
 
 function getAwsEnv() {
@@ -416,7 +493,12 @@ function publishCrates(rootDir: string, version: string) {
   updateVersion(rootDir, version);
 
   for (const crate of CRATE_ORDER) {
-    console.log(`==> Publishing sandbox-agent-${crate}`);
+    const crateName = `sandbox-agent-${crate}`;
+    if (crateVersionExists(crateName, version)) {
+      console.log(`==> Skipping ${crateName}@${version} (already published)`);
+      continue;
+    }
+    console.log(`==> Publishing ${crateName}`);
     const crateDir = path.join(rootDir, "server", "packages", crate);
     run("cargo", ["publish", "--allow-dirty"], { cwd: crateDir });
     console.log("Waiting 30s for index...");
@@ -426,7 +508,14 @@ function publishCrates(rootDir: string, version: string) {
 
 function publishNpmSdk(rootDir: string, version: string, latest: boolean) {
   const sdkDir = path.join(rootDir, "sdks", "typescript");
-  console.log("==> Publishing TypeScript SDK to npm");
+  const packageName = "sandbox-agent";
+
+  if (npmVersionExists(packageName, version)) {
+    console.log(`==> Skipping ${packageName}@${version} (already published)`);
+    return;
+  }
+
+  console.log(`==> Publishing ${packageName}@${version} to npm`);
   const npmTag = getNpmTag(version, latest);
   run("npm", ["version", version, "--no-git-tag-version", "--allow-same-version"], { cwd: sdkDir });
   run("pnpm", ["install"], { cwd: sdkDir });
@@ -442,6 +531,13 @@ function publishNpmCli(rootDir: string, version: string, latest: boolean) {
   const npmTag = getNpmTag(version, latest);
 
   for (const [target, info] of Object.entries(PLATFORM_MAP)) {
+    const packageName = `@sandbox-agent/cli-${info.pkg}`;
+
+    if (npmVersionExists(packageName, version)) {
+      console.log(`==> Skipping ${packageName}@${version} (already published)`);
+      continue;
+    }
+
     const platformDir = path.join(cliDir, "platforms", info.pkg);
     const binDir = path.join(platformDir, "bin");
     fs.mkdirSync(binDir, { recursive: true });
@@ -451,14 +547,20 @@ function publishNpmCli(rootDir: string, version: string, latest: boolean) {
     fs.copyFileSync(srcBinary, dstBinary);
     if (info.ext !== ".exe") fs.chmodSync(dstBinary, 0o755);
 
-    console.log(`==> Publishing @sandbox-agent/cli-${info.pkg}`);
+    console.log(`==> Publishing ${packageName}@${version}`);
     run("npm", ["version", version, "--no-git-tag-version", "--allow-same-version"], { cwd: platformDir });
     const publishArgs = ["publish", "--access", "public"];
     if (npmTag) publishArgs.push("--tag", npmTag);
     run("npm", publishArgs, { cwd: platformDir });
   }
 
-  console.log("==> Publishing @sandbox-agent/cli");
+  const mainPackageName = "@sandbox-agent/cli";
+  if (npmVersionExists(mainPackageName, version)) {
+    console.log(`==> Skipping ${mainPackageName}@${version} (already published)`);
+    return;
+  }
+
+  console.log(`==> Publishing ${mainPackageName}@${version}`);
   const pkgPath = path.join(cliDir, "package.json");
   const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
   pkg.version = version;
@@ -617,26 +719,26 @@ async function main() {
     }
   }
 
-  if (shouldRun("trigger-workflow")) {
-    console.log("==> Triggering release workflow");
-    const branch = runCapture("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: rootDir });
-    const latestFlag = latest ? "true" : "false";
-    run(
-      "gh",
-      [
-        "workflow",
-        "run",
-        ".github/workflows/release.yaml",
-        "-f",
-        `version=${version}`,
-        "-f",
-        `latest=${latestFlag}`,
-        "--ref",
-        branch,
-      ],
-      { cwd: rootDir },
-    );
-  }
+  // if (shouldRun("trigger-workflow")) {
+  //   console.log("==> Triggering release workflow");
+  //   const branch = runCapture("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: rootDir });
+  //   const latestFlag = latest ? "true" : "false";
+  //   run(
+  //     "gh",
+  //     [
+  //       "workflow",
+  //       "run",
+  //       ".github/workflows/release.yaml",
+  //       "-f",
+  //       `version=${version}`,
+  //       "-f",
+  //       `latest=${latestFlag}`,
+  //       "--ref",
+  //       branch,
+  //     ],
+  //     { cwd: rootDir },
+  //   );
+  // }
 
   if (shouldRun("run-checks")) {
     runChecks(rootDir);
@@ -664,6 +766,14 @@ async function main() {
 
   if (shouldRun("upload-binaries")) {
     uploadBinaries(rootDir, version, latest);
+  }
+
+  if (shouldRun("push-tag")) {
+    createAndPushTag(rootDir, version);
+  }
+
+  if (shouldRun("create-github-release")) {
+    createGitHubRelease(rootDir, version);
   }
 }
 

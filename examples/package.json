@@ -1,0 +1,25 @@
+{
+  "name": "sandbox-agent-examples",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "start:docker": "tsx docker/docker.ts",
+    "start:e2b": "tsx e2b/e2b.ts",
+    "start:daytona": "tsx daytona/daytona.ts",
+    "start:vercel": "tsx vercel/vercel-sandbox.ts"
+  },
+  "dependencies": {
+    "@daytonaio/sdk": "latest",
+    "@e2b/code-interpreter": "latest",
+    "@vercel/sandbox": "latest",
+    "dockerode": "latest"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "tsx": "latest",
+    "typescript": "latest",
+    "vitest": "latest"
+  }
+}

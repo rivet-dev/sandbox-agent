@@ -318,6 +318,9 @@ impl SessionState {
         self.codex_sender = sender;
     }
 
+    // Note: This is unused now that Codex uses the shared server model,
+    // but keeping it for potential future use with other agents.
+    #[allow(dead_code)]
     fn codex_sender(&self) -> Option<mpsc::UnboundedSender<String>> {
         self.codex_sender.clone()
     }
@@ -1148,7 +1151,7 @@ impl SessionManager {
         reply: PermissionReply,
     ) -> Result<(), SandboxError> {
         let reply_for_status = reply.clone();
-        let (agent, native_session_id, codex_sender, pending_permission) = {
+        let (agent, native_session_id, pending_permission) = {
             let mut sessions = self.sessions.lock().await;
             let session = Self::session_mut(&mut sessions, session_id).ok_or_else(|| {
                 SandboxError::SessionNotFound {
@@ -1164,23 +1167,21 @@ impl SessionManager {
             if let Some(err) = session.ended_error() {
                 return Err(err);
             }
-            let codex_sender = if session.agent == AgentId::Codex {
-                session.codex_sender()
-            } else {
-                None
-            };
             (
                 session.agent,
                 session.native_session_id.clone(),
-                codex_sender,
                 pending,
             )
         };
 
         if agent == AgentId::Codex {
-            let sender = codex_sender.ok_or_else(|| SandboxError::InvalidRequest {
-                message: "codex session not active".to_string(),
-            })?;
+            // Use the shared Codex server to send the permission reply
+            let server = {
+                let guard = self.codex_server.lock().await;
+                guard.clone().ok_or_else(|| SandboxError::InvalidRequest {
+                    message: "codex server not running".to_string(),
+                })?
+            };
             let pending =
                 pending_permission
                     .clone()
@@ -1227,10 +1228,11 @@ impl SessionManager {
                 serde_json::to_string(&response).map_err(|err| SandboxError::InvalidRequest {
                     message: err.to_string(),
                 })?;
-            sender
+            server
+                .stdin_sender
                 .send(line)
                 .map_err(|_| SandboxError::InvalidRequest {
-                    message: "codex session not active".to_string(),
+                    message: "codex server not active".to_string(),
                 })?;
         } else if agent == AgentId::Opencode {
             let agent_session_id =
@@ -2394,6 +2396,18 @@ pub struct AgentCapabilities {
     pub file_changes: bool,
     pub mcp_tools: bool,
     pub streaming_deltas: bool,
+    /// Whether this agent uses a shared long-running server process (vs per-turn subprocess)
+    pub shared_process: bool,
+}
+
+/// Status of a shared server process for an agent
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum ServerStatus {
+    /// Server is running and accepting requests
+    Running,
+    /// Server is not currently running
+    Stopped,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
@@ -2406,6 +2420,9 @@ pub struct AgentInfo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
     pub capabilities: AgentCapabilities,
+    /// Status of the shared server process (only present for agents with shared_process=true)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_status: Option<ServerStatus>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
@@ -2611,6 +2628,21 @@ async fn list_agents(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<AgentListResponse>, ApiError> {
     let manager = state.agent_manager.clone();
+
+    // Check shared server status for agents that use them
+    let codex_server_running = state
+        .session_manager
+        .codex_server
+        .lock()
+        .await
+        .is_some();
+    let opencode_server_running = state
+        .session_manager
+        .opencode_server
+        .lock()
+        .await
+        .is_some();
+
     let agents = tokio::task::spawn_blocking(move || {
         all_agents()
             .into_iter()
@@ -2618,12 +2650,31 @@ async fn list_agents(
                 let installed = manager.is_installed(agent_id);
                 let version = manager.version(agent_id).ok().flatten();
                 let path = manager.resolve_binary(agent_id).ok();
+                let capabilities = agent_capabilities_for(agent_id);
+
+                // Add server_status for agents with shared processes
+                let server_status = if capabilities.shared_process {
+                    let running = match agent_id {
+                        AgentId::Codex => codex_server_running,
+                        AgentId::Opencode => opencode_server_running,
+                        _ => false,
+                    };
+                    Some(if running {
+                        ServerStatus::Running
+                    } else {
+                        ServerStatus::Stopped
+                    })
+                } else {
+                    None
+                };
+
                 AgentInfo {
                     id: agent_id.as_str().to_string(),
                     installed,
                     version,
                     path: path.map(|path| path.to_string_lossy().to_string()),
-                    capabilities: agent_capabilities_for(agent_id),
+                    capabilities,
+                    server_status,
                 }
             })
             .collect::<Vec<_>>()
@@ -2940,6 +2991,7 @@ fn agent_capabilities_for(agent: AgentId) -> AgentCapabilities {
             file_changes: false,
             mcp_tools: false,
             streaming_deltas: false,
+            shared_process: false, // per-turn subprocess with --resume
         },
         AgentId::Codex => AgentCapabilities {
             plan_mode: true,
@@ -2957,6 +3009,7 @@ fn agent_capabilities_for(agent: AgentId) -> AgentCapabilities {
             file_changes: true,
             mcp_tools: true,
             streaming_deltas: true,
+            shared_process: true, // shared app-server via JSON-RPC
         },
         AgentId::Opencode => AgentCapabilities {
             plan_mode: false,
@@ -2974,6 +3027,7 @@ fn agent_capabilities_for(agent: AgentId) -> AgentCapabilities {
             file_changes: false,
             mcp_tools: false,
             streaming_deltas: true,
+            shared_process: true, // shared HTTP server
         },
         AgentId::Amp => AgentCapabilities {
             plan_mode: false,
@@ -2991,6 +3045,7 @@ fn agent_capabilities_for(agent: AgentId) -> AgentCapabilities {
             file_changes: false,
             mcp_tools: false,
             streaming_deltas: false,
+            shared_process: false, // per-turn subprocess with --continue
         },
         AgentId::Mock => AgentCapabilities {
             plan_mode: true,
@@ -3008,6 +3063,7 @@ fn agent_capabilities_for(agent: AgentId) -> AgentCapabilities {
             file_changes: true,
             mcp_tools: true,
             streaming_deltas: true,
+            shared_process: false, // in-memory mock (no subprocess)
         },
     }
 }

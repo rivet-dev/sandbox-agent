@@ -9,13 +9,19 @@ session_a:
     source: daemon
     synthetic: true
     type: session.started
+  - metadata: true
+    seq: 2
+    session: started
+    source: agent
+    synthetic: false
+    type: session.started
   - item:
       content_types:
         - status
       kind: status
       role: system
       status: completed
-    seq: 2
+    seq: 3
     source: agent
     synthetic: false
     type: item.completed
@@ -25,7 +31,7 @@ session_a:
       kind: message
       role: user
       status: in_progress
-    seq: 3
+    seq: 4
     source: agent
     synthetic: false
     type: item.started
@@ -33,7 +39,7 @@ session_a:
       delta: "<redacted>"
       item_id: "<redacted>"
       native_item_id: "<redacted>"
-    seq: 4
+    seq: 5
     source: daemon
     synthetic: true
     type: item.delta
@@ -43,7 +49,7 @@ session_a:
       kind: message
       role: user
       status: completed
-    seq: 5
+    seq: 6
     source: agent
     synthetic: false
     type: item.completed
@@ -52,67 +58,16 @@ session_a:
       kind: message
       role: assistant
       status: in_progress
-    seq: 6
+    seq: 7
     source: agent
     synthetic: false
     type: item.started
   - item:
-      content_types:
-        - status
-      kind: status
-      role: system
-      status: completed
-    seq: 7
-    source: agent
-    synthetic: false
-    type: item.completed
-  - delta:
-      delta: "<redacted>"
-      item_id: "<redacted>"
-      native_item_id: "<redacted>"
-    seq: 8
-    source: agent
-    synthetic: false
-    type: item.delta
-  - delta:
-      delta: "<redacted>"
-      item_id: "<redacted>"
-      native_item_id: "<redacted>"
-    seq: 9
-    source: agent
-    synthetic: false
-    type: item.delta
-  - delta:
-      delta: "<redacted>"
-      item_id: "<redacted>"
-      native_item_id: "<redacted>"
-    seq: 10
-    source: agent
-    synthetic: false
-    type: item.delta
-  - delta:
-      delta: "<redacted>"
-      item_id: "<redacted>"
-      native_item_id: "<redacted>"
-    seq: 11
-    source: agent
-    synthetic: false
-    type: item.delta
-  - delta:
-      delta: "<redacted>"
-      item_id: "<redacted>"
-      native_item_id: "<redacted>"
-    seq: 12
-    source: agent
-    synthetic: false
-    type: item.delta
-  - item:
-      content_types:
-        - reasoning
+      content_types: []
       kind: message
       role: assistant
       status: completed
-    seq: 13
+    seq: 8
     source: agent
     synthetic: false
     type: item.completed
@@ -123,13 +78,19 @@ session_b:
     source: daemon
     synthetic: true
     type: session.started
+  - metadata: true
+    seq: 2
+    session: started
+    source: agent
+    synthetic: false
+    type: session.started
   - item:
       content_types:
         - status
       kind: status
       role: system
       status: completed
-    seq: 2
+    seq: 3
     source: agent
     synthetic: false
     type: item.completed
@@ -139,7 +100,7 @@ session_b:
       kind: message
       role: user
       status: in_progress
-    seq: 3
+    seq: 4
     source: agent
     synthetic: false
     type: item.started
@@ -147,7 +108,7 @@ session_b:
       delta: "<redacted>"
       item_id: "<redacted>"
       native_item_id: "<redacted>"
-    seq: 4
+    seq: 5
     source: daemon
     synthetic: true
     type: item.delta
@@ -157,7 +118,7 @@ session_b:
       kind: message
       role: user
       status: completed
-    seq: 5
+    seq: 6
     source: agent
     synthetic: false
     type: item.completed
@@ -166,7 +127,7 @@ session_b:
       kind: message
       role: assistant
       status: in_progress
-    seq: 6
+    seq: 7
     source: agent
     synthetic: false
     type: item.started
@@ -176,18 +137,10 @@ session_b:
       kind: status
       role: system
       status: completed
-    seq: 7
-    source: agent
-    synthetic: false
-    type: item.completed
-  - delta:
-      delta: "<redacted>"
-      item_id: "<redacted>"
-      native_item_id: "<redacted>"
     seq: 8
     source: agent
     synthetic: false
-    type: item.delta
+    type: item.completed
   - delta:
       delta: "<redacted>"
       item_id: "<redacted>"
@@ -212,13 +165,37 @@ session_b:
     source: agent
     synthetic: false
     type: item.delta
+  - delta:
+      delta: "<redacted>"
+      item_id: "<redacted>"
+      native_item_id: "<redacted>"
+    seq: 12
+    source: agent
+    synthetic: false
+    type: item.delta
+  - delta:
+      delta: "<redacted>"
+      item_id: "<redacted>"
+      native_item_id: "<redacted>"
+    seq: 13
+    source: agent
+    synthetic: false
+    type: item.delta
+  - delta:
+      delta: "<redacted>"
+      item_id: "<redacted>"
+      native_item_id: "<redacted>"
+    seq: 14
+    source: agent
+    synthetic: false
+    type: item.delta
   - item:
       content_types:
         - reasoning
       kind: message
       role: assistant
       status: completed
-    seq: 12
+    seq: 15
     source: agent
     synthetic: false
     type: item.completed

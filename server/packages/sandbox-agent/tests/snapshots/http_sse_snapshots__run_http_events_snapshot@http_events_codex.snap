@@ -79,13 +79,93 @@ expression: normalized
   source: agent
   synthetic: false
   type: item.delta
+- delta:
+    delta: "<redacted>"
+    item_id: "<redacted>"
+    native_item_id: "<redacted>"
+  seq: 10
+  source: agent
+  synthetic: false
+  type: item.delta
+- delta:
+    delta: "<redacted>"
+    item_id: "<redacted>"
+    native_item_id: "<redacted>"
+  seq: 11
+  source: agent
+  synthetic: false
+  type: item.delta
+- delta:
+    delta: "<redacted>"
+    item_id: "<redacted>"
+    native_item_id: "<redacted>"
+  seq: 12
+  source: agent
+  synthetic: false
+  type: item.delta
+- delta:
+    delta: "<redacted>"
+    item_id: "<redacted>"
+    native_item_id: "<redacted>"
+  seq: 13
+  source: agent
+  synthetic: false
+  type: item.delta
+- delta:
+    delta: "<redacted>"
+    item_id: "<redacted>"
+    native_item_id: "<redacted>"
+  seq: 14
+  source: agent
+  synthetic: false
+  type: item.delta
+- delta:
+    delta: "<redacted>"
+    item_id: "<redacted>"
+    native_item_id: "<redacted>"
+  seq: 15
+  source: agent
+  synthetic: false
+  type: item.delta
+- delta:
+    delta: "<redacted>"
+    item_id: "<redacted>"
+    native_item_id: "<redacted>"
+  seq: 16
+  source: agent
+  synthetic: false
+  type: item.delta
+- delta:
+    delta: "<redacted>"
+    item_id: "<redacted>"
+    native_item_id: "<redacted>"
+  seq: 17
+  source: agent
+  synthetic: false
+  type: item.delta
+- delta:
+    delta: "<redacted>"
+    item_id: "<redacted>"
+    native_item_id: "<redacted>"
+  seq: 18
+  source: agent
+  synthetic: false
+  type: item.delta
+- delta:
+    delta: "<redacted>"
+    item_id: "<redacted>"
+    native_item_id: "<redacted>"
+  seq: 19
+  source: agent
+  synthetic: false
+  type: item.delta
 - item:
     content_types:
       - reasoning
     kind: message
     role: assistant
     status: completed
-  seq: 10
+  seq: 20
   source: agent
   synthetic: false
   type: item.completed

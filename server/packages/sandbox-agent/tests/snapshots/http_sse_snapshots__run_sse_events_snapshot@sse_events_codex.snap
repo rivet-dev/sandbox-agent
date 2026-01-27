@@ -8,13 +8,19 @@ expression: normalized
   source: daemon
   synthetic: true
   type: session.started
+- metadata: true
+  seq: 2
+  session: started
+  source: agent
+  synthetic: false
+  type: session.started
 - item:
     content_types:
       - status
     kind: status
     role: system
     status: completed
-  seq: 2
+  seq: 3
   source: agent
   synthetic: false
   type: item.completed
@@ -24,7 +30,7 @@ expression: normalized
     kind: message
     role: user
     status: in_progress
-  seq: 3
+  seq: 4
   source: agent
   synthetic: false
   type: item.started
@@ -32,7 +38,7 @@ expression: normalized
     delta: "<redacted>"
     item_id: "<redacted>"
     native_item_id: "<redacted>"
-  seq: 4
+  seq: 5
   source: daemon
   synthetic: true
   type: item.delta
@@ -42,7 +48,7 @@ expression: normalized
     kind: message
     role: user
     status: completed
-  seq: 5
+  seq: 6
   source: agent
   synthetic: false
   type: item.completed
@@ -51,7 +57,7 @@ expression: normalized
     kind: message
     role: assistant
     status: in_progress
-  seq: 6
+  seq: 7
   source: agent
   synthetic: false
   type: item.started
@@ -61,7 +67,7 @@ expression: normalized
     kind: status
     role: system
     status: completed
-  seq: 7
+  seq: 8
   source: agent
   synthetic: false
   type: item.completed
@@ -69,31 +75,7 @@ expression: normalized
     delta: "<redacted>"
     item_id: "<redacted>"
     native_item_id: "<redacted>"
-  seq: 8
-  source: agent
-  synthetic: false
-  type: item.delta
-- delta:
-    delta: "<redacted>"
-    item_id: "<redacted>"
-    native_item_id: "<redacted>"
   seq: 9
-  source: agent
-  synthetic: false
-  type: item.delta
-- delta:
-    delta: "<redacted>"
-    item_id: "<redacted>"
-    native_item_id: "<redacted>"
-  seq: 10
-  source: agent
-  synthetic: false
-  type: item.delta
-- delta:
-    delta: "<redacted>"
-    item_id: "<redacted>"
-    native_item_id: "<redacted>"
-  seq: 11
   source: agent
   synthetic: false
   type: item.delta
@@ -103,7 +85,7 @@ expression: normalized
     kind: message
     role: assistant
     status: completed
-  seq: 12
+  seq: 10
   source: agent
   synthetic: false
   type: item.completed

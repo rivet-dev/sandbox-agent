@@ -1,0 +1,19 @@
+{
+  "name": "release",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check-types": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/semver": "^7.5.8"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "execa": "^9.5.0",
+    "glob": "^10.3.10",
+    "semver": "^7.6.0"
+  }
+}

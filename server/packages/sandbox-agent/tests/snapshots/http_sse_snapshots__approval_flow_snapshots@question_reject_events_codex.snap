@@ -263,13 +263,69 @@ expression: normalize_events(&reject_events)
   source: agent
   synthetic: false
   type: item.delta
+- delta:
+    delta: "<redacted>"
+    item_id: "<redacted>"
+    native_item_id: "<redacted>"
+  seq: 33
+  source: agent
+  synthetic: false
+  type: item.delta
+- delta:
+    delta: "<redacted>"
+    item_id: "<redacted>"
+    native_item_id: "<redacted>"
+  seq: 34
+  source: agent
+  synthetic: false
+  type: item.delta
+- delta:
+    delta: "<redacted>"
+    item_id: "<redacted>"
+    native_item_id: "<redacted>"
+  seq: 35
+  source: agent
+  synthetic: false
+  type: item.delta
+- delta:
+    delta: "<redacted>"
+    item_id: "<redacted>"
+    native_item_id: "<redacted>"
+  seq: 36
+  source: agent
+  synthetic: false
+  type: item.delta
+- delta:
+    delta: "<redacted>"
+    item_id: "<redacted>"
+    native_item_id: "<redacted>"
+  seq: 37
+  source: agent
+  synthetic: false
+  type: item.delta
+- delta:
+    delta: "<redacted>"
+    item_id: "<redacted>"
+    native_item_id: "<redacted>"
+  seq: 38
+  source: agent
+  synthetic: false
+  type: item.delta
+- delta:
+    delta: "<redacted>"
+    item_id: "<redacted>"
+    native_item_id: "<redacted>"
+  seq: 39
+  source: agent
+  synthetic: false
+  type: item.delta
 - item:
     content_types:
       - reasoning
     kind: message
     role: assistant
     status: completed
-  seq: 33
+  seq: 40
   source: agent
   synthetic: false
   type: item.completed
