@@ -19,13 +19,14 @@ import {
   createSandboxDaemonClient,
   type SandboxDaemonClient,
   type AgentInfo,
+  type AgentCapabilities,
   type AgentModeInfo,
-  type PermissionRequest,
-  type QuestionRequest,
+  type PermissionEventData,
+  type QuestionEventData,
   type SessionInfo,
   type UniversalEvent,
-  type UniversalMessage,
-  type UniversalMessagePart
+  type UniversalItem,
+  type ContentPart
 } from "sandbox-agent";
 
 type RequestLog = {
@@ -39,9 +40,38 @@ type RequestLog = {
   error?: string;
 };
 
+type ItemEventData = {
+  item: UniversalItem;
+};
+
+type ItemDeltaEventData = {
+  item_id: string;
+  native_item_id?: string | null;
+  delta: string;
+};
+
+type TimelineEntry = {
+  id: string;
+  kind: "item" | "meta";
+  time: string;
+  item?: UniversalItem;
+  deltaText?: string;
+  meta?: {
+    title: string;
+    detail?: string;
+    severity?: "info" | "error";
+  };
+};
+
 type DebugTab = "log" | "events" | "approvals" | "agents";
 
 const defaultAgents = ["claude", "codex", "opencode", "amp"];
+const emptyCapabilities: AgentCapabilities = {
+  planMode: false,
+  permissions: false,
+  questions: false,
+  toolCalls: false
+};
 
 const formatJson = (value: unknown) => {
   if (value === null || value === undefined) return "";
@@ -54,6 +84,16 @@ const formatJson = (value: unknown) => {
 };
 
 const escapeSingleQuotes = (value: string) => value.replace(/'/g, `'\\''`);
+
+const formatCapabilities = (capabilities: AgentCapabilities) => {
+  const parts = [
+    `planMode ${capabilities.planMode ? "✓" : "—"}`,
+    `permissions ${capabilities.permissions ? "✓" : "—"}`,
+    `questions ${capabilities.questions ? "✓" : "—"}`,
+    `toolCalls ${capabilities.toolCalls ? "✓" : "—"}`
+  ];
+  return parts.join(" · ");
+};
 
 const buildCurl = (method: string, url: string, body?: string, token?: string) => {
   const headers: string[] = [];
@@ -69,20 +109,135 @@ const buildCurl = (method: string, url: string, body?: string, token?: string) =
     .trim();
 };
 
-const getEventType = (event: UniversalEvent) => {
-  if ("message" in event.data) return "message";
-  if ("started" in event.data) return "started";
-  if ("error" in event.data) return "error";
-  if ("questionAsked" in event.data) return "question";
-  if ("permissionAsked" in event.data) return "permission";
-  return "event";
-};
+const getEventType = (event: UniversalEvent) => event.type;
 
 const formatTime = (value: string) => {
   if (!value) return "";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleTimeString();
+};
+
+const getEventCategory = (type: string) => type.split(".")[0] ?? type;
+
+const getEventClass = (type: string) => type.replace(/\./g, "-");
+
+const buildStubItem = (itemId: string, nativeItemId?: string | null): UniversalItem => {
+  return {
+    item_id: itemId,
+    native_item_id: nativeItemId ?? null,
+    parent_id: null,
+    kind: "message",
+    role: null,
+    content: [],
+    status: "in_progress"
+  } as UniversalItem;
+};
+
+const getMessageClass = (item: UniversalItem) => {
+  if (item.kind === "tool_call" || item.kind === "tool_result") return "tool";
+  if (item.kind === "system" || item.kind === "status") return "system";
+  if (item.role === "user") return "user";
+  if (item.role === "tool") return "tool";
+  if (item.role === "system") return "system";
+  return "assistant";
+};
+
+const getAvatarLabel = (messageClass: string) => {
+  if (messageClass === "user") return "U";
+  if (messageClass === "tool") return "T";
+  if (messageClass === "system") return "S";
+  if (messageClass === "error") return "!";
+  return "AI";
+};
+
+const renderContentPart = (part: ContentPart, index: number) => {
+  const partType = (part as { type?: string }).type ?? "unknown";
+  const key = `${partType}-${index}`;
+  switch (partType) {
+    case "text":
+      return (
+        <div key={key} className="part">
+          <div className="part-body">{(part as { text: string }).text}</div>
+        </div>
+      );
+    case "json":
+      return (
+        <div key={key} className="part">
+          <div className="part-title">json</div>
+          <pre className="code-block">{formatJson((part as { json: unknown }).json)}</pre>
+        </div>
+      );
+    case "tool_call": {
+      const { name, arguments: args, call_id } = part as {
+        name: string;
+        arguments: string;
+        call_id: string;
+      };
+      return (
+        <div key={key} className="part">
+          <div className="part-title">
+            tool call - {name}
+            {call_id ? ` - ${call_id}` : ""}
+          </div>
+          {args ? <pre className="code-block">{args}</pre> : <div className="muted">No arguments</div>}
+        </div>
+      );
+    }
+    case "tool_result": {
+      const { call_id, output } = part as { call_id: string; output: string };
+      return (
+        <div key={key} className="part">
+          <div className="part-title">tool result - {call_id}</div>
+          {output ? <pre className="code-block">{output}</pre> : <div className="muted">No output</div>}
+        </div>
+      );
+    }
+    case "file_ref": {
+      const { path, action, diff } = part as { path: string; action: string; diff?: string | null };
+      return (
+        <div key={key} className="part">
+          <div className="part-title">file - {action}</div>
+          <div className="part-body mono">{path}</div>
+          {diff && <pre className="code-block">{diff}</pre>}
+        </div>
+      );
+    }
+    case "reasoning": {
+      const { text, visibility } = part as { text: string; visibility: string };
+      return (
+        <div key={key} className="part">
+          <div className="part-title">reasoning - {visibility}</div>
+          <div className="part-body muted">{text}</div>
+        </div>
+      );
+    }
+    case "image": {
+      const { path, mime } = part as { path: string; mime?: string | null };
+      return (
+        <div key={key} className="part">
+          <div className="part-title">image {mime ? `- ${mime}` : ""}</div>
+          <div className="part-body mono">{path}</div>
+        </div>
+      );
+    }
+    case "status": {
+      const { label, detail } = part as { label: string; detail?: string | null };
+      return (
+        <div key={key} className="part">
+          <div className="part-title">status - {label}</div>
+          {detail && <div className="part-body">{detail}</div>}
+        </div>
+      );
+    }
+    default:
+      return (
+        <div key={key} className="part">
+          <div className="part-title">unknown</div>
+          <pre className="code-block">{formatJson(part)}</pre>
+        </div>
+      );
+  }
 };
 
 const getDefaultEndpoint = () => {
@@ -381,9 +536,9 @@ export default function App() {
   const appendEvents = useCallback((incoming: UniversalEvent[]) => {
     if (!incoming.length) return;
     setEvents((prev) => [...prev, ...incoming]);
-    const lastId = incoming[incoming.length - 1]?.id ?? offsetRef.current;
-    offsetRef.current = lastId;
-    setOffset(lastId);
+    const lastSeq = incoming[incoming.length - 1]?.sequence ?? offsetRef.current;
+    offsetRef.current = lastSeq;
+    setOffset(lastSeq);
   }, []);
 
   const fetchEvents = useCallback(async () => {
@@ -478,35 +633,18 @@ export default function App() {
     }
   };
 
-  const toggleQuestionOption = (
-    requestId: string,
-    questionIndex: number,
-    optionLabel: string,
-    multiSelect: boolean
-  ) => {
-    setQuestionSelections((prev) => {
-      const next = { ...prev };
-      const currentAnswers = next[requestId] ? [...next[requestId]] : [];
-      const selections = currentAnswers[questionIndex] ? [...currentAnswers[questionIndex]] : [];
-      if (multiSelect) {
-        if (selections.includes(optionLabel)) {
-          currentAnswers[questionIndex] = selections.filter((label) => label !== optionLabel);
-        } else {
-          currentAnswers[questionIndex] = [...selections, optionLabel];
-        }
-      } else {
-        currentAnswers[questionIndex] = [optionLabel];
-      }
-      next[requestId] = currentAnswers;
-      return next;
-    });
+  const selectQuestionOption = (requestId: string, optionLabel: string) => {
+    setQuestionSelections((prev) => ({
+      ...prev,
+      [requestId]: [[optionLabel]]
+    }));
   };
 
-  const answerQuestion = async (request: QuestionRequest) => {
-    const answers = questionSelections[request.id] ?? [];
+  const answerQuestion = async (request: QuestionEventData) => {
+    const answers = questionSelections[request.question_id] ?? [];
     try {
-      await getClient().replyQuestion(sessionId, request.id, { answers });
-      setQuestionStatus((prev) => ({ ...prev, [request.id]: "replied" }));
+      await getClient().replyQuestion(sessionId, request.question_id, { answers });
+      setQuestionStatus((prev) => ({ ...prev, [request.question_id]: "replied" }));
     } catch (error) {
       setEventError(getErrorMessage(error, "Unable to reply"));
     }
@@ -531,37 +669,134 @@ export default function App() {
   };
 
   const questionRequests = useMemo(() => {
-    return events
-      .filter((event) => "questionAsked" in event.data)
-      .map((event) => (event.data as { questionAsked: QuestionRequest }).questionAsked)
-      .filter((request) => !questionStatus[request.id]);
+    const latestById = new Map<string, QuestionEventData>();
+    for (const event of events) {
+      if (event.type === "question.requested" || event.type === "question.resolved") {
+        const data = event.data as QuestionEventData;
+        latestById.set(data.question_id, data);
+      }
+    }
+    return Array.from(latestById.values()).filter(
+      (request) => request.status === "requested" && !questionStatus[request.question_id]
+    );
   }, [events, questionStatus]);
 
   const permissionRequests = useMemo(() => {
-    return events
-      .filter((event) => "permissionAsked" in event.data)
-      .map((event) => (event.data as { permissionAsked: PermissionRequest }).permissionAsked)
-      .filter((request) => !permissionStatus[request.id]);
+    const latestById = new Map<string, PermissionEventData>();
+    for (const event of events) {
+      if (event.type === "permission.requested" || event.type === "permission.resolved") {
+        const data = event.data as PermissionEventData;
+        latestById.set(data.permission_id, data);
+      }
+    }
+    return Array.from(latestById.values()).filter(
+      (request) => request.status === "requested" && !permissionStatus[request.permission_id]
+    );
   }, [events, permissionStatus]);
 
-  const transcriptMessages = useMemo(() => {
-    return events
-      .filter((event): event is UniversalEvent & { data: { message: UniversalMessage } } => "message" in event.data)
-      .map((event) => {
-        const msg = event.data.message;
-        const parts = ("parts" in msg ? msg.parts : []) ?? [];
-        const content = parts
-          .filter((part: UniversalMessagePart): part is UniversalMessagePart & { type: "text"; text: string } => part.type === "text" && "text" in part && typeof part.text === "string")
-          .map((part) => part.text)
-          .join("\n");
-        return {
-          id: event.id,
-          role: "role" in msg ? msg.role : "assistant",
-          content,
-          timestamp: event.timestamp
+  const transcriptEntries = useMemo(() => {
+    const entries: TimelineEntry[] = [];
+    const itemMap = new Map<string, TimelineEntry>();
+
+    const upsertItemEntry = (item: UniversalItem, time: string) => {
+      let entry = itemMap.get(item.item_id);
+      if (!entry) {
+        entry = {
+          id: item.item_id,
+          kind: "item",
+          time,
+          item,
+          deltaText: ""
         };
-      })
-      .filter((msg) => msg.content);
+        itemMap.set(item.item_id, entry);
+        entries.push(entry);
+      } else {
+        entry.item = item;
+        entry.time = time;
+      }
+      return entry;
+    };
+
+    for (const event of events) {
+      switch (event.type) {
+        case "item.started": {
+          const data = event.data as ItemEventData;
+          upsertItemEntry(data.item, event.time);
+          break;
+        }
+        case "item.delta": {
+          const data = event.data as ItemDeltaEventData;
+          const stub = buildStubItem(data.item_id, data.native_item_id);
+          const entry = upsertItemEntry(stub, event.time);
+          entry.deltaText = `${entry.deltaText ?? ""}${data.delta ?? ""}`;
+          break;
+        }
+        case "item.completed": {
+          const data = event.data as ItemEventData;
+          const entry = upsertItemEntry(data.item, event.time);
+          entry.deltaText = "";
+          break;
+        }
+        case "error": {
+          const data = event.data as { message: string; code?: string | null };
+          entries.push({
+            id: event.event_id,
+            kind: "meta",
+            time: event.time,
+            meta: {
+              title: data.code ? `Error - ${data.code}` : "Error",
+              detail: data.message,
+              severity: "error"
+            }
+          });
+          break;
+        }
+        case "agent.unparsed": {
+          const data = event.data as { error: string; location: string };
+          entries.push({
+            id: event.event_id,
+            kind: "meta",
+            time: event.time,
+            meta: {
+              title: "Agent parse failure",
+              detail: `${data.location}: ${data.error}`,
+              severity: "error"
+            }
+          });
+          break;
+        }
+        case "session.started": {
+          entries.push({
+            id: event.event_id,
+            kind: "meta",
+            time: event.time,
+            meta: {
+              title: "Session started",
+              severity: "info"
+            }
+          });
+          break;
+        }
+        case "session.ended": {
+          const data = event.data as { reason: string; terminated_by: string };
+          entries.push({
+            id: event.event_id,
+            kind: "meta",
+            time: event.time,
+            meta: {
+              title: "Session ended",
+              detail: `${data.reason} - ${data.terminated_by}`,
+              severity: "info"
+            }
+          });
+          break;
+        }
+        default:
+          break;
+      }
+    }
+
+    return entries;
   }, [events]);
 
   useEffect(() => {
@@ -592,7 +827,7 @@ export default function App() {
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [transcriptMessages]);
+  }, [transcriptEntries]);
 
   // Auto-load modes when agent changes
   useEffect(() => {
@@ -801,7 +1036,7 @@ export default function App() {
                   Create Session
                 </button>
               </div>
-            ) : transcriptMessages.length === 0 && !sessionError ? (
+            ) : transcriptEntries.length === 0 && !sessionError ? (
               <div className="empty-state">
                 <Terminal className="empty-state-icon" />
                 <div className="empty-state-title">Ready to Chat</div>
@@ -811,16 +1046,59 @@ export default function App() {
               </div>
             ) : (
               <div className="messages">
-                {transcriptMessages.map((msg) => (
-                  <div key={msg.id} className={`message ${msg.role === "user" ? "user" : "assistant"}`}>
-                    <div className="avatar">
-                      {msg.role === "user" ? "U" : "AI"}
+                {transcriptEntries.map((entry) => {
+                  if (entry.kind === "meta") {
+                    const messageClass = entry.meta?.severity === "error" ? "error" : "system";
+                    return (
+                      <div key={entry.id} className={`message ${messageClass}`}>
+                        <div className="avatar">{getAvatarLabel(messageClass)}</div>
+                        <div className="message-content">
+                          <div className="message-meta">
+                            <span>{entry.meta?.title ?? "Status"}</span>
+                          </div>
+                          {entry.meta?.detail && <div className="part-body">{entry.meta.detail}</div>}
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  const item = entry.item;
+                  if (!item) return null;
+                  const hasParts = (item.content ?? []).length > 0;
+                  const isInProgress = item.status === "in_progress";
+                  const isFailed = item.status === "failed";
+                  const messageClass = getMessageClass(item);
+                  const statusLabel = item.status !== "completed" ? item.status.replace("_", " ") : "";
+                  const kindLabel = item.kind.replace("_", " ");
+
+                  return (
+                    <div key={entry.id} className={`message ${messageClass} ${isFailed ? "error" : ""}`}>
+                      <div className="avatar">{getAvatarLabel(isFailed ? "error" : messageClass)}</div>
+                      <div className="message-content">
+                        {(item.kind !== "message" || item.status !== "completed") && (
+                          <div className="message-meta">
+                            <span>{kindLabel}</span>
+                            {statusLabel && (
+                              <span className={`pill ${item.status === "failed" ? "danger" : "accent"}`}>
+                                {statusLabel}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                        {hasParts ? (
+                          (item.content ?? []).map(renderContentPart)
+                        ) : entry.deltaText ? (
+                          <span>
+                            {entry.deltaText}
+                            {isInProgress && <span className="cursor" />}
+                          </span>
+                        ) : (
+                          <span className="muted">No content yet.</span>
+                        )}
+                      </div>
                     </div>
-                    <div className="message-content">
-                      {msg.content}
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
                 {sessionError && (
                   <div className="message-error">
                     {sessionError}
@@ -1028,13 +1306,18 @@ export default function App() {
                   <div className="event-list">
                     {[...events].reverse().map((event) => {
                       const type = getEventType(event);
+                      const category = getEventCategory(type);
+                      const eventClass = `${category} ${getEventClass(type)}`;
                       return (
-                        <div key={event.id} className="event-item">
+                        <div key={event.event_id ?? event.sequence} className="event-item">
                           <div className="event-header">
-                            <span className={`event-type ${type}`}>{type}</span>
-                            <span className="event-time">{formatTime(event.timestamp)}</span>
+                            <span className={`event-type ${eventClass}`}>{type}</span>
+                            <span className="event-time">{formatTime(event.time)}</span>
                           </div>
-                          <div className="event-id">Event #{event.id}</div>
+                          <div className="event-id">
+                            Event #{event.event_id || event.sequence} - seq {event.sequence} - {event.source}
+                            {event.synthetic ? " (synthetic)" : ""}
+                          </div>
                           <pre className="code-block">{formatJson(event.data)}</pre>
                         </div>
                       );
@@ -1052,13 +1335,11 @@ export default function App() {
                 ) : (
                   <>
                     {questionRequests.map((request) => {
-                      const selections = questionSelections[request.id] ?? [];
-                      const answeredAll = request.questions.every((q, idx) => {
-                        const answer = selections[idx] ?? [];
-                        return answer.length > 0;
-                      });
+                      const selections = questionSelections[request.question_id] ?? [];
+                      const selected = selections[0] ?? [];
+                      const answered = selected.length > 0;
                       return (
-                        <div key={request.id} className="card">
+                        <div key={request.question_id} className="card">
                           <div className="card-header">
                             <span className="card-title">
                               <HelpCircle className="button-icon" style={{ marginRight: 6 }} />
@@ -1066,52 +1347,35 @@ export default function App() {
                             </span>
                             <span className="pill accent">Pending</span>
                           </div>
-                          {request.questions.map((question, qIdx) => (
-                            <div key={qIdx} style={{ marginTop: 12 }}>
-                              <div style={{ fontSize: 12, marginBottom: 8 }}>
-                                {question.header && <strong>{question.header}: </strong>}
-                                {question.question}
-                              </div>
-                              <div className="option-list">
-                                {question.options.map((option) => {
-                                  const selected = selections[qIdx]?.includes(option.label) ?? false;
-                                  return (
-                                    <label key={option.label} className="option-item">
-                                      <input
-                                        type={question.multiSelect ? "checkbox" : "radio"}
-                                        checked={selected}
-                                        onChange={() =>
-                                          toggleQuestionOption(
-                                            request.id,
-                                            qIdx,
-                                            option.label,
-                                            Boolean(question.multiSelect)
-                                          )
-                                        }
-                                      />
-                                      <span>
-                                        {option.label}
-                                        {option.description && (
-                                          <span className="muted"> - {option.description}</span>
-                                        )}
-                                      </span>
-                                    </label>
-                                  );
-                                })}
-                              </div>
+                          <div style={{ marginTop: 12 }}>
+                            <div style={{ fontSize: 12, marginBottom: 8 }}>{request.prompt}</div>
+                            <div className="option-list">
+                              {request.options.map((option) => {
+                                const isSelected = selected.includes(option);
+                                return (
+                                  <label key={option} className="option-item">
+                                    <input
+                                      type="radio"
+                                      checked={isSelected}
+                                      onChange={() => selectQuestionOption(request.question_id, option)}
+                                    />
+                                    <span>{option}</span>
+                                  </label>
+                                );
+                              })}
                             </div>
-                          ))}
+                          </div>
                           <div className="card-actions">
                             <button
                               className="button success small"
-                              disabled={!answeredAll}
+                              disabled={!answered}
                               onClick={() => answerQuestion(request)}
                             >
                               Reply
                             </button>
                             <button
                               className="button danger small"
-                              onClick={() => rejectQuestion(request.id)}
+                              onClick={() => rejectQuestion(request.question_id)}
                             >
                               Reject
                             </button>
@@ -1121,7 +1385,7 @@ export default function App() {
                     })}
 
                     {permissionRequests.map((request) => (
-                      <div key={request.id} className="card">
+                      <div key={request.permission_id} className="card">
                         <div className="card-header">
                           <span className="card-title">
                             <Shield className="button-icon" style={{ marginRight: 6 }} />
@@ -1130,32 +1394,27 @@ export default function App() {
                           <span className="pill accent">Pending</span>
                         </div>
                         <div className="card-meta" style={{ marginTop: 8 }}>
-                          {request.permission}
+                          {request.action}
                         </div>
-                        {request.patterns && request.patterns.length > 0 && (
-                          <div className="mono muted" style={{ fontSize: 11, marginTop: 4 }}>
-                            {request.patterns.join(", ")}
-                          </div>
-                        )}
-                        {request.metadata && (
+                        {request.metadata !== null && request.metadata !== undefined && (
                           <pre className="code-block">{formatJson(request.metadata)}</pre>
                         )}
                         <div className="card-actions">
                           <button
                             className="button success small"
-                            onClick={() => replyPermission(request.id, "once")}
+                            onClick={() => replyPermission(request.permission_id, "once")}
                           >
                             Allow Once
                           </button>
                           <button
                             className="button secondary small"
-                            onClick={() => replyPermission(request.id, "always")}
+                            onClick={() => replyPermission(request.permission_id, "always")}
                           >
                             Always
                           </button>
                           <button
                             className="button danger small"
-                            onClick={() => replyPermission(request.id, "reject")}
+                            onClick={() => replyPermission(request.permission_id, "reject")}
                           >
                             Reject
                           </button>
@@ -1180,7 +1439,15 @@ export default function App() {
                   <div className="card-meta">No agents reported. Click refresh to check.</div>
                 )}
 
-                {(agents.length ? agents : defaultAgents.map((id) => ({ id, installed: false, version: undefined, path: undefined }))).map((agent) => (
+                {(agents.length
+                  ? agents
+                  : defaultAgents.map((id) => ({
+                      id,
+                      installed: false,
+                      version: undefined,
+                      path: undefined,
+                      capabilities: emptyCapabilities
+                    }))).map((agent) => (
                   <div key={agent.id} className="card">
                     <div className="card-header">
                       <span className="card-title">{agent.id}</span>
@@ -1191,6 +1458,9 @@ export default function App() {
                     <div className="card-meta">
                       {agent.version ? `v${agent.version}` : "Version unknown"}
                       {agent.path && <span className="mono muted" style={{ marginLeft: 8 }}>{agent.path}</span>}
+                    </div>
+                    <div className="card-meta" style={{ marginTop: 8 }}>
+                      Capabilities: {formatCapabilities(agent.capabilities ?? emptyCapabilities)}
                     </div>
                     {modesByAgent[agent.id] && modesByAgent[agent.id].length > 0 && (
                       <div className="card-meta" style={{ marginTop: 8 }}>

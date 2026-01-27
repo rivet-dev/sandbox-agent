@@ -1,7 +1,7 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "title": "sandbox-agent-core",
+    "title": "sandbox-agent",
     "description": "",
     "contact": {
       "name": "Sandbox Agent Contributors"
@@ -262,7 +262,7 @@
           {
             "name": "offset",
             "in": "query",
-            "description": "Last seen event id (exclusive)",
+            "description": "Last seen event sequence (exclusive)",
             "required": false,
             "schema": {
               "type": "integer",
@@ -281,6 +281,16 @@
               "format": "int64",
               "nullable": true,
               "minimum": 0
+            }
+          },
+          {
+            "name": "include_raw",
+            "in": "query",
+            "description": "Include raw provider payloads",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "nullable": true
             }
           }
         ],
@@ -327,13 +337,23 @@
           {
             "name": "offset",
             "in": "query",
-            "description": "Last seen event id (exclusive)",
+            "description": "Last seen event sequence (exclusive)",
             "required": false,
             "schema": {
               "type": "integer",
               "format": "int64",
               "nullable": true,
               "minimum": 0
+            }
+          },
+          {
+            "name": "include_raw",
+            "in": "query",
+            "description": "Include raw provider payloads",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "nullable": true
             }
           }
         ],
@@ -536,10 +556,67 @@
           }
         }
       }
+    },
+    "/v1/sessions/{session_id}/terminate": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "operationId": "terminate_session",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "description": "Session id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Session terminated"
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "AgentCapabilities": {
+        "type": "object",
+        "required": [
+          "planMode",
+          "permissions",
+          "questions",
+          "toolCalls"
+        ],
+        "properties": {
+          "permissions": {
+            "type": "boolean"
+          },
+          "planMode": {
+            "type": "boolean"
+          },
+          "questions": {
+            "type": "boolean"
+          },
+          "toolCalls": {
+            "type": "boolean"
+          }
+        }
+      },
       "AgentError": {
         "type": "object",
         "required": [
@@ -570,9 +647,13 @@
         "type": "object",
         "required": [
           "id",
-          "installed"
+          "installed",
+          "capabilities"
         ],
         "properties": {
+          "capabilities": {
+            "$ref": "#/components/schemas/AgentCapabilities"
+          },
           "id": {
             "type": "string"
           },
@@ -645,8 +726,157 @@
           }
         }
       },
-      "AttachmentSource": {
+      "AgentUnparsedData": {
+        "type": "object",
+        "required": [
+          "error",
+          "location"
+        ],
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "location": {
+            "type": "string"
+          },
+          "raw_hash": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "ContentPart": {
         "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "text",
+              "type"
+            ],
+            "properties": {
+              "text": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "text"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "json",
+              "type"
+            ],
+            "properties": {
+              "json": {},
+              "type": {
+                "type": "string",
+                "enum": [
+                  "json"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "name",
+              "arguments",
+              "call_id",
+              "type"
+            ],
+            "properties": {
+              "arguments": {
+                "type": "string"
+              },
+              "call_id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "tool_call"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "call_id",
+              "output",
+              "type"
+            ],
+            "properties": {
+              "call_id": {
+                "type": "string"
+              },
+              "output": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "tool_result"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "path",
+              "action",
+              "type"
+            ],
+            "properties": {
+              "action": {
+                "$ref": "#/components/schemas/FileAction"
+              },
+              "diff": {
+                "type": "string",
+                "nullable": true
+              },
+              "path": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "file_ref"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "text",
+              "visibility",
+              "type"
+            ],
+            "properties": {
+              "text": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "reasoning"
+                ]
+              },
+              "visibility": {
+                "$ref": "#/components/schemas/ReasoningVisibility"
+              }
+            }
+          },
           {
             "type": "object",
             "required": [
@@ -654,13 +884,17 @@
               "type"
             ],
             "properties": {
+              "mime": {
+                "type": "string",
+                "nullable": true
+              },
               "path": {
                 "type": "string"
               },
               "type": {
                 "type": "string",
                 "enum": [
-                  "path"
+                  "image"
                 ]
               }
             }
@@ -668,39 +902,21 @@
           {
             "type": "object",
             "required": [
-              "url",
+              "label",
               "type"
             ],
             "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "url"
-                ]
-              },
-              "url": {
-                "type": "string"
-              }
-            }
-          },
-          {
-            "type": "object",
-            "required": [
-              "data",
-              "type"
-            ],
-            "properties": {
-              "data": {
-                "type": "string"
-              },
-              "encoding": {
+              "detail": {
                 "type": "string",
                 "nullable": true
               },
+              "label": {
+                "type": "string"
+              },
               "type": {
                 "type": "string",
                 "enum": [
-                  "data"
+                  "status"
                 ]
               }
             }
@@ -708,24 +924,6 @@
         ],
         "discriminator": {
           "propertyName": "type"
-        }
-      },
-      "CrashInfo": {
-        "type": "object",
-        "required": [
-          "message"
-        ],
-        "properties": {
-          "details": {
-            "nullable": true
-          },
-          "kind": {
-            "type": "string",
-            "nullable": true
-          },
-          "message": {
-            "type": "string"
-          }
         }
       },
       "CreateSessionRequest": {
@@ -765,10 +963,6 @@
           "healthy"
         ],
         "properties": {
-          "agentSessionId": {
-            "type": "string",
-            "nullable": true
-          },
           "error": {
             "allOf": [
               {
@@ -779,6 +973,28 @@
           },
           "healthy": {
             "type": "boolean"
+          },
+          "nativeSessionId": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "ErrorData": {
+        "type": "object",
+        "required": [
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "nullable": true
+          },
+          "details": {
+            "nullable": true
+          },
+          "message": {
+            "type": "string"
           }
         }
       },
@@ -799,9 +1015,20 @@
           "timeout"
         ]
       },
+      "EventSource": {
+        "type": "string",
+        "enum": [
+          "agent",
+          "daemon"
+        ]
+      },
       "EventsQuery": {
         "type": "object",
         "properties": {
+          "includeRaw": {
+            "type": "boolean",
+            "nullable": true
+          },
           "limit": {
             "type": "integer",
             "format": "int64",
@@ -834,6 +1061,14 @@
           }
         }
       },
+      "FileAction": {
+        "type": "string",
+        "enum": [
+          "read",
+          "write",
+          "patch"
+        ]
+      },
       "HealthResponse": {
         "type": "object",
         "required": [
@@ -845,6 +1080,64 @@
           }
         }
       },
+      "ItemDeltaData": {
+        "type": "object",
+        "required": [
+          "item_id",
+          "delta"
+        ],
+        "properties": {
+          "delta": {
+            "type": "string"
+          },
+          "item_id": {
+            "type": "string"
+          },
+          "native_item_id": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "ItemEventData": {
+        "type": "object",
+        "required": [
+          "item"
+        ],
+        "properties": {
+          "item": {
+            "$ref": "#/components/schemas/UniversalItem"
+          }
+        }
+      },
+      "ItemKind": {
+        "type": "string",
+        "enum": [
+          "message",
+          "tool_call",
+          "tool_result",
+          "system",
+          "status",
+          "unknown"
+        ]
+      },
+      "ItemRole": {
+        "type": "string",
+        "enum": [
+          "user",
+          "assistant",
+          "system",
+          "tool"
+        ]
+      },
+      "ItemStatus": {
+        "type": "string",
+        "enum": [
+          "in_progress",
+          "completed",
+          "failed"
+        ]
+      },
       "MessageRequest": {
         "type": "object",
         "required": [
@@ -853,6 +1146,28 @@
         "properties": {
           "message": {
             "type": "string"
+          }
+        }
+      },
+      "PermissionEventData": {
+        "type": "object",
+        "required": [
+          "permission_id",
+          "action",
+          "status"
+        ],
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "metadata": {
+            "nullable": true
+          },
+          "permission_id": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/PermissionStatus"
           }
         }
       },
@@ -875,65 +1190,13 @@
           }
         }
       },
-      "PermissionRequest": {
-        "type": "object",
-        "required": [
-          "id",
-          "sessionId",
-          "permission",
-          "patterns",
-          "always"
-        ],
-        "properties": {
-          "always": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "id": {
-            "type": "string"
-          },
-          "metadata": {
-            "type": "object",
-            "additionalProperties": {}
-          },
-          "patterns": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "permission": {
-            "type": "string"
-          },
-          "sessionId": {
-            "type": "string"
-          },
-          "tool": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/PermissionToolRef"
-              }
-            ],
-            "nullable": true
-          }
-        }
-      },
-      "PermissionToolRef": {
-        "type": "object",
-        "required": [
-          "messageId",
-          "callId"
-        ],
-        "properties": {
-          "callId": {
-            "type": "string"
-          },
-          "messageId": {
-            "type": "string"
-          }
-        }
+      "PermissionStatus": {
+        "type": "string",
+        "enum": [
+          "requested",
+          "approved",
+          "denied"
+        ]
       },
       "ProblemDetails": {
         "type": "object",
@@ -965,48 +1228,33 @@
         },
         "additionalProperties": {}
       },
-      "QuestionInfo": {
+      "QuestionEventData": {
         "type": "object",
         "required": [
-          "question",
-          "options"
+          "question_id",
+          "prompt",
+          "options",
+          "status"
         ],
         "properties": {
-          "custom": {
-            "type": "boolean",
-            "nullable": true
-          },
-          "header": {
-            "type": "string",
-            "nullable": true
-          },
-          "multiSelect": {
-            "type": "boolean",
-            "nullable": true
-          },
           "options": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/QuestionOption"
+              "type": "string"
             }
           },
-          "question": {
+          "prompt": {
             "type": "string"
-          }
-        }
-      },
-      "QuestionOption": {
-        "type": "object",
-        "required": [
-          "label"
-        ],
-        "properties": {
-          "description": {
+          },
+          "question_id": {
+            "type": "string"
+          },
+          "response": {
             "type": "string",
             "nullable": true
           },
-          "label": {
-            "type": "string"
+          "status": {
+            "$ref": "#/components/schemas/QuestionStatus"
           }
         }
       },
@@ -1027,48 +1275,41 @@
           }
         }
       },
-      "QuestionRequest": {
-        "type": "object",
-        "required": [
-          "id",
-          "sessionId",
-          "questions"
-        ],
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "questions": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/QuestionInfo"
-            }
-          },
-          "sessionId": {
-            "type": "string"
-          },
-          "tool": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/QuestionToolRef"
-              }
-            ],
-            "nullable": true
-          }
-        }
+      "QuestionStatus": {
+        "type": "string",
+        "enum": [
+          "requested",
+          "answered",
+          "rejected"
+        ]
       },
-      "QuestionToolRef": {
+      "ReasoningVisibility": {
+        "type": "string",
+        "enum": [
+          "public",
+          "private"
+        ]
+      },
+      "SessionEndReason": {
+        "type": "string",
+        "enum": [
+          "completed",
+          "error",
+          "terminated"
+        ]
+      },
+      "SessionEndedData": {
         "type": "object",
         "required": [
-          "messageId",
-          "callId"
+          "reason",
+          "terminated_by"
         ],
         "properties": {
-          "callId": {
-            "type": "string"
+          "reason": {
+            "$ref": "#/components/schemas/SessionEndReason"
           },
-          "messageId": {
-            "type": "string"
+          "terminated_by": {
+            "$ref": "#/components/schemas/TerminatedBy"
           }
         }
       },
@@ -1089,10 +1330,6 @@
           "agentMode": {
             "type": "string"
           },
-          "agentSessionId": {
-            "type": "string",
-            "nullable": true
-          },
           "ended": {
             "type": "boolean"
           },
@@ -1102,6 +1339,10 @@
             "minimum": 0
           },
           "model": {
+            "type": "string",
+            "nullable": true
+          },
+          "nativeSessionId": {
             "type": "string",
             "nullable": true
           },
@@ -1131,390 +1372,153 @@
           }
         }
       },
-      "Started": {
+      "SessionStartedData": {
         "type": "object",
         "properties": {
-          "details": {
-            "nullable": true
-          },
-          "message": {
-            "type": "string",
+          "metadata": {
             "nullable": true
           }
         }
       },
+      "TerminatedBy": {
+        "type": "string",
+        "enum": [
+          "agent",
+          "daemon"
+        ]
+      },
       "UniversalEvent": {
         "type": "object",
         "required": [
-          "id",
-          "timestamp",
-          "sessionId",
-          "agent",
+          "event_id",
+          "sequence",
+          "time",
+          "session_id",
+          "synthetic",
+          "source",
+          "type",
           "data"
         ],
         "properties": {
-          "agent": {
-            "type": "string"
-          },
-          "agentSessionId": {
-            "type": "string",
-            "nullable": true
-          },
           "data": {
             "$ref": "#/components/schemas/UniversalEventData"
           },
-          "id": {
+          "event_id": {
+            "type": "string"
+          },
+          "native_session_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "raw": {
+            "nullable": true
+          },
+          "sequence": {
             "type": "integer",
             "format": "int64",
             "minimum": 0
           },
-          "sessionId": {
+          "session_id": {
             "type": "string"
           },
-          "timestamp": {
+          "source": {
+            "$ref": "#/components/schemas/EventSource"
+          },
+          "synthetic": {
+            "type": "boolean"
+          },
+          "time": {
             "type": "string"
+          },
+          "type": {
+            "$ref": "#/components/schemas/UniversalEventType"
           }
         }
       },
       "UniversalEventData": {
         "oneOf": [
           {
-            "type": "object",
-            "required": [
-              "message"
-            ],
-            "properties": {
-              "message": {
-                "$ref": "#/components/schemas/UniversalMessage"
-              }
-            }
+            "$ref": "#/components/schemas/SessionStartedData"
           },
           {
-            "type": "object",
-            "required": [
-              "started"
-            ],
-            "properties": {
-              "started": {
-                "$ref": "#/components/schemas/Started"
-              }
-            }
+            "$ref": "#/components/schemas/SessionEndedData"
           },
           {
-            "type": "object",
-            "required": [
-              "error"
-            ],
-            "properties": {
-              "error": {
-                "$ref": "#/components/schemas/CrashInfo"
-              }
-            }
+            "$ref": "#/components/schemas/ItemEventData"
           },
           {
-            "type": "object",
-            "required": [
-              "questionAsked"
-            ],
-            "properties": {
-              "questionAsked": {
-                "$ref": "#/components/schemas/QuestionRequest"
-              }
-            }
+            "$ref": "#/components/schemas/ItemDeltaData"
           },
           {
-            "type": "object",
-            "required": [
-              "permissionAsked"
-            ],
-            "properties": {
-              "permissionAsked": {
-                "$ref": "#/components/schemas/PermissionRequest"
-              }
-            }
+            "$ref": "#/components/schemas/ErrorData"
           },
           {
-            "type": "object",
-            "required": [
-              "raw"
-            ],
-            "properties": {
-              "raw": {}
-            }
+            "$ref": "#/components/schemas/PermissionEventData"
+          },
+          {
+            "$ref": "#/components/schemas/QuestionEventData"
+          },
+          {
+            "$ref": "#/components/schemas/AgentUnparsedData"
           }
         ]
       },
-      "UniversalMessage": {
-        "oneOf": [
-          {
-            "$ref": "#/components/schemas/UniversalMessageParsed"
-          },
-          {
-            "type": "object",
-            "required": [
-              "raw"
-            ],
-            "properties": {
-              "error": {
-                "type": "string",
-                "nullable": true
-              },
-              "raw": {}
-            }
-          }
+      "UniversalEventType": {
+        "type": "string",
+        "enum": [
+          "session.started",
+          "session.ended",
+          "item.started",
+          "item.delta",
+          "item.completed",
+          "error",
+          "permission.requested",
+          "permission.resolved",
+          "question.requested",
+          "question.resolved",
+          "agent.unparsed"
         ]
       },
-      "UniversalMessageParsed": {
+      "UniversalItem": {
         "type": "object",
         "required": [
-          "role",
-          "parts"
+          "item_id",
+          "kind",
+          "content",
+          "status"
         ],
         "properties": {
-          "id": {
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ContentPart"
+            }
+          },
+          "item_id": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ItemKind"
+          },
+          "native_item_id": {
             "type": "string",
             "nullable": true
           },
-          "metadata": {
-            "type": "object",
-            "additionalProperties": {}
-          },
-          "parts": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/UniversalMessagePart"
-            }
+          "parent_id": {
+            "type": "string",
+            "nullable": true
           },
           "role": {
-            "type": "string"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ItemRole"
+              }
+            ],
+            "nullable": true
+          },
+          "status": {
+            "$ref": "#/components/schemas/ItemStatus"
           }
-        }
-      },
-      "UniversalMessagePart": {
-        "oneOf": [
-          {
-            "type": "object",
-            "required": [
-              "text",
-              "type"
-            ],
-            "properties": {
-              "text": {
-                "type": "string"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "text"
-                ]
-              }
-            }
-          },
-          {
-            "type": "object",
-            "required": [
-              "name",
-              "input",
-              "type"
-            ],
-            "properties": {
-              "id": {
-                "type": "string",
-                "nullable": true
-              },
-              "input": {},
-              "name": {
-                "type": "string"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "tool_call"
-                ]
-              }
-            }
-          },
-          {
-            "type": "object",
-            "required": [
-              "output",
-              "type"
-            ],
-            "properties": {
-              "id": {
-                "type": "string",
-                "nullable": true
-              },
-              "is_error": {
-                "type": "boolean",
-                "nullable": true
-              },
-              "name": {
-                "type": "string",
-                "nullable": true
-              },
-              "output": {},
-              "type": {
-                "type": "string",
-                "enum": [
-                  "tool_result"
-                ]
-              }
-            }
-          },
-          {
-            "type": "object",
-            "required": [
-              "arguments",
-              "type"
-            ],
-            "properties": {
-              "arguments": {},
-              "id": {
-                "type": "string",
-                "nullable": true
-              },
-              "name": {
-                "type": "string",
-                "nullable": true
-              },
-              "raw": {
-                "nullable": true
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "function_call"
-                ]
-              }
-            }
-          },
-          {
-            "type": "object",
-            "required": [
-              "result",
-              "type"
-            ],
-            "properties": {
-              "id": {
-                "type": "string",
-                "nullable": true
-              },
-              "is_error": {
-                "type": "boolean",
-                "nullable": true
-              },
-              "name": {
-                "type": "string",
-                "nullable": true
-              },
-              "raw": {
-                "nullable": true
-              },
-              "result": {},
-              "type": {
-                "type": "string",
-                "enum": [
-                  "function_result"
-                ]
-              }
-            }
-          },
-          {
-            "type": "object",
-            "required": [
-              "source",
-              "type"
-            ],
-            "properties": {
-              "filename": {
-                "type": "string",
-                "nullable": true
-              },
-              "mime_type": {
-                "type": "string",
-                "nullable": true
-              },
-              "raw": {
-                "nullable": true
-              },
-              "source": {
-                "$ref": "#/components/schemas/AttachmentSource"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "file"
-                ]
-              }
-            }
-          },
-          {
-            "type": "object",
-            "required": [
-              "source",
-              "type"
-            ],
-            "properties": {
-              "alt": {
-                "type": "string",
-                "nullable": true
-              },
-              "mime_type": {
-                "type": "string",
-                "nullable": true
-              },
-              "raw": {
-                "nullable": true
-              },
-              "source": {
-                "$ref": "#/components/schemas/AttachmentSource"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "image"
-                ]
-              }
-            }
-          },
-          {
-            "type": "object",
-            "required": [
-              "message",
-              "type"
-            ],
-            "properties": {
-              "message": {
-                "type": "string"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "error"
-                ]
-              }
-            }
-          },
-          {
-            "type": "object",
-            "required": [
-              "raw",
-              "type"
-            ],
-            "properties": {
-              "raw": {},
-              "type": {
-                "type": "string",
-                "enum": [
-                  "unknown"
-                ]
-              }
-            }
-          }
-        ],
-        "discriminator": {
-          "propertyName": "type"
         }
       }
     }

@@ -2068,7 +2068,7 @@
             "type": {
               "type": "string",
               "enum": [
-                "danger-full-access"
+                "dangerFullAccess"
               ],
               "title": "DangerFullAccessSandboxPolicyType"
             }
@@ -2085,7 +2085,7 @@
             "type": {
               "type": "string",
               "enum": [
-                "read-only"
+                "readOnly"
               ],
               "title": "ReadOnlySandboxPolicyType"
             }
@@ -2111,7 +2111,7 @@
             "type": {
               "type": "string",
               "enum": [
-                "external-sandbox"
+                "externalSandbox"
               ],
               "title": "ExternalSandboxSandboxPolicyType"
             }
@@ -2143,7 +2143,7 @@
             "type": {
               "type": "string",
               "enum": [
-                "workspace-write"
+                "workspaceWrite"
               ],
               "title": "WorkspaceWriteSandboxPolicyType"
             },
@@ -2172,7 +2172,7 @@
             "type": {
               "type": "string",
               "enum": [
-                "danger-full-access"
+                "dangerFullAccess"
               ],
               "title": "DangerFullAccessSandboxPolicy2Type"
             }
@@ -2189,7 +2189,7 @@
             "type": {
               "type": "string",
               "enum": [
-                "read-only"
+                "readOnly"
               ],
               "title": "ReadOnlySandboxPolicy2Type"
             }
@@ -2215,7 +2215,7 @@
             "type": {
               "type": "string",
               "enum": [
-                "external-sandbox"
+                "externalSandbox"
               ],
               "title": "ExternalSandboxSandboxPolicy2Type"
             }
@@ -2247,7 +2247,7 @@
             "type": {
               "type": "string",
               "enum": [
-                "workspace-write"
+                "workspaceWrite"
               ],
               "title": "WorkspaceWriteSandboxPolicy2Type"
             },
@@ -11393,9 +11393,9 @@
       "SandboxMode": {
         "type": "string",
         "enum": [
-          "read-only",
-          "workspace-write",
-          "danger-full-access"
+          "readOnly",
+          "workspaceWrite",
+          "dangerFullAccess"
         ]
       },
       "ThreadStartParams": {

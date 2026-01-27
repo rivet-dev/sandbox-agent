@@ -10,13 +10,13 @@ use sandbox_agent_agent_management::credentials::{
     extract_all_credentials, AuthType, CredentialExtractionOptions, ExtractedCredentials,
     ProviderCredentials,
 };
-use sandbox_agent_core::router::{
+use sandbox_agent::router::{
     AgentInstallRequest, AppState, AuthConfig, CreateSessionRequest, MessageRequest,
     PermissionReply, PermissionReplyRequest, QuestionReplyRequest,
 };
-use sandbox_agent_core::router::{AgentListResponse, AgentModesResponse, CreateSessionResponse, EventsResponse};
-use sandbox_agent_core::router::build_router;
-use sandbox_agent_core::ui;
+use sandbox_agent::router::{AgentListResponse, AgentModesResponse, CreateSessionResponse, EventsResponse};
+use sandbox_agent::router::build_router;
+use sandbox_agent::ui;
 use serde::Serialize;
 use serde_json::Value;
 use thiserror::Error;
@@ -118,6 +118,9 @@ enum SessionsCommand {
     #[command(name = "send-message")]
     /// Send a message to an existing session.
     SendMessage(SessionMessageArgs),
+    #[command(name = "terminate")]
+    /// Terminate a session.
+    Terminate(SessionTerminateArgs),
     #[command(name = "get-messages")]
     /// Alias for events; returns session events.
     GetMessages(SessionEventsArgs),
@@ -195,6 +198,8 @@ struct SessionEventsArgs {
     offset: Option<u64>,
     #[arg(long, short = 'l')]
     limit: Option<u64>,
+    #[arg(long)]
+    include_raw: bool,
     #[command(flatten)]
     client: ClientArgs,
 }
@@ -204,6 +209,15 @@ struct SessionEventsSseArgs {
     session_id: String,
     #[arg(long, short = 'o')]
     offset: Option<u64>,
+    #[arg(long)]
+    include_raw: bool,
+    #[command(flatten)]
+    client: ClientArgs,
+}
+
+#[derive(Args, Debug)]
+struct SessionTerminateArgs {
+    session_id: String,
     #[command(flatten)]
     client: ClientArgs,
 }
@@ -419,16 +433,41 @@ fn run_sessions(command: &SessionsCommand, cli: &Cli) -> Result<(), CliError> {
             let response = ctx.post(&path, &body)?;
             print_empty_response(response)
         }
+        SessionsCommand::Terminate(args) => {
+            let ctx = ClientContext::new(cli, &args.client)?;
+            let path = format!("{API_PREFIX}/sessions/{}/terminate", args.session_id);
+            let response = ctx.post_empty(&path)?;
+            print_empty_response(response)
+        }
         SessionsCommand::GetMessages(args) | SessionsCommand::Events(args) => {
             let ctx = ClientContext::new(cli, &args.client)?;
             let path = format!("{API_PREFIX}/sessions/{}/events", args.session_id);
-            let response = ctx.get_with_query(&path, &[ ("offset", args.offset), ("limit", args.limit) ])?;
+            let response = ctx.get_with_query(
+                &path,
+                &[
+                    ("offset", args.offset.map(|v| v.to_string())),
+                    ("limit", args.limit.map(|v| v.to_string())),
+                    (
+                        "include_raw",
+                        if args.include_raw { Some("true".to_string()) } else { None },
+                    ),
+                ],
+            )?;
             print_json_response::<EventsResponse>(response)
         }
         SessionsCommand::EventsSse(args) => {
             let ctx = ClientContext::new(cli, &args.client)?;
             let path = format!("{API_PREFIX}/sessions/{}/events/sse", args.session_id);
-            let response = ctx.get_with_query(&path, &[("offset", args.offset)])?;
+            let response = ctx.get_with_query(
+                &path,
+                &[
+                    ("offset", args.offset.map(|v| v.to_string())),
+                    (
+                        "include_raw",
+                        if args.include_raw { Some("true".to_string()) } else { None },
+                    ),
+                ],
+            )?;
             print_text_response(response)
         }
         SessionsCommand::ReplyQuestion(args) => {
@@ -786,7 +825,7 @@ impl ClientContext {
     fn get_with_query(
         &self,
         path: &str,
-        query: &[(&str, Option<u64>)],
+        query: &[(&str, Option<String>)],
     ) -> Result<reqwest::blocking::Response, CliError> {
         let mut request = self.request(Method::GET, path);
         for (key, value) in query {

@@ -1,98 +1,206 @@
-use crate::{
-    AttachmentSource,
-    ConversionError,
-    CrashInfo,
-    EventConversion,
-    Started,
-    UniversalEventData,
-    UniversalMessage,
-    UniversalMessageParsed,
-    UniversalMessagePart,
-};
+use serde_json::Value;
+
 use crate::codex as schema;
-use serde_json::{Map, Value};
+use crate::{
+    ContentPart,
+    ErrorData,
+    EventConversion,
+    ItemDeltaData,
+    ItemEventData,
+    ItemKind,
+    ItemRole,
+    ItemStatus,
+    ReasoningVisibility,
+    SessionEndedData,
+    SessionEndReason,
+    SessionStartedData,
+    TerminatedBy,
+    UniversalEventData,
+    UniversalEventType,
+    UniversalItem,
+};
 
-/// Convert a Codex ServerNotification to a universal event.
-/// This is the main entry point for handling Codex events.
-pub fn notification_to_universal(notification: &schema::ServerNotification) -> EventConversion {
+/// Convert a Codex ServerNotification to universal events.
+pub fn notification_to_universal(
+    notification: &schema::ServerNotification,
+) -> Result<Vec<EventConversion>, String> {
+    let raw = serde_json::to_value(notification).ok();
     match notification {
-        // Thread lifecycle
         schema::ServerNotification::ThreadStarted(params) => {
-            thread_started_to_universal(params)
+            let data = SessionStartedData {
+                metadata: serde_json::to_value(&params.thread).ok(),
+            };
+            Ok(vec![
+                EventConversion::new(
+                    UniversalEventType::SessionStarted,
+                    UniversalEventData::SessionStarted(data),
+                )
+                .with_native_session(Some(params.thread.id.clone()))
+                .with_raw(raw),
+            ])
         }
-        schema::ServerNotification::TurnStarted(params) => {
-            turn_started_to_universal(params)
-        }
-        schema::ServerNotification::TurnCompleted(params) => {
-            turn_completed_to_universal(params)
-        }
-
-        // Item lifecycle
+        schema::ServerNotification::ThreadCompacted(params) => Ok(vec![status_event(
+            "thread.compacted",
+            serde_json::to_string(params).ok(),
+            Some(params.thread_id.clone()),
+            raw,
+        )]),
+        schema::ServerNotification::ThreadTokenUsageUpdated(params) => Ok(vec![status_event(
+            "thread.token_usage.updated",
+            serde_json::to_string(params).ok(),
+            Some(params.thread_id.clone()),
+            raw,
+        )]),
+        schema::ServerNotification::TurnStarted(params) => Ok(vec![status_event(
+            "turn.started",
+            serde_json::to_string(&params.turn).ok(),
+            Some(params.thread_id.clone()),
+            raw,
+        )]),
+        schema::ServerNotification::TurnCompleted(params) => Ok(vec![status_event(
+            "turn.completed",
+            serde_json::to_string(&params.turn).ok(),
+            Some(params.thread_id.clone()),
+            raw,
+        )]),
+        schema::ServerNotification::TurnDiffUpdated(params) => Ok(vec![status_event(
+            "turn.diff.updated",
+            serde_json::to_string(params).ok(),
+            Some(params.thread_id.clone()),
+            raw,
+        )]),
+        schema::ServerNotification::TurnPlanUpdated(params) => Ok(vec![status_event(
+            "turn.plan.updated",
+            serde_json::to_string(params).ok(),
+            Some(params.thread_id.clone()),
+            raw,
+        )]),
         schema::ServerNotification::ItemStarted(params) => {
-            item_started_to_universal(params)
+            let item = thread_item_to_item(&params.item, ItemStatus::InProgress);
+            Ok(vec![
+                EventConversion::new(
+                    UniversalEventType::ItemStarted,
+                    UniversalEventData::Item(ItemEventData { item }),
+                )
+                .with_native_session(Some(params.thread_id.clone()))
+                .with_raw(raw),
+            ])
         }
         schema::ServerNotification::ItemCompleted(params) => {
-            item_completed_to_universal(params)
+            let item = thread_item_to_item(&params.item, ItemStatus::Completed);
+            Ok(vec![
+                EventConversion::new(
+                    UniversalEventType::ItemCompleted,
+                    UniversalEventData::Item(ItemEventData { item }),
+                )
+                .with_native_session(Some(params.thread_id.clone()))
+                .with_raw(raw),
+            ])
         }
-
-        // Streaming deltas
-        schema::ServerNotification::ItemAgentMessageDelta(params) => {
-            agent_message_delta_to_universal(params)
-        }
-        schema::ServerNotification::ItemReasoningTextDelta(params) => {
-            reasoning_text_delta_to_universal(params)
-        }
-        schema::ServerNotification::ItemReasoningSummaryTextDelta(params) => {
-            reasoning_summary_delta_to_universal(params)
-        }
-        schema::ServerNotification::ItemCommandExecutionOutputDelta(params) => {
-            command_output_delta_to_universal(params)
-        }
-        schema::ServerNotification::ItemFileChangeOutputDelta(params) => {
-            file_change_delta_to_universal(params)
-        }
-
-        // Errors
+        schema::ServerNotification::ItemAgentMessageDelta(params) => Ok(vec![
+            EventConversion::new(
+                UniversalEventType::ItemDelta,
+                UniversalEventData::ItemDelta(ItemDeltaData {
+                    item_id: String::new(),
+                    native_item_id: Some(params.item_id.clone()),
+                    delta: params.delta.clone(),
+                }),
+            )
+            .with_native_session(Some(params.thread_id.clone()))
+            .with_raw(raw),
+        ]),
+        schema::ServerNotification::ItemReasoningTextDelta(params) => Ok(vec![
+            EventConversion::new(
+                UniversalEventType::ItemDelta,
+                UniversalEventData::ItemDelta(ItemDeltaData {
+                    item_id: String::new(),
+                    native_item_id: Some(params.item_id.clone()),
+                    delta: params.delta.clone(),
+                }),
+            )
+            .with_native_session(Some(params.thread_id.clone()))
+            .with_raw(raw),
+        ]),
+        schema::ServerNotification::ItemReasoningSummaryTextDelta(params) => Ok(vec![
+            EventConversion::new(
+                UniversalEventType::ItemDelta,
+                UniversalEventData::ItemDelta(ItemDeltaData {
+                    item_id: String::new(),
+                    native_item_id: Some(params.item_id.clone()),
+                    delta: params.delta.clone(),
+                }),
+            )
+            .with_native_session(Some(params.thread_id.clone()))
+            .with_raw(raw),
+        ]),
+        schema::ServerNotification::ItemCommandExecutionOutputDelta(params) => Ok(vec![
+            EventConversion::new(
+                UniversalEventType::ItemDelta,
+                UniversalEventData::ItemDelta(ItemDeltaData {
+                    item_id: String::new(),
+                    native_item_id: Some(params.item_id.clone()),
+                    delta: params.delta.clone(),
+                }),
+            )
+            .with_native_session(Some(params.thread_id.clone()))
+            .with_raw(raw),
+        ]),
+        schema::ServerNotification::ItemFileChangeOutputDelta(params) => Ok(vec![
+            EventConversion::new(
+                UniversalEventType::ItemDelta,
+                UniversalEventData::ItemDelta(ItemDeltaData {
+                    item_id: String::new(),
+                    native_item_id: Some(params.item_id.clone()),
+                    delta: params.delta.clone(),
+                }),
+            )
+            .with_native_session(Some(params.thread_id.clone()))
+            .with_raw(raw),
+        ]),
+        schema::ServerNotification::ItemCommandExecutionTerminalInteraction(params) => Ok(vec![
+            EventConversion::new(
+                UniversalEventType::ItemDelta,
+                UniversalEventData::ItemDelta(ItemDeltaData {
+                    item_id: String::new(),
+                    native_item_id: Some(params.item_id.clone()),
+                    delta: params.stdin.clone(),
+                }),
+            )
+            .with_native_session(Some(params.thread_id.clone()))
+            .with_raw(raw),
+        ]),
+        schema::ServerNotification::ItemMcpToolCallProgress(params) => Ok(vec![status_event(
+            "mcp.progress",
+            serde_json::to_string(params).ok(),
+            Some(params.thread_id.clone()),
+            raw,
+        )]),
+        schema::ServerNotification::ItemReasoningSummaryPartAdded(params) => Ok(vec![
+            status_event(
+                "reasoning.summary.part_added",
+                serde_json::to_string(params).ok(),
+                Some(params.thread_id.clone()),
+                raw,
+            ),
+        ]),
         schema::ServerNotification::Error(params) => {
-            error_notification_to_universal(params)
+            let data = ErrorData {
+                message: params.error.message.clone(),
+                code: None,
+                details: serde_json::to_value(params).ok(),
+            };
+            Ok(vec![
+                EventConversion::new(UniversalEventType::Error, UniversalEventData::Error(data))
+                    .with_native_session(Some(params.thread_id.clone()))
+                    .with_raw(raw),
+            ])
         }
-
-        // Token usage updates
-        schema::ServerNotification::ThreadTokenUsageUpdated(params) => {
-            token_usage_to_universal(params)
-        }
-
-        // Turn diff updates
-        schema::ServerNotification::TurnDiffUpdated(params) => {
-            turn_diff_to_universal(params)
-        }
-
-        // Plan updates
-        schema::ServerNotification::TurnPlanUpdated(params) => {
-            turn_plan_to_universal(params)
-        }
-
-        // Terminal interaction
-        schema::ServerNotification::ItemCommandExecutionTerminalInteraction(params) => {
-            terminal_interaction_to_universal(params)
-        }
-
-        // MCP tool call progress
-        schema::ServerNotification::ItemMcpToolCallProgress(params) => {
-            mcp_progress_to_universal(params)
-        }
-
-        // Reasoning summary part added
-        schema::ServerNotification::ItemReasoningSummaryPartAdded(params) => {
-            reasoning_summary_part_to_universal(params)
-        }
-
-        // Context compacted
-        schema::ServerNotification::ThreadCompacted(params) => {
-            context_compacted_to_universal(params)
-        }
-
-        // Account/auth notifications (less relevant for message conversion)
+        schema::ServerNotification::RawResponseItemCompleted(params) => Ok(vec![status_event(
+            "raw.item.completed",
+            serde_json::to_string(params).ok(),
+            Some(params.thread_id.clone()),
+            raw,
+        )]),
         schema::ServerNotification::AccountUpdated(_)
         | schema::ServerNotification::AccountRateLimitsUpdated(_)
         | schema::ServerNotification::AccountLoginCompleted(_)
@@ -102,632 +210,318 @@ pub fn notification_to_universal(notification: &schema::ServerNotification) -> E
         | schema::ServerNotification::SessionConfigured(_)
         | schema::ServerNotification::DeprecationNotice(_)
         | schema::ServerNotification::ConfigWarning(_)
-        | schema::ServerNotification::WindowsWorldWritableWarning(_)
-        | schema::ServerNotification::RawResponseItemCompleted(_) => {
-            EventConversion::new(UniversalEventData::Unknown {
-                raw: serde_json::to_value(notification).unwrap_or(Value::Null),
-            })
-        }
+        | schema::ServerNotification::WindowsWorldWritableWarning(_) => Ok(vec![status_event(
+            "notice",
+            serde_json::to_string(notification).ok(),
+            None,
+            raw,
+        )]),
     }
 }
 
-fn thread_started_to_universal(params: &schema::ThreadStartedNotification) -> EventConversion {
-    let started = Started {
-        message: Some("thread/started".to_string()),
-        details: serde_json::to_value(&params.thread).ok(),
-    };
-    EventConversion::new(UniversalEventData::Started { started })
-        .with_session(Some(params.thread.id.clone()))
-}
-
-fn turn_started_to_universal(params: &schema::TurnStartedNotification) -> EventConversion {
-    let started = Started {
-        message: Some("turn/started".to_string()),
-        details: serde_json::to_value(&params.turn).ok(),
-    };
-    EventConversion::new(UniversalEventData::Started { started })
-        .with_session(Some(params.thread_id.clone()))
-}
-
-fn turn_completed_to_universal(params: &schema::TurnCompletedNotification) -> EventConversion {
-    // Convert all items in the turn to messages
-    let items = &params.turn.items;
-    if items.is_empty() {
-        // If no items, just emit as unknown with the turn data
-        return EventConversion::new(UniversalEventData::Unknown {
-            raw: serde_json::to_value(params).unwrap_or(Value::Null),
-        })
-        .with_session(Some(params.thread_id.clone()));
-    }
-
-    // Return the last item as a message (most relevant for completion)
-    if let Some(last_item) = items.last() {
-        let message = thread_item_to_message(last_item);
-        EventConversion::new(UniversalEventData::Message { message })
-            .with_session(Some(params.thread_id.clone()))
-    } else {
-        EventConversion::new(UniversalEventData::Unknown {
-            raw: serde_json::to_value(params).unwrap_or(Value::Null),
-        })
-        .with_session(Some(params.thread_id.clone()))
-    }
-}
-
-fn item_started_to_universal(params: &schema::ItemStartedNotification) -> EventConversion {
-    let message = thread_item_to_message(&params.item);
-    EventConversion::new(UniversalEventData::Message { message })
-        .with_session(Some(params.thread_id.clone()))
-}
-
-fn item_completed_to_universal(params: &schema::ItemCompletedNotification) -> EventConversion {
-    let message = thread_item_to_message(&params.item);
-    EventConversion::new(UniversalEventData::Message { message })
-        .with_session(Some(params.thread_id.clone()))
-}
-
-fn agent_message_delta_to_universal(
-    params: &schema::AgentMessageDeltaNotification,
-) -> EventConversion {
-    let message = UniversalMessage::Parsed(UniversalMessageParsed {
-        role: "assistant".to_string(),
-        id: Some(params.item_id.clone()),
-        metadata: Map::from_iter([
-            ("delta".to_string(), Value::Bool(true)),
-            ("turnId".to_string(), Value::String(params.turn_id.clone())),
-        ]),
-        parts: vec![UniversalMessagePart::Text {
-            text: params.delta.clone(),
-        }],
-    });
-    EventConversion::new(UniversalEventData::Message { message })
-        .with_session(Some(params.thread_id.clone()))
-}
-
-fn reasoning_text_delta_to_universal(
-    params: &schema::ReasoningTextDeltaNotification,
-) -> EventConversion {
-    let message = UniversalMessage::Parsed(UniversalMessageParsed {
-        role: "assistant".to_string(),
-        id: Some(params.item_id.clone()),
-        metadata: Map::from_iter([
-            ("delta".to_string(), Value::Bool(true)),
-            ("itemType".to_string(), Value::String("reasoning".to_string())),
-            ("turnId".to_string(), Value::String(params.turn_id.clone())),
-        ]),
-        parts: vec![UniversalMessagePart::Text {
-            text: params.delta.clone(),
-        }],
-    });
-    EventConversion::new(UniversalEventData::Message { message })
-        .with_session(Some(params.thread_id.clone()))
-}
-
-fn reasoning_summary_delta_to_universal(
-    params: &schema::ReasoningSummaryTextDeltaNotification,
-) -> EventConversion {
-    let message = UniversalMessage::Parsed(UniversalMessageParsed {
-        role: "assistant".to_string(),
-        id: Some(params.item_id.clone()),
-        metadata: Map::from_iter([
-            ("delta".to_string(), Value::Bool(true)),
-            ("itemType".to_string(), Value::String("reasoning_summary".to_string())),
-            ("turnId".to_string(), Value::String(params.turn_id.clone())),
-        ]),
-        parts: vec![UniversalMessagePart::Text {
-            text: params.delta.clone(),
-        }],
-    });
-    EventConversion::new(UniversalEventData::Message { message })
-        .with_session(Some(params.thread_id.clone()))
-}
-
-fn command_output_delta_to_universal(
-    params: &schema::CommandExecutionOutputDeltaNotification,
-) -> EventConversion {
-    let message = UniversalMessage::Parsed(UniversalMessageParsed {
-        role: "assistant".to_string(),
-        id: Some(params.item_id.clone()),
-        metadata: Map::from_iter([
-            ("delta".to_string(), Value::Bool(true)),
-            ("itemType".to_string(), Value::String("commandExecution".to_string())),
-            ("turnId".to_string(), Value::String(params.turn_id.clone())),
-        ]),
-        parts: vec![UniversalMessagePart::Text {
-            text: params.delta.clone(),
-        }],
-    });
-    EventConversion::new(UniversalEventData::Message { message })
-        .with_session(Some(params.thread_id.clone()))
-}
-
-fn file_change_delta_to_universal(
-    params: &schema::FileChangeOutputDeltaNotification,
-) -> EventConversion {
-    let message = UniversalMessage::Parsed(UniversalMessageParsed {
-        role: "assistant".to_string(),
-        id: Some(params.item_id.clone()),
-        metadata: Map::from_iter([
-            ("delta".to_string(), Value::Bool(true)),
-            ("itemType".to_string(), Value::String("fileChange".to_string())),
-            ("turnId".to_string(), Value::String(params.turn_id.clone())),
-        ]),
-        parts: vec![UniversalMessagePart::Text {
-            text: params.delta.clone(),
-        }],
-    });
-    EventConversion::new(UniversalEventData::Message { message })
-        .with_session(Some(params.thread_id.clone()))
-}
-
-fn error_notification_to_universal(params: &schema::ErrorNotification) -> EventConversion {
-    let crash = CrashInfo {
-        message: params.error.message.clone(),
-        kind: Some("error".to_string()),
-        details: serde_json::to_value(params).ok(),
-    };
-    EventConversion::new(UniversalEventData::Error { error: crash })
-        .with_session(Some(params.thread_id.clone()))
-}
-
-fn token_usage_to_universal(
-    params: &schema::ThreadTokenUsageUpdatedNotification,
-) -> EventConversion {
-    EventConversion::new(UniversalEventData::Unknown {
-        raw: serde_json::to_value(params).unwrap_or(Value::Null),
-    })
-    .with_session(Some(params.thread_id.clone()))
-}
-
-fn turn_diff_to_universal(params: &schema::TurnDiffUpdatedNotification) -> EventConversion {
-    EventConversion::new(UniversalEventData::Unknown {
-        raw: serde_json::to_value(params).unwrap_or(Value::Null),
-    })
-    .with_session(Some(params.thread_id.clone()))
-}
-
-fn turn_plan_to_universal(params: &schema::TurnPlanUpdatedNotification) -> EventConversion {
-    EventConversion::new(UniversalEventData::Unknown {
-        raw: serde_json::to_value(params).unwrap_or(Value::Null),
-    })
-    .with_session(Some(params.thread_id.clone()))
-}
-
-fn terminal_interaction_to_universal(
-    params: &schema::TerminalInteractionNotification,
-) -> EventConversion {
-    EventConversion::new(UniversalEventData::Unknown {
-        raw: serde_json::to_value(params).unwrap_or(Value::Null),
-    })
-    .with_session(Some(params.thread_id.clone()))
-}
-
-fn mcp_progress_to_universal(params: &schema::McpToolCallProgressNotification) -> EventConversion {
-    EventConversion::new(UniversalEventData::Unknown {
-        raw: serde_json::to_value(params).unwrap_or(Value::Null),
-    })
-    .with_session(Some(params.thread_id.clone()))
-}
-
-fn reasoning_summary_part_to_universal(
-    params: &schema::ReasoningSummaryPartAddedNotification,
-) -> EventConversion {
-    // This notification signals a new summary part was added, but doesn't contain the text itself
-    // Return as Unknown with all metadata
-    EventConversion::new(UniversalEventData::Unknown {
-        raw: serde_json::to_value(params).unwrap_or(Value::Null),
-    })
-    .with_session(Some(params.thread_id.clone()))
-}
-
-fn context_compacted_to_universal(
-    params: &schema::ContextCompactedNotification,
-) -> EventConversion {
-    EventConversion::new(UniversalEventData::Unknown {
-        raw: serde_json::to_value(params).unwrap_or(Value::Null),
-    })
-    .with_session(Some(params.thread_id.clone()))
-}
-
-/// Convert a ThreadItem to a UniversalMessage
-pub fn thread_item_to_message(item: &schema::ThreadItem) -> UniversalMessage {
+fn thread_item_to_item(item: &schema::ThreadItem, status: ItemStatus) -> UniversalItem {
     match item {
-        schema::ThreadItem::UserMessage { content, id } => {
-            user_message_to_universal(content, id)
-        }
-        schema::ThreadItem::AgentMessage { id, text } => {
-            agent_message_to_universal(id, text)
-        }
+        schema::ThreadItem::UserMessage { content, id } => UniversalItem {
+            item_id: String::new(),
+            native_item_id: Some(id.clone()),
+            parent_id: None,
+            kind: ItemKind::Message,
+            role: Some(ItemRole::User),
+            content: content.iter().map(user_input_to_content).collect(),
+            status,
+        },
+        schema::ThreadItem::AgentMessage { id, text } => UniversalItem {
+            item_id: String::new(),
+            native_item_id: Some(id.clone()),
+            parent_id: None,
+            kind: ItemKind::Message,
+            role: Some(ItemRole::Assistant),
+            content: vec![ContentPart::Text { text: text.clone() }],
+            status,
+        },
         schema::ThreadItem::Reasoning { content, id, summary } => {
-            reasoning_to_universal(id, content, summary)
+            let mut parts = Vec::new();
+            for line in content {
+                parts.push(ContentPart::Reasoning {
+                    text: line.clone(),
+                    visibility: ReasoningVisibility::Private,
+                });
+            }
+            for line in summary {
+                parts.push(ContentPart::Reasoning {
+                    text: line.clone(),
+                    visibility: ReasoningVisibility::Public,
+                });
+            }
+            UniversalItem {
+                item_id: String::new(),
+                native_item_id: Some(id.clone()),
+                parent_id: None,
+                kind: ItemKind::Message,
+                role: Some(ItemRole::Assistant),
+                content: parts,
+                status,
+            }
         }
         schema::ThreadItem::CommandExecution {
             aggregated_output,
             command,
-            command_actions: _,
             cwd,
-            duration_ms,
-            exit_code,
             id,
-            process_id: _,
-            status,
+            status: exec_status,
+            ..
         } => {
-            command_execution_to_universal(
-                id,
-                command,
-                cwd,
-                aggregated_output.as_deref(),
-                exit_code.as_ref(),
-                duration_ms.as_ref(),
+            let mut parts = Vec::new();
+            if let Some(output) = aggregated_output {
+                parts.push(ContentPart::ToolResult {
+                    call_id: id.clone(),
+                    output: output.clone(),
+                });
+            }
+            parts.push(ContentPart::Json {
+                json: serde_json::json!({
+                    "command": command,
+                    "cwd": cwd,
+                    "status": format!("{:?}", exec_status)
+                }),
+            });
+            UniversalItem {
+                item_id: String::new(),
+                native_item_id: Some(id.clone()),
+                parent_id: None,
+                kind: ItemKind::ToolResult,
+                role: Some(ItemRole::Tool),
+                content: parts,
                 status,
-            )
+            }
         }
-        schema::ThreadItem::FileChange { changes, id, status } => {
-            file_change_to_universal(id, changes, status)
-        }
+        schema::ThreadItem::FileChange { changes, id, status: file_status } => UniversalItem {
+            item_id: String::new(),
+            native_item_id: Some(id.clone()),
+            parent_id: None,
+            kind: ItemKind::ToolResult,
+            role: Some(ItemRole::Tool),
+            content: vec![ContentPart::Json {
+                json: serde_json::json!({
+                    "changes": changes,
+                    "status": format!("{:?}", file_status)
+                }),
+            }],
+            status,
+        },
         schema::ThreadItem::McpToolCall {
             arguments,
-            duration_ms: _,
             error,
             id,
             result,
             server,
-            status,
+            status: tool_status,
             tool,
+            ..
         } => {
-            mcp_tool_call_to_universal(id, server, tool, arguments, result.as_ref(), error.as_ref(), status)
+            let mut parts = Vec::new();
+            if matches!(tool_status, schema::McpToolCallStatus::Completed) {
+                let output = result
+                    .as_ref()
+                    .and_then(|value| serde_json::to_string(value).ok())
+                    .unwrap_or_else(|| "".to_string());
+                parts.push(ContentPart::ToolResult {
+                    call_id: id.clone(),
+                    output,
+                });
+            } else if matches!(tool_status, schema::McpToolCallStatus::Failed) {
+                let output = error
+                    .as_ref()
+                    .map(|value| value.message.clone())
+                    .unwrap_or_else(|| "".to_string());
+                parts.push(ContentPart::ToolResult {
+                    call_id: id.clone(),
+                    output,
+                });
+            } else {
+                let arguments = serde_json::to_string(arguments).unwrap_or_else(|_| "{}".to_string());
+                parts.push(ContentPart::ToolCall {
+                    name: format!("{server}.{tool}"),
+                    arguments,
+                    call_id: id.clone(),
+                });
+            }
+            let kind = if matches!(tool_status, schema::McpToolCallStatus::Completed)
+                || matches!(tool_status, schema::McpToolCallStatus::Failed)
+            {
+                ItemKind::ToolResult
+            } else {
+                ItemKind::ToolCall
+            };
+            let role = if kind == ItemKind::ToolResult {
+                ItemRole::Tool
+            } else {
+                ItemRole::Assistant
+            };
+            UniversalItem {
+                item_id: String::new(),
+                native_item_id: Some(id.clone()),
+                parent_id: None,
+                kind,
+                role: Some(role),
+                content: parts,
+                status,
+            }
         }
         schema::ThreadItem::CollabAgentToolCall {
-            agents_states: _,
             id,
             prompt,
-            receiver_thread_ids: _,
-            sender_thread_id,
-            status,
             tool,
+            status: tool_status,
+            ..
         } => {
-            collab_tool_call_to_universal(id, tool, prompt.as_deref(), sender_thread_id, status)
+            let mut parts = Vec::new();
+            if matches!(tool_status, schema::CollabAgentToolCallStatus::Completed) {
+                parts.push(ContentPart::ToolResult {
+                    call_id: id.clone(),
+                    output: prompt.clone().unwrap_or_default(),
+                });
+            } else {
+                parts.push(ContentPart::ToolCall {
+                    name: tool.to_string(),
+                    arguments: prompt.clone().unwrap_or_default(),
+                    call_id: id.clone(),
+                });
+            }
+            let kind = if matches!(tool_status, schema::CollabAgentToolCallStatus::Completed) {
+                ItemKind::ToolResult
+            } else {
+                ItemKind::ToolCall
+            };
+            let role = if kind == ItemKind::ToolResult {
+                ItemRole::Tool
+            } else {
+                ItemRole::Assistant
+            };
+            UniversalItem {
+                item_id: String::new(),
+                native_item_id: Some(id.clone()),
+                parent_id: None,
+                kind,
+                role: Some(role),
+                content: parts,
+                status,
+            }
         }
-        schema::ThreadItem::WebSearch { id, query } => {
-            web_search_to_universal(id, query)
-        }
-        schema::ThreadItem::ImageView { id, path } => {
-            image_view_to_universal(id, path)
-        }
-        schema::ThreadItem::EnteredReviewMode { id, review } => {
-            review_mode_to_universal(id, review, true)
-        }
-        schema::ThreadItem::ExitedReviewMode { id, review } => {
-            review_mode_to_universal(id, review, false)
-        }
+        schema::ThreadItem::WebSearch { id, query } => UniversalItem {
+            item_id: String::new(),
+            native_item_id: Some(id.clone()),
+            parent_id: None,
+            kind: ItemKind::ToolCall,
+            role: Some(ItemRole::Assistant),
+            content: vec![ContentPart::ToolCall {
+                name: "web_search".to_string(),
+                arguments: query.clone(),
+                call_id: id.clone(),
+            }],
+            status,
+        },
+        schema::ThreadItem::ImageView { id, path } => UniversalItem {
+            item_id: String::new(),
+            native_item_id: Some(id.clone()),
+            parent_id: None,
+            kind: ItemKind::Message,
+            role: Some(ItemRole::Assistant),
+            content: vec![ContentPart::Image {
+                path: path.clone(),
+                mime: None,
+            }],
+            status,
+        },
+        schema::ThreadItem::EnteredReviewMode { id, review } => status_item_internal(
+            id,
+            "review.entered",
+            Some(review.clone()),
+            status,
+        ),
+        schema::ThreadItem::ExitedReviewMode { id, review } => status_item_internal(
+            id,
+            "review.exited",
+            Some(review.clone()),
+            status,
+        ),
     }
 }
 
-fn user_message_to_universal(content: &[schema::UserInput], id: &str) -> UniversalMessage {
-    let parts: Vec<UniversalMessagePart> = content.iter().map(user_input_to_part).collect();
-    UniversalMessage::Parsed(UniversalMessageParsed {
-        role: "user".to_string(),
-        id: Some(id.to_string()),
-        metadata: Map::new(),
-        parts,
-    })
+fn status_item(label: &str, detail: Option<String>) -> UniversalItem {
+    UniversalItem {
+        item_id: String::new(),
+        native_item_id: None,
+        parent_id: None,
+        kind: ItemKind::Status,
+        role: Some(ItemRole::System),
+        content: vec![ContentPart::Status {
+            label: label.to_string(),
+            detail,
+        }],
+        status: ItemStatus::Completed,
+    }
 }
 
-fn user_input_to_part(input: &schema::UserInput) -> UniversalMessagePart {
+fn status_item_internal(id: &str, label: &str, detail: Option<String>, status: ItemStatus) -> UniversalItem {
+    UniversalItem {
+        item_id: String::new(),
+        native_item_id: Some(id.to_string()),
+        parent_id: None,
+        kind: ItemKind::Status,
+        role: Some(ItemRole::System),
+        content: vec![ContentPart::Status {
+            label: label.to_string(),
+            detail,
+        }],
+        status,
+    }
+}
+
+fn status_event(
+    label: &str,
+    detail: Option<String>,
+    session_id: Option<String>,
+    raw: Option<Value>,
+) -> EventConversion {
+    EventConversion::new(
+        UniversalEventType::ItemCompleted,
+        UniversalEventData::Item(ItemEventData {
+            item: status_item(label, detail),
+        }),
+    )
+    .with_native_session(session_id)
+    .with_raw(raw)
+}
+
+fn user_input_to_content(input: &schema::UserInput) -> ContentPart {
     match input {
-        schema::UserInput::Text { text, text_elements: _ } => {
-            UniversalMessagePart::Text { text: text.clone() }
-        }
-        schema::UserInput::Image { image_url } => {
-            UniversalMessagePart::Image {
-                source: AttachmentSource::Url { url: image_url.clone() },
-                mime_type: None,
-                alt: None,
-                raw: None,
-            }
-        }
-        schema::UserInput::LocalImage { path } => {
-            UniversalMessagePart::Image {
-                source: AttachmentSource::Path { path: path.clone() },
-                mime_type: None,
-                alt: None,
-                raw: None,
-            }
-        }
-        schema::UserInput::Skill { name, path } => {
-            UniversalMessagePart::Unknown {
-                raw: serde_json::json!({
-                    "type": "skill",
-                    "name": name,
-                    "path": path,
-                }),
-            }
-        }
-    }
-}
-
-fn agent_message_to_universal(id: &str, text: &str) -> UniversalMessage {
-    UniversalMessage::Parsed(UniversalMessageParsed {
-        role: "assistant".to_string(),
-        id: Some(id.to_string()),
-        metadata: Map::from_iter([
-            ("itemType".to_string(), Value::String("agentMessage".to_string())),
-        ]),
-        parts: vec![UniversalMessagePart::Text {
-            text: text.to_string(),
-        }],
-    })
-}
-
-fn reasoning_to_universal(
-    id: &str,
-    content: &[String],
-    summary: &[String],
-) -> UniversalMessage {
-    let mut metadata = Map::new();
-    metadata.insert("itemType".to_string(), Value::String("reasoning".to_string()));
-    if !summary.is_empty() {
-        metadata.insert(
-            "summary".to_string(),
-            Value::Array(summary.iter().map(|s| Value::String(s.clone())).collect()),
-        );
-    }
-
-    let parts: Vec<UniversalMessagePart> = content
-        .iter()
-        .map(|text| UniversalMessagePart::Text { text: text.clone() })
-        .collect();
-
-    UniversalMessage::Parsed(UniversalMessageParsed {
-        role: "assistant".to_string(),
-        id: Some(id.to_string()),
-        metadata,
-        parts,
-    })
-}
-
-fn command_execution_to_universal(
-    id: &str,
-    command: &str,
-    cwd: &str,
-    aggregated_output: Option<&str>,
-    exit_code: Option<&i32>,
-    duration_ms: Option<&i64>,
-    status: &schema::CommandExecutionStatus,
-) -> UniversalMessage {
-    let mut metadata = Map::new();
-    metadata.insert("itemType".to_string(), Value::String("commandExecution".to_string()));
-    metadata.insert("command".to_string(), Value::String(command.to_string()));
-    metadata.insert("cwd".to_string(), Value::String(cwd.to_string()));
-    metadata.insert("status".to_string(), Value::String(format!("{:?}", status)));
-    if let Some(code) = exit_code {
-        metadata.insert("exitCode".to_string(), Value::Number((*code).into()));
-    }
-    if let Some(ms) = duration_ms {
-        metadata.insert("durationMs".to_string(), Value::Number((*ms).into()));
-    }
-
-    let parts = if let Some(output) = aggregated_output {
-        vec![UniversalMessagePart::Text {
-            text: output.to_string(),
-        }]
-    } else {
-        vec![]
-    };
-
-    UniversalMessage::Parsed(UniversalMessageParsed {
-        role: "assistant".to_string(),
-        id: Some(id.to_string()),
-        metadata,
-        parts,
-    })
-}
-
-fn file_change_to_universal(
-    id: &str,
-    changes: &[schema::FileUpdateChange],
-    status: &schema::PatchApplyStatus,
-) -> UniversalMessage {
-    let mut metadata = Map::new();
-    metadata.insert("itemType".to_string(), Value::String("fileChange".to_string()));
-    metadata.insert("status".to_string(), Value::String(format!("{:?}", status)));
-
-    let parts: Vec<UniversalMessagePart> = changes
-        .iter()
-        .map(|change| {
-            let raw = serde_json::to_value(change).unwrap_or(Value::Null);
-            UniversalMessagePart::Unknown { raw }
-        })
-        .collect();
-
-    UniversalMessage::Parsed(UniversalMessageParsed {
-        role: "assistant".to_string(),
-        id: Some(id.to_string()),
-        metadata,
-        parts,
-    })
-}
-
-fn mcp_tool_call_to_universal(
-    id: &str,
-    server: &str,
-    tool: &str,
-    arguments: &Value,
-    result: Option<&schema::McpToolCallResult>,
-    error: Option<&schema::McpToolCallError>,
-    status: &schema::McpToolCallStatus,
-) -> UniversalMessage {
-    let mut metadata = Map::new();
-    metadata.insert("itemType".to_string(), Value::String("mcpToolCall".to_string()));
-    metadata.insert("server".to_string(), Value::String(server.to_string()));
-    metadata.insert("status".to_string(), Value::String(format!("{:?}", status)));
-
-    let is_error = error.is_some();
-    let result_value = if let Some(res) = result {
-        serde_json::to_value(res).unwrap_or(Value::Null)
-    } else if let Some(err) = error {
-        serde_json::to_value(err).unwrap_or(Value::Null)
-    } else {
-        Value::Null
-    };
-
-    let parts = vec![
-        UniversalMessagePart::ToolCall {
-            id: Some(id.to_string()),
-            name: tool.to_string(),
-            input: arguments.clone(),
+        schema::UserInput::Text { text, .. } => ContentPart::Text { text: text.clone() },
+        schema::UserInput::Image { image_url } => ContentPart::Image {
+            path: image_url.clone(),
+            mime: None,
         },
-        UniversalMessagePart::ToolResult {
-            id: Some(id.to_string()),
-            name: Some(tool.to_string()),
-            output: result_value,
-            is_error: Some(is_error),
+        schema::UserInput::LocalImage { path } => ContentPart::Image {
+            path: path.clone(),
+            mime: None,
         },
-    ];
-
-    UniversalMessage::Parsed(UniversalMessageParsed {
-        role: "assistant".to_string(),
-        id: Some(id.to_string()),
-        metadata,
-        parts,
-    })
-}
-
-fn collab_tool_call_to_universal(
-    id: &str,
-    tool: &schema::CollabAgentTool,
-    prompt: Option<&str>,
-    sender_thread_id: &str,
-    status: &schema::CollabAgentToolCallStatus,
-) -> UniversalMessage {
-    let mut metadata = Map::new();
-    metadata.insert("itemType".to_string(), Value::String("collabAgentToolCall".to_string()));
-    metadata.insert("tool".to_string(), Value::String(format!("{:?}", tool)));
-    metadata.insert("senderThreadId".to_string(), Value::String(sender_thread_id.to_string()));
-    metadata.insert("status".to_string(), Value::String(format!("{:?}", status)));
-
-    let parts = if let Some(p) = prompt {
-        vec![UniversalMessagePart::Text { text: p.to_string() }]
-    } else {
-        vec![]
-    };
-
-    UniversalMessage::Parsed(UniversalMessageParsed {
-        role: "assistant".to_string(),
-        id: Some(id.to_string()),
-        metadata,
-        parts,
-    })
-}
-
-fn web_search_to_universal(id: &str, query: &str) -> UniversalMessage {
-    let mut metadata = Map::new();
-    metadata.insert("itemType".to_string(), Value::String("webSearch".to_string()));
-
-    UniversalMessage::Parsed(UniversalMessageParsed {
-        role: "assistant".to_string(),
-        id: Some(id.to_string()),
-        metadata,
-        parts: vec![UniversalMessagePart::Text {
-            text: query.to_string(),
-        }],
-    })
-}
-
-fn image_view_to_universal(id: &str, path: &str) -> UniversalMessage {
-    let mut metadata = Map::new();
-    metadata.insert("itemType".to_string(), Value::String("imageView".to_string()));
-
-    UniversalMessage::Parsed(UniversalMessageParsed {
-        role: "assistant".to_string(),
-        id: Some(id.to_string()),
-        metadata,
-        parts: vec![UniversalMessagePart::Image {
-            source: AttachmentSource::Path { path: path.to_string() },
-            mime_type: None,
-            alt: None,
-            raw: None,
-        }],
-    })
-}
-
-fn review_mode_to_universal(id: &str, review: &str, entered: bool) -> UniversalMessage {
-    let item_type = if entered { "enteredReviewMode" } else { "exitedReviewMode" };
-    let mut metadata = Map::new();
-    metadata.insert("itemType".to_string(), Value::String(item_type.to_string()));
-    metadata.insert("review".to_string(), Value::String(review.to_string()));
-
-    UniversalMessage::Parsed(UniversalMessageParsed {
-        role: "assistant".to_string(),
-        id: Some(id.to_string()),
-        metadata,
-        parts: vec![],
-    })
-}
-
-/// Convert a universal event back to a Codex ServerNotification.
-/// Note: This is a best-effort conversion and may not preserve all information.
-pub fn universal_event_to_codex(
-    event: &UniversalEventData,
-) -> Result<schema::ServerNotification, ConversionError> {
-    match event {
-        UniversalEventData::Message { message } => {
-            let parsed = match message {
-                UniversalMessage::Parsed(parsed) => parsed,
-                UniversalMessage::Unparsed { .. } => {
-                    return Err(ConversionError::Unsupported("unparsed message"))
-                }
-            };
-
-            // Extract text content
-            let text = parsed
-                .parts
-                .iter()
-                .filter_map(|part| {
-                    if let UniversalMessagePart::Text { text } = part {
-                        Some(text.as_str())
-                    } else {
-                        None
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
-
-            let id = parsed.id.clone().unwrap_or_else(|| "msg".to_string());
-            let thread_id = "unknown".to_string();
-            let turn_id = "unknown".to_string();
-
-            // Create an ItemCompletedNotification with an AgentMessage item
-            let item = schema::ThreadItem::AgentMessage {
-                id,
-                text,
-            };
-
-            Ok(schema::ServerNotification::ItemCompleted(
-                schema::ItemCompletedNotification {
-                    item,
-                    thread_id,
-                    turn_id,
-                },
-            ))
-        }
-        UniversalEventData::Error { error } => {
-            let turn_error = schema::TurnError {
-                message: error.message.clone(),
-                additional_details: error.details.as_ref().and_then(|d| {
-                    d.get("additionalDetails")
-                        .and_then(Value::as_str)
-                        .map(|s| s.to_string())
-                }),
-                codex_error_info: None,
-            };
-
-            Ok(schema::ServerNotification::Error(schema::ErrorNotification {
-                error: turn_error,
-                thread_id: "unknown".to_string(),
-                turn_id: "unknown".to_string(),
-                will_retry: false,
-            }))
-        }
-        _ => Err(ConversionError::Unsupported("codex event type")),
+        schema::UserInput::Skill { name, path } => ContentPart::Json {
+            json: serde_json::json!({
+                "type": "skill",
+                "name": name,
+                "path": path,
+            }),
+        },
     }
+}
+
+pub fn session_ended_event(thread_id: &str, reason: SessionEndReason) -> EventConversion {
+    EventConversion::new(
+        UniversalEventType::SessionEnded,
+        UniversalEventData::SessionEnded(SessionEndedData {
+            reason,
+            terminated_by: TerminatedBy::Agent,
+        }),
+    )
+    .with_native_session(Some(thread_id.to_string()))
 }

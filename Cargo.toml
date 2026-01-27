@@ -12,7 +12,7 @@ description = "Universal agent API for AI coding assistants"
 
 [workspace.dependencies]
 # Internal crates
-sandbox-agent-core = { path = "server/packages/sandbox-agent" }
+sandbox-agent = { path = "server/packages/sandbox-agent" }
 sandbox-agent-error = { path = "server/packages/error" }
 sandbox-agent-agent-management = { path = "server/packages/agent-management" }
 sandbox-agent-agent-credentials = { path = "server/packages/agent-credentials" }

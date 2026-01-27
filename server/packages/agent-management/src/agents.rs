@@ -446,7 +446,6 @@ impl AgentManager {
                     }],
                     model: options.model.clone(),
                     output_schema: None,
-                    personality: None,
                     sandbox_policy: sandbox_policy.clone(),
                     summary: None,
                     thread_id: thread_id.clone().unwrap_or_default(),

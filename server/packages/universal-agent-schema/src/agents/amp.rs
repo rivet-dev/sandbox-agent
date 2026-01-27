@@ -1,155 +1,161 @@
-use crate::{
-    message_from_parts,
-    message_from_text,
-    text_only_from_parts,
-    ConversionError,
-    CrashInfo,
-    EventConversion,
-    UniversalEventData,
-    UniversalMessage,
-    UniversalMessageParsed,
-    UniversalMessagePart,
-};
-use crate::amp as schema;
-use serde_json::{Map, Value};
+use std::sync::atomic::{AtomicU64, Ordering};
 
-pub fn event_to_universal(event: &schema::StreamJsonMessage) -> EventConversion {
-    let schema::StreamJsonMessage {
-        content,
-        error,
-        id,
-        tool_call,
-        type_,
-    } = event;
-    match type_ {
+use serde_json::Value;
+
+use crate::amp as schema;
+use crate::{
+    ContentPart,
+    ErrorData,
+    EventConversion,
+    ItemDeltaData,
+    ItemEventData,
+    ItemKind,
+    ItemRole,
+    ItemStatus,
+    SessionEndedData,
+    SessionEndReason,
+    TerminatedBy,
+    UniversalEventData,
+    UniversalEventType,
+    UniversalItem,
+};
+
+static TEMP_ID: AtomicU64 = AtomicU64::new(1);
+
+fn next_temp_id(prefix: &str) -> String {
+    let id = TEMP_ID.fetch_add(1, Ordering::Relaxed);
+    format!("{prefix}_{id}")
+}
+
+pub fn event_to_universal(event: &schema::StreamJsonMessage) -> Result<Vec<EventConversion>, String> {
+    let mut events = Vec::new();
+    match event.type_ {
         schema::StreamJsonMessageType::Message => {
-            let text = content.clone().unwrap_or_default();
-            let mut message = message_from_text("assistant", text);
-            if let UniversalMessage::Parsed(parsed) = &mut message {
-                parsed.id = id.clone();
-            }
-            EventConversion::new(UniversalEventData::Message { message })
+            let text = event.content.clone().unwrap_or_default();
+            let item = UniversalItem {
+                item_id: next_temp_id("tmp_amp_message"),
+                native_item_id: event.id.clone(),
+                parent_id: None,
+                kind: ItemKind::Message,
+                role: Some(ItemRole::Assistant),
+                content: vec![ContentPart::Text { text: text.clone() }],
+                status: ItemStatus::Completed,
+            };
+            events.extend(message_events(item, text));
         }
         schema::StreamJsonMessageType::ToolCall => {
-            let tool_call = tool_call.as_ref();
-            let part = if let Some(tool_call) = tool_call {
-                let schema::ToolCall { arguments, id, name } = tool_call;
-                let input = match arguments {
-                    schema::ToolCallArguments::Variant0(text) => Value::String(text.clone()),
-                    schema::ToolCallArguments::Variant1(map) => Value::Object(map.clone()),
+            let tool_call = event.tool_call.clone();
+            let (name, arguments, call_id) = if let Some(call) = tool_call {
+                let arguments = match call.arguments {
+                    schema::ToolCallArguments::Variant0(text) => text,
+                    schema::ToolCallArguments::Variant1(map) => {
+                        serde_json::to_string(&Value::Object(map)).unwrap_or_else(|_| "{}".to_string())
+                    }
                 };
-                UniversalMessagePart::ToolCall {
-                    id: Some(id.clone()),
-                    name: name.clone(),
-                    input,
-                }
+                (call.name, arguments, call.id)
             } else {
-                UniversalMessagePart::Unknown { raw: Value::Null }
+                ("unknown".to_string(), "{}".to_string(), next_temp_id("tmp_amp_tool"))
             };
-            let mut message = message_from_parts("assistant", vec![part]);
-            if let UniversalMessage::Parsed(parsed) = &mut message {
-                parsed.id = id.clone();
-            }
-            EventConversion::new(UniversalEventData::Message { message })
+            let item = UniversalItem {
+                item_id: next_temp_id("tmp_amp_tool_call"),
+                native_item_id: Some(call_id.clone()),
+                parent_id: None,
+                kind: ItemKind::ToolCall,
+                role: Some(ItemRole::Assistant),
+                content: vec![ContentPart::ToolCall {
+                    name,
+                    arguments,
+                    call_id,
+                }],
+                status: ItemStatus::Completed,
+            };
+            events.extend(item_events(item));
         }
         schema::StreamJsonMessageType::ToolResult => {
-            let output = content
+            let output = event.content.clone().unwrap_or_default();
+            let call_id = event
+                .id
                 .clone()
-                .map(Value::String)
-                .unwrap_or(Value::Null);
-            let part = UniversalMessagePart::ToolResult {
-                id: id.clone(),
-                name: None,
-                output,
-                is_error: None,
+                .unwrap_or_else(|| next_temp_id("tmp_amp_tool"));
+            let item = UniversalItem {
+                item_id: next_temp_id("tmp_amp_tool_result"),
+                native_item_id: Some(call_id.clone()),
+                parent_id: None,
+                kind: ItemKind::ToolResult,
+                role: Some(ItemRole::Tool),
+                content: vec![ContentPart::ToolResult {
+                    call_id,
+                    output,
+                }],
+                status: ItemStatus::Completed,
             };
-            let message = message_from_parts("tool", vec![part]);
-            EventConversion::new(UniversalEventData::Message { message })
+            events.extend(item_events(item));
         }
         schema::StreamJsonMessageType::Error => {
-            let message = error.clone().unwrap_or_else(|| "amp error".to_string());
-            let crash = CrashInfo {
-                message,
-                kind: Some("amp".to_string()),
-                details: serde_json::to_value(event).ok(),
-            };
-            EventConversion::new(UniversalEventData::Error { error: crash })
+            let message = event.error.clone().unwrap_or_else(|| "amp error".to_string());
+            events.push(EventConversion::new(
+                UniversalEventType::Error,
+                UniversalEventData::Error(ErrorData {
+                    message,
+                    code: Some("amp".to_string()),
+                    details: serde_json::to_value(event).ok(),
+                }),
+            ));
         }
-        schema::StreamJsonMessageType::Done => EventConversion::new(UniversalEventData::Unknown {
-            raw: serde_json::to_value(event).unwrap_or(Value::Null),
-        }),
+        schema::StreamJsonMessageType::Done => {
+            events.push(
+                EventConversion::new(
+                    UniversalEventType::SessionEnded,
+                    UniversalEventData::SessionEnded(SessionEndedData {
+                        reason: SessionEndReason::Completed,
+                        terminated_by: TerminatedBy::Agent,
+                    }),
+                )
+                .with_raw(serde_json::to_value(event).ok()),
+            );
+        }
     }
+
+    for conversion in &mut events {
+        conversion.raw = serde_json::to_value(event).ok();
+    }
+    Ok(events)
 }
 
-pub fn universal_event_to_amp(event: &UniversalEventData) -> Result<schema::StreamJsonMessage, ConversionError> {
-    match event {
-        UniversalEventData::Message { message } => {
-            let parsed = match message {
-                UniversalMessage::Parsed(parsed) => parsed,
-                UniversalMessage::Unparsed { .. } => {
-                    return Err(ConversionError::Unsupported("unparsed message"))
-                }
-            };
-            let content = text_only_from_parts(&parsed.parts)?;
-            Ok(schema::StreamJsonMessage {
-                content: Some(content),
-                error: None,
-                id: parsed.id.clone(),
-                tool_call: None,
-                type_: schema::StreamJsonMessageType::Message,
-            })
-        }
-        _ => Err(ConversionError::Unsupported("amp event")),
-    }
+fn item_events(item: UniversalItem) -> Vec<EventConversion> {
+    vec![EventConversion::new(
+        UniversalEventType::ItemCompleted,
+        UniversalEventData::Item(ItemEventData { item }),
+    )]
 }
 
-pub fn message_to_universal(message: &schema::Message) -> UniversalMessage {
-    let schema::Message {
-        role,
-        content,
-        tool_calls,
-    } = message;
-    let mut parts = vec![UniversalMessagePart::Text {
-        text: content.clone(),
-    }];
-    for call in tool_calls {
-        let schema::ToolCall { arguments, id, name } = call;
-        let input = match arguments {
-            schema::ToolCallArguments::Variant0(text) => Value::String(text.clone()),
-            schema::ToolCallArguments::Variant1(map) => Value::Object(map.clone()),
-        };
-        parts.push(UniversalMessagePart::ToolCall {
-            id: Some(id.clone()),
-            name: name.clone(),
-            input,
-        });
+fn message_events(item: UniversalItem, delta: String) -> Vec<EventConversion> {
+    let mut events = Vec::new();
+    let mut started = item.clone();
+    started.status = ItemStatus::InProgress;
+    events.push(
+        EventConversion::new(
+            UniversalEventType::ItemStarted,
+            UniversalEventData::Item(ItemEventData { item: started }),
+        )
+        .synthetic(),
+    );
+    if !delta.is_empty() {
+        events.push(
+            EventConversion::new(
+                UniversalEventType::ItemDelta,
+                UniversalEventData::ItemDelta(ItemDeltaData {
+                    item_id: item.item_id.clone(),
+                    native_item_id: item.native_item_id.clone(),
+                    delta,
+                }),
+            )
+            .synthetic(),
+        );
     }
-    UniversalMessage::Parsed(UniversalMessageParsed {
-        role: role.to_string(),
-        id: None,
-        metadata: Map::new(),
-        parts,
-    })
-}
-
-pub fn universal_message_to_message(
-    message: &UniversalMessage,
-) -> Result<schema::Message, ConversionError> {
-    let parsed = match message {
-        UniversalMessage::Parsed(parsed) => parsed,
-        UniversalMessage::Unparsed { .. } => {
-            return Err(ConversionError::Unsupported("unparsed message"))
-        }
-    };
-    let content = text_only_from_parts(&parsed.parts)?;
-    Ok(schema::Message {
-        role: match parsed.role.as_str() {
-            "user" => schema::MessageRole::User,
-            "assistant" => schema::MessageRole::Assistant,
-            "system" => schema::MessageRole::System,
-            _ => schema::MessageRole::User,
-        },
-        content,
-        tool_calls: vec![],
-    })
+    events.push(EventConversion::new(
+        UniversalEventType::ItemCompleted,
+        UniversalEventData::Item(ItemEventData { item }),
+    ));
+    events
 }

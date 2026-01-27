@@ -1,94 +1,76 @@
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use serde_json::Value;
+
 use crate::{
-    message_from_parts,
-    message_from_text,
-    text_only_from_parts,
-    ConversionError,
+    ContentPart,
     EventConversion,
-    QuestionInfo,
-    QuestionOption,
-    QuestionRequest,
-    Started,
+    ItemEventData,
+    ItemKind,
+    ItemRole,
+    ItemStatus,
+    QuestionEventData,
+    QuestionStatus,
+    SessionStartedData,
     UniversalEventData,
-    UniversalMessage,
-    UniversalMessageParsed,
-    UniversalMessagePart,
+    UniversalEventType,
+    UniversalItem,
 };
-use serde_json::{Map, Value};
+
+static TEMP_ID: AtomicU64 = AtomicU64::new(1);
+
+fn next_temp_id(prefix: &str) -> String {
+    let id = TEMP_ID.fetch_add(1, Ordering::Relaxed);
+    format!("{prefix}_{id}")
+}
 
 pub fn event_to_universal_with_session(
     event: &Value,
     session_id: String,
-) -> EventConversion {
+) -> Result<Vec<EventConversion>, String> {
     let event_type = event.get("type").and_then(Value::as_str).unwrap_or("");
-    match event_type {
-        "system" => system_event_to_universal(event),
+    let mut conversions = match event_type {
+        "system" => vec![system_event_to_universal(event)],
         "assistant" => assistant_event_to_universal(event),
         "tool_use" => tool_use_event_to_universal(event, session_id),
         "tool_result" => tool_result_event_to_universal(event),
         "result" => result_event_to_universal(event),
-        _ => EventConversion::new(UniversalEventData::Unknown { raw: event.clone() }),
-    }
-}
-
-pub fn universal_event_to_claude(event: &UniversalEventData) -> Result<Value, ConversionError> {
-    match event {
-        UniversalEventData::Message { message } => {
-            let parsed = match message {
-                UniversalMessage::Parsed(parsed) => parsed,
-                UniversalMessage::Unparsed { .. } => {
-                    return Err(ConversionError::Unsupported("unparsed message"))
-                }
-            };
-            let text = text_only_from_parts(&parsed.parts)?;
-            Ok(Value::Object(Map::from_iter([
-                ("type".to_string(), Value::String("assistant".to_string())),
-                (
-                    "message".to_string(),
-                    Value::Object(Map::from_iter([(
-                        "content".to_string(),
-                        Value::Array(vec![Value::Object(Map::from_iter([(
-                            "type".to_string(),
-                            Value::String("text".to_string()),
-                        ), (
-                            "text".to_string(),
-                            Value::String(text),
-                        )]))]),
-                    )])),
-                ),
-            ])))
-        }
-        _ => Err(ConversionError::Unsupported("claude event")),
-    }
-}
-
-pub fn prompt_to_universal(prompt: &str) -> UniversalMessage {
-    message_from_text("user", prompt.to_string())
-}
-
-pub fn universal_message_to_prompt(message: &UniversalMessage) -> Result<String, ConversionError> {
-    let parsed = match message {
-        UniversalMessage::Parsed(parsed) => parsed,
-        UniversalMessage::Unparsed { .. } => {
-            return Err(ConversionError::Unsupported("unparsed message"))
-        }
+        _ => return Err(format!("unsupported Claude event type: {event_type}")),
     };
-    text_only_from_parts(&parsed.parts)
+
+    for conversion in &mut conversions {
+        conversion.raw = Some(event.clone());
+    }
+
+    Ok(conversions)
 }
 
-fn assistant_event_to_universal(event: &Value) -> EventConversion {
+fn system_event_to_universal(event: &Value) -> EventConversion {
+    let data = SessionStartedData {
+        metadata: Some(event.clone()),
+    };
+    EventConversion::new(UniversalEventType::SessionStarted, UniversalEventData::SessionStarted(data))
+        .with_raw(Some(event.clone()))
+}
+
+fn assistant_event_to_universal(event: &Value) -> Vec<EventConversion> {
+    let mut conversions = Vec::new();
     let content = event
         .get("message")
         .and_then(|msg| msg.get("content"))
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
-    let mut parts = Vec::new();
+
+    let message_id = next_temp_id("tmp_claude_message");
+    let mut message_parts = Vec::new();
+
     for block in content {
         let block_type = block.get("type").and_then(Value::as_str).unwrap_or("");
         match block_type {
             "text" => {
                 if let Some(text) = block.get("text").and_then(Value::as_str) {
-                    parts.push(UniversalMessagePart::Text {
+                    message_parts.push(ContentPart::Text {
                         text: text.to_string(),
                     });
                 }
@@ -96,39 +78,50 @@ fn assistant_event_to_universal(event: &Value) -> EventConversion {
             "tool_use" => {
                 if let Some(name) = block.get("name").and_then(Value::as_str) {
                     let input = block.get("input").cloned().unwrap_or(Value::Null);
-                    let id = block.get("id").and_then(Value::as_str).map(|s| s.to_string());
-                    parts.push(UniversalMessagePart::ToolCall {
-                        id,
-                        name: name.to_string(),
-                        input,
-                    });
+                    let call_id = block
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| next_temp_id("tmp_claude_tool"));
+                    let arguments = serde_json::to_string(&input).unwrap_or_else(|_| "{}".to_string());
+                    let tool_item = UniversalItem {
+                        item_id: next_temp_id("tmp_claude_tool_item"),
+                        native_item_id: Some(call_id.clone()),
+                        parent_id: Some(message_id.clone()),
+                        kind: ItemKind::ToolCall,
+                        role: Some(ItemRole::Assistant),
+                        content: vec![ContentPart::ToolCall {
+                            name: name.to_string(),
+                            arguments,
+                            call_id,
+                        }],
+                        status: ItemStatus::Completed,
+                    };
+                    conversions.extend(item_events(tool_item, true));
                 }
             }
-            _ => parts.push(UniversalMessagePart::Unknown { raw: block }),
+            _ => {
+                message_parts.push(ContentPart::Json { json: block });
+            }
         }
     }
-    let message = UniversalMessage::Parsed(UniversalMessageParsed {
-        role: "assistant".to_string(),
-        id: None,
-        metadata: Map::new(),
-        parts,
-    });
-    EventConversion::new(UniversalEventData::Message { message })
-}
 
-fn system_event_to_universal(event: &Value) -> EventConversion {
-    let subtype = event
-        .get("subtype")
-        .and_then(Value::as_str)
-        .unwrap_or("system");
-    let started = Started {
-        message: Some(format!("system.{subtype}")),
-        details: Some(event.clone()),
+    let message_item = UniversalItem {
+        item_id: message_id,
+        native_item_id: None,
+        parent_id: None,
+        kind: ItemKind::Message,
+        role: Some(ItemRole::Assistant),
+        content: message_parts.clone(),
+        status: ItemStatus::Completed,
     };
-    EventConversion::new(UniversalEventData::Started { started })
+
+    conversions.extend(message_events(message_item, message_parts, true));
+    conversions
 }
 
-fn tool_use_event_to_universal(event: &Value, session_id: String) -> EventConversion {
+fn tool_use_event_to_universal(event: &Value, session_id: String) -> Vec<EventConversion> {
+    let mut conversions = Vec::new();
     let tool_use = event.get("tool_use");
     let name = tool_use
         .and_then(|tool| tool.get("name"))
@@ -141,113 +134,219 @@ fn tool_use_event_to_universal(event: &Value, session_id: String) -> EventConver
     let id = tool_use
         .and_then(|tool| tool.get("id"))
         .and_then(Value::as_str)
-        .map(|s| s.to_string());
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| next_temp_id("tmp_claude_tool"));
 
-    if name == "AskUserQuestion" {
-        if let Some(question) =
-            question_from_claude_input(&input, id.clone(), session_id.clone())
-        {
-            return EventConversion::new(UniversalEventData::QuestionAsked {
-                question_asked: question,
-            });
+    let is_question_tool = matches!(
+        name,
+        "AskUserQuestion" | "ask_user_question" | "askUserQuestion" | "ask-user-question"
+    );
+    let has_question_payload = input.get("questions").is_some();
+    if is_question_tool || has_question_payload {
+        if let Some(question) = question_from_claude_input(&input, id.clone()) {
+            conversions.push(
+                EventConversion::new(
+                    UniversalEventType::QuestionRequested,
+                    UniversalEventData::Question(question),
+                )
+                .with_raw(Some(event.clone())),
+            );
         }
     }
 
-    let message = message_from_parts(
-        "assistant",
-        vec![UniversalMessagePart::ToolCall {
-            id,
+    let arguments = serde_json::to_string(&input).unwrap_or_else(|_| "{}".to_string());
+    let tool_item = UniversalItem {
+        item_id: next_temp_id("tmp_claude_tool_item"),
+        native_item_id: Some(id.clone()),
+        parent_id: None,
+        kind: ItemKind::ToolCall,
+        role: Some(ItemRole::Assistant),
+        content: vec![ContentPart::ToolCall {
             name: name.to_string(),
-            input,
+            arguments,
+            call_id: id,
         }],
-    );
-    EventConversion::new(UniversalEventData::Message { message })
+        status: ItemStatus::Completed,
+    };
+    conversions.extend(item_events(tool_item, true));
+
+    if conversions.is_empty() {
+        let data = QuestionEventData {
+            question_id: next_temp_id("tmp_claude_question"),
+            prompt: "".to_string(),
+            options: Vec::new(),
+            response: None,
+            status: QuestionStatus::Requested,
+        };
+        conversions.push(
+            EventConversion::new(
+                UniversalEventType::QuestionRequested,
+                UniversalEventData::Question(data),
+            )
+            .with_raw(Some(Value::String(format!(
+                "unexpected question payload for session {session_id}"
+            )))),
+        );
+    }
+
+    conversions
 }
 
-fn tool_result_event_to_universal(event: &Value) -> EventConversion {
+fn tool_result_event_to_universal(event: &Value) -> Vec<EventConversion> {
+    let mut conversions = Vec::new();
     let tool_result = event.get("tool_result");
     let output = tool_result
         .and_then(|tool| tool.get("content"))
         .cloned()
         .unwrap_or(Value::Null);
-    let is_error = tool_result
-        .and_then(|tool| tool.get("is_error"))
-        .and_then(Value::as_bool);
     let id = tool_result
         .and_then(|tool| tool.get("id"))
         .and_then(Value::as_str)
-        .map(|s| s.to_string());
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| next_temp_id("tmp_claude_tool"));
+    let output_text = serde_json::to_string(&output).unwrap_or_else(|_| "".to_string());
 
-    let message = message_from_parts(
-        "tool",
-        vec![UniversalMessagePart::ToolResult {
-            id,
-            name: None,
-            output,
-            is_error,
+    let tool_item = UniversalItem {
+        item_id: next_temp_id("tmp_claude_tool_result"),
+        native_item_id: Some(id.clone()),
+        parent_id: None,
+        kind: ItemKind::ToolResult,
+        role: Some(ItemRole::Tool),
+        content: vec![ContentPart::ToolResult {
+            call_id: id,
+            output: output_text,
         }],
-    );
-    EventConversion::new(UniversalEventData::Message { message })
+        status: ItemStatus::Completed,
+    };
+    conversions.extend(item_events(tool_item, true));
+    conversions
 }
 
-fn result_event_to_universal(event: &Value) -> EventConversion {
+fn result_event_to_universal(event: &Value) -> Vec<EventConversion> {
     let result_text = event
         .get("result")
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_string();
-    let session_id = event
-        .get("session_id")
-        .and_then(Value::as_str)
-        .map(|s| s.to_string());
-    let message = message_from_text("assistant", result_text);
-    EventConversion::new(UniversalEventData::Message { message }).with_session(session_id)
+    let message_item = UniversalItem {
+        item_id: next_temp_id("tmp_claude_result"),
+        native_item_id: None,
+        parent_id: None,
+        kind: ItemKind::Message,
+        role: Some(ItemRole::Assistant),
+        content: vec![ContentPart::Text { text: result_text.clone() }],
+        status: ItemStatus::Completed,
+    };
+    message_events(message_item, vec![ContentPart::Text { text: result_text }], true)
 }
 
-fn question_from_claude_input(
-    input: &Value,
-    tool_id: Option<String>,
-    session_id: String,
-) -> Option<QuestionRequest> {
-    let questions = input.get("questions").and_then(Value::as_array)?;
-    let mut parsed_questions = Vec::new();
-    for question in questions {
-        let question_text = question.get("question")?.as_str()?.to_string();
-        let header = question
-            .get("header")
-            .and_then(Value::as_str)
-            .map(|s| s.to_string());
-        let multi_select = question
-            .get("multiSelect")
-            .and_then(Value::as_bool);
-        let options = question
+fn item_events(item: UniversalItem, synthetic_start: bool) -> Vec<EventConversion> {
+    let mut events = Vec::new();
+    if synthetic_start {
+        let mut started_item = item.clone();
+        started_item.status = ItemStatus::InProgress;
+        events.push(
+            EventConversion::new(
+                UniversalEventType::ItemStarted,
+                UniversalEventData::Item(ItemEventData { item: started_item }),
+            )
+            .synthetic(),
+        );
+    }
+    events.push(EventConversion::new(
+        UniversalEventType::ItemCompleted,
+        UniversalEventData::Item(ItemEventData { item }),
+    ));
+    events
+}
+
+fn message_events(item: UniversalItem, parts: Vec<ContentPart>, synthetic_start: bool) -> Vec<EventConversion> {
+    let mut events = Vec::new();
+    if synthetic_start {
+        let mut started_item = item.clone();
+        started_item.status = ItemStatus::InProgress;
+        events.push(
+            EventConversion::new(
+                UniversalEventType::ItemStarted,
+                UniversalEventData::Item(ItemEventData { item: started_item }),
+            )
+            .synthetic(),
+        );
+    }
+
+    let mut delta_text = String::new();
+    for part in &parts {
+        if let ContentPart::Text { text } = part {
+            delta_text.push_str(text);
+        }
+    }
+    if !delta_text.is_empty() {
+        events.push(
+            EventConversion::new(
+                UniversalEventType::ItemDelta,
+                UniversalEventData::ItemDelta(crate::ItemDeltaData {
+                    item_id: item.item_id.clone(),
+                    native_item_id: item.native_item_id.clone(),
+                    delta: delta_text,
+                }),
+            )
+            .synthetic(),
+        );
+    }
+
+    events.push(EventConversion::new(
+        UniversalEventType::ItemCompleted,
+        UniversalEventData::Item(ItemEventData { item }),
+    ));
+    events
+}
+
+fn question_from_claude_input(input: &Value, tool_id: String) -> Option<QuestionEventData> {
+    if let Some(questions) = input.get("questions").and_then(Value::as_array) {
+        if let Some(first) = questions.first() {
+            let prompt = first.get("question")?.as_str()?.to_string();
+            let options = first
+                .get("options")
+                .and_then(Value::as_array)
+                .map(|opts| {
+                    opts.iter()
+                        .filter_map(|opt| opt.get("label").and_then(Value::as_str))
+                        .map(|label| label.to_string())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            return Some(QuestionEventData {
+                question_id: tool_id,
+                prompt,
+                options,
+                response: None,
+                status: QuestionStatus::Requested,
+            });
+        }
+    }
+
+    let prompt = input
+        .get("question")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    if prompt.is_empty() {
+        return None;
+    }
+    Some(QuestionEventData {
+        question_id: tool_id,
+        prompt,
+        options: input
             .get("options")
             .and_then(Value::as_array)
-            .map(|options| {
-                options
-                    .iter()
-                    .filter_map(|option| {
-                        let label = option.get("label")?.as_str()?.to_string();
-                        let description = option
-                            .get("description")
-                            .and_then(Value::as_str)
-                            .map(|s| s.to_string());
-                        Some(QuestionOption { label, description })
-                    })
+            .map(|opts| {
+                opts.iter()
+                    .filter_map(Value::as_str)
+                    .map(|s| s.to_string())
                     .collect::<Vec<_>>()
-            })?;
-        parsed_questions.push(QuestionInfo {
-            question: question_text,
-            header,
-            options,
-            multi_select,
-            custom: None,
-        });
-    }
-    Some(QuestionRequest {
-        id: tool_id.unwrap_or_else(|| "claude-question".to_string()),
-        session_id,
-        questions: parsed_questions,
-        tool: None,
+            })
+            .unwrap_or_default(),
+        response: None,
+        status: QuestionStatus::Requested,
     })
 }

@@ -2,7 +2,7 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
 
-use sandbox_agent_core::router::ApiDoc;
+use sandbox_agent::router::ApiDoc;
 use utoipa::OpenApi;
 
 fn main() {

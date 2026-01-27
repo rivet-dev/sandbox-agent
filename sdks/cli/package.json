@@ -11,6 +11,12 @@
     "sandbox-agent": "bin/sandbox-agent",
     "sandbox-daemon": "bin/sandbox-agent"
   },
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "vitest": "^3.0.0"
+  },
   "optionalDependencies": {
     "@sandbox-agent/cli-darwin-arm64": "0.1.0",
     "@sandbox-agent/cli-darwin-x64": "0.1.0",

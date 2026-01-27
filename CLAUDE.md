@@ -38,6 +38,11 @@ Universal schema guidance:
 - Never use synthetic data or mocked responses in tests.
 - Never manually write agent types; always use generated types in `resources/agent-schemas/`. If types are broken, fix the generated types.
 - The universal schema must provide consistent behavior across providers; avoid requiring frontend/client logic to special-case agents.
+- When parsing agent data, if something is unexpected or does not match the schema, bail out and surface the error rather than trying to continue with partial parsing.
+- When defining the universal schema, choose the option most compatible with native agent APIs, and add synthetics to fill gaps for other agents.
+- Use `docs/glossary.md` as the source of truth for universal schema terminology and keep it updated alongside schema changes.
+- On parse failures, emit an `agent.unparsed` event (source=daemon, synthetic=true) and treat it as a test failure. Preserve raw payloads when `include_raw=true`.
+- Track subagent support in `docs/conversion.md`. For now, normalize subagent activity into normal message/tool flow, but revisit explicit subagent modeling later.
 
 ### CLI ⇄ HTTP endpoint map (keep in sync)
 

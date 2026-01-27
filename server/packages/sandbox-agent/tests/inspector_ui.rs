@@ -2,8 +2,8 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use sandbox_agent_agent_management::agents::AgentManager;
-use sandbox_agent_core::router::{build_router, AppState, AuthConfig};
-use sandbox_agent_core::ui;
+use sandbox_agent::router::{build_router, AppState, AuthConfig};
+use sandbox_agent::ui;
 use tempfile::TempDir;
 use tower::util::ServiceExt;
 

@@ -88,6 +88,7 @@
 - [x] Add HTTP request log with copyable curl command
 - [x] Add Content-Type header to CORS callout command
 - [x] Default inspector endpoint to current origin and auto-connect via health check
+- [x] Update inspector to universal schema events (items, deltas, approvals, errors)
 
 ## TypeScript SDK
 - [x] Generate OpenAPI from utoipa and run `openapi-typescript`

@@ -3,32 +3,53 @@ export {
   SandboxDaemonError,
   connectSandboxDaemonClient,
   createSandboxDaemonClient,
-} from "./client.js";
+} from "./client.ts";
 export type {
+  SandboxDaemonClientOptions,
+  SandboxDaemonConnectOptions,
+} from "./client.ts";
+export type {
+  AgentCapabilities,
   AgentInfo,
   AgentInstallRequest,
   AgentListResponse,
   AgentModeInfo,
   AgentModesResponse,
+  AgentUnparsedData,
+  ContentPart,
   CreateSessionRequest,
   CreateSessionResponse,
+  ErrorData,
+  EventSource,
   EventsQuery,
   EventsResponse,
+  FileAction,
   HealthResponse,
+  ItemDeltaData,
+  ItemEventData,
+  ItemKind,
+  ItemRole,
+  ItemStatus,
   MessageRequest,
-  PermissionRequest,
+  PermissionEventData,
   PermissionReply,
   PermissionReplyRequest,
+  PermissionStatus,
   ProblemDetails,
-  QuestionRequest,
+  QuestionEventData,
   QuestionReplyRequest,
+  QuestionStatus,
+  ReasoningVisibility,
+  SessionEndReason,
+  SessionEndedData,
   SessionInfo,
   SessionListResponse,
+  SessionStartedData,
+  TerminatedBy,
   UniversalEvent,
-  UniversalMessage,
-  UniversalMessagePart,
-  SandboxDaemonClientOptions,
-  SandboxDaemonConnectOptions,
-} from "./client.js";
-export type { components, paths } from "./generated/openapi.js";
-export type { SandboxDaemonSpawnOptions, SandboxDaemonSpawnLogMode } from "./spawn.js";
+  UniversalEventData,
+  UniversalEventType,
+  UniversalItem,
+} from "./types.ts";
+export type { components, paths } from "./generated/openapi.ts";
+export type { SandboxDaemonSpawnOptions, SandboxDaemonSpawnLogMode } from "./spawn.ts";

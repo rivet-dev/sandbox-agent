@@ -662,6 +662,75 @@
         border-bottom-left-radius: 4px;
       }
 
+      .message.system .avatar {
+        background: var(--border-2);
+        color: var(--text);
+      }
+
+      .message.tool .avatar {
+        background: rgba(100, 210, 255, 0.2);
+        color: var(--cyan);
+      }
+
+      .message.system .message-content {
+        background: var(--surface-2);
+        color: var(--muted);
+        border: 1px solid var(--border-2);
+      }
+
+      .message.tool .message-content {
+        background: rgba(100, 210, 255, 0.1);
+        color: var(--text-secondary);
+        border: 1px solid rgba(100, 210, 255, 0.25);
+      }
+
+      .message.error .message-content {
+        background: rgba(255, 59, 48, 0.12);
+        border: 1px solid rgba(255, 59, 48, 0.4);
+        color: var(--danger);
+      }
+
+      .message.error .avatar {
+        background: rgba(255, 59, 48, 0.2);
+        color: var(--danger);
+      }
+
+      .message-meta {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        color: var(--muted);
+        margin-bottom: 6px;
+      }
+
+      .message-meta .pill {
+        font-size: 9px;
+        padding: 2px 6px;
+      }
+
+      .part {
+        margin-top: 8px;
+      }
+
+      .part:first-child {
+        margin-top: 0;
+      }
+
+      .part-title {
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
+        color: var(--muted);
+        margin-bottom: 4px;
+      }
+
+      .part-body {
+        white-space: pre-wrap;
+      }
+
       .message-error {
         background: rgba(255, 59, 48, 0.1);
         border: 1px solid rgba(255, 59, 48, 0.3);
@@ -1071,11 +1140,38 @@
         letter-spacing: 0.3px;
       }
 
-      .event-type.message { color: var(--accent); }
-      .event-type.started { color: var(--success); }
-      .event-type.error { color: var(--danger); }
-      .event-type.question { color: var(--warning); }
-      .event-type.permission { color: var(--purple); }
+      .event-type.session,
+      .event-type.session-started,
+      .event-type.session-ended {
+        color: var(--success);
+      }
+
+      .event-type.item,
+      .event-type.item-started,
+      .event-type.item-completed {
+        color: var(--accent);
+      }
+
+      .event-type.item-delta {
+        color: var(--cyan);
+      }
+
+      .event-type.error,
+      .event-type.agent-unparsed {
+        color: var(--danger);
+      }
+
+      .event-type.question,
+      .event-type.question-requested,
+      .event-type.question-resolved {
+        color: var(--warning);
+      }
+
+      .event-type.permission,
+      .event-type.permission-requested,
+      .event-type.permission-resolved {
+        color: var(--purple);
+      }
 
       .event-time {
         font-size: 10px;

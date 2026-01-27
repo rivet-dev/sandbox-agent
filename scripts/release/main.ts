@@ -389,6 +389,12 @@ function runChecks(rootDir: string) {
   console.log("==> Running TypeScript checks");
   run("pnpm", ["run", "build"], { cwd: rootDir });
 
+  console.log("==> Running TypeScript SDK tests");
+  run("pnpm", ["--filter", "sandbox-agent", "test"], { cwd: rootDir });
+
+  console.log("==> Running CLI SDK tests");
+  run("pnpm", ["--filter", "@sandbox-agent/cli", "test"], { cwd: rootDir });
+
   console.log("==> Validating OpenAPI spec for Mintlify");
   run("pnpm", ["dlx", "mint", "openapi-check", "docs/openapi.json"], { cwd: rootDir });
 }

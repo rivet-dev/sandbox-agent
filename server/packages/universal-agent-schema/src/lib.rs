@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::Value;
 use schemars::JsonSchema;
-use thiserror::Error;
 use utoipa::ToSchema;
 
 pub use sandbox_agent_extracted_agent_schemas::{amp, claude, codex, opencode};
@@ -11,318 +10,282 @@ pub mod agents;
 pub use agents::{amp as convert_amp, claude as convert_claude, codex as convert_codex, opencode as convert_opencode};
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct UniversalEvent {
-    pub id: u64,
-    pub timestamp: String,
+    pub event_id: String,
+    pub sequence: u64,
+    pub time: String,
     pub session_id: String,
-    pub agent: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub agent_session_id: Option<String>,
+    pub native_session_id: Option<String>,
+    pub synthetic: bool,
+    pub source: EventSource,
+    #[serde(rename = "type")]
+    pub event_type: UniversalEventType,
     pub data: UniversalEventData,
+    pub raw: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum EventSource {
+    Agent,
+    Daemon,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub enum UniversalEventType {
+    #[serde(rename = "session.started")]
+    SessionStarted,
+    #[serde(rename = "session.ended")]
+    SessionEnded,
+    #[serde(rename = "item.started")]
+    ItemStarted,
+    #[serde(rename = "item.delta")]
+    ItemDelta,
+    #[serde(rename = "item.completed")]
+    ItemCompleted,
+    #[serde(rename = "error")]
+    Error,
+    #[serde(rename = "permission.requested")]
+    PermissionRequested,
+    #[serde(rename = "permission.resolved")]
+    PermissionResolved,
+    #[serde(rename = "question.requested")]
+    QuestionRequested,
+    #[serde(rename = "question.resolved")]
+    QuestionResolved,
+    #[serde(rename = "agent.unparsed")]
+    AgentUnparsed,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(untagged)]
 pub enum UniversalEventData {
-    Message { message: UniversalMessage },
-    Started { started: Started },
-    Error { error: CrashInfo },
-    QuestionAsked {
-        #[serde(rename = "questionAsked")]
-        question_asked: QuestionRequest,
-    },
-    PermissionAsked {
-        #[serde(rename = "permissionAsked")]
-        permission_asked: PermissionRequest,
-    },
-    Unknown { raw: Value },
+    SessionStarted(SessionStartedData),
+    SessionEnded(SessionEndedData),
+    Item(ItemEventData),
+    ItemDelta(ItemDeltaData),
+    Error(ErrorData),
+    Permission(PermissionEventData),
+    Question(QuestionEventData),
+    AgentUnparsed(AgentUnparsedData),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct Started {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub message: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub details: Option<Value>,
+pub struct SessionStartedData {
+    pub metadata: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct CrashInfo {
+pub struct SessionEndedData {
+    pub reason: SessionEndReason,
+    pub terminated_by: TerminatedBy,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionEndReason {
+    Completed,
+    Error,
+    Terminated,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TerminatedBy {
+    Agent,
+    Daemon,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct ItemEventData {
+    pub item: UniversalItem,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct ItemDeltaData {
+    pub item_id: String,
+    pub native_item_id: Option<String>,
+    pub delta: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct ErrorData {
     pub message: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub kind: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
     pub details: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
-pub struct UniversalMessageParsed {
-    pub role: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub id: Option<String>,
-    #[serde(default, skip_serializing_if = "Map::is_empty")]
-    pub metadata: Map<String, Value>,
-    pub parts: Vec<UniversalMessagePart>,
+pub struct AgentUnparsedData {
+    pub error: String,
+    pub location: String,
+    pub raw_hash: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
-#[serde(untagged)]
-pub enum UniversalMessage {
-    Parsed(UniversalMessageParsed),
-    Unparsed {
-        raw: Value,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        error: Option<String>,
-    },
+pub struct PermissionEventData {
+    pub permission_id: String,
+    pub action: String,
+    pub status: PermissionStatus,
+    pub metadata: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PermissionStatus {
+    Requested,
+    Approved,
+    Denied,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct QuestionEventData {
+    pub question_id: String,
+    pub prompt: String,
+    pub options: Vec<String>,
+    pub response: Option<String>,
+    pub status: QuestionStatus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum QuestionStatus {
+    Requested,
+    Answered,
+    Rejected,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct UniversalItem {
+    pub item_id: String,
+    pub native_item_id: Option<String>,
+    pub parent_id: Option<String>,
+    pub kind: ItemKind,
+    pub role: Option<ItemRole>,
+    pub content: Vec<ContentPart>,
+    pub status: ItemStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ItemKind {
+    Message,
+    ToolCall,
+    ToolResult,
+    System,
+    Status,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ItemRole {
+    User,
+    Assistant,
+    System,
+    Tool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ItemStatus {
+    InProgress,
+    Completed,
+    Failed,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum UniversalMessagePart {
+pub enum ContentPart {
     Text { text: String },
-    ToolCall {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        id: Option<String>,
-        name: String,
-        input: Value,
-    },
-    ToolResult {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        id: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        name: Option<String>,
-        output: Value,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        is_error: Option<bool>,
-    },
-    FunctionCall {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        id: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        name: Option<String>,
-        arguments: Value,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        raw: Option<Value>,
-    },
-    FunctionResult {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        id: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        name: Option<String>,
-        result: Value,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        is_error: Option<bool>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        raw: Option<Value>,
-    },
-    File {
-        source: AttachmentSource,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        mime_type: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        filename: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        raw: Option<Value>,
-    },
-    Image {
-        source: AttachmentSource,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        mime_type: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        alt: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        raw: Option<Value>,
-    },
-    Error { message: String },
-    Unknown { raw: Value },
+    Json { json: Value },
+    ToolCall { name: String, arguments: String, call_id: String },
+    ToolResult { call_id: String, output: String },
+    FileRef { path: String, action: FileAction, diff: Option<String> },
+    Reasoning { text: String, visibility: ReasoningVisibility },
+    Image { path: String, mime: Option<String> },
+    Status { label: String, detail: Option<String> },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum AttachmentSource {
-    Path { path: String },
-    Url { url: String },
-    Data {
-        data: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        encoding: Option<String>,
-    },
+#[serde(rename_all = "snake_case")]
+pub enum FileAction {
+    Read,
+    Write,
+    Patch,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct QuestionRequest {
-    pub id: String,
-    pub session_id: String,
-    pub questions: Vec<QuestionInfo>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool: Option<QuestionToolRef>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct QuestionInfo {
-    pub question: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub header: Option<String>,
-    pub options: Vec<QuestionOption>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub multi_select: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub custom: Option<bool>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct QuestionOption {
-    pub label: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct QuestionToolRef {
-    pub message_id: String,
-    pub call_id: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct PermissionRequest {
-    pub id: String,
-    pub session_id: String,
-    pub permission: String,
-    pub patterns: Vec<String>,
-    #[serde(default, skip_serializing_if = "Map::is_empty")]
-    pub metadata: Map<String, Value>,
-    pub always: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool: Option<PermissionToolRef>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct PermissionToolRef {
-    pub message_id: String,
-    pub call_id: String,
-}
-
-#[derive(Debug, Error)]
-pub enum ConversionError {
-    #[error("unsupported conversion: {0}")]
-    Unsupported(&'static str),
-    #[error("missing field: {0}")]
-    MissingField(&'static str),
-    #[error("invalid value: {0}")]
-    InvalidValue(String),
-    #[error("serde error: {0}")]
-    Serde(String),
-}
-
-impl From<serde_json::Error> for ConversionError {
-    fn from(err: serde_json::Error) -> Self {
-        Self::Serde(err.to_string())
-    }
+#[serde(rename_all = "snake_case")]
+pub enum ReasoningVisibility {
+    Public,
+    Private,
 }
 
 #[derive(Debug, Clone)]
 pub struct EventConversion {
+    pub event_type: UniversalEventType,
     pub data: UniversalEventData,
-    pub agent_session_id: Option<String>,
+    pub native_session_id: Option<String>,
+    pub source: EventSource,
+    pub synthetic: bool,
+    pub raw: Option<Value>,
 }
 
 impl EventConversion {
-    pub fn new(data: UniversalEventData) -> Self {
+    pub fn new(event_type: UniversalEventType, data: UniversalEventData) -> Self {
         Self {
+            event_type,
             data,
-            agent_session_id: None,
+            native_session_id: None,
+            source: EventSource::Agent,
+            synthetic: false,
+            raw: None,
         }
     }
 
-    pub fn with_session(mut self, session_id: Option<String>) -> Self {
-        self.agent_session_id = session_id;
+    pub fn with_native_session(mut self, session_id: Option<String>) -> Self {
+        self.native_session_id = session_id;
+        self
+    }
+
+    pub fn with_raw(mut self, raw: Option<Value>) -> Self {
+        self.raw = raw;
+        self
+    }
+
+    pub fn synthetic(mut self) -> Self {
+        self.synthetic = true;
+        self.source = EventSource::Daemon;
+        self
+    }
+
+    pub fn with_source(mut self, source: EventSource) -> Self {
+        self.source = source;
         self
     }
 }
 
-fn message_from_text(role: &str, text: String) -> UniversalMessage {
-    UniversalMessage::Parsed(UniversalMessageParsed {
-        role: role.to_string(),
-        id: None,
-        metadata: Map::new(),
-        parts: vec![UniversalMessagePart::Text { text }],
-    })
-}
-
-fn message_from_parts(role: &str, parts: Vec<UniversalMessagePart>) -> UniversalMessage {
-    UniversalMessage::Parsed(UniversalMessageParsed {
-        role: role.to_string(),
-        id: None,
-        metadata: Map::new(),
-        parts,
-    })
-}
-
-fn text_only_from_parts(parts: &[UniversalMessagePart]) -> Result<String, ConversionError> {
-    let mut text = String::new();
-    for part in parts {
-        match part {
-            UniversalMessagePart::Text { text: part_text } => {
-                if !text.is_empty() {
-                    text.push_str("\n");
-                }
-                text.push_str(part_text);
-            }
-            UniversalMessagePart::ToolCall { .. } => {
-                return Err(ConversionError::Unsupported("tool call part"))
-            }
-            UniversalMessagePart::ToolResult { .. } => {
-                return Err(ConversionError::Unsupported("tool result part"))
-            }
-            UniversalMessagePart::FunctionCall { .. } => {
-                return Err(ConversionError::Unsupported("function call part"))
-            }
-            UniversalMessagePart::FunctionResult { .. } => {
-                return Err(ConversionError::Unsupported("function result part"))
-            }
-            UniversalMessagePart::File { .. } => {
-                return Err(ConversionError::Unsupported("file part"))
-            }
-            UniversalMessagePart::Image { .. } => {
-                return Err(ConversionError::Unsupported("image part"))
-            }
-            UniversalMessagePart::Error { .. } => {
-                return Err(ConversionError::Unsupported("error part"))
-            }
-            UniversalMessagePart::Unknown { .. } => {
-                return Err(ConversionError::Unsupported("unknown part"))
-            }
-        }
-    }
-    if text.is_empty() {
-        Err(ConversionError::MissingField("text part"))
-    } else {
-        Ok(text)
+pub fn item_from_text(role: ItemRole, text: String) -> UniversalItem {
+    UniversalItem {
+        item_id: String::new(),
+        native_item_id: None,
+        parent_id: None,
+        kind: ItemKind::Message,
+        role: Some(role),
+        content: vec![ContentPart::Text { text }],
+        status: ItemStatus::Completed,
     }
 }
 
-fn extract_message_from_value(value: &Value) -> Option<String> {
-    if let Some(message) = value.get("message").and_then(Value::as_str) {
-        return Some(message.to_string());
+pub fn item_from_parts(role: ItemRole, kind: ItemKind, parts: Vec<ContentPart>) -> UniversalItem {
+    UniversalItem {
+        item_id: String::new(),
+        native_item_id: None,
+        parent_id: None,
+        kind,
+        role: Some(role),
+        content: parts,
+        status: ItemStatus::Completed,
     }
-    if let Some(message) = value.get("error").and_then(|v| v.get("message")).and_then(Value::as_str) {
-        return Some(message.to_string());
-    }
-    if let Some(message) = value.get("data").and_then(|v| v.get("message")).and_then(Value::as_str) {
-        return Some(message.to_string());
-    }
-    None
 }
-
-
-
-

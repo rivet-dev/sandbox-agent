@@ -117,6 +117,13 @@ Claude CLI outputs newline-delimited JSON events:
 }
 ```
 
+## Limitations (Headless CLI)
+
+- The headless CLI tool list does not include the `AskUserQuestion` tool, even though the Agent SDK documents it.
+- As a result, prompting the CLI to "call AskUserQuestion" does not emit question events; it proceeds with normal tool/message flow instead.
+- If we need structured question events, we can implement a wrapper around the Claude Agent SDK (instead of the CLI) and surface question events in our own transport.
+- The current Python SDK repo does not expose `AskUserQuestion` types; it only supports permission prompts via the control protocol.
+
 ## Response Schema
 
 ```typescript

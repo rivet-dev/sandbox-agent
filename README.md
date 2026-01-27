@@ -1,6 +1,6 @@
 # Sandbox Agent SDK
 
-Universal API for running Claude Code, Codex, OpenCode, and Amp inside sandboxes.
+Universal API for automatic coding agents in sandboxes. Supprots Claude Code, Codex, OpenCode, and Amp.
 
 - **Any coding agent**: Universal API to interact with all agents with full feature coverage
 - **Server or SDK mode**: Run as an HTTP server or with the TypeScript SDK
@@ -16,14 +16,14 @@ Roadmap:
 
 ## Agent Support
 
-| Feature | [Claude Code](https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview) | [Codex](https://github.com/openai/codex) | [OpenCode](https://github.com/opencode-ai/opencode) | [Amp](https://ampcode.com) |
+| Feature | [Claude Code*](https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview) | [Codex](https://github.com/openai/codex) | [OpenCode](https://github.com/opencode-ai/opencode) | [Amp](https://ampcode.com) |
 |---------|:-----------:|:-----:|:--------:|:---:|
 | Stability | Stable | Stable | Experimental | Experimental |
 | Text Messages | ✓ | ✓ | ✓ | ✓ |
-| Tool Calls | ✓ | ✓ | ✓ | ✓ |
-| Tool Results | ✓ | ✓ | ✓ | ✓ |
-| Questions (HITL) | ✓ | | ✓ | |
-| Permissions (HITL) | | | ✓ | |
+| Tool Calls | —* | ✓ | ✓ | ✓ |
+| Tool Results | —* | ✓ | ✓ | ✓ |
+| Questions (HITL) | —* | | ✓ | |
+| Permissions (HITL) | —* | | ✓ | |
 | Images | | ✓ | ✓ | |
 | File Attachments | | ✓ | ✓ | |
 | Session Lifecycle | | ✓ | ✓ | |
@@ -34,13 +34,15 @@ Roadmap:
 | MCP Tools | | ✓ | | |
 | Streaming Deltas | | ✓ | ✓ | |
 
+* Claude headless CLI does not natively support tool calls/results or HITL questions/permissions yet; these are WIP.
+
 Want support for another agent? [Open an issue](https://github.com/anthropics/sandbox-agent/issues/new) to request it.
 
 ## Architecture
 
 - TODO
-    - Embedded (runs agents locally)
-    - Sandboxed
+    - Local
+    - Remote/Sandboxed
 
 ## Components
 
@@ -48,6 +50,26 @@ Want support for another agent? [Open an issue](https://github.com/anthropics/sa
 - SDK: TODO
 - Inspector: inspect.sandboxagent.dev
 - CLI: TODO
+
+## Quickstart
+
+### SDK
+
+- Local
+- Remote/Sandboxed 
+
+Docs
+
+### Server
+
+- Run server
+- Auth
+
+Docs
+
+### CLI
+
+Docs
 
 ## Project Goals
 
@@ -98,4 +120,3 @@ TODO
 
 - the harnesses do a lot of heavy lifting
 - the difference between opencode, claude, and codex is vast & vastly opinionated
-

@@ -1,22 +1,45 @@
 ---
 source: server/packages/sandbox-agent/tests/http_sse_snapshots.rs
+assertion_line: 742
 expression: normalized
 ---
-- agent: claude
-  kind: started
+- metadata: true
   seq: 1
-  started:
-    message: session.created
-- agent: claude
-  kind: started
+  session: started
+  source: daemon
+  synthetic: true
+  type: session.started
+- metadata: true
   seq: 2
-  started:
-    message: system.init
-- agent: claude
-  kind: message
-  message:
-    parts:
-      - text: "<redacted>"
-        type: text
+  session: started
+  source: agent
+  synthetic: false
+  type: session.started
+- item:
+    content_types:
+      - text
+    kind: message
     role: assistant
+    status: in_progress
   seq: 3
+  source: daemon
+  synthetic: true
+  type: item.started
+- delta:
+    delta: "<redacted>"
+    item_id: "<redacted>"
+    native_item_id: "<redacted>"
+  seq: 4
+  source: daemon
+  synthetic: true
+  type: item.delta
+- item:
+    content_types:
+      - text
+    kind: message
+    role: assistant
+    status: completed
+  seq: 5
+  source: agent
+  synthetic: false
+  type: item.completed

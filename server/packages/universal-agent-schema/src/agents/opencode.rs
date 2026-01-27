@@ -1,958 +1,505 @@
-use crate::{
-    extract_message_from_value,
-    AttachmentSource,
-    ConversionError,
-    CrashInfo,
-    EventConversion,
-    PermissionRequest,
-    PermissionToolRef,
-    QuestionInfo,
-    QuestionOption,
-    QuestionRequest,
-    QuestionToolRef,
-    Started,
-    UniversalEventData,
-    UniversalMessage,
-    UniversalMessageParsed,
-    UniversalMessagePart,
-};
-use crate::opencode as schema;
-use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::Value;
 
-pub fn event_to_universal(event: &schema::Event) -> EventConversion {
+use crate::opencode as schema;
+use crate::{
+    ContentPart,
+    EventConversion,
+    ItemDeltaData,
+    ItemEventData,
+    ItemKind,
+    ItemRole,
+    ItemStatus,
+    PermissionEventData,
+    PermissionStatus,
+    QuestionEventData,
+    QuestionStatus,
+    SessionStartedData,
+    UniversalEventData,
+    UniversalEventType,
+    UniversalItem,
+};
+
+pub fn event_to_universal(event: &schema::Event) -> Result<Vec<EventConversion>, String> {
+    let raw = serde_json::to_value(event).ok();
     match event {
         schema::Event::MessageUpdated(updated) => {
             let schema::EventMessageUpdated { properties, type_: _ } = updated;
             let schema::EventMessageUpdatedProperties { info } = properties;
-            let (message, session_id) = message_from_opencode(info);
-            EventConversion::new(UniversalEventData::Message { message })
-                .with_session(session_id)
+            let (mut item, completed, session_id) = message_to_item(info);
+            item.status = if completed { ItemStatus::Completed } else { ItemStatus::InProgress };
+            let event_type = if completed {
+                UniversalEventType::ItemCompleted
+            } else {
+                UniversalEventType::ItemStarted
+            };
+            let conversion = EventConversion::new(
+                event_type,
+                UniversalEventData::Item(ItemEventData { item }),
+            )
+            .with_native_session(session_id)
+            .with_raw(raw);
+            Ok(vec![conversion])
         }
         schema::Event::MessagePartUpdated(updated) => {
             let schema::EventMessagePartUpdated { properties, type_: _ } = updated;
             let schema::EventMessagePartUpdatedProperties { part, delta } = properties;
-            let (message, session_id) = part_to_message(part, delta.as_ref());
-            EventConversion::new(UniversalEventData::Message { message })
-                .with_session(session_id)
+            let mut events = Vec::new();
+            let (session_id, message_id) = part_session_message(part);
+
+            match part {
+                schema::Part::Variant0(text_part) => {
+                    let schema::TextPart { text, .. } = text_part;
+                    let delta_text = delta.as_ref().unwrap_or(&text).clone();
+                    let stub = stub_message_item(&message_id, ItemRole::Assistant);
+                    events.push(
+                        EventConversion::new(
+                            UniversalEventType::ItemStarted,
+                            UniversalEventData::Item(ItemEventData { item: stub }),
+                        )
+                        .synthetic()
+                        .with_raw(raw.clone()),
+                    );
+                    events.push(
+                        EventConversion::new(
+                            UniversalEventType::ItemDelta,
+                            UniversalEventData::ItemDelta(ItemDeltaData {
+                                item_id: String::new(),
+                                native_item_id: Some(message_id.clone()),
+                                delta: delta_text,
+                            }),
+                        )
+                        .with_native_session(session_id.clone())
+                        .with_raw(raw.clone()),
+                    );
+                }
+                schema::Part::Variant2(reasoning_part) => {
+                    let delta_text = delta
+                        .as_ref()
+                        .cloned()
+                        .unwrap_or_else(|| reasoning_part.text.clone());
+                    let stub = stub_message_item(&message_id, ItemRole::Assistant);
+                    events.push(
+                        EventConversion::new(
+                            UniversalEventType::ItemStarted,
+                            UniversalEventData::Item(ItemEventData { item: stub }),
+                        )
+                        .synthetic()
+                        .with_raw(raw.clone()),
+                    );
+                    events.push(
+                        EventConversion::new(
+                            UniversalEventType::ItemDelta,
+                            UniversalEventData::ItemDelta(ItemDeltaData {
+                                item_id: String::new(),
+                                native_item_id: Some(message_id.clone()),
+                                delta: delta_text,
+                            }),
+                        )
+                        .with_native_session(session_id.clone())
+                        .with_raw(raw.clone()),
+                    );
+                }
+                schema::Part::Variant3(file_part) => {
+                    let file_content = file_part_to_content(file_part);
+                    let item = UniversalItem {
+                        item_id: String::new(),
+                        native_item_id: Some(message_id.clone()),
+                        parent_id: None,
+                        kind: ItemKind::Message,
+                        role: Some(ItemRole::Assistant),
+                        content: vec![file_content],
+                        status: ItemStatus::Completed,
+                    };
+                    events.push(
+                        EventConversion::new(
+                            UniversalEventType::ItemCompleted,
+                            UniversalEventData::Item(ItemEventData { item }),
+                        )
+                        .with_native_session(session_id.clone())
+                        .with_raw(raw.clone()),
+                    );
+                }
+                schema::Part::Variant4(tool_part) => {
+                    let tool_events = tool_part_to_events(&tool_part, &message_id);
+                    for event in tool_events {
+                        events.push(event.with_native_session(session_id.clone()).with_raw(raw.clone()));
+                    }
+                }
+                schema::Part::Variant1 { .. } => {
+                    let detail = serde_json::to_string(part).unwrap_or_else(|_| "subtask".to_string());
+                    let item = status_item("subtask", Some(detail));
+                    events.push(
+                        EventConversion::new(
+                            UniversalEventType::ItemCompleted,
+                            UniversalEventData::Item(ItemEventData { item }),
+                        )
+                        .with_native_session(session_id.clone())
+                        .with_raw(raw.clone()),
+                    );
+                }
+                schema::Part::Variant5(_)
+                | schema::Part::Variant6(_)
+                | schema::Part::Variant7(_)
+                | schema::Part::Variant8(_)
+                | schema::Part::Variant9(_)
+                | schema::Part::Variant10(_)
+                | schema::Part::Variant11(_) => {
+                    let detail = serde_json::to_string(part).unwrap_or_else(|_| "part".to_string());
+                    let item = status_item("part.updated", Some(detail));
+                    events.push(
+                        EventConversion::new(
+                            UniversalEventType::ItemCompleted,
+                            UniversalEventData::Item(ItemEventData { item }),
+                        )
+                        .with_native_session(session_id.clone())
+                        .with_raw(raw.clone()),
+                    );
+                }
+            }
+
+            Ok(events)
         }
         schema::Event::QuestionAsked(asked) => {
             let schema::EventQuestionAsked { properties, type_: _ } = asked;
-            let question = question_request_from_opencode(properties);
-            let session_id = question.session_id.clone();
-            EventConversion::new(UniversalEventData::QuestionAsked { question_asked: question })
-                .with_session(Some(session_id))
+            let question = question_from_opencode(properties);
+            let conversion = EventConversion::new(
+                UniversalEventType::QuestionRequested,
+                UniversalEventData::Question(question),
+            )
+            .with_native_session(Some(properties.session_id.to_string()))
+            .with_raw(raw);
+            Ok(vec![conversion])
         }
         schema::Event::PermissionAsked(asked) => {
             let schema::EventPermissionAsked { properties, type_: _ } = asked;
-            let permission = permission_request_from_opencode(properties);
-            let session_id = permission.session_id.clone();
-            EventConversion::new(UniversalEventData::PermissionAsked { permission_asked: permission })
-                .with_session(Some(session_id))
+            let permission = permission_from_opencode(properties);
+            let conversion = EventConversion::new(
+                UniversalEventType::PermissionRequested,
+                UniversalEventData::Permission(permission),
+            )
+            .with_native_session(Some(properties.session_id.to_string()))
+            .with_raw(raw);
+            Ok(vec![conversion])
         }
         schema::Event::SessionCreated(created) => {
             let schema::EventSessionCreated { properties, type_: _ } = created;
-            let schema::EventSessionCreatedProperties { info } = properties;
-            let details = serde_json::to_value(info).ok();
-            let started = Started {
-                message: Some("session.created".to_string()),
-                details,
-            };
-            EventConversion::new(UniversalEventData::Started { started })
+            let metadata = serde_json::to_value(&properties.info).ok();
+            let conversion = EventConversion::new(
+                UniversalEventType::SessionStarted,
+                UniversalEventData::SessionStarted(SessionStartedData { metadata }),
+            )
+            .with_native_session(Some(properties.info.id.to_string()))
+            .with_raw(raw);
+            Ok(vec![conversion])
+        }
+        schema::Event::SessionStatus(status) => {
+            let schema::EventSessionStatus { properties, type_: _ } = status;
+            let detail = serde_json::to_string(&properties.status).unwrap_or_else(|_| "status".to_string());
+            let item = status_item("session.status", Some(detail));
+            let conversion = EventConversion::new(
+                UniversalEventType::ItemCompleted,
+                UniversalEventData::Item(ItemEventData { item }),
+            )
+            .with_native_session(Some(properties.session_id.clone()))
+            .with_raw(raw);
+            Ok(vec![conversion])
+        }
+        schema::Event::SessionIdle(idle) => {
+            let schema::EventSessionIdle { properties, type_: _ } = idle;
+            let item = status_item("session.idle", None);
+            let conversion = EventConversion::new(
+                UniversalEventType::ItemCompleted,
+                UniversalEventData::Item(ItemEventData { item }),
+            )
+            .with_native_session(Some(properties.session_id.clone()))
+            .with_raw(raw);
+            Ok(vec![conversion])
         }
         schema::Event::SessionError(error) => {
             let schema::EventSessionError { properties, type_: _ } = error;
-            let schema::EventSessionErrorProperties {
-                error: _error,
-                session_id,
-            } = properties;
-            let message = extract_message_from_value(&serde_json::to_value(properties).unwrap_or(Value::Null))
-                .unwrap_or_else(|| "opencode session error".to_string());
-            let crash = CrashInfo {
-                message,
-                kind: Some("session.error".to_string()),
-                details: serde_json::to_value(properties).ok(),
-            };
-            EventConversion::new(UniversalEventData::Error { error: crash })
-                .with_session(session_id.clone())
+            let detail = serde_json::to_string(&properties.error).unwrap_or_else(|_| "session error".to_string());
+            let item = status_item("session.error", Some(detail));
+            let conversion = EventConversion::new(
+                UniversalEventType::ItemCompleted,
+                UniversalEventData::Item(ItemEventData { item }),
+            )
+            .with_native_session(properties.session_id.clone())
+            .with_raw(raw);
+            Ok(vec![conversion])
         }
-        _ => EventConversion::new(UniversalEventData::Unknown {
-            raw: serde_json::to_value(event).unwrap_or(Value::Null),
-        }),
+        _ => Err("unsupported opencode event".to_string()),
     }
 }
 
-pub fn universal_event_to_opencode(event: &UniversalEventData) -> Result<schema::Event, ConversionError> {
-    match event {
-        UniversalEventData::QuestionAsked { question_asked } => {
-            let properties = question_request_to_opencode(question_asked)?;
-            Ok(schema::Event::QuestionAsked(schema::EventQuestionAsked {
-                properties,
-                type_: "question.asked".to_string(),
-            }))
-        }
-        UniversalEventData::PermissionAsked { permission_asked } => {
-            let properties = permission_request_to_opencode(permission_asked)?;
-            Ok(schema::Event::PermissionAsked(schema::EventPermissionAsked {
-                properties,
-                type_: "permission.asked".to_string(),
-            }))
-        }
-        _ => Err(ConversionError::Unsupported("opencode event")),
-    }
-}
-
-pub fn universal_message_to_parts(
-    message: &UniversalMessage,
-) -> Result<Vec<schema::TextPartInput>, ConversionError> {
-    let parsed = match message {
-        UniversalMessage::Parsed(parsed) => parsed,
-        UniversalMessage::Unparsed { .. } => {
-            return Err(ConversionError::Unsupported("unparsed message"))
-        }
-    };
-    let mut parts = Vec::new();
-    for part in &parsed.parts {
-        match part {
-            UniversalMessagePart::Text { text } => {
-                parts.push(text_part_input_from_text(text));
-            }
-            UniversalMessagePart::ToolCall { .. }
-            | UniversalMessagePart::ToolResult { .. }
-            | UniversalMessagePart::FunctionCall { .. }
-            | UniversalMessagePart::FunctionResult { .. }
-            | UniversalMessagePart::File { .. }
-            | UniversalMessagePart::Image { .. }
-            | UniversalMessagePart::Error { .. }
-            | UniversalMessagePart::Unknown { .. } => {
-                return Err(ConversionError::Unsupported("non-text part"))
-            }
-        }
-    }
-    if parts.is_empty() {
-        return Err(ConversionError::MissingField("parts"));
-    }
-    Ok(parts)
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum OpencodePartInput {
-    Text(schema::TextPartInput),
-    File(schema::FilePartInput),
-}
-
-pub fn universal_message_to_part_inputs(
-    message: &UniversalMessage,
-) -> Result<Vec<OpencodePartInput>, ConversionError> {
-    let parsed = match message {
-        UniversalMessage::Parsed(parsed) => parsed,
-        UniversalMessage::Unparsed { .. } => {
-            return Err(ConversionError::Unsupported("unparsed message"))
-        }
-    };
-    universal_parts_to_part_inputs(&parsed.parts)
-}
-
-pub fn universal_parts_to_part_inputs(
-    parts: &[UniversalMessagePart],
-) -> Result<Vec<OpencodePartInput>, ConversionError> {
-    let mut inputs = Vec::new();
-    for part in parts {
-        inputs.push(universal_part_to_opencode_input(part)?);
-    }
-    if inputs.is_empty() {
-        return Err(ConversionError::MissingField("parts"));
-    }
-    Ok(inputs)
-}
-
-pub fn universal_part_to_opencode_input(
-    part: &UniversalMessagePart,
-) -> Result<OpencodePartInput, ConversionError> {
-    match part {
-        UniversalMessagePart::Text { text } => Ok(OpencodePartInput::Text(
-            text_part_input_from_text(text),
-        )),
-        UniversalMessagePart::File {
-            source,
-            mime_type,
-            filename,
-            ..
-        } => Ok(OpencodePartInput::File(file_part_input_from_universal(
-            source,
-            mime_type.as_deref(),
-            filename.as_ref(),
-        )?)),
-        UniversalMessagePart::Image {
-            source, mime_type, ..
-        } => Ok(OpencodePartInput::File(file_part_input_from_universal(
-            source,
-            mime_type.as_deref(),
-            None,
-        )?)),
-        UniversalMessagePart::ToolCall { .. }
-        | UniversalMessagePart::ToolResult { .. }
-        | UniversalMessagePart::FunctionCall { .. }
-        | UniversalMessagePart::FunctionResult { .. }
-        | UniversalMessagePart::Error { .. }
-        | UniversalMessagePart::Unknown { .. } => {
-            Err(ConversionError::Unsupported("unsupported part"))
-        }
-    }
-}
-
-fn text_part_input_from_text(text: &str) -> schema::TextPartInput {
-    schema::TextPartInput {
-        id: None,
-        ignored: None,
-        metadata: Map::new(),
-        synthetic: None,
-        text: text.to_string(),
-        time: None,
-        type_: "text".to_string(),
-    }
-}
-
-pub fn text_part_input_to_universal(part: &schema::TextPartInput) -> UniversalMessage {
-    let schema::TextPartInput {
-        id,
-        ignored,
-        metadata,
-        synthetic,
-        text,
-        time,
-        type_,
-    } = part;
-    let mut metadata = metadata.clone();
-    if let Some(id) = id {
-        metadata.insert("partId".to_string(), Value::String(id.clone()));
-    }
-    if let Some(ignored) = ignored {
-        metadata.insert("ignored".to_string(), Value::Bool(*ignored));
-    }
-    if let Some(synthetic) = synthetic {
-        metadata.insert("synthetic".to_string(), Value::Bool(*synthetic));
-    }
-    if let Some(time) = time {
-        metadata.insert(
-            "time".to_string(),
-            serde_json::to_value(time).unwrap_or(Value::Null),
-        );
-    }
-    metadata.insert("type".to_string(), Value::String(type_.clone()));
-    UniversalMessage::Parsed(UniversalMessageParsed {
-        role: "user".to_string(),
-        id: None,
-        metadata,
-        parts: vec![UniversalMessagePart::Text { text: text.clone() }],
-    })
-}
-
-fn file_part_input_from_universal(
-    source: &AttachmentSource,
-    mime_type: Option<&str>,
-    filename: Option<&String>,
-) -> Result<schema::FilePartInput, ConversionError> {
-    let mime = mime_type.ok_or(ConversionError::MissingField("mime_type"))?;
-    let url = attachment_source_to_opencode_url(source, mime)?;
-    Ok(schema::FilePartInput {
-        filename: filename.cloned(),
-        id: None,
-        mime: mime.to_string(),
-        source: None,
-        type_: "file".to_string(),
-        url,
-    })
-}
-
-fn attachment_source_to_opencode_url(
-    source: &AttachmentSource,
-    mime_type: &str,
-) -> Result<String, ConversionError> {
-    match source {
-        AttachmentSource::Url { url } => Ok(url.clone()),
-        AttachmentSource::Path { path } => Ok(format!("file://{}", path)),
-        AttachmentSource::Data { data, encoding } => {
-            let encoding = encoding.as_deref().unwrap_or("base64");
-            if encoding != "base64" {
-                return Err(ConversionError::Unsupported("opencode data encoding"));
-            }
-            Ok(format!("data:{};base64,{}", mime_type, data))
-        }
-    }
-}
-
-fn message_from_opencode(message: &schema::Message) -> (UniversalMessage, Option<String>) {
+fn message_to_item(message: &schema::Message) -> (UniversalItem, bool, Option<String>) {
     match message {
         schema::Message::UserMessage(user) => {
             let schema::UserMessage {
-                agent,
                 id,
-                model,
-                role,
                 session_id,
-                summary,
-                system,
-                time,
-                tools,
-                variant,
+                role: _,
+                ..
             } = user;
-            let mut metadata = Map::new();
-            metadata.insert("agent".to_string(), Value::String(agent.clone()));
-            metadata.insert(
-                "model".to_string(),
-                serde_json::to_value(model).unwrap_or(Value::Null),
-            );
-            metadata.insert(
-                "time".to_string(),
-                serde_json::to_value(time).unwrap_or(Value::Null),
-            );
-            metadata.insert(
-                "tools".to_string(),
-                serde_json::to_value(tools).unwrap_or(Value::Null),
-            );
-            if let Some(summary) = summary {
-                metadata.insert(
-                    "summary".to_string(),
-                    serde_json::to_value(summary).unwrap_or(Value::Null),
-                );
-            }
-            if let Some(system) = system {
-                metadata.insert("system".to_string(), Value::String(system.clone()));
-            }
-            if let Some(variant) = variant {
-                metadata.insert("variant".to_string(), Value::String(variant.clone()));
-            }
-            let parsed = UniversalMessageParsed {
-                role: role.clone(),
-                id: Some(id.clone()),
-                metadata,
-                parts: Vec::new(),
-            };
             (
-                UniversalMessage::Parsed(parsed),
+                UniversalItem {
+                    item_id: String::new(),
+                    native_item_id: Some(id.clone()),
+                    parent_id: None,
+                    kind: ItemKind::Message,
+                    role: Some(ItemRole::User),
+                    content: Vec::new(),
+                    status: ItemStatus::Completed,
+                },
+                true,
                 Some(session_id.clone()),
             )
         }
         schema::Message::AssistantMessage(assistant) => {
             let schema::AssistantMessage {
-                agent,
-                cost,
-                error,
-                finish,
                 id,
-                mode,
-                model_id,
-                parent_id,
-                path,
-                provider_id,
-                role,
                 session_id,
-                summary,
                 time,
-                tokens,
+                ..
             } = assistant;
-            let mut metadata = Map::new();
-            metadata.insert("agent".to_string(), Value::String(agent.clone()));
-            metadata.insert(
-                "cost".to_string(),
-                serde_json::to_value(cost).unwrap_or(Value::Null),
-            );
-            metadata.insert("mode".to_string(), Value::String(mode.clone()));
-            metadata.insert("modelId".to_string(), Value::String(model_id.clone()));
-            metadata.insert("providerId".to_string(), Value::String(provider_id.clone()));
-            metadata.insert("parentId".to_string(), Value::String(parent_id.clone()));
-            metadata.insert(
-                "path".to_string(),
-                serde_json::to_value(path).unwrap_or(Value::Null),
-            );
-            metadata.insert(
-                "tokens".to_string(),
-                serde_json::to_value(tokens).unwrap_or(Value::Null),
-            );
-            metadata.insert(
-                "time".to_string(),
-                serde_json::to_value(time).unwrap_or(Value::Null),
-            );
-            if let Some(error) = error {
-                metadata.insert(
-                    "error".to_string(),
-                    serde_json::to_value(error).unwrap_or(Value::Null),
-                );
-            }
-            if let Some(finish) = finish {
-                metadata.insert("finish".to_string(), Value::String(finish.clone()));
-            }
-            if let Some(summary) = summary {
-                metadata.insert(
-                    "summary".to_string(),
-                    serde_json::to_value(summary).unwrap_or(Value::Null),
-                );
-            }
-            let parsed = UniversalMessageParsed {
-                role: role.clone(),
-                id: Some(id.clone()),
-                metadata,
-                parts: Vec::new(),
-            };
+            let completed = time.completed.is_some();
             (
-                UniversalMessage::Parsed(parsed),
+                UniversalItem {
+                    item_id: String::new(),
+                    native_item_id: Some(id.clone()),
+                    parent_id: None,
+                    kind: ItemKind::Message,
+                    role: Some(ItemRole::Assistant),
+                    content: Vec::new(),
+                    status: if completed { ItemStatus::Completed } else { ItemStatus::InProgress },
+                },
+                completed,
                 Some(session_id.clone()),
             )
         }
     }
 }
 
-fn part_to_message(part: &schema::Part, delta: Option<&String>) -> (UniversalMessage, Option<String>) {
+fn part_session_message(part: &schema::Part) -> (Option<String>, String) {
     match part {
         schema::Part::Variant0(text_part) => {
-            let schema::TextPart {
-                id,
-                ignored,
-                message_id,
-                metadata,
-                session_id,
-                synthetic,
-                text,
-                time,
-                type_,
-            } = text_part;
-            let mut part_metadata = base_part_metadata(message_id, id, delta);
-            part_metadata.insert("type".to_string(), Value::String(type_.clone()));
-            if let Some(ignored) = ignored {
-                part_metadata.insert("ignored".to_string(), Value::Bool(*ignored));
-            }
-            if let Some(synthetic) = synthetic {
-                part_metadata.insert("synthetic".to_string(), Value::Bool(*synthetic));
-            }
-            if let Some(time) = time {
-                part_metadata.insert(
-                    "time".to_string(),
-                    serde_json::to_value(time).unwrap_or(Value::Null),
-                );
-            }
-            if !metadata.is_empty() {
-                part_metadata.insert(
-                    "partMetadata".to_string(),
-                    Value::Object(metadata.clone()),
-                );
-            }
-            let parsed = UniversalMessageParsed {
-                role: "assistant".to_string(),
-                id: Some(message_id.clone()),
-                metadata: part_metadata,
-                parts: vec![UniversalMessagePart::Text { text: text.clone() }],
-            };
-            (UniversalMessage::Parsed(parsed), Some(session_id.clone()))
+            (Some(text_part.session_id.clone()), text_part.message_id.clone())
         }
         schema::Part::Variant1 {
-            agent: _agent,
-            command: _command,
-            description: _description,
-            id,
-            message_id,
-            model: _model,
-            prompt: _prompt,
             session_id,
-            type_: _type,
-        } => unknown_part_message(message_id, id, session_id, serde_json::to_value(part).unwrap_or(Value::Null), delta),
-        schema::Part::Variant2(reasoning_part) => {
-            let schema::ReasoningPart {
-                id,
-                message_id,
-                metadata: _metadata,
-                session_id,
-                text: _text,
-                time: _time,
-                type_: _type,
-            } = reasoning_part;
-            unknown_part_message(
-                message_id,
-                id,
-                session_id,
-                serde_json::to_value(reasoning_part).unwrap_or(Value::Null),
-                delta,
-            )
-        }
-        schema::Part::Variant3(file_part) => {
-            let schema::FilePart {
-                filename: _filename,
-                id,
-                message_id,
-                mime: _mime,
-                session_id,
-                source: _source,
-                type_: _type,
-                url: _url,
-            } = file_part;
-            let part_metadata = base_part_metadata(message_id, id, delta);
-            let part = file_part_to_universal_part(file_part);
-            let parsed = UniversalMessageParsed {
-                role: "assistant".to_string(),
-                id: Some(message_id.clone()),
-                metadata: part_metadata,
-                parts: vec![part],
-            };
-            (UniversalMessage::Parsed(parsed), Some(session_id.clone()))
-        }
-        schema::Part::Variant4(tool_part) => {
-            let schema::ToolPart {
-                call_id,
-                id,
-                message_id,
-                metadata,
-                session_id,
-                state,
-                tool,
-                type_,
-            } = tool_part;
-            let mut part_metadata = base_part_metadata(message_id, id, delta);
-            part_metadata.insert("type".to_string(), Value::String(type_.clone()));
-            part_metadata.insert("callId".to_string(), Value::String(call_id.clone()));
-            part_metadata.insert("tool".to_string(), Value::String(tool.clone()));
-            if !metadata.is_empty() {
-                part_metadata.insert(
-                    "partMetadata".to_string(),
-                    Value::Object(metadata.clone()),
-                );
-            }
-            let (mut parts, state_meta) = tool_state_to_parts(call_id, tool, state);
-            if let Some(state_meta) = state_meta {
-                part_metadata.insert("toolState".to_string(), state_meta);
-            }
-            let parsed = UniversalMessageParsed {
-                role: "assistant".to_string(),
-                id: Some(message_id.clone()),
-                metadata: part_metadata,
-                parts: parts.drain(..).collect(),
-            };
-            (UniversalMessage::Parsed(parsed), Some(session_id.clone()))
-        }
-        schema::Part::Variant5(step_start) => {
-            let schema::StepStartPart {
-                id,
-                message_id,
-                session_id,
-                snapshot: _snapshot,
-                type_: _type,
-            } = step_start;
-            unknown_part_message(
-                message_id,
-                id,
-                session_id,
-                serde_json::to_value(step_start).unwrap_or(Value::Null),
-                delta,
-            )
-        }
-        schema::Part::Variant6(step_finish) => {
-            let schema::StepFinishPart {
-                cost: _cost,
-                id,
-                message_id,
-                reason: _reason,
-                session_id,
-                snapshot: _snapshot,
-                tokens: _tokens,
-                type_: _type,
-            } = step_finish;
-            unknown_part_message(
-                message_id,
-                id,
-                session_id,
-                serde_json::to_value(step_finish).unwrap_or(Value::Null),
-                delta,
-            )
-        }
-        schema::Part::Variant7(snapshot_part) => {
-            let schema::SnapshotPart {
-                id,
-                message_id,
-                session_id,
-                snapshot: _snapshot,
-                type_: _type,
-            } = snapshot_part;
-            unknown_part_message(
-                message_id,
-                id,
-                session_id,
-                serde_json::to_value(snapshot_part).unwrap_or(Value::Null),
-                delta,
-            )
-        }
-        schema::Part::Variant8(patch_part) => {
-            let schema::PatchPart {
-                files: _files,
-                hash: _hash,
-                id,
-                message_id,
-                session_id,
-                type_: _type,
-            } = patch_part;
-            unknown_part_message(
-                message_id,
-                id,
-                session_id,
-                serde_json::to_value(patch_part).unwrap_or(Value::Null),
-                delta,
-            )
-        }
-        schema::Part::Variant9(agent_part) => {
-            let schema::AgentPart {
-                id,
-                message_id,
-                name: _name,
-                session_id,
-                source: _source,
-                type_: _type,
-            } = agent_part;
-            unknown_part_message(
-                message_id,
-                id,
-                session_id,
-                serde_json::to_value(agent_part).unwrap_or(Value::Null),
-                delta,
-            )
-        }
-        schema::Part::Variant10(retry_part) => {
-            let schema::RetryPart {
-                attempt: _attempt,
-                error: _error,
-                id,
-                message_id,
-                session_id,
-                time: _time,
-                type_: _type,
-            } = retry_part;
-            unknown_part_message(
-                message_id,
-                id,
-                session_id,
-                serde_json::to_value(retry_part).unwrap_or(Value::Null),
-                delta,
-            )
-        }
-        schema::Part::Variant11(compaction_part) => {
-            let schema::CompactionPart {
-                auto: _auto,
-                id,
-                message_id,
-                session_id,
-                type_: _type,
-            } = compaction_part;
-            unknown_part_message(
-                message_id,
-                id,
-                session_id,
-                serde_json::to_value(compaction_part).unwrap_or(Value::Null),
-                delta,
-            )
-        }
+            message_id,
+            ..
+        } => (Some(session_id.clone()), message_id.clone()),
+        schema::Part::Variant2(reasoning_part) => (
+            Some(reasoning_part.session_id.clone()),
+            reasoning_part.message_id.clone(),
+        ),
+        schema::Part::Variant3(file_part) => (
+            Some(file_part.session_id.clone()),
+            file_part.message_id.clone(),
+        ),
+        schema::Part::Variant4(tool_part) => (
+            Some(tool_part.session_id.clone()),
+            tool_part.message_id.clone(),
+        ),
+        schema::Part::Variant5(step_part) => (
+            Some(step_part.session_id.clone()),
+            step_part.message_id.clone(),
+        ),
+        schema::Part::Variant6(step_part) => (
+            Some(step_part.session_id.clone()),
+            step_part.message_id.clone(),
+        ),
+        schema::Part::Variant7(snapshot_part) => (
+            Some(snapshot_part.session_id.clone()),
+            snapshot_part.message_id.clone(),
+        ),
+        schema::Part::Variant8(patch_part) => (
+            Some(patch_part.session_id.clone()),
+            patch_part.message_id.clone(),
+        ),
+        schema::Part::Variant9(agent_part) => (
+            Some(agent_part.session_id.clone()),
+            agent_part.message_id.clone(),
+        ),
+        schema::Part::Variant10(retry_part) => (
+            Some(retry_part.session_id.clone()),
+            retry_part.message_id.clone(),
+        ),
+        schema::Part::Variant11(compaction_part) => (
+            Some(compaction_part.session_id.clone()),
+            compaction_part.message_id.clone(),
+        ),
     }
 }
 
-fn base_part_metadata(message_id: &str, part_id: &str, delta: Option<&String>) -> Map<String, Value> {
-    let mut metadata = Map::new();
-    metadata.insert("messageId".to_string(), Value::String(message_id.to_string()));
-    metadata.insert("partId".to_string(), Value::String(part_id.to_string()));
-    if let Some(delta) = delta {
-        metadata.insert("delta".to_string(), Value::String(delta.clone()));
-    }
-    metadata
-}
-
-fn unknown_part_message(
-    message_id: &str,
-    part_id: &str,
-    session_id: &str,
-    raw: Value,
-    delta: Option<&String>,
-) -> (UniversalMessage, Option<String>) {
-    let metadata = base_part_metadata(message_id, part_id, delta);
-    let parsed = UniversalMessageParsed {
-        role: "assistant".to_string(),
-        id: Some(message_id.to_string()),
-        metadata,
-        parts: vec![UniversalMessagePart::Unknown { raw }],
-    };
-    (UniversalMessage::Parsed(parsed), Some(session_id.to_string()))
-}
-
-fn file_part_to_universal_part(file_part: &schema::FilePart) -> UniversalMessagePart {
-    let schema::FilePart {
-        filename,
-        id: _id,
-        message_id: _message_id,
-        mime,
-        session_id: _session_id,
-        source: _source,
-        type_: _type,
-        url,
-    } = file_part;
-    let raw = serde_json::to_value(file_part).unwrap_or(Value::Null);
-    let source = AttachmentSource::Url { url: url.clone() };
-    if mime.starts_with("image/") {
-        UniversalMessagePart::Image {
-            source,
-            mime_type: Some(mime.clone()),
-            alt: filename.clone(),
-            raw: Some(raw),
-        }
-    } else {
-        UniversalMessagePart::File {
-            source,
-            mime_type: Some(mime.clone()),
-            filename: filename.clone(),
-            raw: Some(raw),
-        }
+fn stub_message_item(message_id: &str, role: ItemRole) -> UniversalItem {
+    UniversalItem {
+        item_id: String::new(),
+        native_item_id: Some(message_id.to_string()),
+        parent_id: None,
+        kind: ItemKind::Message,
+        role: Some(role),
+        content: Vec::new(),
+        status: ItemStatus::InProgress,
     }
 }
 
-fn tool_state_to_parts(
-    call_id: &str,
-    tool: &str,
-    state: &schema::ToolState,
-) -> (Vec<UniversalMessagePart>, Option<Value>) {
+fn tool_part_to_events(tool_part: &schema::ToolPart, message_id: &str) -> Vec<EventConversion> {
+    let schema::ToolPart {
+        call_id,
+        state,
+        tool,
+        ..
+    } = tool_part;
+    let mut events = Vec::new();
     match state {
         schema::ToolState::Pending(state) => {
-            let schema::ToolStatePending { input, raw, status } = state;
-            let mut meta = Map::new();
-            meta.insert("status".to_string(), Value::String(status.clone()));
-            meta.insert("raw".to_string(), Value::String(raw.clone()));
-            meta.insert("input".to_string(), Value::Object(input.clone()));
-            (
-                vec![UniversalMessagePart::ToolCall {
-                    id: Some(call_id.to_string()),
-                    name: tool.to_string(),
-                    input: Value::Object(input.clone()),
+            let arguments = serde_json::to_string(&Value::Object(state.input.clone()))
+                .unwrap_or_else(|_| "{}".to_string());
+            let item = UniversalItem {
+                item_id: String::new(),
+                native_item_id: Some(call_id.clone()),
+                parent_id: Some(message_id.to_string()),
+                kind: ItemKind::ToolCall,
+                role: Some(ItemRole::Assistant),
+                content: vec![ContentPart::ToolCall {
+                    name: tool.clone(),
+                    arguments,
+                    call_id: call_id.clone(),
                 }],
-                Some(Value::Object(meta)),
-            )
+                status: ItemStatus::InProgress,
+            };
+            events.push(EventConversion::new(
+                UniversalEventType::ItemStarted,
+                UniversalEventData::Item(ItemEventData { item }),
+            ));
         }
         schema::ToolState::Running(state) => {
-            let schema::ToolStateRunning {
-                input,
-                metadata,
-                status,
-                time,
-                title,
-            } = state;
-            let mut meta = Map::new();
-            meta.insert("status".to_string(), Value::String(status.clone()));
-            meta.insert("input".to_string(), Value::Object(input.clone()));
-            meta.insert("metadata".to_string(), Value::Object(metadata.clone()));
-            meta.insert(
-                "time".to_string(),
-                serde_json::to_value(time).unwrap_or(Value::Null),
-            );
-            if let Some(title) = title {
-                meta.insert("title".to_string(), Value::String(title.clone()));
-            }
-            (
-                vec![UniversalMessagePart::ToolCall {
-                    id: Some(call_id.to_string()),
-                    name: tool.to_string(),
-                    input: Value::Object(input.clone()),
+            let arguments = serde_json::to_string(&Value::Object(state.input.clone()))
+                .unwrap_or_else(|_| "{}".to_string());
+            let item = UniversalItem {
+                item_id: String::new(),
+                native_item_id: Some(call_id.clone()),
+                parent_id: Some(message_id.to_string()),
+                kind: ItemKind::ToolCall,
+                role: Some(ItemRole::Assistant),
+                content: vec![ContentPart::ToolCall {
+                    name: tool.clone(),
+                    arguments,
+                    call_id: call_id.clone(),
                 }],
-                Some(Value::Object(meta)),
-            )
+                status: ItemStatus::InProgress,
+            };
+            events.push(EventConversion::new(
+                UniversalEventType::ItemStarted,
+                UniversalEventData::Item(ItemEventData { item }),
+            ));
         }
         schema::ToolState::Completed(state) => {
-            let schema::ToolStateCompleted {
-                attachments,
-                input,
-                metadata,
+            let output = state.output.clone();
+            let mut content = vec![ContentPart::ToolResult {
+                call_id: call_id.clone(),
                 output,
-                status,
-                time,
-                title,
-            } = state;
-            let mut meta = Map::new();
-            meta.insert("status".to_string(), Value::String(status.clone()));
-            meta.insert("input".to_string(), Value::Object(input.clone()));
-            meta.insert("metadata".to_string(), Value::Object(metadata.clone()));
-            meta.insert(
-                "time".to_string(),
-                serde_json::to_value(time).unwrap_or(Value::Null),
-            );
-            meta.insert("title".to_string(), Value::String(title.clone()));
-            if !attachments.is_empty() {
-                meta.insert(
-                    "attachments".to_string(),
-                    serde_json::to_value(attachments).unwrap_or(Value::Null),
-                );
-            }
-            let mut parts = vec![UniversalMessagePart::ToolResult {
-                id: Some(call_id.to_string()),
-                name: Some(tool.to_string()),
-                output: Value::String(output.clone()),
-                is_error: Some(false),
             }];
-            for attachment in attachments {
-                parts.push(file_part_to_universal_part(attachment));
+            for attachment in &state.attachments {
+                content.push(file_part_to_content(attachment));
             }
-            (parts, Some(Value::Object(meta)))
+            let item = UniversalItem {
+                item_id: String::new(),
+                native_item_id: Some(call_id.clone()),
+                parent_id: Some(message_id.to_string()),
+                kind: ItemKind::ToolResult,
+                role: Some(ItemRole::Tool),
+                content,
+                status: ItemStatus::Completed,
+            };
+            events.push(EventConversion::new(
+                UniversalEventType::ItemCompleted,
+                UniversalEventData::Item(ItemEventData { item }),
+            ));
         }
         schema::ToolState::Error(state) => {
-            let schema::ToolStateError {
-                error,
-                input,
-                metadata,
-                status,
-                time,
-            } = state;
-            let mut meta = Map::new();
-            meta.insert("status".to_string(), Value::String(status.clone()));
-            meta.insert("error".to_string(), Value::String(error.clone()));
-            meta.insert("input".to_string(), Value::Object(input.clone()));
-            meta.insert("metadata".to_string(), Value::Object(metadata.clone()));
-            meta.insert(
-                "time".to_string(),
-                serde_json::to_value(time).unwrap_or(Value::Null),
-            );
-            (
-                vec![UniversalMessagePart::ToolResult {
-                    id: Some(call_id.to_string()),
-                    name: Some(tool.to_string()),
-                    output: Value::String(error.clone()),
-                    is_error: Some(true),
+            let output = state.error.clone();
+            let item = UniversalItem {
+                item_id: String::new(),
+                native_item_id: Some(call_id.clone()),
+                parent_id: Some(message_id.to_string()),
+                kind: ItemKind::ToolResult,
+                role: Some(ItemRole::Tool),
+                content: vec![ContentPart::ToolResult {
+                    call_id: call_id.clone(),
+                    output,
                 }],
-                Some(Value::Object(meta)),
-            )
+                status: ItemStatus::Failed,
+            };
+            events.push(EventConversion::new(
+                UniversalEventType::ItemCompleted,
+                UniversalEventData::Item(ItemEventData { item }),
+            ));
         }
     }
+    events
 }
 
-fn question_request_from_opencode(request: &schema::QuestionRequest) -> QuestionRequest {
-    let schema::QuestionRequest {
-        id,
-        questions,
-        session_id,
-        tool,
-    } = request;
-    QuestionRequest {
-        id: id.clone().into(),
-        session_id: session_id.clone().into(),
-        questions: questions
-            .iter()
-            .map(|question| {
-                let schema::QuestionInfo {
-                    custom,
-                    header,
-                    multiple,
-                    options,
-                    question,
-                } = question;
-                QuestionInfo {
-                    question: question.clone(),
-                    header: Some(header.clone()),
-                    options: options
-                        .iter()
-                        .map(|opt| {
-                            let schema::QuestionOption { description, label } = opt;
-                            QuestionOption {
-                                label: label.clone(),
-                                description: Some(description.clone()),
-                            }
-                        })
-                        .collect(),
-                    multi_select: *multiple,
-                    custom: *custom,
-                }
-            })
-            .collect(),
-        tool: tool.as_ref().map(|tool| {
-            let schema::QuestionRequestTool { message_id, call_id } = tool;
-            QuestionToolRef {
-                message_id: message_id.clone(),
-                call_id: call_id.clone(),
-            }
-        }),
+fn file_part_to_content(file_part: &schema::FilePart) -> ContentPart {
+    let path = file_part.url.clone();
+    let action = if file_part.mime.starts_with("image/") {
+        crate::FileAction::Read
+    } else {
+        crate::FileAction::Read
+    };
+    ContentPart::FileRef {
+        path,
+        action,
+        diff: None,
     }
 }
 
-fn permission_request_from_opencode(request: &schema::PermissionRequest) -> PermissionRequest {
-    let schema::PermissionRequest {
-        always,
-        id,
-        metadata,
-        patterns,
-        permission,
-        session_id,
-        tool,
-    } = request;
-    PermissionRequest {
-        id: id.clone().into(),
-        session_id: session_id.clone().into(),
-        permission: permission.clone(),
-        patterns: patterns.clone(),
-        metadata: metadata.clone(),
-        always: always.clone(),
-        tool: tool.as_ref().map(|tool| {
-            let schema::PermissionRequestTool { message_id, call_id } = tool;
-            PermissionToolRef {
-                message_id: message_id.clone(),
-                call_id: call_id.clone(),
-            }
-        }),
+fn status_item(label: &str, detail: Option<String>) -> UniversalItem {
+    UniversalItem {
+        item_id: String::new(),
+        native_item_id: None,
+        parent_id: None,
+        kind: ItemKind::Status,
+        role: Some(ItemRole::System),
+        content: vec![ContentPart::Status {
+            label: label.to_string(),
+            detail,
+        }],
+        status: ItemStatus::Completed,
     }
 }
 
-fn question_request_to_opencode(request: &QuestionRequest) -> Result<schema::QuestionRequest, ConversionError> {
-    let id = schema::QuestionRequestId::try_from(request.id.as_str())
-        .map_err(|err| ConversionError::InvalidValue(err.to_string()))?;
-    let session_id = schema::QuestionRequestSessionId::try_from(request.session_id.as_str())
-        .map_err(|err| ConversionError::InvalidValue(err.to_string()))?;
-    let questions = request
+fn question_from_opencode(request: &schema::QuestionRequest) -> QuestionEventData {
+    let prompt = request
         .questions
-        .iter()
-        .map(|question| schema::QuestionInfo {
-            question: question.question.clone(),
-            header: question
-                .header
-                .clone()
-                .unwrap_or_else(|| "Question".to_string()),
-            options: question
-                .options
+        .first()
+        .map(|q| q.question.clone())
+        .unwrap_or_default();
+    let options = request
+        .questions
+        .first()
+        .map(|q| {
+            q.options
                 .iter()
-                .map(|opt| schema::QuestionOption {
-                    label: opt.label.clone(),
-                    description: opt.description.clone().unwrap_or_default(),
-                })
-                .collect(),
-            multiple: question.multi_select,
-            custom: question.custom,
+                .map(|opt| opt.label.clone())
+                .collect::<Vec<_>>()
         })
-        .collect();
-
-    Ok(schema::QuestionRequest {
-        id,
-        session_id,
-        questions,
-        tool: request.tool.as_ref().map(|tool| schema::QuestionRequestTool {
-            message_id: tool.message_id.clone(),
-            call_id: tool.call_id.clone(),
-        }),
-    })
+        .unwrap_or_default();
+    QuestionEventData {
+        question_id: request.id.clone().into(),
+        prompt,
+        options,
+        response: None,
+        status: QuestionStatus::Requested,
+    }
 }
 
-fn permission_request_to_opencode(
-    request: &PermissionRequest,
-) -> Result<schema::PermissionRequest, ConversionError> {
-    let id = schema::PermissionRequestId::try_from(request.id.as_str())
-        .map_err(|err| ConversionError::InvalidValue(err.to_string()))?;
-    let session_id = schema::PermissionRequestSessionId::try_from(request.session_id.as_str())
-        .map_err(|err| ConversionError::InvalidValue(err.to_string()))?;
-    Ok(schema::PermissionRequest {
-        id,
-        session_id,
-        permission: request.permission.clone(),
-        patterns: request.patterns.clone(),
-        metadata: request.metadata.clone(),
-        always: request.always.clone(),
-        tool: request.tool.as_ref().map(|tool| schema::PermissionRequestTool {
-            message_id: tool.message_id.clone(),
-            call_id: tool.call_id.clone(),
-        }),
-    })
+fn permission_from_opencode(request: &schema::PermissionRequest) -> PermissionEventData {
+    PermissionEventData {
+        permission_id: request.id.clone().into(),
+        action: request.permission.clone(),
+        status: PermissionStatus::Requested,
+        metadata: serde_json::to_value(request).ok(),
+    }
 }

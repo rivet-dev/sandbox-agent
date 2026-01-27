@@ -1,12 +1,19 @@
 ## launch
 
+- provide mock data for validating your rendering
+    - provides history with all items, then iterates thorugh all items on a stream
+    - this is a special type of serve function
+    - make sure claude.md covers everything
 - re-review agent schemas and compare it to ours
+- write integration guide
+- add optional raw payloads to events via query parameters
 - auto-serve frontend from cli
 - verify embedded sdk works
 - fix bugs in ui
     - double messages
     - user-sent messages
     - permissions
+- add an API option to stream only the next assistant item after a posted message (single-response stream)
 - consider migraing our standard to match the vercel ai standard
 - discuss actor arch in readme + give example
 - skillfile
@@ -18,9 +25,18 @@
 - **Auto-configure MCP & Skills**: Auto-load MCP servers & skills for your agents
 - **Process & logs manager**: Manage processes, logs, and ports for your agents to run background processes
 - **Codex app-server concurrency**: Run a single shared Codex app-server with multiple threads in parallel (like OpenCode), with file-write safety
+- persistence
 
 ## later
 
+- missing features
+    - file changes
+- api compat
+    - vercel ai sdk + hono proxy
+    - tanstack ai
+    - opencode ui
+- synthetic question tool
+    - since claude headless does not support this
 - guides:
     - ralph
     - swarms

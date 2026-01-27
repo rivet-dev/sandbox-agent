@@ -3,287 +3,65 @@
   "title": "UniversalEvent",
   "type": "object",
   "required": [
-    "agent",
     "data",
-    "id",
-    "sessionId",
-    "timestamp"
+    "event_id",
+    "sequence",
+    "session_id",
+    "source",
+    "synthetic",
+    "time",
+    "type"
   ],
   "properties": {
-    "agent": {
+    "data": {
+      "$ref": "#/definitions/UniversalEventData"
+    },
+    "event_id": {
       "type": "string"
     },
-    "agentSessionId": {
+    "native_session_id": {
       "type": [
         "string",
         "null"
       ]
     },
-    "data": {
-      "$ref": "#/definitions/UniversalEventData"
-    },
-    "id": {
+    "raw": true,
+    "sequence": {
       "type": "integer",
       "format": "uint64",
       "minimum": 0.0
     },
-    "sessionId": {
+    "session_id": {
       "type": "string"
     },
-    "timestamp": {
+    "source": {
+      "$ref": "#/definitions/EventSource"
+    },
+    "synthetic": {
+      "type": "boolean"
+    },
+    "time": {
       "type": "string"
+    },
+    "type": {
+      "$ref": "#/definitions/UniversalEventType"
     }
   },
   "definitions": {
-    "AttachmentSource": {
-      "oneOf": [
-        {
-          "type": "object",
-          "required": [
-            "path",
-            "type"
-          ],
-          "properties": {
-            "path": {
-              "type": "string"
-            },
-            "type": {
-              "type": "string",
-              "enum": [
-                "path"
-              ]
-            }
-          }
-        },
-        {
-          "type": "object",
-          "required": [
-            "type",
-            "url"
-          ],
-          "properties": {
-            "type": {
-              "type": "string",
-              "enum": [
-                "url"
-              ]
-            },
-            "url": {
-              "type": "string"
-            }
-          }
-        },
-        {
-          "type": "object",
-          "required": [
-            "data",
-            "type"
-          ],
-          "properties": {
-            "data": {
-              "type": "string"
-            },
-            "encoding": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "type": {
-              "type": "string",
-              "enum": [
-                "data"
-              ]
-            }
-          }
-        }
-      ]
-    },
-    "CrashInfo": {
+    "AgentUnparsedData": {
       "type": "object",
       "required": [
-        "message"
+        "error",
+        "location"
       ],
       "properties": {
-        "details": true,
-        "kind": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "message": {
-          "type": "string"
-        }
-      }
-    },
-    "PermissionRequest": {
-      "type": "object",
-      "required": [
-        "always",
-        "id",
-        "patterns",
-        "permission",
-        "sessionId"
-      ],
-      "properties": {
-        "always": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "id": {
+        "error": {
           "type": "string"
         },
-        "metadata": {
-          "type": "object",
-          "additionalProperties": true
-        },
-        "patterns": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "permission": {
+        "location": {
           "type": "string"
         },
-        "sessionId": {
-          "type": "string"
-        },
-        "tool": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/PermissionToolRef"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      }
-    },
-    "PermissionToolRef": {
-      "type": "object",
-      "required": [
-        "callId",
-        "messageId"
-      ],
-      "properties": {
-        "callId": {
-          "type": "string"
-        },
-        "messageId": {
-          "type": "string"
-        }
-      }
-    },
-    "QuestionInfo": {
-      "type": "object",
-      "required": [
-        "options",
-        "question"
-      ],
-      "properties": {
-        "custom": {
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
-        "header": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "multiSelect": {
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
-        "options": {
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/QuestionOption"
-          }
-        },
-        "question": {
-          "type": "string"
-        }
-      }
-    },
-    "QuestionOption": {
-      "type": "object",
-      "required": [
-        "label"
-      ],
-      "properties": {
-        "description": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "label": {
-          "type": "string"
-        }
-      }
-    },
-    "QuestionRequest": {
-      "type": "object",
-      "required": [
-        "id",
-        "questions",
-        "sessionId"
-      ],
-      "properties": {
-        "id": {
-          "type": "string"
-        },
-        "questions": {
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/QuestionInfo"
-          }
-        },
-        "sessionId": {
-          "type": "string"
-        },
-        "tool": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/QuestionToolRef"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      }
-    },
-    "QuestionToolRef": {
-      "type": "object",
-      "required": [
-        "callId",
-        "messageId"
-      ],
-      "properties": {
-        "callId": {
-          "type": "string"
-        },
-        "messageId": {
-          "type": "string"
-        }
-      }
-    },
-    "Started": {
-      "type": "object",
-      "properties": {
-        "details": true,
-        "message": {
+        "raw_hash": {
           "type": [
             "string",
             "null"
@@ -291,125 +69,7 @@
         }
       }
     },
-    "UniversalEventData": {
-      "anyOf": [
-        {
-          "type": "object",
-          "required": [
-            "message"
-          ],
-          "properties": {
-            "message": {
-              "$ref": "#/definitions/UniversalMessage"
-            }
-          }
-        },
-        {
-          "type": "object",
-          "required": [
-            "started"
-          ],
-          "properties": {
-            "started": {
-              "$ref": "#/definitions/Started"
-            }
-          }
-        },
-        {
-          "type": "object",
-          "required": [
-            "error"
-          ],
-          "properties": {
-            "error": {
-              "$ref": "#/definitions/CrashInfo"
-            }
-          }
-        },
-        {
-          "type": "object",
-          "required": [
-            "questionAsked"
-          ],
-          "properties": {
-            "questionAsked": {
-              "$ref": "#/definitions/QuestionRequest"
-            }
-          }
-        },
-        {
-          "type": "object",
-          "required": [
-            "permissionAsked"
-          ],
-          "properties": {
-            "permissionAsked": {
-              "$ref": "#/definitions/PermissionRequest"
-            }
-          }
-        },
-        {
-          "type": "object",
-          "required": [
-            "raw"
-          ],
-          "properties": {
-            "raw": true
-          }
-        }
-      ]
-    },
-    "UniversalMessage": {
-      "anyOf": [
-        {
-          "$ref": "#/definitions/UniversalMessageParsed"
-        },
-        {
-          "type": "object",
-          "required": [
-            "raw"
-          ],
-          "properties": {
-            "error": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "raw": true
-          }
-        }
-      ]
-    },
-    "UniversalMessageParsed": {
-      "type": "object",
-      "required": [
-        "parts",
-        "role"
-      ],
-      "properties": {
-        "id": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "metadata": {
-          "type": "object",
-          "additionalProperties": true
-        },
-        "parts": {
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/UniversalMessagePart"
-          }
-        },
-        "role": {
-          "type": "string"
-        }
-      }
-    },
-    "UniversalMessagePart": {
+    "ContentPart": {
       "oneOf": [
         {
           "type": "object",
@@ -432,18 +92,34 @@
         {
           "type": "object",
           "required": [
-            "input",
+            "json",
+            "type"
+          ],
+          "properties": {
+            "json": true,
+            "type": {
+              "type": "string",
+              "enum": [
+                "json"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "arguments",
+            "call_id",
             "name",
             "type"
           ],
           "properties": {
-            "id": {
-              "type": [
-                "string",
-                "null"
-              ]
+            "arguments": {
+              "type": "string"
             },
-            "input": true,
+            "call_id": {
+              "type": "string"
+            },
             "name": {
               "type": "string"
             },
@@ -458,29 +134,17 @@
         {
           "type": "object",
           "required": [
+            "call_id",
             "output",
             "type"
           ],
           "properties": {
-            "id": {
-              "type": [
-                "string",
-                "null"
-              ]
+            "call_id": {
+              "type": "string"
             },
-            "is_error": {
-              "type": [
-                "boolean",
-                "null"
-              ]
+            "output": {
+              "type": "string"
             },
-            "name": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "output": true,
             "type": {
               "type": "string",
               "enum": [
@@ -492,28 +156,27 @@
         {
           "type": "object",
           "required": [
-            "arguments",
+            "action",
+            "path",
             "type"
           ],
           "properties": {
-            "arguments": true,
-            "id": {
+            "action": {
+              "$ref": "#/definitions/FileAction"
+            },
+            "diff": {
               "type": [
                 "string",
                 "null"
               ]
             },
-            "name": {
-              "type": [
-                "string",
-                "null"
-              ]
+            "path": {
+              "type": "string"
             },
-            "raw": true,
             "type": {
               "type": "string",
               "enum": [
-                "function_call"
+                "file_ref"
               ]
             }
           }
@@ -521,91 +184,40 @@
         {
           "type": "object",
           "required": [
-            "result",
-            "type"
+            "text",
+            "type",
+            "visibility"
           ],
           "properties": {
-            "id": {
-              "type": [
-                "string",
-                "null"
-              ]
+            "text": {
+              "type": "string"
             },
-            "is_error": {
-              "type": [
-                "boolean",
-                "null"
-              ]
-            },
-            "name": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "raw": true,
-            "result": true,
             "type": {
               "type": "string",
               "enum": [
-                "function_result"
+                "reasoning"
               ]
+            },
+            "visibility": {
+              "$ref": "#/definitions/ReasoningVisibility"
             }
           }
         },
         {
           "type": "object",
           "required": [
-            "source",
+            "path",
             "type"
           ],
           "properties": {
-            "filename": {
+            "mime": {
               "type": [
                 "string",
                 "null"
               ]
             },
-            "mime_type": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "raw": true,
-            "source": {
-              "$ref": "#/definitions/AttachmentSource"
-            },
-            "type": {
-              "type": "string",
-              "enum": [
-                "file"
-              ]
-            }
-          }
-        },
-        {
-          "type": "object",
-          "required": [
-            "source",
-            "type"
-          ],
-          "properties": {
-            "alt": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "mime_type": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "raw": true,
-            "source": {
-              "$ref": "#/definitions/AttachmentSource"
+            "path": {
+              "type": "string"
             },
             "type": {
               "type": "string",
@@ -618,38 +230,324 @@
         {
           "type": "object",
           "required": [
-            "message",
+            "label",
             "type"
           ],
           "properties": {
-            "message": {
+            "detail": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
               "type": "string"
             },
             "type": {
               "type": "string",
               "enum": [
-                "error"
-              ]
-            }
-          }
-        },
-        {
-          "type": "object",
-          "required": [
-            "raw",
-            "type"
-          ],
-          "properties": {
-            "raw": true,
-            "type": {
-              "type": "string",
-              "enum": [
-                "unknown"
+                "status"
               ]
             }
           }
         }
       ]
+    },
+    "ErrorData": {
+      "type": "object",
+      "required": [
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "details": true,
+        "message": {
+          "type": "string"
+        }
+      }
+    },
+    "EventSource": {
+      "type": "string",
+      "enum": [
+        "agent",
+        "daemon"
+      ]
+    },
+    "FileAction": {
+      "type": "string",
+      "enum": [
+        "read",
+        "write",
+        "patch"
+      ]
+    },
+    "ItemDeltaData": {
+      "type": "object",
+      "required": [
+        "delta",
+        "item_id"
+      ],
+      "properties": {
+        "delta": {
+          "type": "string"
+        },
+        "item_id": {
+          "type": "string"
+        },
+        "native_item_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "ItemEventData": {
+      "type": "object",
+      "required": [
+        "item"
+      ],
+      "properties": {
+        "item": {
+          "$ref": "#/definitions/UniversalItem"
+        }
+      }
+    },
+    "ItemKind": {
+      "type": "string",
+      "enum": [
+        "message",
+        "tool_call",
+        "tool_result",
+        "system",
+        "status",
+        "unknown"
+      ]
+    },
+    "ItemRole": {
+      "type": "string",
+      "enum": [
+        "user",
+        "assistant",
+        "system",
+        "tool"
+      ]
+    },
+    "ItemStatus": {
+      "type": "string",
+      "enum": [
+        "in_progress",
+        "completed",
+        "failed"
+      ]
+    },
+    "PermissionEventData": {
+      "type": "object",
+      "required": [
+        "action",
+        "permission_id",
+        "status"
+      ],
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "metadata": true,
+        "permission_id": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/PermissionStatus"
+        }
+      }
+    },
+    "PermissionStatus": {
+      "type": "string",
+      "enum": [
+        "requested",
+        "approved",
+        "denied"
+      ]
+    },
+    "QuestionEventData": {
+      "type": "object",
+      "required": [
+        "options",
+        "prompt",
+        "question_id",
+        "status"
+      ],
+      "properties": {
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "question_id": {
+          "type": "string"
+        },
+        "response": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "$ref": "#/definitions/QuestionStatus"
+        }
+      }
+    },
+    "QuestionStatus": {
+      "type": "string",
+      "enum": [
+        "requested",
+        "answered",
+        "rejected"
+      ]
+    },
+    "ReasoningVisibility": {
+      "type": "string",
+      "enum": [
+        "public",
+        "private"
+      ]
+    },
+    "SessionEndReason": {
+      "type": "string",
+      "enum": [
+        "completed",
+        "error",
+        "terminated"
+      ]
+    },
+    "SessionEndedData": {
+      "type": "object",
+      "required": [
+        "reason",
+        "terminated_by"
+      ],
+      "properties": {
+        "reason": {
+          "$ref": "#/definitions/SessionEndReason"
+        },
+        "terminated_by": {
+          "$ref": "#/definitions/TerminatedBy"
+        }
+      }
+    },
+    "SessionStartedData": {
+      "type": "object",
+      "properties": {
+        "metadata": true
+      }
+    },
+    "TerminatedBy": {
+      "type": "string",
+      "enum": [
+        "agent",
+        "daemon"
+      ]
+    },
+    "UniversalEventData": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/SessionStartedData"
+        },
+        {
+          "$ref": "#/definitions/SessionEndedData"
+        },
+        {
+          "$ref": "#/definitions/ItemEventData"
+        },
+        {
+          "$ref": "#/definitions/ItemDeltaData"
+        },
+        {
+          "$ref": "#/definitions/ErrorData"
+        },
+        {
+          "$ref": "#/definitions/PermissionEventData"
+        },
+        {
+          "$ref": "#/definitions/QuestionEventData"
+        },
+        {
+          "$ref": "#/definitions/AgentUnparsedData"
+        }
+      ]
+    },
+    "UniversalEventType": {
+      "type": "string",
+      "enum": [
+        "session.started",
+        "session.ended",
+        "item.started",
+        "item.delta",
+        "item.completed",
+        "error",
+        "permission.requested",
+        "permission.resolved",
+        "question.requested",
+        "question.resolved",
+        "agent.unparsed"
+      ]
+    },
+    "UniversalItem": {
+      "type": "object",
+      "required": [
+        "content",
+        "item_id",
+        "kind",
+        "status"
+      ],
+      "properties": {
+        "content": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ContentPart"
+          }
+        },
+        "item_id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/definitions/ItemKind"
+        },
+        "native_item_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "parent_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "role": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ItemRole"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "$ref": "#/definitions/ItemStatus"
+        }
+      }
     }
   }
 }

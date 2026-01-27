@@ -1,31 +1,23 @@
-import type { components } from "./generated/openapi.js";
 import type {
   SandboxDaemonSpawnHandle,
   SandboxDaemonSpawnOptions,
-} from "./spawn.js";
-
-export type AgentInstallRequest = components["schemas"]["AgentInstallRequest"];
-export type AgentModeInfo = components["schemas"]["AgentModeInfo"];
-export type AgentModesResponse = components["schemas"]["AgentModesResponse"];
-export type AgentInfo = components["schemas"]["AgentInfo"];
-export type AgentListResponse = components["schemas"]["AgentListResponse"];
-export type CreateSessionRequest = components["schemas"]["CreateSessionRequest"];
-export type CreateSessionResponse = components["schemas"]["CreateSessionResponse"];
-export type HealthResponse = components["schemas"]["HealthResponse"];
-export type MessageRequest = components["schemas"]["MessageRequest"];
-export type EventsQuery = components["schemas"]["EventsQuery"];
-export type EventsResponse = components["schemas"]["EventsResponse"];
-export type PermissionRequest = components["schemas"]["PermissionRequest"];
-export type QuestionReplyRequest = components["schemas"]["QuestionReplyRequest"];
-export type QuestionRequest = components["schemas"]["QuestionRequest"];
-export type PermissionReplyRequest = components["schemas"]["PermissionReplyRequest"];
-export type PermissionReply = components["schemas"]["PermissionReply"];
-export type ProblemDetails = components["schemas"]["ProblemDetails"];
-export type SessionInfo = components["schemas"]["SessionInfo"];
-export type SessionListResponse = components["schemas"]["SessionListResponse"];
-export type UniversalEvent = components["schemas"]["UniversalEvent"];
-export type UniversalMessage = components["schemas"]["UniversalMessage"];
-export type UniversalMessagePart = components["schemas"]["UniversalMessagePart"];
+} from "./spawn.ts";
+import type {
+  AgentInstallRequest,
+  AgentListResponse,
+  AgentModesResponse,
+  CreateSessionRequest,
+  CreateSessionResponse,
+  EventsQuery,
+  EventsResponse,
+  HealthResponse,
+  MessageRequest,
+  PermissionReplyRequest,
+  ProblemDetails,
+  QuestionReplyRequest,
+  SessionListResponse,
+  UniversalEvent,
+} from "./types.ts";
 
 const API_PREFIX = "/v1";
 
@@ -179,13 +171,14 @@ export class SandboxDaemonClient {
       if (done) {
         break;
       }
-      buffer += decoder.decode(value, { stream: true });
+      // Normalize CRLF to LF for consistent parsing
+      buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
       let index = buffer.indexOf("\n\n");
       while (index !== -1) {
         const chunk = buffer.slice(0, index);
         buffer = buffer.slice(index + 2);
         const dataLines = chunk
-          .split(/\r?\n/)
+          .split("\n")
           .filter((line) => line.startsWith("data:"));
         if (dataLines.length > 0) {
           const payload = dataLines

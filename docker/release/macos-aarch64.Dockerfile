@@ -55,7 +55,7 @@ COPY . .
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/build/target \
-    cargo build -p sandbox-agent-core --release --target aarch64-apple-darwin && \
+    cargo build -p sandbox-agent --release --target aarch64-apple-darwin && \
     mkdir -p /artifacts && \
     cp target/aarch64-apple-darwin/release/sandbox-agent /artifacts/sandbox-agent-aarch64-apple-darwin
 

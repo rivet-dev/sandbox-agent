@@ -1,5 +1,5 @@
 [package]
-name = "sandbox-agent-core"
+name = "sandbox-agent"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

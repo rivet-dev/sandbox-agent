@@ -55,12 +55,12 @@ To keep snapshots deterministic:
 
 Run only Claude snapshots:
 ```
-SANDBOX_TEST_AGENTS=claude cargo test -p sandbox-agent-core --test http_sse_snapshots
+SANDBOX_TEST_AGENTS=claude cargo test -p sandbox-agent --test http_sse_snapshots
 ```
 
 Run all detected agents:
 ```
-cargo test -p sandbox-agent-core --test http_sse_snapshots
+cargo test -p sandbox-agent --test http_sse_snapshots
 ```
 
 ## Universal Schema

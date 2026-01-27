@@ -12,7 +12,7 @@ use tempfile::TempDir;
 use sandbox_agent_agent_management::agents::{AgentId, AgentManager};
 use sandbox_agent_agent_management::testing::{test_agents_from_env, TestAgentConfig};
 use sandbox_agent_agent_credentials::ExtractedCredentials;
-use sandbox_agent_core::router::{build_router, AppState, AuthConfig};
+use sandbox_agent::router::{build_router, AppState, AuthConfig};
 use tower::util::ServiceExt;
 use tower_http::cors::CorsLayer;
 
@@ -226,7 +226,11 @@ async fn poll_events_until(
             .cloned()
             .unwrap_or_default();
         if !new_events.is_empty() {
-            if let Some(last) = new_events.last().and_then(|event| event.get("id")).and_then(Value::as_u64) {
+            if let Some(last) = new_events
+                .last()
+                .and_then(|event| event.get("sequence"))
+                .and_then(Value::as_u64)
+            {
                 offset = last;
             }
             events.extend(new_events);
@@ -307,26 +311,48 @@ fn should_stop(events: &[Value]) -> bool {
 
 fn is_assistant_message(event: &Value) -> bool {
     event
-        .get("data")
-        .and_then(|data| data.get("message"))
-        .and_then(|message| message.get("role"))
+        .get("type")
         .and_then(Value::as_str)
-        .map(|role| role == "assistant")
+        .map(|event_type| event_type == "item.completed")
         .unwrap_or(false)
+        && event
+            .get("data")
+            .and_then(|data| data.get("item"))
+            .and_then(|item| item.get("role"))
+            .and_then(Value::as_str)
+            .map(|role| role == "assistant")
+            .unwrap_or(false)
 }
 
 fn is_error_event(event: &Value) -> bool {
+    matches!(
+        event.get("type").and_then(Value::as_str),
+        Some("error") | Some("agent.unparsed")
+    )
+}
+
+fn is_unparsed_event(event: &Value) -> bool {
     event
-        .get("data")
-        .and_then(|data| data.get("error"))
-        .is_some()
+        .get("type")
+        .and_then(Value::as_str)
+        .map(|value| value == "agent.unparsed")
+        .unwrap_or(false)
 }
 
 fn is_permission_event(event: &Value) -> bool {
     event
-        .get("data")
-        .and_then(|data| data.get("permissionAsked"))
-        .is_some()
+        .get("type")
+        .and_then(Value::as_str)
+        .map(|value| value == "permission.requested")
+        .unwrap_or(false)
+}
+
+fn is_question_event(event: &Value) -> bool {
+    event
+        .get("type")
+        .and_then(Value::as_str)
+        .map(|value| value == "question.requested")
+        .unwrap_or(false)
 }
 
 fn truncate_permission_events(events: &[Value]) -> Vec<Value> {
@@ -339,7 +365,21 @@ fn truncate_permission_events(events: &[Value]) -> Vec<Value> {
     events.to_vec()
 }
 
+fn truncate_question_events(events: &[Value]) -> Vec<Value> {
+    if let Some(idx) = events.iter().position(is_question_event) {
+        return events[..=idx].to_vec();
+    }
+    if let Some(idx) = events.iter().position(is_assistant_message) {
+        return events[..=idx].to_vec();
+    }
+    events.to_vec()
+}
+
 fn normalize_events(events: &[Value]) -> Value {
+    assert!(
+        !events.iter().any(is_unparsed_event),
+        "agent.unparsed event encountered"
+    );
     let normalized = events
         .iter()
         .enumerate()
@@ -361,77 +401,100 @@ fn truncate_after_first_stop(events: &[Value]) -> Vec<Value> {
 fn normalize_event(event: &Value, seq: usize) -> Value {
     let mut map = Map::new();
     map.insert("seq".to_string(), Value::Number(seq.into()));
-    if let Some(agent) = event.get("agent").and_then(Value::as_str) {
-        map.insert("agent".to_string(), Value::String(agent.to_string()));
+    if let Some(event_type) = event.get("type").and_then(Value::as_str) {
+        map.insert("type".to_string(), Value::String(event_type.to_string()));
     }
+    if let Some(source) = event.get("source").and_then(Value::as_str) {
+        map.insert("source".to_string(), Value::String(source.to_string()));
+    }
+    if let Some(synthetic) = event.get("synthetic").and_then(Value::as_bool) {
+        map.insert("synthetic".to_string(), Value::Bool(synthetic));
+    }
+
     let data = event.get("data").unwrap_or(&Value::Null);
-    if let Some(message) = data.get("message") {
-        map.insert("kind".to_string(), Value::String("message".to_string()));
-        map.insert("message".to_string(), normalize_message(message));
-    } else if let Some(started) = data.get("started") {
-        map.insert("kind".to_string(), Value::String("started".to_string()));
-        map.insert("started".to_string(), normalize_started(started));
-    } else if let Some(error) = data.get("error") {
-        map.insert("kind".to_string(), Value::String("error".to_string()));
-        map.insert("error".to_string(), normalize_error(error));
-    } else if let Some(question) = data.get("questionAsked") {
-        map.insert("kind".to_string(), Value::String("question".to_string()));
-        map.insert("question".to_string(), normalize_question(question));
-    } else if let Some(permission) = data.get("permissionAsked") {
-        map.insert("kind".to_string(), Value::String("permission".to_string()));
-        map.insert("permission".to_string(), normalize_permission(permission));
-    } else {
-        map.insert("kind".to_string(), Value::String("unknown".to_string()));
+    match event.get("type").and_then(Value::as_str).unwrap_or("") {
+        "session.started" => {
+            map.insert("session".to_string(), Value::String("started".to_string()));
+            if data.get("metadata").is_some() {
+                map.insert("metadata".to_string(), Value::Bool(true));
+            }
+        }
+        "session.ended" => {
+            map.insert("session".to_string(), Value::String("ended".to_string()));
+            map.insert("ended".to_string(), normalize_session_end(data));
+        }
+        "item.started" | "item.completed" => {
+            if let Some(item) = data.get("item") {
+                map.insert("item".to_string(), normalize_item(item));
+            }
+        }
+        "item.delta" => {
+            let mut delta = Map::new();
+            if data.get("item_id").is_some() {
+                delta.insert("item_id".to_string(), Value::String("<redacted>".to_string()));
+            }
+            if data.get("native_item_id").is_some() {
+                delta.insert("native_item_id".to_string(), Value::String("<redacted>".to_string()));
+            }
+            if data.get("delta").is_some() {
+                delta.insert("delta".to_string(), Value::String("<redacted>".to_string()));
+            }
+            map.insert("delta".to_string(), Value::Object(delta));
+        }
+        "permission.requested" | "permission.resolved" => {
+            map.insert("permission".to_string(), normalize_permission(data));
+        }
+        "question.requested" | "question.resolved" => {
+            map.insert("question".to_string(), normalize_question(data));
+        }
+        "error" => {
+            map.insert("error".to_string(), normalize_error(data));
+        }
+        "agent.unparsed" => {
+            map.insert("unparsed".to_string(), Value::Bool(true));
+        }
+        _ => {}
     }
     Value::Object(map)
 }
 
-fn normalize_message(message: &Value) -> Value {
+fn normalize_item(item: &Value) -> Value {
     let mut map = Map::new();
-    if let Some(role) = message.get("role").and_then(Value::as_str) {
+    if let Some(kind) = item.get("kind").and_then(Value::as_str) {
+        map.insert("kind".to_string(), Value::String(kind.to_string()));
+    }
+    if let Some(role) = item.get("role").and_then(Value::as_str) {
         map.insert("role".to_string(), Value::String(role.to_string()));
     }
-    if let Some(parts) = message.get("parts").and_then(Value::as_array) {
-        let parts = parts.iter().map(normalize_part).collect::<Vec<_>>();
-        map.insert("parts".to_string(), Value::Array(parts));
-    } else if message.get("raw").is_some() {
-        map.insert("unparsed".to_string(), Value::Bool(true));
+    if let Some(status) = item.get("status").and_then(Value::as_str) {
+        map.insert("status".to_string(), Value::String(status.to_string()));
+    }
+    if let Some(content) = item.get("content").and_then(Value::as_array) {
+        let types = content
+            .iter()
+            .filter_map(|part| part.get("type").and_then(Value::as_str))
+            .map(|value| Value::String(value.to_string()))
+            .collect::<Vec<_>>();
+        map.insert("content_types".to_string(), Value::Array(types));
     }
     Value::Object(map)
 }
 
-fn normalize_part(part: &Value) -> Value {
+fn normalize_session_end(data: &Value) -> Value {
     let mut map = Map::new();
-    if let Some(part_type) = part.get("type").and_then(Value::as_str) {
-        map.insert("type".to_string(), Value::String(part_type.to_string()));
+    if let Some(reason) = data.get("reason").and_then(Value::as_str) {
+        map.insert("reason".to_string(), Value::String(reason.to_string()));
     }
-    if let Some(name) = part.get("name").and_then(Value::as_str) {
-        map.insert("name".to_string(), Value::String(name.to_string()));
-    }
-    if part.get("text").is_some() {
-        map.insert("text".to_string(), Value::String("<redacted>".to_string()));
-    }
-    if part.get("input").is_some() {
-        map.insert("input".to_string(), Value::Bool(true));
-    }
-    if part.get("output").is_some() {
-        map.insert("output".to_string(), Value::Bool(true));
-    }
-    Value::Object(map)
-}
-
-fn normalize_started(started: &Value) -> Value {
-    let mut map = Map::new();
-    if let Some(message) = started.get("message").and_then(Value::as_str) {
-        map.insert("message".to_string(), Value::String(message.to_string()));
+    if let Some(terminated_by) = data.get("terminated_by").and_then(Value::as_str) {
+        map.insert("terminated_by".to_string(), Value::String(terminated_by.to_string()));
     }
     Value::Object(map)
 }
 
 fn normalize_error(error: &Value) -> Value {
     let mut map = Map::new();
-    if let Some(kind) = error.get("kind").and_then(Value::as_str) {
-        map.insert("kind".to_string(), Value::String(kind.to_string()));
+    if let Some(code) = error.get("code").and_then(Value::as_str) {
+        map.insert("code".to_string(), Value::String(code.to_string()));
     }
     if let Some(message) = error.get("message").and_then(Value::as_str) {
         map.insert("message".to_string(), Value::String(message.to_string()));
@@ -441,22 +504,28 @@ fn normalize_error(error: &Value) -> Value {
 
 fn normalize_question(question: &Value) -> Value {
     let mut map = Map::new();
-    if question.get("id").is_some() {
+    if question.get("question_id").is_some() {
         map.insert("id".to_string(), Value::String("<redacted>".to_string()));
     }
-    if let Some(questions) = question.get("questions").and_then(Value::as_array) {
-        map.insert("count".to_string(), Value::Number(questions.len().into()));
+    if let Some(options) = question.get("options").and_then(Value::as_array) {
+        map.insert("options".to_string(), Value::Number(options.len().into()));
+    }
+    if let Some(status) = question.get("status").and_then(Value::as_str) {
+        map.insert("status".to_string(), Value::String(status.to_string()));
     }
     Value::Object(map)
 }
 
 fn normalize_permission(permission: &Value) -> Value {
     let mut map = Map::new();
-    if permission.get("id").is_some() {
+    if permission.get("permission_id").is_some() {
         map.insert("id".to_string(), Value::String("<redacted>".to_string()));
     }
-    if let Some(value) = permission.get("permission").and_then(Value::as_str) {
-        map.insert("permission".to_string(), Value::String(value.to_string()));
+    if let Some(value) = permission.get("action").and_then(Value::as_str) {
+        map.insert("action".to_string(), Value::String(value.to_string()));
+    }
+    if let Some(status) = permission.get("status").and_then(Value::as_str) {
+        map.insert("status".to_string(), Value::String(status.to_string()));
     }
     Value::Object(map)
 }
@@ -538,8 +607,8 @@ fn normalize_create_session(value: &Value) -> Value {
     if let Some(healthy) = value.get("healthy").and_then(Value::as_bool) {
         map.insert("healthy".to_string(), Value::Bool(healthy));
     }
-    if value.get("agentSessionId").is_some() {
-        map.insert("agentSessionId".to_string(), Value::String("<redacted>".to_string()));
+    if value.get("nativeSessionId").is_some() {
+        map.insert("nativeSessionId".to_string(), Value::String("<redacted>".to_string()));
     }
     if let Some(error) = value.get("error") {
         map.insert("error".to_string(), error.clone());
@@ -611,7 +680,7 @@ where
         if !new_events.is_empty() {
             if let Some(last) = new_events
                 .last()
-                .and_then(|event| event.get("id"))
+                .and_then(|event| event.get("sequence"))
                 .and_then(Value::as_u64)
             {
                 offset = last;
@@ -631,9 +700,11 @@ fn find_permission_id(events: &[Value]) -> Option<String> {
         .iter()
         .find_map(|event| {
             event
-                .get("data")
-                .and_then(|data| data.get("permissionAsked"))
-                .and_then(|permission| permission.get("id"))
+                .get("type")
+                .and_then(Value::as_str)
+                .filter(|value| *value == "permission.requested")
+                .and_then(|_| event.get("data"))
+                .and_then(|data| data.get("permission_id"))
                 .and_then(Value::as_str)
                 .map(|id| id.to_string())
         })
@@ -641,31 +712,23 @@ fn find_permission_id(events: &[Value]) -> Option<String> {
 
 fn find_question_id_and_answers(events: &[Value]) -> Option<(String, Vec<Vec<String>>)> {
     let question = events.iter().find_map(|event| {
-        event
-            .get("data")
-            .and_then(|data| data.get("questionAsked"))
-            .cloned()
+        let event_type = event.get("type").and_then(Value::as_str)?;
+        if event_type != "question.requested" {
+            return None;
+        }
+        event.get("data").cloned()
     })?;
-    let id = question.get("id").and_then(Value::as_str)?.to_string();
-    let questions = question
-        .get("questions")
+    let id = question.get("question_id").and_then(Value::as_str)?.to_string();
+    let options = question
+        .get("options")
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
     let mut answers = Vec::new();
-    for question in questions {
-        let option = question
-            .get("options")
-            .and_then(Value::as_array)
-            .and_then(|options| options.first())
-            .and_then(|option| option.get("label"))
-            .and_then(Value::as_str)
-            .map(|label| label.to_string());
-        if let Some(label) = option {
-            answers.push(vec![label]);
-        } else {
-            answers.push(Vec::new());
-        }
+    if let Some(option) = options.first().and_then(Value::as_str) {
+        answers.push(vec![option.to_string()]);
+    } else {
+        answers.push(Vec::new());
     }
     Some((id, answers))
 }
@@ -1039,6 +1102,7 @@ async fn approval_flow_snapshots() {
             |events| find_question_id_and_answers(events).is_some() || should_stop(events),
         )
         .await;
+        let question_events = truncate_question_events(&question_events);
         insta::with_settings!({
             snapshot_suffix => snapshot_name("question_reply_events", Some(config.agent)),
         }, {
@@ -1100,6 +1164,7 @@ async fn approval_flow_snapshots() {
             |events| find_question_id_and_answers(events).is_some() || should_stop(events),
         )
         .await;
+        let reject_events = truncate_question_events(&reject_events);
         insta::with_settings!({
             snapshot_suffix => snapshot_name("question_reject_events", Some(config.agent)),
         }, {

@@ -17,6 +17,10 @@ Notes:
 - When a provider does not supply IDs (Claude), we synthesize item_id values and keep native_item_id null.
 - native_session_id is the only provider session identifier. It is intentionally used for thread/session/run ids.
 - native_item_id preserves the agent-native item/message id when present.
+- source indicates who emitted the event: agent (native) or daemon (synthetic).
+- raw is always present on events. When clients do not opt-in to raw payloads, raw is null.
+- opt-in via `include_raw=true` on events endpoints (HTTP + SSE).
+- If parsing fails, emit agent.unparsed (source=daemon, synthetic=true). Tests must assert zero unparsed events.
 
 Events / Message Flow
 
@@ -42,14 +46,14 @@ Synthetics
 +------------------------------+------------------------+--------------------------+--------------------------------------------------------------+
 | Synthetic element            | When it appears        | Stored as               | Notes                                                        |
 +------------------------------+------------------------+--------------------------+--------------------------------------------------------------+
-| session.started              | When agent emits no explicit start | session.started event | Mark origin=daemon                                            |
-| session.ended                | When agent emits no explicit end   | session.ended event   | Mark origin=daemon; reason may be inferred                    |
+| session.started              | When agent emits no explicit start | session.started event | Mark source=daemon                                            |
+| session.ended                | When agent emits no explicit end   | session.ended event   | Mark source=daemon; reason may be inferred                    |
 | item_id (Claude)             | Claude provides no item IDs        | item_id               | Maintain provider_item_id map when possible                   |
-| user message (Claude)        | Claude emits only assistant output | item.completed        | Mark origin=daemon; preserve raw input in event metadata       |
+| user message (Claude)        | Claude emits only assistant output | item.completed        | Mark source=daemon; preserve raw input in event metadata       |
 | question events (Claude)     | Plan mode ExitPlanMode tool usage  | question.requested/resolved | Synthetic mapping from tool call/result                       |
 | native_session_id (Codex)    | Codex uses threadId                | native_session_id     | Intentionally merged threadId into native_session_id          |
 +------------------------------+------------------------+--------------------------+--------------------------------------------------------------+
-| message.delta (Claude/Amp)   | No native deltas               | item.delta             | Synthetic delta with full message content; origin=daemon       |
+| message.delta (Claude/Amp)   | No native deltas               | item.delta             | Synthetic delta with full message content; source=daemon       |
 +------------------------------+------------------------+--------------------------+--------------------------------------------------------------+
 | message.delta (OpenCode)     | part delta before message       | item.delta             | If part arrives first, create item.started stub then delta     |
 +------------------------------+------------------------+--------------------------+--------------------------------------------------------------+
@@ -68,5 +72,9 @@ Policy:
 Message normalization notes
 
 - user vs assistant: normalized via role in the universal item; provider role fields or item types determine role.
+- file artifacts: always represented as content parts (type=file_ref) inside message/tool_result items, not a separate item kind.
+- reasoning: represented as content parts (type=reasoning) inside message items, with visibility when available.
+- subagents: OpenCode subtask parts and Claude Task tool usage are currently normalized into standard message/tool flow (no dedicated subagent fields).
 - OpenCode unrolling: message.updated creates/updates the parent message item; tool-related parts emit separate tool item events (item.started/ item.completed) with parent_id pointing to the message item.
-- If a message.part.updated arrives before message.updated, we create a stub item.started (origin=daemon) so deltas have a parent.
+- If a message.part.updated arrives before message.updated, we create a stub item.started (source=daemon) so deltas have a parent.
+- Tool calls/results are always emitted as separate tool items to keep behavior consistent across agents.

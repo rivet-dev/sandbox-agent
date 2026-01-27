@@ -4,11 +4,6 @@
  */
 
 
-/** OneOf type helpers */
-type Without<T, U> = { [P in Exclude<keyof T, keyof U>]?: never };
-type XOR<T, U> = (T | U) extends object ? (Without<T, U> & U) | (Without<U, T> & T) : T | U;
-type OneOf<T extends any[]> = T extends [infer Only] ? Only : T extends [infer A, infer B, ...infer Rest] ? OneOf<[XOR<A, B>, ...Rest]> : never;
-
 export interface paths {
   "/v1/agents": {
     get: operations["list_agents"];
@@ -46,12 +41,21 @@ export interface paths {
   "/v1/sessions/{session_id}/questions/{question_id}/reply": {
     post: operations["reply_question"];
   };
+  "/v1/sessions/{session_id}/terminate": {
+    post: operations["terminate_session"];
+  };
 }
 
 export type webhooks = Record<string, never>;
 
 export interface components {
   schemas: {
+    AgentCapabilities: {
+      permissions: boolean;
+      planMode: boolean;
+      questions: boolean;
+      toolCalls: boolean;
+    };
     AgentError: {
       agent?: string | null;
       details?: unknown;
@@ -60,6 +64,7 @@ export interface components {
       type: components["schemas"]["ErrorType"];
     };
     AgentInfo: {
+      capabilities: components["schemas"]["AgentCapabilities"];
       id: string;
       installed: boolean;
       path?: string | null;
@@ -79,25 +84,52 @@ export interface components {
     AgentModesResponse: {
       modes: components["schemas"]["AgentModeInfo"][];
     };
-    AttachmentSource: {
+    AgentUnparsedData: {
+      error: string;
+      location: string;
+      raw_hash?: string | null;
+    };
+    ContentPart: {
+      text: string;
+      /** @enum {string} */
+      type: "text";
+    } | {
+      json: unknown;
+      /** @enum {string} */
+      type: "json";
+    } | {
+      arguments: string;
+      call_id: string;
+      name: string;
+      /** @enum {string} */
+      type: "tool_call";
+    } | {
+      call_id: string;
+      output: string;
+      /** @enum {string} */
+      type: "tool_result";
+    } | ({
+      action: components["schemas"]["FileAction"];
+      diff?: string | null;
       path: string;
       /** @enum {string} */
-      type: "path";
-    } | {
+      type: "file_ref";
+    }) | {
+      text: string;
       /** @enum {string} */
-      type: "url";
-      url: string;
+      type: "reasoning";
+      visibility: components["schemas"]["ReasoningVisibility"];
     } | ({
-      data: string;
-      encoding?: string | null;
+      mime?: string | null;
+      path: string;
       /** @enum {string} */
-      type: "data";
+      type: "image";
+    }) | ({
+      detail?: string | null;
+      label: string;
+      /** @enum {string} */
+      type: "status";
     });
-    CrashInfo: {
-      details?: unknown;
-      kind?: string | null;
-      message: string;
-    };
     CreateSessionRequest: {
       agent: string;
       agentMode?: string | null;
@@ -107,13 +139,21 @@ export interface components {
       variant?: string | null;
     };
     CreateSessionResponse: {
-      agentSessionId?: string | null;
       error?: components["schemas"]["AgentError"] | null;
       healthy: boolean;
+      nativeSessionId?: string | null;
+    };
+    ErrorData: {
+      code?: string | null;
+      details?: unknown;
+      message: string;
     };
     /** @enum {string} */
     ErrorType: "invalid_request" | "unsupported_agent" | "agent_not_installed" | "install_failed" | "agent_process_exited" | "token_invalid" | "permission_denied" | "session_not_found" | "session_already_exists" | "mode_not_supported" | "stream_error" | "timeout";
+    /** @enum {string} */
+    EventSource: "agent" | "daemon";
     EventsQuery: {
+      includeRaw?: boolean | null;
       /** Format: int64 */
       limit?: number | null;
       /** Format: int64 */
@@ -123,32 +163,41 @@ export interface components {
       events: components["schemas"]["UniversalEvent"][];
       hasMore: boolean;
     };
+    /** @enum {string} */
+    FileAction: "read" | "write" | "patch";
     HealthResponse: {
       status: string;
     };
+    ItemDeltaData: {
+      delta: string;
+      item_id: string;
+      native_item_id?: string | null;
+    };
+    ItemEventData: {
+      item: components["schemas"]["UniversalItem"];
+    };
+    /** @enum {string} */
+    ItemKind: "message" | "tool_call" | "tool_result" | "system" | "status" | "unknown";
+    /** @enum {string} */
+    ItemRole: "user" | "assistant" | "system" | "tool";
+    /** @enum {string} */
+    ItemStatus: "in_progress" | "completed" | "failed";
     MessageRequest: {
       message: string;
+    };
+    PermissionEventData: {
+      action: string;
+      metadata?: unknown;
+      permission_id: string;
+      status: components["schemas"]["PermissionStatus"];
     };
     /** @enum {string} */
     PermissionReply: "once" | "always" | "reject";
     PermissionReplyRequest: {
       reply: components["schemas"]["PermissionReply"];
     };
-    PermissionRequest: {
-      always: string[];
-      id: string;
-      metadata?: {
-        [key: string]: unknown;
-      };
-      patterns: string[];
-      permission: string;
-      sessionId: string;
-      tool?: components["schemas"]["PermissionToolRef"] | null;
-    };
-    PermissionToolRef: {
-      callId: string;
-      messageId: string;
-    };
+    /** @enum {string} */
+    PermissionStatus: "requested" | "approved" | "denied";
     ProblemDetails: {
       detail?: string | null;
       instance?: string | null;
@@ -158,38 +207,34 @@ export interface components {
       type: string;
       [key: string]: unknown;
     };
-    QuestionInfo: {
-      custom?: boolean | null;
-      header?: string | null;
-      multiSelect?: boolean | null;
-      options: components["schemas"]["QuestionOption"][];
-      question: string;
-    };
-    QuestionOption: {
-      description?: string | null;
-      label: string;
+    QuestionEventData: {
+      options: string[];
+      prompt: string;
+      question_id: string;
+      response?: string | null;
+      status: components["schemas"]["QuestionStatus"];
     };
     QuestionReplyRequest: {
       answers: string[][];
     };
-    QuestionRequest: {
-      id: string;
-      questions: components["schemas"]["QuestionInfo"][];
-      sessionId: string;
-      tool?: components["schemas"]["QuestionToolRef"] | null;
-    };
-    QuestionToolRef: {
-      callId: string;
-      messageId: string;
+    /** @enum {string} */
+    QuestionStatus: "requested" | "answered" | "rejected";
+    /** @enum {string} */
+    ReasoningVisibility: "public" | "private";
+    /** @enum {string} */
+    SessionEndReason: "completed" | "error" | "terminated";
+    SessionEndedData: {
+      reason: components["schemas"]["SessionEndReason"];
+      terminated_by: components["schemas"]["TerminatedBy"];
     };
     SessionInfo: {
       agent: string;
       agentMode: string;
-      agentSessionId?: string | null;
       ended: boolean;
       /** Format: int64 */
       eventCount: number;
       model?: string | null;
+      nativeSessionId?: string | null;
       permissionMode: string;
       sessionId: string;
       variant?: string | null;
@@ -197,98 +242,35 @@ export interface components {
     SessionListResponse: {
       sessions: components["schemas"]["SessionInfo"][];
     };
-    Started: {
-      details?: unknown;
-      message?: string | null;
+    SessionStartedData: {
+      metadata?: unknown;
     };
+    /** @enum {string} */
+    TerminatedBy: "agent" | "daemon";
     UniversalEvent: {
-      agent: string;
-      agentSessionId?: string | null;
       data: components["schemas"]["UniversalEventData"];
+      event_id: string;
+      native_session_id?: string | null;
+      raw?: unknown;
       /** Format: int64 */
-      id: number;
-      sessionId: string;
-      timestamp: string;
+      sequence: number;
+      session_id: string;
+      source: components["schemas"]["EventSource"];
+      synthetic: boolean;
+      time: string;
+      type: components["schemas"]["UniversalEventType"];
     };
-    UniversalEventData: {
-      message: components["schemas"]["UniversalMessage"];
-    } | {
-      started: components["schemas"]["Started"];
-    } | {
-      error: components["schemas"]["CrashInfo"];
-    } | {
-      questionAsked: components["schemas"]["QuestionRequest"];
-    } | {
-      permissionAsked: components["schemas"]["PermissionRequest"];
-    } | {
-      raw: unknown;
-    };
-    UniversalMessage: OneOf<[components["schemas"]["UniversalMessageParsed"], {
-      error?: string | null;
-      raw: unknown;
-    }]>;
-    UniversalMessageParsed: {
-      id?: string | null;
-      metadata?: {
-        [key: string]: unknown;
-      };
-      parts: components["schemas"]["UniversalMessagePart"][];
-      role: string;
-    };
-    UniversalMessagePart: {
-      text: string;
-      /** @enum {string} */
-      type: "text";
-    } | ({
-      id?: string | null;
-      input: unknown;
-      name: string;
-      /** @enum {string} */
-      type: "tool_call";
-    }) | ({
-      id?: string | null;
-      is_error?: boolean | null;
-      name?: string | null;
-      output: unknown;
-      /** @enum {string} */
-      type: "tool_result";
-    }) | ({
-      arguments: unknown;
-      id?: string | null;
-      name?: string | null;
-      raw?: unknown;
-      /** @enum {string} */
-      type: "function_call";
-    }) | ({
-      id?: string | null;
-      is_error?: boolean | null;
-      name?: string | null;
-      raw?: unknown;
-      result: unknown;
-      /** @enum {string} */
-      type: "function_result";
-    }) | ({
-      filename?: string | null;
-      mime_type?: string | null;
-      raw?: unknown;
-      source: components["schemas"]["AttachmentSource"];
-      /** @enum {string} */
-      type: "file";
-    }) | ({
-      alt?: string | null;
-      mime_type?: string | null;
-      raw?: unknown;
-      source: components["schemas"]["AttachmentSource"];
-      /** @enum {string} */
-      type: "image";
-    }) | {
-      message: string;
-      /** @enum {string} */
-      type: "error";
-    } | {
-      raw: unknown;
-      /** @enum {string} */
-      type: "unknown";
+    UniversalEventData: components["schemas"]["SessionStartedData"] | components["schemas"]["SessionEndedData"] | components["schemas"]["ItemEventData"] | components["schemas"]["ItemDeltaData"] | components["schemas"]["ErrorData"] | components["schemas"]["PermissionEventData"] | components["schemas"]["QuestionEventData"] | components["schemas"]["AgentUnparsedData"];
+    /** @enum {string} */
+    UniversalEventType: "session.started" | "session.ended" | "item.started" | "item.delta" | "item.completed" | "error" | "permission.requested" | "permission.resolved" | "question.requested" | "question.resolved" | "agent.unparsed";
+    UniversalItem: {
+      content: components["schemas"]["ContentPart"][];
+      item_id: string;
+      kind: components["schemas"]["ItemKind"];
+      native_item_id?: string | null;
+      parent_id?: string | null;
+      role?: components["schemas"]["ItemRole"] | null;
+      status: components["schemas"]["ItemStatus"];
     };
   };
   responses: never;
@@ -418,10 +400,12 @@ export interface operations {
   get_events: {
     parameters: {
       query?: {
-        /** @description Last seen event id (exclusive) */
+        /** @description Last seen event sequence (exclusive) */
         offset?: number | null;
         /** @description Max events to return */
         limit?: number | null;
+        /** @description Include raw provider payloads */
+        include_raw?: boolean | null;
       };
       path: {
         /** @description Session id */
@@ -444,8 +428,10 @@ export interface operations {
   get_events_sse: {
     parameters: {
       query?: {
-        /** @description Last seen event id (exclusive) */
+        /** @description Last seen event sequence (exclusive) */
         offset?: number | null;
+        /** @description Include raw provider payloads */
+        include_raw?: boolean | null;
       };
       path: {
         /** @description Session id */
@@ -546,6 +532,25 @@ export interface operations {
     };
     responses: {
       /** @description Question answered */
+      204: {
+        content: never;
+      };
+      404: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  terminate_session: {
+    parameters: {
+      path: {
+        /** @description Session id */
+        session_id: string;
+      };
+    };
+    responses: {
+      /** @description Session terminated */
       204: {
         content: never;
       };

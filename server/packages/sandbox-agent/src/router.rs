@@ -24,21 +24,30 @@ use sandbox_agent_universal_agent_schema::{
     convert_claude,
     convert_codex,
     convert_opencode,
-    AttachmentSource,
-    CrashInfo,
+    AgentUnparsedData,
     EventConversion,
-    PermissionRequest,
-    PermissionToolRef,
-    QuestionInfo,
-    QuestionOption,
-    QuestionRequest,
-    QuestionToolRef,
-    Started,
+    EventSource,
+    FileAction,
+    ItemDeltaData,
+    ItemEventData,
+    ItemKind,
+    ItemRole,
+    ItemStatus,
+    ReasoningVisibility,
+    PermissionEventData,
+    PermissionStatus,
+    QuestionEventData,
+    QuestionStatus,
+    ErrorData,
+    SessionEndedData,
+    SessionEndReason,
+    SessionStartedData,
+    TerminatedBy,
     UniversalEvent,
     UniversalEventData,
-    UniversalMessage,
-    UniversalMessageParsed,
-    UniversalMessagePart,
+    UniversalEventType,
+    UniversalItem,
+    ContentPart,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -101,6 +110,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/sessions", get(list_sessions))
         .route("/sessions/:session_id", post(create_session))
         .route("/sessions/:session_id/messages", post(post_message))
+        .route("/sessions/:session_id/terminate", post(terminate_session))
         .route("/sessions/:session_id/events", get(get_events))
         .route("/sessions/:session_id/events/sse", get(get_events_sse))
         .route(
@@ -140,6 +150,7 @@ pub fn build_router(state: AppState) -> Router {
         list_sessions,
         create_session,
         post_message,
+        terminate_session,
         get_events,
         get_events_sse,
         reply_question,
@@ -151,6 +162,7 @@ pub fn build_router(state: AppState) -> Router {
             AgentInstallRequest,
             AgentModeInfo,
             AgentModesResponse,
+            AgentCapabilities,
             AgentInfo,
             AgentListResponse,
             SessionInfo,
@@ -163,18 +175,27 @@ pub fn build_router(state: AppState) -> Router {
             EventsResponse,
             UniversalEvent,
             UniversalEventData,
-            UniversalMessage,
-            UniversalMessageParsed,
-            UniversalMessagePart,
-            AttachmentSource,
-            Started,
-            CrashInfo,
-            QuestionRequest,
-            QuestionInfo,
-            QuestionOption,
-            QuestionToolRef,
-            PermissionRequest,
-            PermissionToolRef,
+            UniversalEventType,
+            EventSource,
+            SessionStartedData,
+            SessionEndedData,
+            SessionEndReason,
+            TerminatedBy,
+            ItemEventData,
+            ItemDeltaData,
+            UniversalItem,
+            ItemKind,
+            ItemRole,
+            ItemStatus,
+            ContentPart,
+            FileAction,
+            ReasoningVisibility,
+            ErrorData,
+            AgentUnparsedData,
+            PermissionEventData,
+            PermissionStatus,
+            QuestionEventData,
+            QuestionStatus,
             QuestionReplyRequest,
             PermissionReplyRequest,
             PermissionReply,
@@ -226,17 +247,35 @@ struct SessionState {
     permission_mode: String,
     model: Option<String>,
     variant: Option<String>,
-    agent_session_id: Option<String>,
+    native_session_id: Option<String>,
     ended: bool,
     ended_exit_code: Option<i32>,
     ended_message: Option<String>,
-    next_event_id: u64,
+    ended_reason: Option<SessionEndReason>,
+    terminated_by: Option<TerminatedBy>,
+    next_event_sequence: u64,
+    next_item_id: u64,
     events: Vec<UniversalEvent>,
-    pending_questions: HashSet<String>,
-    pending_permissions: HashSet<String>,
+    pending_questions: HashMap<String, PendingQuestion>,
+    pending_permissions: HashMap<String, PendingPermission>,
+    item_started: HashSet<String>,
+    item_delta_seen: HashSet<String>,
+    item_map: HashMap<String, String>,
     broadcaster: broadcast::Sender<UniversalEvent>,
     opencode_stream_started: bool,
     codex_sender: Option<mpsc::UnboundedSender<String>>,
+}
+
+#[derive(Debug, Clone)]
+struct PendingPermission {
+    action: String,
+    metadata: Option<Value>,
+}
+
+#[derive(Debug, Clone)]
+struct PendingQuestion {
+    prompt: String,
+    options: Vec<String>,
 }
 
 impl SessionState {
@@ -259,53 +298,36 @@ impl SessionState {
             permission_mode,
             model: request.model.clone(),
             variant: request.variant.clone(),
-            agent_session_id: None,
+            native_session_id: None,
             ended: false,
             ended_exit_code: None,
             ended_message: None,
-            next_event_id: 0,
+            ended_reason: None,
+            terminated_by: None,
+            next_event_sequence: 0,
+            next_item_id: 0,
             events: Vec::new(),
-            pending_questions: HashSet::new(),
-            pending_permissions: HashSet::new(),
+            pending_questions: HashMap::new(),
+            pending_permissions: HashMap::new(),
+            item_started: HashSet::new(),
+            item_delta_seen: HashSet::new(),
+            item_map: HashMap::new(),
             broadcaster,
             opencode_stream_started: false,
             codex_sender: None,
         })
     }
 
-    fn record_conversion(&mut self, conversion: EventConversion) -> UniversalEvent {
-        let agent_session_id = conversion
-            .agent_session_id
-            .clone()
-            .or_else(|| self.agent_session_id.clone());
-        if self.agent_session_id.is_none() {
-            self.agent_session_id = conversion.agent_session_id.clone();
+    fn record_conversions(&mut self, conversions: Vec<EventConversion>) -> Vec<UniversalEvent> {
+        let mut events = Vec::new();
+        for conversion in conversions {
+            for normalized in self.normalize_conversion(conversion) {
+                if let Some(event) = self.push_event(normalized) {
+                    events.push(event);
+                }
+            }
         }
-        self.record_event(conversion.data, agent_session_id)
-    }
-
-    fn record_event(
-        &mut self,
-        data: UniversalEventData,
-        agent_session_id: Option<String>,
-    ) -> UniversalEvent {
-        self.next_event_id += 1;
-        let data = self.normalize_event_data(data);
-        let event = UniversalEvent {
-            id: self.next_event_id,
-            timestamp: now_rfc3339(),
-            session_id: self.session_id.clone(),
-            agent: self.agent.as_str().to_string(),
-            agent_session_id: agent_session_id.clone(),
-            data,
-        };
-        self.update_pending(&event);
-        self.events.push(event.clone());
-        let _ = self.broadcaster.send(event.clone());
-        if self.agent_session_id.is_none() {
-            self.agent_session_id = agent_session_id;
-        }
-        event
+        events
     }
 
     fn set_codex_sender(&mut self, sender: Option<mpsc::UnboundedSender<String>>) {
@@ -316,55 +338,224 @@ impl SessionState {
         self.codex_sender.clone()
     }
 
-    fn normalize_event_data(&self, mut data: UniversalEventData) -> UniversalEventData {
-        match &mut data {
-            UniversalEventData::QuestionAsked { question_asked } => {
-                question_asked.session_id = self.session_id.clone();
+    fn normalize_conversion(&mut self, mut conversion: EventConversion) -> Vec<EventConversion> {
+        if self.native_session_id.is_none() && conversion.native_session_id.is_some() {
+            self.native_session_id = conversion.native_session_id.clone();
+        }
+        if conversion.native_session_id.is_none() {
+            conversion.native_session_id = self.native_session_id.clone();
+        }
+
+        let mut conversions = Vec::new();
+        match conversion.event_type {
+            UniversalEventType::ItemStarted | UniversalEventType::ItemCompleted => {
+                if let UniversalEventData::Item(ref mut data) = conversion.data {
+                    self.ensure_item_id(&mut data.item);
+                    self.ensure_parent_id(&mut data.item);
+                    if conversion.event_type == UniversalEventType::ItemCompleted
+                        && data.item.kind == ItemKind::Message
+                        && !self.item_delta_seen.contains(&data.item.item_id)
+                    {
+                        if let Some(delta) = text_delta_from_parts(&data.item.content) {
+                            conversions.push(
+                                EventConversion::new(
+                                    UniversalEventType::ItemDelta,
+                                    UniversalEventData::ItemDelta(ItemDeltaData {
+                                        item_id: data.item.item_id.clone(),
+                                        native_item_id: data.item.native_item_id.clone(),
+                                        delta,
+                                    }),
+                                )
+                                .synthetic()
+                                .with_native_session(conversion.native_session_id.clone()),
+                            );
+                        }
+                    }
+                }
             }
-            UniversalEventData::PermissionAsked { permission_asked } => {
-                permission_asked.session_id = self.session_id.clone();
+            UniversalEventType::ItemDelta => {
+                if let UniversalEventData::ItemDelta(ref mut data) = conversion.data {
+                    if data.item_id.is_empty() {
+                        data.item_id = match data.native_item_id.as_ref() {
+                            Some(native) => self.item_id_for_native(native),
+                            None => self.next_item_id(),
+                        };
+                    }
+                }
             }
             _ => {}
         }
-        data
+
+        conversions.push(conversion);
+        conversions
+    }
+
+    fn push_event(&mut self, conversion: EventConversion) -> Option<UniversalEvent> {
+        if conversion.event_type == UniversalEventType::ItemStarted {
+            if let UniversalEventData::Item(ref data) = conversion.data {
+                if self.item_started.contains(&data.item.item_id) {
+                    return None;
+                }
+            }
+        }
+
+        self.next_event_sequence += 1;
+        let sequence = self.next_event_sequence;
+        let event = UniversalEvent {
+            event_id: format!("evt_{sequence}"),
+            sequence,
+            time: now_rfc3339(),
+            session_id: self.session_id.clone(),
+            native_session_id: conversion.native_session_id.clone(),
+            synthetic: conversion.synthetic,
+            source: conversion.source,
+            event_type: conversion.event_type,
+            data: conversion.data,
+            raw: conversion.raw,
+        };
+
+        self.update_pending(&event);
+        self.update_item_tracking(&event);
+        self.events.push(event.clone());
+        let _ = self.broadcaster.send(event.clone());
+        if self.native_session_id.is_none() {
+            self.native_session_id = event.native_session_id.clone();
+        }
+        Some(event)
     }
 
     fn update_pending(&mut self, event: &UniversalEvent) {
-        match &event.data {
-            UniversalEventData::QuestionAsked { question_asked } => {
-                self.pending_questions.insert(question_asked.id.clone());
+        match event.event_type {
+            UniversalEventType::QuestionRequested => {
+                if let UniversalEventData::Question(data) = &event.data {
+                    self.pending_questions.insert(
+                        data.question_id.clone(),
+                        PendingQuestion {
+                            prompt: data.prompt.clone(),
+                            options: data.options.clone(),
+                        },
+                    );
+                }
             }
-            UniversalEventData::PermissionAsked { permission_asked } => {
-                self.pending_permissions
-                    .insert(permission_asked.id.clone());
+            UniversalEventType::QuestionResolved => {
+                if let UniversalEventData::Question(data) = &event.data {
+                    self.pending_questions.remove(&data.question_id);
+                }
+            }
+            UniversalEventType::PermissionRequested => {
+                if let UniversalEventData::Permission(data) = &event.data {
+                    self.pending_permissions
+                        .insert(
+                            data.permission_id.clone(),
+                            PendingPermission {
+                                action: data.action.clone(),
+                                metadata: data.metadata.clone(),
+                            },
+                        );
+                }
+            }
+            UniversalEventType::PermissionResolved => {
+                if let UniversalEventData::Permission(data) = &event.data {
+                    self.pending_permissions.remove(&data.permission_id);
+                }
             }
             _ => {}
         }
     }
 
-    fn take_question(&mut self, question_id: &str) -> bool {
+    fn update_item_tracking(&mut self, event: &UniversalEvent) {
+        match event.event_type {
+            UniversalEventType::ItemStarted | UniversalEventType::ItemCompleted => {
+                if let UniversalEventData::Item(data) = &event.data {
+                    self.item_started.insert(data.item.item_id.clone());
+                    if let Some(native) = data.item.native_item_id.as_ref() {
+                        self.item_map
+                            .insert(native.clone(), data.item.item_id.clone());
+                    }
+                }
+            }
+            UniversalEventType::ItemDelta => {
+                if let UniversalEventData::ItemDelta(data) = &event.data {
+                    self.item_delta_seen.insert(data.item_id.clone());
+                    if let Some(native) = data.native_item_id.as_ref() {
+                        self.item_map
+                            .insert(native.clone(), data.item_id.clone());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn take_question(&mut self, question_id: &str) -> Option<PendingQuestion> {
         self.pending_questions.remove(question_id)
     }
 
-    fn take_permission(&mut self, permission_id: &str) -> bool {
+    fn take_permission(&mut self, permission_id: &str) -> Option<PendingPermission> {
         self.pending_permissions.remove(permission_id)
     }
 
-    fn mark_ended(&mut self, exit_code: Option<i32>, message: String) {
+    fn mark_ended(
+        &mut self,
+        exit_code: Option<i32>,
+        message: String,
+        reason: SessionEndReason,
+        terminated_by: TerminatedBy,
+    ) {
         self.ended = true;
         self.ended_exit_code = exit_code;
         self.ended_message = Some(message);
+        self.ended_reason = Some(reason);
+        self.terminated_by = Some(terminated_by);
     }
 
     fn ended_error(&self) -> Option<SandboxError> {
         if !self.ended {
             return None;
         }
+        if matches!(self.terminated_by, Some(TerminatedBy::Daemon)) {
+            return Some(SandboxError::InvalidRequest {
+                message: "session terminated".to_string(),
+            });
+        }
         Some(SandboxError::AgentProcessExited {
             agent: self.agent.as_str().to_string(),
             exit_code: self.ended_exit_code,
             stderr: self.ended_message.clone(),
         })
+    }
+
+    fn ensure_item_id(&mut self, item: &mut UniversalItem) {
+        if item.item_id.is_empty() {
+            if let Some(native) = item.native_item_id.as_ref() {
+                item.item_id = self.item_id_for_native(native);
+            } else {
+                item.item_id = self.next_item_id();
+            }
+        }
+    }
+
+    fn ensure_parent_id(&mut self, item: &mut UniversalItem) {
+        let Some(parent_id) = item.parent_id.clone() else { return };
+        if parent_id.starts_with("itm_") {
+            return;
+        }
+        let mapped = self.item_id_for_native(&parent_id);
+        item.parent_id = Some(mapped);
+    }
+
+    fn item_id_for_native(&mut self, native: &str) -> String {
+        if let Some(item_id) = self.item_map.get(native) {
+            return item_id.clone();
+        }
+        let item_id = self.next_item_id();
+        self.item_map.insert(native.to_string(), item_id.clone());
+        item_id
+    }
+
+    fn next_item_id(&mut self) -> String {
+        self.next_item_id += 1;
+        format!("itm_{}", self.next_item_id)
     }
 }
 
@@ -433,19 +624,27 @@ impl SessionManager {
         let mut session = SessionState::new(session_id.clone(), agent_id, &request)?;
         if agent_id == AgentId::Opencode {
             let opencode_session_id = self.create_opencode_session().await?;
-            session.agent_session_id = Some(opencode_session_id);
+            session.native_session_id = Some(opencode_session_id);
         }
 
-        let started = Started {
-            message: Some("session.created".to_string()),
-            details: None,
-        };
-        session.record_event(
-            UniversalEventData::Started { started },
-            session.agent_session_id.clone(),
-        );
+        let metadata = json!({
+            "agent": request.agent,
+            "agentMode": session.agent_mode,
+            "permissionMode": session.permission_mode,
+            "model": request.model,
+            "variant": request.variant,
+        });
+        let started = EventConversion::new(
+            UniversalEventType::SessionStarted,
+            UniversalEventData::SessionStarted(SessionStartedData {
+                metadata: Some(metadata),
+            }),
+        )
+        .synthetic()
+        .with_native_session(session.native_session_id.clone());
+        session.record_conversions(vec![started]);
 
-        let agent_session_id = session.agent_session_id.clone();
+        let native_session_id = session.native_session_id.clone();
         let mut sessions = self.sessions.lock().await;
         sessions.insert(session_id.clone(), session);
         drop(sessions);
@@ -457,7 +656,7 @@ impl SessionManager {
         Ok(CreateSessionResponse {
             healthy: true,
             error: None,
-            agent_session_id,
+            native_session_id,
         })
     }
 
@@ -521,11 +720,39 @@ impl SessionManager {
         Ok(())
     }
 
+    async fn terminate_session(&self, session_id: String) -> Result<(), SandboxError> {
+        let mut sessions = self.sessions.lock().await;
+        let session = sessions.get_mut(&session_id).ok_or_else(|| SandboxError::SessionNotFound {
+            session_id: session_id.clone(),
+        })?;
+        if session.ended {
+            return Ok(());
+        }
+        session.mark_ended(
+            None,
+            "terminated by daemon".to_string(),
+            SessionEndReason::Terminated,
+            TerminatedBy::Daemon,
+        );
+        let ended = EventConversion::new(
+            UniversalEventType::SessionEnded,
+            UniversalEventData::SessionEnded(SessionEndedData {
+                reason: SessionEndReason::Terminated,
+                terminated_by: TerminatedBy::Daemon,
+            }),
+        )
+        .synthetic()
+        .with_native_session(session.native_session_id.clone());
+        session.record_conversions(vec![ended]);
+        Ok(())
+    }
+
     async fn events(
         &self,
         session_id: &str,
         offset: u64,
         limit: Option<u64>,
+        include_raw: bool,
     ) -> Result<EventsResponse, SandboxError> {
         let sessions = self.sessions.lock().await;
         let session = sessions.get(session_id).ok_or_else(|| SandboxError::SessionNotFound {
@@ -535,8 +762,14 @@ impl SessionManager {
         let mut events: Vec<UniversalEvent> = session
             .events
             .iter()
-            .filter(|event| event.id > offset)
+            .filter(|event| event.sequence > offset)
             .cloned()
+            .map(|mut event| {
+                if !include_raw {
+                    event.raw = None;
+                }
+                event
+            })
             .collect();
 
         let has_more = if let Some(limit) = limit {
@@ -565,7 +798,7 @@ impl SessionManager {
                 permission_mode: state.permission_mode.clone(),
                 model: state.model.clone(),
                 variant: state.variant.clone(),
-                agent_session_id: state.agent_session_id.clone(),
+                native_session_id: state.native_session_id.clone(),
                 ended: state.ended,
                 event_count: state.events.len() as u64,
             })
@@ -584,7 +817,7 @@ impl SessionManager {
         let initial_events = session
             .events
             .iter()
-            .filter(|event| event.id > offset)
+            .filter(|event| event.sequence > offset)
             .cloned()
             .collect::<Vec<_>>();
         let receiver = session.broadcaster.subscribe();
@@ -600,12 +833,13 @@ impl SessionManager {
         question_id: &str,
         answers: Vec<Vec<String>>,
     ) -> Result<(), SandboxError> {
-        let (agent, agent_session_id) = {
+        let (agent, native_session_id, pending_question) = {
             let mut sessions = self.sessions.lock().await;
             let session = sessions.get_mut(session_id).ok_or_else(|| SandboxError::SessionNotFound {
                 session_id: session_id.to_string(),
             })?;
-            if !session.take_question(question_id) {
+            let pending = session.take_question(question_id);
+            if pending.is_none() {
                 return Err(SandboxError::InvalidRequest {
                     message: format!("unknown question id: {question_id}"),
                 });
@@ -613,17 +847,40 @@ impl SessionManager {
             if let Some(err) = session.ended_error() {
                 return Err(err);
             }
-            (session.agent, session.agent_session_id.clone())
+            (session.agent, session.native_session_id.clone(), pending)
         };
 
+        let response = answers
+            .first()
+            .and_then(|inner| inner.first())
+            .cloned();
+
         if agent == AgentId::Opencode {
-            let agent_session_id = agent_session_id.ok_or_else(|| SandboxError::InvalidRequest {
+            let agent_session_id = native_session_id.clone().ok_or_else(|| SandboxError::InvalidRequest {
                 message: "missing OpenCode session id".to_string(),
             })?;
             self.opencode_question_reply(&agent_session_id, question_id, answers)
                 .await?;
         } else {
             // TODO: Forward question replies to subprocess agents.
+        }
+
+        if let Some(pending) = pending_question {
+            let resolved = EventConversion::new(
+                UniversalEventType::QuestionResolved,
+                UniversalEventData::Question(QuestionEventData {
+                    question_id: question_id.to_string(),
+                    prompt: pending.prompt,
+                    options: pending.options,
+                    response,
+                    status: QuestionStatus::Answered,
+                }),
+            )
+            .synthetic()
+            .with_native_session(native_session_id);
+            let _ = self
+                .record_conversions(session_id, vec![resolved])
+                .await;
         }
 
         Ok(())
@@ -634,12 +891,13 @@ impl SessionManager {
         session_id: &str,
         question_id: &str,
     ) -> Result<(), SandboxError> {
-        let (agent, agent_session_id) = {
+        let (agent, native_session_id, pending_question) = {
             let mut sessions = self.sessions.lock().await;
             let session = sessions.get_mut(session_id).ok_or_else(|| SandboxError::SessionNotFound {
                 session_id: session_id.to_string(),
             })?;
-            if !session.take_question(question_id) {
+            let pending = session.take_question(question_id);
+            if pending.is_none() {
                 return Err(SandboxError::InvalidRequest {
                     message: format!("unknown question id: {question_id}"),
                 });
@@ -647,17 +905,35 @@ impl SessionManager {
             if let Some(err) = session.ended_error() {
                 return Err(err);
             }
-            (session.agent, session.agent_session_id.clone())
+            (session.agent, session.native_session_id.clone(), pending)
         };
 
         if agent == AgentId::Opencode {
-            let agent_session_id = agent_session_id.ok_or_else(|| SandboxError::InvalidRequest {
+            let agent_session_id = native_session_id.clone().ok_or_else(|| SandboxError::InvalidRequest {
                 message: "missing OpenCode session id".to_string(),
             })?;
             self.opencode_question_reject(&agent_session_id, question_id)
                 .await?;
         } else {
             // TODO: Forward question rejections to subprocess agents.
+        }
+
+        if let Some(pending) = pending_question {
+            let resolved = EventConversion::new(
+                UniversalEventType::QuestionResolved,
+                UniversalEventData::Question(QuestionEventData {
+                    question_id: question_id.to_string(),
+                    prompt: pending.prompt,
+                    options: pending.options,
+                    response: None,
+                    status: QuestionStatus::Rejected,
+                }),
+            )
+            .synthetic()
+            .with_native_session(native_session_id);
+            let _ = self
+                .record_conversions(session_id, vec![resolved])
+                .await;
         }
 
         Ok(())
@@ -669,12 +945,14 @@ impl SessionManager {
         permission_id: &str,
         reply: PermissionReply,
     ) -> Result<(), SandboxError> {
-        let (agent, agent_session_id, codex_sender, codex_metadata) = {
+        let reply_for_status = reply.clone();
+        let (agent, native_session_id, codex_sender, pending_permission) = {
             let mut sessions = self.sessions.lock().await;
             let session = sessions.get_mut(session_id).ok_or_else(|| SandboxError::SessionNotFound {
                 session_id: session_id.to_string(),
             })?;
-            if !session.take_permission(permission_id) {
+            let pending = session.take_permission(permission_id);
+            if pending.is_none() {
                 return Err(SandboxError::InvalidRequest {
                     message: format!("unknown permission id: {permission_id}"),
                 });
@@ -682,18 +960,6 @@ impl SessionManager {
             if let Some(err) = session.ended_error() {
                 return Err(err);
             }
-            let codex_metadata = if session.agent == AgentId::Codex {
-                session.events.iter().find_map(|event| {
-                    if let UniversalEventData::PermissionAsked { permission_asked } = &event.data {
-                        if permission_asked.id == permission_id {
-                            return Some(permission_asked.metadata.clone());
-                        }
-                    }
-                    None
-                })
-            } else {
-                None
-            };
             let codex_sender = if session.agent == AgentId::Codex {
                 session.codex_sender()
             } else {
@@ -701,9 +967,9 @@ impl SessionManager {
             };
             (
                 session.agent,
-                session.agent_session_id.clone(),
+                session.native_session_id.clone(),
                 codex_sender,
-                codex_metadata,
+                pending,
             )
         };
 
@@ -711,9 +977,10 @@ impl SessionManager {
             let sender = codex_sender.ok_or_else(|| SandboxError::InvalidRequest {
                 message: "codex session not active".to_string(),
             })?;
-            let metadata = codex_metadata.ok_or_else(|| SandboxError::InvalidRequest {
+            let pending = pending_permission.clone().ok_or_else(|| SandboxError::InvalidRequest {
                 message: "missing codex permission metadata".to_string(),
             })?;
+            let metadata = pending.metadata.clone().unwrap_or(Value::Null);
             let request_id = codex_request_id_from_metadata(&metadata)
                 .or_else(|| codex_request_id_from_string(permission_id))
                 .ok_or_else(|| SandboxError::InvalidRequest {
@@ -725,14 +992,14 @@ impl SessionManager {
                 .unwrap_or("");
             let response_value = match request_kind {
                 "commandExecution" => {
-                    let decision = codex_command_decision_for_reply(reply);
+                    let decision = codex_command_decision_for_reply(reply.clone());
                     let response = codex_schema::CommandExecutionRequestApprovalResponse { decision };
                     serde_json::to_value(response).map_err(|err| SandboxError::InvalidRequest {
                         message: err.to_string(),
                     })?
                 }
                 "fileChange" => {
-                    let decision = codex_file_change_decision_for_reply(reply);
+                    let decision = codex_file_change_decision_for_reply(reply.clone());
                     let response = codex_schema::FileChangeRequestApprovalResponse { decision };
                     serde_json::to_value(response).map_err(|err| SandboxError::InvalidRequest {
                         message: err.to_string(),
@@ -755,13 +1022,34 @@ impl SessionManager {
                 message: "codex session not active".to_string(),
             })?;
         } else if agent == AgentId::Opencode {
-            let agent_session_id = agent_session_id.ok_or_else(|| SandboxError::InvalidRequest {
+            let agent_session_id = native_session_id.clone().ok_or_else(|| SandboxError::InvalidRequest {
                 message: "missing OpenCode session id".to_string(),
             })?;
-            self.opencode_permission_reply(&agent_session_id, permission_id, reply)
+            self.opencode_permission_reply(&agent_session_id, permission_id, reply.clone())
                 .await?;
         } else {
             // TODO: Forward permission replies to subprocess agents.
+        }
+
+        if let Some(pending) = pending_permission {
+            let status = match reply_for_status {
+                PermissionReply::Reject => PermissionStatus::Denied,
+                PermissionReply::Once | PermissionReply::Always => PermissionStatus::Approved,
+            };
+            let resolved = EventConversion::new(
+                UniversalEventType::PermissionResolved,
+                UniversalEventData::Permission(PermissionEventData {
+                    permission_id: permission_id.to_string(),
+                    action: pending.action,
+                    status,
+                    metadata: pending.metadata,
+                }),
+            )
+            .synthetic()
+            .with_native_session(native_session_id);
+            let _ = self
+                .record_conversions(session_id, vec![resolved])
+                .await;
         }
 
         Ok(())
@@ -841,16 +1129,21 @@ impl SessionManager {
             if agent == AgentId::Codex {
                 if let Some(state) = codex_state.as_mut() {
                     let outcome = state.handle_line(&line);
-                    if let Some(conversion) = outcome.conversion {
-                        let _ = self.record_conversion(&session_id, conversion).await;
+                    if !outcome.conversions.is_empty() {
+                        let _ = self
+                            .record_conversions(&session_id, outcome.conversions)
+                            .await;
                     }
                     if outcome.should_terminate {
                         terminate_early = true;
                         break;
                     }
                 }
-            } else if let Some(conversion) = parse_agent_line(agent, &line, &session_id) {
-                let _ = self.record_conversion(&session_id, conversion).await;
+            } else {
+                let conversions = parse_agent_line(agent, &line, &session_id);
+                if !conversions.is_empty() {
+                    let _ = self.record_conversions(&session_id, conversions).await;
+                }
             }
         }
 
@@ -866,7 +1159,17 @@ impl SessionManager {
         }
         let status = tokio::task::spawn_blocking(move || child.wait()).await;
         match status {
-            Ok(Ok(status)) if status.success() => {}
+            Ok(Ok(status)) if status.success() => {
+                let message = format!("agent exited with status {:?}", status);
+                self.mark_session_ended(
+                    &session_id,
+                    status.code(),
+                    &message,
+                    SessionEndReason::Completed,
+                    TerminatedBy::Agent,
+                )
+                .await;
+            }
             Ok(Ok(status)) => {
                 let message = format!("agent exited with status {:?}", status);
                 if !terminate_early {
@@ -878,7 +1181,13 @@ impl SessionManager {
                     )
                     .await;
                 }
-                self.mark_session_ended(&session_id, status.code(), &message)
+                self.mark_session_ended(
+                    &session_id,
+                    status.code(),
+                    &message,
+                    SessionEndReason::Error,
+                    TerminatedBy::Agent,
+                )
                     .await;
             }
             Ok(Err(err)) => {
@@ -892,7 +1201,13 @@ impl SessionManager {
                     )
                     .await;
                 }
-                self.mark_session_ended(&session_id, None, &message)
+                self.mark_session_ended(
+                    &session_id,
+                    None,
+                    &message,
+                    SessionEndReason::Error,
+                    TerminatedBy::Daemon,
+                )
                     .await;
             }
             Err(err) => {
@@ -906,35 +1221,28 @@ impl SessionManager {
                     )
                     .await;
                 }
-                self.mark_session_ended(&session_id, None, &message)
+                self.mark_session_ended(
+                    &session_id,
+                    None,
+                    &message,
+                    SessionEndReason::Error,
+                    TerminatedBy::Daemon,
+                )
                     .await;
             }
         }
     }
 
-    async fn record_conversion(
+    async fn record_conversions(
         &self,
         session_id: &str,
-        conversion: EventConversion,
-    ) -> Result<UniversalEvent, SandboxError> {
+        conversions: Vec<EventConversion>,
+    ) -> Result<Vec<UniversalEvent>, SandboxError> {
         let mut sessions = self.sessions.lock().await;
         let session = sessions.get_mut(session_id).ok_or_else(|| SandboxError::SessionNotFound {
             session_id: session_id.to_string(),
         })?;
-        Ok(session.record_conversion(conversion))
-    }
-
-    async fn record_event(
-        &self,
-        session_id: &str,
-        data: UniversalEventData,
-        agent_session_id: Option<String>,
-    ) -> Result<UniversalEvent, SandboxError> {
-        let mut sessions = self.sessions.lock().await;
-        let session = sessions.get_mut(session_id).ok_or_else(|| SandboxError::SessionNotFound {
-            session_id: session_id.to_string(),
-        })?;
-        Ok(session.record_event(data, agent_session_id))
+        Ok(session.record_conversions(conversions))
     }
 
     async fn record_error(
@@ -944,28 +1252,48 @@ impl SessionManager {
         kind: Option<String>,
         details: Option<Value>,
     ) {
-        let error = CrashInfo { message, kind, details };
-        let _ = self
-            .record_event(
-                session_id,
-                UniversalEventData::Error { error },
-                None,
-            )
-            .await;
+        let error = ErrorData {
+            message,
+            code: kind,
+            details,
+        };
+        let conversion = EventConversion::new(
+            UniversalEventType::Error,
+            UniversalEventData::Error(error),
+        )
+        .synthetic();
+        let _ = self.record_conversions(session_id, vec![conversion]).await;
     }
 
-    async fn mark_session_ended(&self, session_id: &str, exit_code: Option<i32>, message: &str) {
+    async fn mark_session_ended(
+        &self,
+        session_id: &str,
+        exit_code: Option<i32>,
+        message: &str,
+        reason: SessionEndReason,
+        terminated_by: TerminatedBy,
+    ) {
         let mut sessions = self.sessions.lock().await;
         if let Some(session) = sessions.get_mut(session_id) {
             if session.ended {
                 return;
             }
-            session.mark_ended(exit_code, message.to_string());
+            session.mark_ended(exit_code, message.to_string(), reason.clone(), terminated_by.clone());
+            let ended = EventConversion::new(
+                UniversalEventType::SessionEnded,
+                UniversalEventData::SessionEnded(SessionEndedData {
+                    reason,
+                    terminated_by,
+                }),
+            )
+            .synthetic()
+            .with_native_session(session.native_session_id.clone());
+            session.record_conversions(vec![ended]);
         }
     }
 
     async fn ensure_opencode_stream(self: &Arc<Self>, session_id: String) -> Result<(), SandboxError> {
-        let agent_session_id = {
+        let native_session_id = {
             let mut sessions = self.sessions.lock().await;
             let session = sessions.get_mut(&session_id).ok_or_else(|| SandboxError::SessionNotFound {
                 session_id: session_id.clone(),
@@ -973,24 +1301,24 @@ impl SessionManager {
             if session.opencode_stream_started {
                 return Ok(());
             }
-            let agent_session_id = session.agent_session_id.clone().ok_or_else(|| SandboxError::InvalidRequest {
+            let native_session_id = session.native_session_id.clone().ok_or_else(|| SandboxError::InvalidRequest {
                 message: "missing OpenCode session id".to_string(),
             })?;
             session.opencode_stream_started = true;
-            agent_session_id
+            native_session_id
         };
 
         let manager = Arc::clone(self);
         tokio::spawn(async move {
             manager
-                .stream_opencode_events(session_id, agent_session_id)
+                .stream_opencode_events(session_id, native_session_id)
                 .await;
         });
 
         Ok(())
     }
 
-    async fn stream_opencode_events(self: Arc<Self>, session_id: String, agent_session_id: String) {
+    async fn stream_opencode_events(self: Arc<Self>, session_id: String, native_session_id: String) {
         let base_url = match self.ensure_opencode_server().await {
             Ok(base_url) => base_url,
             Err(err) => {
@@ -1005,6 +1333,8 @@ impl SessionManager {
                     &session_id,
                     None,
                     "opencode server unavailable",
+                    SessionEndReason::Error,
+                    TerminatedBy::Daemon,
                 )
                 .await;
                 return;
@@ -1026,6 +1356,8 @@ impl SessionManager {
                     &session_id,
                     None,
                     "opencode sse connection failed",
+                    SessionEndReason::Error,
+                    TerminatedBy::Daemon,
                 )
                 .await;
                 return;
@@ -1046,6 +1378,8 @@ impl SessionManager {
                 &session_id,
                 None,
                 "opencode sse error",
+                SessionEndReason::Error,
+                TerminatedBy::Daemon,
             )
             .await;
             return;
@@ -1068,6 +1402,8 @@ impl SessionManager {
                         &session_id,
                         None,
                         "opencode sse stream error",
+                        SessionEndReason::Error,
+                        TerminatedBy::Daemon,
                     )
                     .await;
                     return;
@@ -1078,25 +1414,26 @@ impl SessionManager {
                 let value: Value = match serde_json::from_str(&event_payload) {
                     Ok(value) => value,
                     Err(err) => {
-                        let conversion = EventConversion::new(unparsed_message(
-                            &event_payload,
+                        let conversion = agent_unparsed(
+                            "opencode",
                             &err.to_string(),
-                        ));
-                        let _ = self.record_conversion(&session_id, conversion).await;
+                            Value::String(event_payload.clone()),
+                        );
+                        let _ = self.record_conversions(&session_id, vec![conversion]).await;
                         continue;
                     }
                 };
-                if !opencode_event_matches_session(&value, &agent_session_id) {
+                if !opencode_event_matches_session(&value, &native_session_id) {
                     continue;
                 }
-                let conversion = match serde_json::from_value(value.clone()) {
-                    Ok(event) => convert_opencode::event_to_universal(&event),
-                    Err(err) => EventConversion::new(unparsed_message(
-                        &value.to_string(),
-                        &err.to_string(),
-                    )),
+                let conversions = match serde_json::from_value(value.clone()) {
+                    Ok(event) => match convert_opencode::event_to_universal(&event) {
+                        Ok(conversions) => conversions,
+                        Err(err) => vec![agent_unparsed("opencode", &err, value.clone())],
+                    },
+                    Err(err) => vec![agent_unparsed("opencode", &err.to_string(), value.clone())],
                 };
-                let _ = self.record_conversion(&session_id, conversion).await;
+                let _ = self.record_conversions(&session_id, conversions).await;
             }
         }
     }
@@ -1224,7 +1561,7 @@ impl SessionManager {
         prompt: &str,
     ) -> Result<(), SandboxError> {
         let base_url = self.ensure_opencode_server().await?;
-        let session_id = session.agent_session_id.as_ref().ok_or_else(|| SandboxError::InvalidRequest {
+        let session_id = session.native_session_id.as_ref().ok_or_else(|| SandboxError::InvalidRequest {
             message: "missing OpenCode session id".to_string(),
         })?;
         let url = format!("{base_url}/session/{session_id}/prompt");
@@ -1418,6 +1755,15 @@ pub struct AgentModesResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+pub struct AgentCapabilities {
+    pub plan_mode: bool,
+    pub permissions: bool,
+    pub questions: bool,
+    pub tool_calls: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct AgentInfo {
     pub id: String,
     pub installed: bool,
@@ -1425,6 +1771,7 @@ pub struct AgentInfo {
     pub version: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
+    pub capabilities: AgentCapabilities,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
@@ -1442,7 +1789,7 @@ pub struct SessionInfo {
     pub permission_mode: String,
     pub model: Option<String>,
     pub variant: Option<String>,
-    pub agent_session_id: Option<String>,
+    pub native_session_id: Option<String>,
     pub ended: bool,
     pub event_count: u64,
 }
@@ -1481,7 +1828,7 @@ pub struct CreateSessionResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<AgentError>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub agent_session_id: Option<String>,
+    pub native_session_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
@@ -1497,6 +1844,8 @@ pub struct EventsQuery {
     pub offset: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limit: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub include_raw: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
@@ -1633,6 +1982,7 @@ async fn list_agents(
                     installed,
                     version,
                     path: path.map(|path| path.to_string_lossy().to_string()),
+                    capabilities: agent_capabilities_for(agent_id),
                 }
             })
             .collect::<Vec<_>>()
@@ -1706,12 +2056,31 @@ async fn post_message(
 }
 
 #[utoipa::path(
+    post,
+    path = "/v1/sessions/{session_id}/terminate",
+    params(("session_id" = String, Path, description = "Session id")),
+    responses(
+        (status = 204, description = "Session terminated"),
+        (status = 404, body = ProblemDetails)
+    ),
+    tag = "sessions"
+)]
+async fn terminate_session(
+    State(state): State<Arc<AppState>>,
+    Path(session_id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    state.session_manager.terminate_session(session_id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
     get,
     path = "/v1/sessions/{session_id}/events",
     params(
         ("session_id" = String, Path, description = "Session id"),
-        ("offset" = Option<u64>, Query, description = "Last seen event id (exclusive)"),
-        ("limit" = Option<u64>, Query, description = "Max events to return")
+        ("offset" = Option<u64>, Query, description = "Last seen event sequence (exclusive)"),
+        ("limit" = Option<u64>, Query, description = "Max events to return"),
+        ("include_raw" = Option<bool>, Query, description = "Include raw provider payloads")
     ),
     responses(
         (status = 200, body = EventsResponse),
@@ -1727,7 +2096,7 @@ async fn get_events(
     let offset = query.offset.unwrap_or(0);
     let response = state
         .session_manager
-        .events(&session_id, offset, query.limit)
+        .events(&session_id, offset, query.limit, query.include_raw.unwrap_or(false))
         .await?;
     Ok(Json(response))
 }
@@ -1737,7 +2106,8 @@ async fn get_events(
     path = "/v1/sessions/{session_id}/events/sse",
     params(
         ("session_id" = String, Path, description = "Session id"),
-        ("offset" = Option<u64>, Query, description = "Last seen event id (exclusive)")
+        ("offset" = Option<u64>, Query, description = "Last seen event sequence (exclusive)"),
+        ("include_raw" = Option<bool>, Query, description = "Include raw provider payloads")
     ),
     responses((status = 200, description = "SSE event stream")),
     tag = "sessions"
@@ -1748,6 +2118,7 @@ async fn get_events_sse(
     Query(query): Query<EventsQuery>,
 ) -> Result<Sse<impl futures::Stream<Item = Result<Event, Infallible>>>, ApiError> {
     let offset = query.offset.unwrap_or(0);
+    let include_raw = query.include_raw.unwrap_or(false);
     let subscription = state
         .session_manager
         .subscribe(&session_id, offset)
@@ -1755,14 +2126,25 @@ async fn get_events_sse(
     let initial_events = subscription.initial_events;
     let receiver = subscription.receiver;
 
-    let initial_stream = stream::iter(initial_events.into_iter().map(|event| {
+    let initial_stream = stream::iter(initial_events.into_iter().map(move |mut event| {
+        if !include_raw {
+            event.raw = None;
+        }
         Ok::<Event, Infallible>(to_sse_event(event))
     }));
 
-    let live_stream = BroadcastStream::new(receiver).filter_map(|result| async move {
+    let live_stream = BroadcastStream::new(receiver).filter_map(move |result| {
+        let include_raw = include_raw;
+        async move {
         match result {
-            Ok(event) => Some(Ok::<Event, Infallible>(to_sse_event(event))),
+            Ok(mut event) => {
+                if !include_raw {
+                    event.raw = None;
+                }
+                Some(Ok::<Event, Infallible>(to_sse_event(event)))
+            }
             Err(_) => None,
+        }
         }
     });
 
@@ -1853,6 +2235,37 @@ fn all_agents() -> [AgentId; 4] {
         AgentId::Opencode,
         AgentId::Amp,
     ]
+}
+
+fn agent_capabilities_for(agent: AgentId) -> AgentCapabilities {
+    match agent {
+        // Headless Claude CLI does not expose AskUserQuestion and does not emit tool_result,
+        // so we keep these capabilities off until we switch to an SDK-backed wrapper.
+        AgentId::Claude => AgentCapabilities {
+            plan_mode: false,
+            permissions: false,
+            questions: false,
+            tool_calls: false,
+        },
+        AgentId::Codex => AgentCapabilities {
+            plan_mode: true,
+            permissions: true,
+            questions: false,
+            tool_calls: true,
+        },
+        AgentId::Opencode => AgentCapabilities {
+            plan_mode: false,
+            permissions: false,
+            questions: false,
+            tool_calls: true,
+        },
+        AgentId::Amp => AgentCapabilities {
+            plan_mode: false,
+            permissions: false,
+            questions: false,
+            tool_calls: true,
+        },
+    }
 }
 
 fn parse_agent_id(agent: &str) -> Result<AgentId, SandboxError> {
@@ -2040,7 +2453,7 @@ fn build_spawn_options(
     options.variant = session.variant.clone();
     options.agent_mode = Some(session.agent_mode.clone());
     options.permission_mode = Some(session.permission_mode.clone());
-    options.session_id = session.agent_session_id.clone().or_else(|| {
+    options.session_id = session.native_session_id.clone().or_else(|| {
         if session.agent == AgentId::Opencode {
             Some(session.session_id.clone())
         } else {
@@ -2101,7 +2514,7 @@ fn write_lines(mut stdin: std::process::ChildStdin, mut receiver: mpsc::Unbounde
 
 #[derive(Default)]
 struct CodexLineOutcome {
-    conversion: Option<EventConversion>,
+    conversions: Vec<EventConversion>,
     should_terminate: bool,
 }
 
@@ -2171,11 +2584,29 @@ impl CodexAppServerState {
         }
         let value: Value = match serde_json::from_str(trimmed) {
             Ok(value) => value,
-            Err(_) => return CodexLineOutcome::default(),
+            Err(err) => {
+                return CodexLineOutcome {
+                    conversions: vec![agent_unparsed(
+                        "codex",
+                        &err.to_string(),
+                        Value::String(trimmed.to_string()),
+                    )],
+                    should_terminate: false,
+                };
+            }
         };
         let message: codex_schema::JsonrpcMessage = match serde_json::from_value(value.clone()) {
             Ok(message) => message,
-            Err(_) => return CodexLineOutcome::default(),
+            Err(err) => {
+                return CodexLineOutcome {
+                    conversions: vec![agent_unparsed(
+                        "codex",
+                        &err.to_string(),
+                        value,
+                    )],
+                    should_terminate: false,
+                };
+            }
         };
 
         match message {
@@ -2194,36 +2625,73 @@ impl CodexAppServerState {
                             | codex_schema::ServerNotification::Error(_)
                     );
                     if codex_should_emit_notification(&notification) {
-                        let conversion = convert_codex::notification_to_universal(&notification);
-                        CodexLineOutcome {
-                            conversion: Some(conversion),
-                            should_terminate,
+                        match convert_codex::notification_to_universal(&notification) {
+                            Ok(conversions) => CodexLineOutcome {
+                                conversions,
+                                should_terminate,
+                            },
+                            Err(err) => CodexLineOutcome {
+                                conversions: vec![agent_unparsed(
+                                    "codex",
+                                    &err,
+                                    value,
+                                )],
+                                should_terminate,
+                            },
                         }
                     } else {
                         CodexLineOutcome {
-                            conversion: None,
+                            conversions: Vec::new(),
                             should_terminate,
                         }
                     }
                 } else {
-                    CodexLineOutcome::default()
+                    CodexLineOutcome {
+                        conversions: vec![agent_unparsed(
+                            "codex",
+                            "invalid notification",
+                            value,
+                        )],
+                        should_terminate: false,
+                    }
                 }
             }
             codex_schema::JsonrpcMessage::Request(_) => {
                 if let Ok(request) =
                     serde_json::from_value::<codex_schema::ServerRequest>(value.clone())
                 {
-                    let conversion = codex_request_to_universal(&request);
-                    CodexLineOutcome {
-                        conversion: Some(conversion),
-                        should_terminate: false,
+                    match codex_request_to_universal(&request) {
+                        Ok(mut conversions) => {
+                            for conversion in &mut conversions {
+                                conversion.raw = Some(value.clone());
+                            }
+                            CodexLineOutcome {
+                            conversions,
+                            should_terminate: false,
+                            }
+                        }
+                        Err(err) => CodexLineOutcome {
+                            conversions: vec![agent_unparsed(
+                                "codex",
+                                &err,
+                                value,
+                            )],
+                            should_terminate: false,
+                        },
                     }
                 } else {
-                    CodexLineOutcome::default()
+                    CodexLineOutcome {
+                        conversions: vec![agent_unparsed(
+                            "codex",
+                            "invalid request",
+                            value,
+                        )],
+                        should_terminate: false,
+                    }
                 }
             }
             codex_schema::JsonrpcMessage::Error(error) => CodexLineOutcome {
-                conversion: Some(codex_rpc_error_to_universal(&error)),
+                conversions: vec![codex_rpc_error_to_universal(&error)],
                 should_terminate: true,
             },
         }
@@ -2327,7 +2795,6 @@ impl CodexAppServerState {
             }],
             model: self.model.clone(),
             output_schema: None,
-            personality: None,
             sandbox_policy: self.sandbox_policy.clone(),
             summary: None,
             thread_id,
@@ -2386,20 +2853,11 @@ fn codex_sandbox_policy(mode: Option<&str>) -> Option<codex_schema::SandboxPolic
 }
 
 fn codex_should_emit_notification(notification: &codex_schema::ServerNotification) -> bool {
-    match notification {
-        codex_schema::ServerNotification::ThreadStarted(_)
-        | codex_schema::ServerNotification::TurnStarted(_)
-        | codex_schema::ServerNotification::Error(_) => true,
-        codex_schema::ServerNotification::ItemCompleted(params) => matches!(
-            params.item,
-            codex_schema::ThreadItem::UserMessage { .. }
-                | codex_schema::ThreadItem::AgentMessage { .. }
-        ),
-        _ => false,
-    }
+    let _ = notification;
+    true
 }
 
-fn codex_request_to_universal(request: &codex_schema::ServerRequest) -> EventConversion {
+fn codex_request_to_universal(request: &codex_schema::ServerRequest) -> Result<Vec<EventConversion>, String> {
     match request {
         codex_schema::ServerRequest::ItemCommandExecutionRequestApproval { id, params } => {
             let mut metadata = serde_json::Map::new();
@@ -2420,23 +2878,17 @@ fn codex_request_to_universal(request: &codex_schema::ServerRequest) -> EventCon
             if let Some(reason) = params.reason.as_ref() {
                 metadata.insert("reason".to_string(), Value::String(reason.clone()));
             }
-            let permission = PermissionRequest {
-                id: id.to_string(),
-                session_id: params.thread_id.clone(),
-                permission: "commandExecution".to_string(),
-                patterns: params
-                    .command
-                    .as_ref()
-                    .map(|command| vec![command.clone()])
-                    .unwrap_or_default(),
-                metadata,
-                always: Vec::new(),
-                tool: None,
+            let permission = PermissionEventData {
+                permission_id: id.to_string(),
+                action: "commandExecution".to_string(),
+                status: PermissionStatus::Requested,
+                metadata: Some(Value::Object(metadata)),
             };
-            EventConversion::new(UniversalEventData::PermissionAsked {
-                permission_asked: permission,
-            })
-            .with_session(Some(params.thread_id.clone()))
+            Ok(vec![EventConversion::new(
+                UniversalEventType::PermissionRequested,
+                UniversalEventData::Permission(permission),
+            )
+            .with_native_session(Some(params.thread_id.clone()))])
         }
         codex_schema::ServerRequest::ItemFileChangeRequestApproval { id, params } => {
             let mut metadata = serde_json::Map::new();
@@ -2457,43 +2909,33 @@ fn codex_request_to_universal(request: &codex_schema::ServerRequest) -> EventCon
             if let Some(grant_root) = params.grant_root.as_ref() {
                 metadata.insert("grantRoot".to_string(), Value::String(grant_root.clone()));
             }
-            let permission = PermissionRequest {
-                id: id.to_string(),
-                session_id: params.thread_id.clone(),
-                permission: "fileChange".to_string(),
-                patterns: params
-                    .grant_root
-                    .as_ref()
-                    .map(|root| vec![root.clone()])
-                    .unwrap_or_default(),
-                metadata,
-                always: Vec::new(),
-                tool: None,
+            let permission = PermissionEventData {
+                permission_id: id.to_string(),
+                action: "fileChange".to_string(),
+                status: PermissionStatus::Requested,
+                metadata: Some(Value::Object(metadata)),
             };
-            EventConversion::new(UniversalEventData::PermissionAsked {
-                permission_asked: permission,
-            })
-            .with_session(Some(params.thread_id.clone()))
+            Ok(vec![EventConversion::new(
+                UniversalEventType::PermissionRequested,
+                UniversalEventData::Permission(permission),
+            )
+            .with_native_session(Some(params.thread_id.clone()))])
         }
-        _ => EventConversion::new(UniversalEventData::Unknown {
-            raw: serde_json::to_value(request).unwrap_or(Value::Null),
-        }),
+        _ => Err("unsupported codex request".to_string()),
     }
 }
 
 fn codex_rpc_error_to_universal(error: &codex_schema::JsonrpcError) -> EventConversion {
-    let message = error.error.message.clone();
-    let crash = CrashInfo {
-        message,
-        kind: Some("jsonrpc.error".to_string()),
+    let data = ErrorData {
+        message: error.error.message.clone(),
+        code: Some("jsonrpc.error".to_string()),
         details: serde_json::to_value(error).ok(),
     };
-    EventConversion::new(UniversalEventData::Error { error: crash })
+    EventConversion::new(UniversalEventType::Error, UniversalEventData::Error(data))
 }
 
-fn codex_request_id_from_metadata(
-    metadata: &serde_json::Map<String, Value>,
-) -> Option<codex_schema::RequestId> {
+fn codex_request_id_from_metadata(metadata: &Value) -> Option<codex_schema::RequestId> {
+    let metadata = metadata.as_object()?;
     let value = metadata.get("codexRequestId")?;
     codex_request_id_from_value(value)
 }
@@ -2533,47 +2975,40 @@ fn codex_file_change_decision_for_reply(
     }
 }
 
-fn parse_agent_line(agent: AgentId, line: &str, session_id: &str) -> Option<EventConversion> {
+fn parse_agent_line(agent: AgentId, line: &str, session_id: &str) -> Vec<EventConversion> {
     let trimmed = line.trim();
     if trimmed.is_empty() {
-        return None;
+        return Vec::new();
     }
     let value: Value = match serde_json::from_str(trimmed) {
         Ok(value) => value,
         Err(err) => {
-            return Some(EventConversion::new(unparsed_message(
-                trimmed,
+            return vec![agent_unparsed(
+                agent.as_str(),
                 &err.to_string(),
-            )));
+                Value::String(trimmed.to_string()),
+            )];
         }
     };
-    let conversion = match agent {
-        AgentId::Claude => {
-            convert_claude::event_to_universal_with_session(&value, session_id.to_string())
-        }
+    match agent {
+        AgentId::Claude => convert_claude::event_to_universal_with_session(&value, session_id.to_string())
+            .unwrap_or_else(|err| vec![agent_unparsed("claude", &err, value)]),
         AgentId::Codex => match serde_json::from_value(value.clone()) {
-            Ok(notification) => convert_codex::notification_to_universal(&notification),
-            Err(err) => EventConversion::new(unparsed_message(
-                &value.to_string(),
-                &err.to_string(),
-            )),
+            Ok(notification) => convert_codex::notification_to_universal(&notification)
+                .unwrap_or_else(|err| vec![agent_unparsed("codex", &err, value)]),
+            Err(err) => vec![agent_unparsed("codex", &err.to_string(), value)],
         },
         AgentId::Opencode => match serde_json::from_value(value.clone()) {
-            Ok(event) => convert_opencode::event_to_universal(&event),
-            Err(err) => EventConversion::new(unparsed_message(
-                &value.to_string(),
-                &err.to_string(),
-            )),
+            Ok(event) => convert_opencode::event_to_universal(&event)
+                .unwrap_or_else(|err| vec![agent_unparsed("opencode", &err, value)]),
+            Err(err) => vec![agent_unparsed("opencode", &err.to_string(), value)],
         },
         AgentId::Amp => match serde_json::from_value(value.clone()) {
-            Ok(event) => convert_amp::event_to_universal(&event),
-            Err(err) => EventConversion::new(unparsed_message(
-                &value.to_string(),
-                &err.to_string(),
-            )),
+            Ok(event) => convert_amp::event_to_universal(&event)
+                .unwrap_or_else(|err| vec![agent_unparsed("amp", &err, value)]),
+            Err(err) => vec![agent_unparsed("amp", &err.to_string(), value)],
         },
-    };
-    Some(conversion)
+    }
 }
 
 fn opencode_event_matches_session(value: &Value, session_id: &str) -> bool {
@@ -2720,13 +3155,34 @@ fn ensure_custom_mode(modes: &mut Vec<AgentModeInfo>) {
     });
 }
 
-fn unparsed_message(raw: &str, error: &str) -> UniversalEventData {
-    UniversalEventData::Message {
-        message: UniversalMessage::Unparsed {
-            raw: Value::String(raw.to_string()),
-            error: Some(error.to_string()),
-        },
+fn text_delta_from_parts(parts: &[ContentPart]) -> Option<String> {
+    let mut delta = String::new();
+    for part in parts {
+        if let ContentPart::Text { text } = part {
+            if !delta.is_empty() {
+                delta.push_str("\n");
+            }
+            delta.push_str(text);
+        }
     }
+    if delta.is_empty() {
+        None
+    } else {
+        Some(delta)
+    }
+}
+
+fn agent_unparsed(location: &str, error: &str, raw: Value) -> EventConversion {
+    EventConversion::new(
+        UniversalEventType::AgentUnparsed,
+        UniversalEventData::AgentUnparsed(AgentUnparsedData {
+            error: error.to_string(),
+            location: location.to_string(),
+            raw_hash: None,
+        }),
+    )
+    .synthetic()
+    .with_raw(Some(raw))
 }
 
 fn now_rfc3339() -> String {
@@ -2749,7 +3205,7 @@ struct SessionSnapshot {
     permission_mode: String,
     model: Option<String>,
     variant: Option<String>,
-    agent_session_id: Option<String>,
+    native_session_id: Option<String>,
 }
 
 impl From<&SessionState> for SessionSnapshot {
@@ -2761,7 +3217,7 @@ impl From<&SessionState> for SessionSnapshot {
             permission_mode: session.permission_mode.clone(),
             model: session.model.clone(),
             variant: session.variant.clone(),
-            agent_session_id: session.agent_session_id.clone(),
+            native_session_id: session.native_session_id.clone(),
         }
     }
 }
