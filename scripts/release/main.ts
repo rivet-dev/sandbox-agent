@@ -618,10 +618,11 @@ async function main() {
 		await createAndPushTag(releaseOpts);
 	}
 
-	if (shouldRunStep("create-github-release")) {
-		console.log("==> Creating GitHub Release");
-		await createGitHubRelease(releaseOpts);
-	}
+	// DISABLED FOR TESTING - uncomment when ready to release
+	// if (shouldRunStep("create-github-release")) {
+	// 	console.log("==> Creating GitHub Release");
+	// 	await createGitHubRelease(releaseOpts);
+	// }
 
 	console.log("==> Complete");
 }
