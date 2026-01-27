@@ -32,6 +32,9 @@ export interface paths {
   "/v1/sessions/{session_id}/messages": {
     post: operations["post_message"];
   };
+  "/v1/sessions/{session_id}/messages/stream": {
+    post: operations["post_message_stream"];
+  };
   "/v1/sessions/{session_id}/permissions/{permission_id}/reply": {
     post: operations["reply_permission"];
   };
@@ -258,6 +261,9 @@ export interface components {
     };
     /** @enum {string} */
     TerminatedBy: "agent" | "daemon";
+    TurnStreamQuery: {
+      includeRaw?: boolean | null;
+    };
     UniversalEvent: {
       data: components["schemas"]["UniversalEventData"];
       event_id: string;
@@ -471,6 +477,34 @@ export interface operations {
     responses: {
       /** @description Message accepted */
       204: {
+        content: never;
+      };
+      404: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  post_message_stream: {
+    parameters: {
+      query?: {
+        /** @description Include raw provider payloads */
+        include_raw?: boolean | null;
+      };
+      path: {
+        /** @description Session id */
+        session_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["MessageRequest"];
+      };
+    };
+    responses: {
+      /** @description SSE event stream */
+      200: {
         content: never;
       };
       404: {

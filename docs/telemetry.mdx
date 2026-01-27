@@ -3,7 +3,7 @@ title: "Telemetry"
 description: "Anonymous telemetry collected by sandbox-agent."
 ---
 
-sandbox-agent sends a small, anonymous telemetry payload on startup to help us understand usage and improve reliability.
+sandbox-agent sends a small, anonymous telemetry payload on startup and then every 5 minutes to help us understand usage and improve reliability.
 
 ## What gets sent
 
@@ -12,6 +12,7 @@ sandbox-agent sends a small, anonymous telemetry payload on startup to help us u
 - Detected sandbox provider (for example: Docker, E2B, Vercel Sandboxes).
 
 Each sandbox gets a random anonymous ID stored on disk so usage can be counted without identifying users.
+The last successful send time is also stored on disk, and heartbeats are rate-limited to at most one every 5 minutes.
 
 ## Opting out
 

@@ -408,6 +408,60 @@
         }
       }
     },
+    "/v1/sessions/{session_id}/messages/stream": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "operationId": "post_message_stream",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "description": "Session id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "include_raw",
+            "in": "query",
+            "description": "Include raw provider payloads",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "nullable": true
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MessageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "SSE event stream"
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/sessions/{session_id}/permissions/{permission_id}/reply": {
       "post": {
         "tags": [
@@ -1430,6 +1484,15 @@
           "agent",
           "daemon"
         ]
+      },
+      "TurnStreamQuery": {
+        "type": "object",
+        "properties": {
+          "includeRaw": {
+            "type": "boolean",
+            "nullable": true
+          }
+        }
       },
       "UniversalEvent": {
         "type": "object",

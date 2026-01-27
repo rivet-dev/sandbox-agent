@@ -39,6 +39,7 @@ export type SessionInfo = S["SessionInfo"];
 export type SessionListResponse = S["SessionListResponse"];
 export type SessionStartedData = S["SessionStartedData"];
 export type TerminatedBy = S["TerminatedBy"];
+export type TurnStreamQuery = S["TurnStreamQuery"];
 export type UniversalEvent = S["UniversalEvent"];
 export type UniversalEventData = S["UniversalEventData"];
 export type UniversalEventType = S["UniversalEventType"];

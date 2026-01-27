@@ -1,8 +1,9 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::convert::Infallible;
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
 use std::process::Stdio;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -28,7 +29,7 @@ use sandbox_agent_universal_agent_schema::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use tokio::sync::{broadcast, mpsc, Mutex};
+use tokio::sync::{broadcast, mpsc, oneshot, Mutex};
 use tokio::time::sleep;
 use tokio_stream::wrappers::BroadcastStream;
 use tower_http::trace::TraceLayer;
@@ -89,6 +90,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/sessions", get(list_sessions))
         .route("/sessions/:session_id", post(create_session))
         .route("/sessions/:session_id/messages", post(post_message))
+        .route("/sessions/:session_id/messages/stream", post(post_message_stream))
         .route("/sessions/:session_id/terminate", post(terminate_session))
         .route("/sessions/:session_id/events", get(get_events))
         .route("/sessions/:session_id/events/sse", get(get_events_sse))
@@ -129,6 +131,7 @@ pub fn build_router(state: AppState) -> Router {
         list_sessions,
         create_session,
         post_message,
+        post_message_stream,
         terminate_session,
         get_events,
         get_events_sse,
@@ -151,6 +154,7 @@ pub fn build_router(state: AppState) -> Router {
             CreateSessionResponse,
             MessageRequest,
             EventsQuery,
+            TurnStreamQuery,
             EventsResponse,
             UniversalEvent,
             UniversalEventData,
@@ -488,6 +492,14 @@ impl SessionState {
     }
 
     fn ended_error(&self) -> Option<SandboxError> {
+        self.ended_error_for_messages(false)
+    }
+
+    /// Returns an error if the session cannot accept new messages.
+    /// `for_new_message` should be true when checking before sending a new message -
+    /// this allows agents that support resumption (Claude, Amp, OpenCode) to continue
+    /// after their process exits successfully.
+    fn ended_error_for_messages(&self, for_new_message: bool) -> Option<SandboxError> {
         if !self.ended {
             return None;
         }
@@ -495,6 +507,15 @@ impl SessionState {
             return Some(SandboxError::InvalidRequest {
                 message: "session terminated".to_string(),
             });
+        }
+        // For agents that support resumption (Claude, Amp, OpenCode), allow new messages
+        // after the process exits with success (Completed reason). The new message will
+        // spawn a fresh process with --resume/--continue to continue the conversation.
+        if for_new_message
+            && matches!(self.ended_reason, Some(SessionEndReason::Completed))
+            && agent_supports_resume(self.agent)
+        {
+            return None;
         }
         Some(SandboxError::AgentProcessExited {
             agent: self.agent.as_str().to_string(),
@@ -542,8 +563,9 @@ impl SessionState {
 #[derive(Debug)]
 struct SessionManager {
     agent_manager: Arc<AgentManager>,
-    sessions: Mutex<HashMap<String, SessionState>>,
+    sessions: Mutex<Vec<SessionState>>,
     opencode_server: Mutex<Option<OpencodeServer>>,
+    codex_server: Mutex<Option<Arc<CodexServer>>>,
     http_client: Client,
 }
 
@@ -552,6 +574,92 @@ struct OpencodeServer {
     base_url: String,
     #[allow(dead_code)]
     child: Option<std::process::Child>,
+}
+
+/// Shared Codex app-server process that handles multiple sessions via JSON-RPC.
+/// Similar to OpenCode's server model - a single long-running process that multiplexes
+/// multiple thread (session) conversations.
+struct CodexServer {
+    /// Sender for writing to the process stdin
+    stdin_sender: mpsc::UnboundedSender<String>,
+    /// Pending JSON-RPC requests awaiting responses, keyed by request ID
+    pending_requests: std::sync::Mutex<HashMap<i64, oneshot::Sender<Value>>>,
+    /// Next request ID for JSON-RPC
+    next_id: AtomicI64,
+    /// Whether initialize/initialized handshake has completed
+    initialized: std::sync::Mutex<bool>,
+    /// Mapping from thread_id to session_id for routing notifications
+    thread_sessions: std::sync::Mutex<HashMap<String, String>>,
+}
+
+impl std::fmt::Debug for CodexServer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CodexServer")
+            .field("next_id", &self.next_id.load(Ordering::SeqCst))
+            .finish()
+    }
+}
+
+impl CodexServer {
+    fn new(stdin_sender: mpsc::UnboundedSender<String>) -> Self {
+        Self {
+            stdin_sender,
+            pending_requests: std::sync::Mutex::new(HashMap::new()),
+            next_id: AtomicI64::new(1),
+            initialized: std::sync::Mutex::new(false),
+            thread_sessions: std::sync::Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn next_request_id(&self) -> i64 {
+        self.next_id.fetch_add(1, Ordering::SeqCst)
+    }
+
+    fn send_request(&self, id: i64, request: &impl Serialize) -> Option<oneshot::Receiver<Value>> {
+        let (tx, rx) = oneshot::channel();
+        {
+            let mut pending = self.pending_requests.lock().unwrap();
+            pending.insert(id, tx);
+        }
+        let line = serde_json::to_string(request).ok()?;
+        self.stdin_sender.send(line).ok()?;
+        Some(rx)
+    }
+
+    fn send_notification(&self, notification: &impl Serialize) -> bool {
+        let Ok(line) = serde_json::to_string(notification) else {
+            return false;
+        };
+        self.stdin_sender.send(line).is_ok()
+    }
+
+    fn complete_request(&self, id: i64, result: Value) {
+        let tx = {
+            let mut pending = self.pending_requests.lock().unwrap();
+            pending.remove(&id)
+        };
+        if let Some(tx) = tx {
+            let _ = tx.send(result);
+        }
+    }
+
+    fn register_thread(&self, thread_id: String, session_id: String) {
+        let mut sessions = self.thread_sessions.lock().unwrap();
+        sessions.insert(thread_id, session_id);
+    }
+
+    fn session_for_thread(&self, thread_id: &str) -> Option<String> {
+        let sessions = self.thread_sessions.lock().unwrap();
+        sessions.get(thread_id).cloned()
+    }
+
+    fn is_initialized(&self) -> bool {
+        *self.initialized.lock().unwrap()
+    }
+
+    fn set_initialized(&self) {
+        *self.initialized.lock().unwrap() = true;
+    }
 }
 
 struct SessionSubscription {
@@ -563,10 +671,25 @@ impl SessionManager {
     fn new(agent_manager: Arc<AgentManager>) -> Self {
         Self {
             agent_manager,
-            sessions: Mutex::new(HashMap::new()),
+            sessions: Mutex::new(Vec::new()),
             opencode_server: Mutex::new(None),
+            codex_server: Mutex::new(None),
             http_client: Client::new(),
         }
+    }
+
+    fn session_ref<'a>(
+        sessions: &'a [SessionState],
+        session_id: &str,
+    ) -> Option<&'a SessionState> {
+        sessions.iter().find(|session| session.session_id == session_id)
+    }
+
+    fn session_mut<'a>(
+        sessions: &'a mut [SessionState],
+        session_id: &str,
+    ) -> Option<&'a mut SessionState> {
+        sessions.iter_mut().find(|session| session.session_id == session_id)
     }
 
     async fn create_session(
@@ -577,7 +700,7 @@ impl SessionManager {
         let agent_id = parse_agent_id(&request.agent)?;
         {
             let sessions = self.sessions.lock().await;
-            if sessions.contains_key(&session_id) {
+            if sessions.iter().any(|session| session.session_id == session_id) {
                 return Err(SandboxError::SessionAlreadyExists { session_id });
             }
         }
@@ -608,6 +731,20 @@ impl SessionManager {
             let opencode_session_id = self.create_opencode_session().await?;
             session.native_session_id = Some(opencode_session_id);
         }
+        if agent_id == AgentId::Codex {
+            // Create a thread in the shared Codex app-server
+            let snapshot = SessionSnapshot {
+                session_id: session_id.clone(),
+                agent: agent_id,
+                agent_mode: session.agent_mode.clone(),
+                permission_mode: session.permission_mode.clone(),
+                model: session.model.clone(),
+                variant: session.variant.clone(),
+                native_session_id: None,
+            };
+            let thread_id = self.create_codex_thread(&session_id, &snapshot).await?;
+            session.native_session_id = Some(thread_id);
+        }
         if agent_id == AgentId::Mock {
             session.native_session_id = Some(format!("mock-{session_id}"));
         }
@@ -629,12 +766,21 @@ impl SessionManager {
         .with_native_session(session.native_session_id.clone());
         session.record_conversions(vec![started]);
         if agent_id == AgentId::Mock {
+            // Emit native session.started like real agents do
+            let native_started = EventConversion::new(
+                UniversalEventType::SessionStarted,
+                UniversalEventData::SessionStarted(SessionStartedData {
+                    metadata: Some(json!({ "mock": true })),
+                }),
+            )
+            .with_native_session(session.native_session_id.clone());
+            session.record_conversions(vec![native_started]);
             session.record_conversions(mock_prompt_conversions("mock_0"));
         }
 
         let native_session_id = session.native_session_id.clone();
         let mut sessions = self.sessions.lock().await;
-        sessions.insert(session_id.clone(), session);
+        sessions.push(session);
         drop(sessions);
 
         if agent_id == AgentId::Opencode {
@@ -671,7 +817,8 @@ impl SessionManager {
         session_id: String,
         message: String,
     ) -> Result<(), SandboxError> {
-        let session_snapshot = self.session_snapshot(&session_id, false).await?;
+        // Use allow_ended=true and do explicit check to allow resumable agents
+        let session_snapshot = self.session_snapshot_for_message(&session_id).await?;
         if session_snapshot.agent == AgentId::Mock {
             self.send_mock_message(session_id, message).await?;
             return Ok(());
@@ -682,6 +829,14 @@ impl SessionManager {
                 .await?;
             return Ok(());
         }
+        if session_snapshot.agent == AgentId::Codex {
+            // Use the shared Codex app-server
+            self.send_codex_turn(&session_snapshot, &message).await?;
+            return Ok(());
+        }
+
+        // Reopen the session if it was ended (for resumable agents)
+        self.reopen_session_if_ended(&session_id).await;
 
         let manager = self.agent_manager.clone();
         let prompt = message;
@@ -714,14 +869,28 @@ impl SessionManager {
         Ok(())
     }
 
+    /// Reopens a session that was ended by an agent process completing.
+    /// This allows resumable agents (Claude, Amp, OpenCode) to continue conversations.
+    async fn reopen_session_if_ended(&self, session_id: &str) {
+        let mut sessions = self.sessions.lock().await;
+        if let Some(session) = Self::session_mut(&mut sessions, session_id) {
+            if session.ended && agent_supports_resume(session.agent) {
+                session.ended = false;
+                session.ended_exit_code = None;
+                session.ended_message = None;
+                session.ended_reason = None;
+                session.terminated_by = None;
+            }
+        }
+    }
+
     async fn terminate_session(&self, session_id: String) -> Result<(), SandboxError> {
         let mut sessions = self.sessions.lock().await;
-        let session =
-            sessions
-                .get_mut(&session_id)
-                .ok_or_else(|| SandboxError::SessionNotFound {
-                    session_id: session_id.clone(),
-                })?;
+        let session = Self::session_mut(&mut sessions, &session_id).ok_or_else(|| {
+            SandboxError::SessionNotFound {
+                session_id: session_id.clone(),
+            }
+        })?;
         if session.ended {
             return Ok(());
         }
@@ -752,11 +921,11 @@ impl SessionManager {
         include_raw: bool,
     ) -> Result<EventsResponse, SandboxError> {
         let sessions = self.sessions.lock().await;
-        let session = sessions
-            .get(session_id)
-            .ok_or_else(|| SandboxError::SessionNotFound {
+        let session = Self::session_ref(&sessions, session_id).ok_or_else(|| {
+            SandboxError::SessionNotFound {
                 session_id: session_id.to_string(),
-            })?;
+            }
+        })?;
 
         let mut events: Vec<UniversalEvent> = session
             .events
@@ -789,7 +958,8 @@ impl SessionManager {
     async fn list_sessions(&self) -> Vec<SessionInfo> {
         let sessions = self.sessions.lock().await;
         sessions
-            .values()
+            .iter()
+            .rev()
             .map(|state| SessionInfo {
                 session_id: state.session_id.clone(),
                 agent: state.agent.as_str().to_string(),
@@ -810,11 +980,11 @@ impl SessionManager {
         offset: u64,
     ) -> Result<SessionSubscription, SandboxError> {
         let sessions = self.sessions.lock().await;
-        let session = sessions
-            .get(session_id)
-            .ok_or_else(|| SandboxError::SessionNotFound {
+        let session = Self::session_ref(&sessions, session_id).ok_or_else(|| {
+            SandboxError::SessionNotFound {
                 session_id: session_id.to_string(),
-            })?;
+            }
+        })?;
         let initial_events = session
             .events
             .iter()
@@ -828,6 +998,34 @@ impl SessionManager {
         })
     }
 
+    async fn subscribe_for_turn(
+        &self,
+        session_id: &str,
+    ) -> Result<(SessionSnapshot, SessionSubscription), SandboxError> {
+        let sessions = self.sessions.lock().await;
+        let session = Self::session_ref(&sessions, session_id).ok_or_else(|| {
+            SandboxError::SessionNotFound {
+                session_id: session_id.to_string(),
+            }
+        })?;
+        if let Some(err) = session.ended_error() {
+            return Err(err);
+        }
+        let offset = session.next_event_sequence;
+        let initial_events = session
+            .events
+            .iter()
+            .filter(|event| event.sequence > offset)
+            .cloned()
+            .collect::<Vec<_>>();
+        let receiver = session.broadcaster.subscribe();
+        let subscription = SessionSubscription {
+            initial_events,
+            receiver,
+        };
+        Ok((SessionSnapshot::from(session), subscription))
+    }
+
     async fn reply_question(
         &self,
         session_id: &str,
@@ -836,12 +1034,11 @@ impl SessionManager {
     ) -> Result<(), SandboxError> {
         let (agent, native_session_id, pending_question) = {
             let mut sessions = self.sessions.lock().await;
-            let session =
-                sessions
-                    .get_mut(session_id)
-                    .ok_or_else(|| SandboxError::SessionNotFound {
-                        session_id: session_id.to_string(),
-                    })?;
+            let session = Self::session_mut(&mut sessions, session_id).ok_or_else(|| {
+                SandboxError::SessionNotFound {
+                    session_id: session_id.to_string(),
+                }
+            })?;
             let pending = session.take_question(question_id);
             if pending.is_none() {
                 return Err(SandboxError::InvalidRequest {
@@ -895,12 +1092,11 @@ impl SessionManager {
     ) -> Result<(), SandboxError> {
         let (agent, native_session_id, pending_question) = {
             let mut sessions = self.sessions.lock().await;
-            let session =
-                sessions
-                    .get_mut(session_id)
-                    .ok_or_else(|| SandboxError::SessionNotFound {
-                        session_id: session_id.to_string(),
-                    })?;
+            let session = Self::session_mut(&mut sessions, session_id).ok_or_else(|| {
+                SandboxError::SessionNotFound {
+                    session_id: session_id.to_string(),
+                }
+            })?;
             let pending = session.take_question(question_id);
             if pending.is_none() {
                 return Err(SandboxError::InvalidRequest {
@@ -954,12 +1150,11 @@ impl SessionManager {
         let reply_for_status = reply.clone();
         let (agent, native_session_id, codex_sender, pending_permission) = {
             let mut sessions = self.sessions.lock().await;
-            let session =
-                sessions
-                    .get_mut(session_id)
-                    .ok_or_else(|| SandboxError::SessionNotFound {
-                        session_id: session_id.to_string(),
-                    })?;
+            let session = Self::session_mut(&mut sessions, session_id).ok_or_else(|| {
+                SandboxError::SessionNotFound {
+                    session_id: session_id.to_string(),
+                }
+            })?;
             let pending = session.take_permission(permission_id);
             if pending.is_none() {
                 return Err(SandboxError::InvalidRequest {
@@ -1072,21 +1267,21 @@ impl SessionManager {
         Ok(())
     }
 
-    async fn session_snapshot(
+    /// Gets a session snapshot for sending a new message.
+    /// Uses the `for_new_message` check which allows agents that support resumption
+    /// (Claude, Amp, OpenCode) to continue after their process exits successfully.
+    async fn session_snapshot_for_message(
         &self,
         session_id: &str,
-        allow_ended: bool,
     ) -> Result<SessionSnapshot, SandboxError> {
         let sessions = self.sessions.lock().await;
-        let session = sessions
-            .get(session_id)
-            .ok_or_else(|| SandboxError::SessionNotFound {
+        let session = Self::session_ref(&sessions, session_id).ok_or_else(|| {
+            SandboxError::SessionNotFound {
                 session_id: session_id.to_string(),
-            })?;
-        if !allow_ended {
-            if let Some(err) = session.ended_error() {
-                return Err(err);
             }
+        })?;
+        if let Some(err) = session.ended_error_for_messages(true) {
+            return Err(err);
         }
         Ok(SessionSnapshot::from(session))
     }
@@ -1098,12 +1293,11 @@ impl SessionManager {
     ) -> Result<(), SandboxError> {
         let prefix = {
             let mut sessions = self.sessions.lock().await;
-            let session =
-                sessions
-                    .get_mut(&session_id)
-                    .ok_or_else(|| SandboxError::SessionNotFound {
-                        session_id: session_id.to_string(),
-                    })?;
+            let session = Self::session_mut(&mut sessions, &session_id).ok_or_else(|| {
+                SandboxError::SessionNotFound {
+                    session_id: session_id.to_string(),
+                }
+            })?;
             if let Some(err) = session.ended_error() {
                 return Err(err);
             }
@@ -1187,7 +1381,7 @@ impl SessionManager {
                 codex_sender = Some(writer_tx.clone());
                 {
                     let mut sessions = self.sessions.lock().await;
-                    if let Some(session) = sessions.get_mut(&session_id) {
+                    if let Some(session) = Self::session_mut(&mut sessions, &session_id) {
                         session.set_codex_sender(Some(writer_tx));
                     }
                 }
@@ -1224,7 +1418,7 @@ impl SessionManager {
 
         if agent == AgentId::Codex {
             let mut sessions = self.sessions.lock().await;
-            if let Some(session) = sessions.get_mut(&session_id) {
+            if let Some(session) = Self::session_mut(&mut sessions, &session_id) {
                 session.set_codex_sender(None);
             }
         }
@@ -1314,12 +1508,11 @@ impl SessionManager {
         conversions: Vec<EventConversion>,
     ) -> Result<Vec<UniversalEvent>, SandboxError> {
         let mut sessions = self.sessions.lock().await;
-        let session =
-            sessions
-                .get_mut(session_id)
-                .ok_or_else(|| SandboxError::SessionNotFound {
-                    session_id: session_id.to_string(),
-                })?;
+        let session = Self::session_mut(&mut sessions, session_id).ok_or_else(|| {
+            SandboxError::SessionNotFound {
+                session_id: session_id.to_string(),
+            }
+        })?;
         Ok(session.record_conversions(conversions))
     }
 
@@ -1350,7 +1543,7 @@ impl SessionManager {
         terminated_by: TerminatedBy,
     ) {
         let mut sessions = self.sessions.lock().await;
-        if let Some(session) = sessions.get_mut(session_id) {
+        if let Some(session) = Self::session_mut(&mut sessions, session_id) {
             if session.ended {
                 return;
             }
@@ -1380,12 +1573,11 @@ impl SessionManager {
         let native_session_id =
             {
                 let mut sessions = self.sessions.lock().await;
-                let session =
-                    sessions
-                        .get_mut(&session_id)
-                        .ok_or_else(|| SandboxError::SessionNotFound {
-                            session_id: session_id.clone(),
-                        })?;
+                let session = Self::session_mut(&mut sessions, &session_id).ok_or_else(|| {
+                    SandboxError::SessionNotFound {
+                        session_id: session_id.clone(),
+                    }
+                })?;
                 if session.opencode_stream_started {
                     return Ok(());
                 }
@@ -1581,6 +1773,333 @@ impl SessionManager {
             .ok_or_else(|| SandboxError::StreamError {
                 message: "OpenCode server missing".to_string(),
             })
+    }
+
+    /// Ensures a shared Codex app-server process is running.
+    /// Spawns the process if not already running, sets up stdin/stdout tasks,
+    /// and performs the initialize handshake if needed.
+    async fn ensure_codex_server(self: &Arc<Self>) -> Result<Arc<CodexServer>, SandboxError> {
+        // Fast path: return existing server
+        {
+            let guard = self.codex_server.lock().await;
+            if let Some(server) = guard.as_ref() {
+                return Ok(server.clone());
+            }
+        }
+
+        // Spawn the codex app-server process
+        let manager = self.agent_manager.clone();
+        let (stdin_tx, stdin_rx) = mpsc::unbounded_channel::<String>();
+        let (stdout_tx, stdout_rx) = mpsc::unbounded_channel::<String>();
+
+        let _child = tokio::task::spawn_blocking(move || -> Result<std::process::Child, SandboxError> {
+            let path = manager
+                .resolve_binary(AgentId::Codex)
+                .map_err(|err| map_spawn_error(AgentId::Codex, err))?;
+            let mut command = std::process::Command::new(path);
+            command
+                .arg("app-server")
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+
+            let mut child = command.spawn().map_err(|err| SandboxError::StreamError {
+                message: err.to_string(),
+            })?;
+
+            let stdin = child.stdin.take().ok_or_else(|| SandboxError::StreamError {
+                message: "codex stdin unavailable".to_string(),
+            })?;
+            let stdout = child.stdout.take().ok_or_else(|| SandboxError::StreamError {
+                message: "codex stdout unavailable".to_string(),
+            })?;
+
+            // Stdin writer task
+            let stdin_rx_mut = std::sync::Mutex::new(stdin_rx);
+            std::thread::spawn(move || {
+                let mut stdin = stdin;
+                let mut rx = stdin_rx_mut.lock().unwrap();
+                while let Some(line) = rx.blocking_recv() {
+                    if writeln!(stdin, "{line}").is_err() {
+                        break;
+                    }
+                    if stdin.flush().is_err() {
+                        break;
+                    }
+                }
+            });
+
+            // Stdout reader task
+            std::thread::spawn(move || {
+                let reader = BufReader::new(stdout);
+                for line in reader.lines() {
+                    let Ok(line) = line else { break };
+                    if stdout_tx.send(line).is_err() {
+                        break;
+                    }
+                }
+            });
+
+            Ok(child)
+        })
+        .await
+        .map_err(|err| SandboxError::StreamError {
+            message: err.to_string(),
+        })??;
+
+        let server = Arc::new(CodexServer::new(stdin_tx));
+
+        // Store server before spawning notification handler
+        {
+            let mut guard = self.codex_server.lock().await;
+            if let Some(existing) = guard.as_ref() {
+                // Another task beat us to it
+                return Ok(existing.clone());
+            }
+            *guard = Some(server.clone());
+        }
+
+        // Spawn notification routing task
+        let server_for_task = server.clone();
+        let self_for_task = Arc::clone(self);
+        tokio::spawn(async move {
+            self_for_task
+                .handle_codex_server_output(server_for_task, stdout_rx)
+                .await;
+        });
+
+        // Perform initialize handshake
+        self.codex_server_initialize(&server).await?;
+
+        Ok(server)
+    }
+
+    /// Handles output from the Codex app-server, routing responses and notifications.
+    async fn handle_codex_server_output(
+        self: Arc<Self>,
+        server: Arc<CodexServer>,
+        mut stdout_rx: mpsc::UnboundedReceiver<String>,
+    ) {
+        while let Some(line) = stdout_rx.recv().await {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+
+            let value: Value = match serde_json::from_str(trimmed) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+
+            let message: codex_schema::JsonrpcMessage = match serde_json::from_value(value.clone()) {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+
+            match message {
+                codex_schema::JsonrpcMessage::Response(response) => {
+                    // Route response to waiting request
+                    if let Some(id) = codex_request_id_to_i64(&response.id) {
+                        server.complete_request(id, response.result.clone());
+                    }
+                }
+                codex_schema::JsonrpcMessage::Notification(_) => {
+                    // Route notification to correct session by thread_id
+                    if let Ok(notification) =
+                        serde_json::from_value::<codex_schema::ServerNotification>(value.clone())
+                    {
+                        if let Some(thread_id) = codex_thread_id_from_server_notification(&notification) {
+                            if let Some(session_id) = server.session_for_thread(&thread_id) {
+                                let conversions = match convert_codex::notification_to_universal(&notification) {
+                                    Ok(c) => c,
+                                    Err(err) => vec![agent_unparsed("codex", &err, value.clone())],
+                                };
+                                let _ = self.record_conversions(&session_id, conversions).await;
+                            }
+                        }
+                    }
+                }
+                codex_schema::JsonrpcMessage::Request(_) => {
+                    // Handle server requests (permission requests)
+                    if let Ok(request) =
+                        serde_json::from_value::<codex_schema::ServerRequest>(value.clone())
+                    {
+                        if let Some(thread_id) = codex_thread_id_from_server_request(&request) {
+                            if let Some(session_id) = server.session_for_thread(&thread_id) {
+                                match codex_request_to_universal(&request) {
+                                    Ok(mut conversions) => {
+                                        for conversion in &mut conversions {
+                                            conversion.raw = Some(value.clone());
+                                        }
+                                        let _ = self.record_conversions(&session_id, conversions).await;
+                                    }
+                                    Err(err) => {
+                                        let _ = self
+                                            .record_conversions(
+                                                &session_id,
+                                                vec![agent_unparsed("codex", &err, value.clone())],
+                                            )
+                                            .await;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                codex_schema::JsonrpcMessage::Error(error) => {
+                    // Log error but don't have a session to route to
+                    eprintln!("Codex server error: {:?}", error);
+                }
+            }
+        }
+    }
+
+    /// Performs the initialize/initialized handshake with the Codex server.
+    async fn codex_server_initialize(&self, server: &CodexServer) -> Result<(), SandboxError> {
+        if server.is_initialized() {
+            return Ok(());
+        }
+
+        let id = server.next_request_id();
+        let request = codex_schema::ClientRequest::Initialize {
+            id: codex_schema::RequestId::from(id),
+            params: codex_schema::InitializeParams {
+                client_info: codex_schema::ClientInfo {
+                    name: "sandbox-agent".to_string(),
+                    title: Some("sandbox-agent".to_string()),
+                    version: env!("CARGO_PKG_VERSION").to_string(),
+                },
+            },
+        };
+
+        let rx = server
+            .send_request(id, &request)
+            .ok_or_else(|| SandboxError::StreamError {
+                message: "failed to send initialize request".to_string(),
+            })?;
+
+        // Wait for initialize response with timeout
+        let result = tokio::time::timeout(Duration::from_secs(30), rx).await;
+        match result {
+            Ok(Ok(_)) => {
+                // Send initialized notification
+                let notification = codex_schema::JsonrpcNotification {
+                    method: "initialized".to_string(),
+                    params: None,
+                };
+                server.send_notification(&notification);
+                server.set_initialized();
+                Ok(())
+            }
+            Ok(Err(_)) => Err(SandboxError::StreamError {
+                message: "initialize request cancelled".to_string(),
+            }),
+            Err(_) => Err(SandboxError::StreamError {
+                message: "initialize request timed out".to_string(),
+            }),
+        }
+    }
+
+    /// Creates a new Codex thread/session via the shared app-server.
+    async fn create_codex_thread(
+        self: &Arc<Self>,
+        session_id: &str,
+        session: &SessionSnapshot,
+    ) -> Result<String, SandboxError> {
+        let server = self.ensure_codex_server().await?;
+
+        let id = server.next_request_id();
+        let mut params = codex_schema::ThreadStartParams::default();
+        params.approval_policy = codex_approval_policy(Some(&session.permission_mode));
+        params.sandbox = codex_sandbox_mode(Some(&session.permission_mode));
+        params.model = session.model.clone();
+
+        let request = codex_schema::ClientRequest::ThreadStart {
+            id: codex_schema::RequestId::from(id),
+            params,
+        };
+
+        let rx = server
+            .send_request(id, &request)
+            .ok_or_else(|| SandboxError::StreamError {
+                message: "failed to send thread/start request".to_string(),
+            })?;
+
+        // Wait for thread/start response
+        let result = tokio::time::timeout(Duration::from_secs(30), rx).await;
+        match result {
+            Ok(Ok(response)) => {
+                // Extract thread_id from response
+                let thread_id = response
+                    .get("thread")
+                    .and_then(|t| t.get("id"))
+                    .and_then(Value::as_str)
+                    .or_else(|| response.get("threadId").and_then(Value::as_str))
+                    .ok_or_else(|| SandboxError::StreamError {
+                        message: "thread/start response missing thread id".to_string(),
+                    })?
+                    .to_string();
+
+                // Register thread -> session mapping
+                server.register_thread(thread_id.clone(), session_id.to_string());
+
+                Ok(thread_id)
+            }
+            Ok(Err(_)) => Err(SandboxError::StreamError {
+                message: "thread/start request cancelled".to_string(),
+            }),
+            Err(_) => Err(SandboxError::StreamError {
+                message: "thread/start request timed out".to_string(),
+            }),
+        }
+    }
+
+    /// Sends a turn/start request to an existing Codex thread.
+    async fn send_codex_turn(
+        self: &Arc<Self>,
+        session: &SessionSnapshot,
+        prompt: &str,
+    ) -> Result<(), SandboxError> {
+        let server = self.ensure_codex_server().await?;
+
+        let thread_id = session
+            .native_session_id
+            .as_ref()
+            .ok_or_else(|| SandboxError::InvalidRequest {
+                message: "missing Codex thread id".to_string(),
+            })?;
+
+        let id = server.next_request_id();
+        let prompt_text = codex_prompt_for_mode(prompt, Some(&session.agent_mode));
+        let params = codex_schema::TurnStartParams {
+            approval_policy: codex_approval_policy(Some(&session.permission_mode)),
+            collaboration_mode: None,
+            cwd: None,
+            effort: None,
+            input: vec![codex_schema::UserInput::Text {
+                text: prompt_text,
+                text_elements: Vec::new(),
+            }],
+            model: session.model.clone(),
+            output_schema: None,
+            sandbox_policy: codex_sandbox_policy(Some(&session.permission_mode)),
+            summary: None,
+            thread_id: thread_id.clone(),
+        };
+
+        let request = codex_schema::ClientRequest::TurnStart {
+            id: codex_schema::RequestId::from(id),
+            params,
+        };
+
+        // Send but don't wait for response - notifications will stream back
+        server
+            .send_request(id, &request)
+            .ok_or_else(|| SandboxError::StreamError {
+                message: "failed to send turn/start request".to_string(),
+            })?;
+
+        Ok(())
     }
 
     async fn fetch_opencode_modes(&self) -> Result<Vec<AgentModeInfo>, SandboxError> {
@@ -1959,7 +2478,14 @@ pub struct EventsQuery {
     pub offset: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limit: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "include_raw")]
+    pub include_raw: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnStreamQuery {
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "include_raw")]
     pub include_raw: Option<bool>,
 }
 
@@ -2172,6 +2698,39 @@ async fn post_message(
 
 #[utoipa::path(
     post,
+    path = "/v1/sessions/{session_id}/messages/stream",
+    request_body = MessageRequest,
+    params(
+        ("session_id" = String, Path, description = "Session id"),
+        ("include_raw" = Option<bool>, Query, description = "Include raw provider payloads")
+    ),
+    responses(
+        (status = 200, description = "SSE event stream"),
+        (status = 404, body = ProblemDetails)
+    ),
+    tag = "sessions"
+)]
+async fn post_message_stream(
+    State(state): State<Arc<AppState>>,
+    Path(session_id): Path<String>,
+    Query(query): Query<TurnStreamQuery>,
+    Json(request): Json<MessageRequest>,
+) -> Result<Sse<impl futures::Stream<Item = Result<Event, Infallible>>>, ApiError> {
+    let include_raw = query.include_raw.unwrap_or(false);
+    let (snapshot, subscription) = state
+        .session_manager
+        .subscribe_for_turn(&session_id)
+        .await?;
+    state
+        .session_manager
+        .send_message(session_id, request.message)
+        .await?;
+    let stream = stream_turn_events(subscription, snapshot.agent, include_raw);
+    Ok(Sse::new(stream))
+}
+
+#[utoipa::path(
+    post,
     path = "/v1/sessions/{session_id}/terminate",
     params(("session_id" = String, Path, description = "Session id")),
     responses(
@@ -2353,6 +2912,12 @@ fn all_agents() -> [AgentId; 5] {
         AgentId::Amp,
         AgentId::Mock,
     ]
+}
+
+/// Returns true if the agent supports resuming a session after its process exits.
+/// These agents can use --resume/--continue to continue a conversation.
+fn agent_supports_resume(agent: AgentId) -> bool {
+    matches!(agent, AgentId::Claude | AgentId::Amp | AgentId::Opencode | AgentId::Codex)
 }
 
 fn agent_capabilities_for(agent: AgentId) -> AgentCapabilities {
@@ -3067,6 +3632,63 @@ fn codex_should_emit_notification(notification: &codex_schema::ServerNotificatio
     true
 }
 
+/// Extracts thread_id from a Codex server notification.
+fn codex_thread_id_from_server_notification(
+    notification: &codex_schema::ServerNotification,
+) -> Option<String> {
+    match notification {
+        codex_schema::ServerNotification::ThreadStarted(params) => Some(params.thread.id.clone()),
+        codex_schema::ServerNotification::TurnStarted(params) => Some(params.thread_id.clone()),
+        codex_schema::ServerNotification::TurnCompleted(params) => Some(params.thread_id.clone()),
+        codex_schema::ServerNotification::ItemStarted(params) => Some(params.thread_id.clone()),
+        codex_schema::ServerNotification::ItemCompleted(params) => Some(params.thread_id.clone()),
+        codex_schema::ServerNotification::ItemAgentMessageDelta(params) => {
+            Some(params.thread_id.clone())
+        }
+        codex_schema::ServerNotification::ItemReasoningTextDelta(params) => {
+            Some(params.thread_id.clone())
+        }
+        codex_schema::ServerNotification::ItemReasoningSummaryTextDelta(params) => {
+            Some(params.thread_id.clone())
+        }
+        codex_schema::ServerNotification::ItemCommandExecutionOutputDelta(params) => {
+            Some(params.thread_id.clone())
+        }
+        codex_schema::ServerNotification::ItemFileChangeOutputDelta(params) => {
+            Some(params.thread_id.clone())
+        }
+        codex_schema::ServerNotification::ItemMcpToolCallProgress(params) => {
+            Some(params.thread_id.clone())
+        }
+        codex_schema::ServerNotification::ThreadTokenUsageUpdated(params) => {
+            Some(params.thread_id.clone())
+        }
+        codex_schema::ServerNotification::TurnDiffUpdated(params) => Some(params.thread_id.clone()),
+        codex_schema::ServerNotification::TurnPlanUpdated(params) => Some(params.thread_id.clone()),
+        codex_schema::ServerNotification::ItemCommandExecutionTerminalInteraction(params) => {
+            Some(params.thread_id.clone())
+        }
+        codex_schema::ServerNotification::ItemReasoningSummaryPartAdded(params) => {
+            Some(params.thread_id.clone())
+        }
+        codex_schema::ServerNotification::ThreadCompacted(params) => Some(params.thread_id.clone()),
+        _ => None,
+    }
+}
+
+/// Extracts thread_id from a Codex server request.
+fn codex_thread_id_from_server_request(request: &codex_schema::ServerRequest) -> Option<String> {
+    match request {
+        codex_schema::ServerRequest::ItemCommandExecutionRequestApproval { params, .. } => {
+            Some(params.thread_id.clone())
+        }
+        codex_schema::ServerRequest::ItemFileChangeRequestApproval { params, .. } => {
+            Some(params.thread_id.clone())
+        }
+        _ => None,
+    }
+}
+
 fn codex_request_to_universal(
     request: &codex_schema::ServerRequest,
 ) -> Result<Vec<EventConversion>, String> {
@@ -3170,6 +3792,14 @@ fn codex_request_id_from_value(value: &Value) -> Option<codex_schema::RequestId>
         Value::String(value) => Some(codex_schema::RequestId::Variant0(value.clone())),
         Value::Number(value) => value.as_i64().map(codex_schema::RequestId::from),
         _ => None,
+    }
+}
+
+/// Extracts i64 from a RequestId (for matching request/response pairs).
+fn codex_request_id_to_i64(id: &codex_schema::RequestId) -> Option<i64> {
+    match id {
+        codex_schema::RequestId::Variant1(n) => Some(*n),
+        codex_schema::RequestId::Variant0(s) => s.parse().ok(),
     }
 }
 
@@ -4093,6 +4723,93 @@ fn now_rfc3339() -> String {
     time::OffsetDateTime::now_utc()
         .format(&time::format_description::well_known::Rfc3339)
         .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
+}
+
+struct TurnStreamState {
+    initial_events: VecDeque<UniversalEvent>,
+    receiver: broadcast::Receiver<UniversalEvent>,
+    include_raw: bool,
+    done: bool,
+    agent: AgentId,
+}
+
+fn stream_turn_events(
+    subscription: SessionSubscription,
+    agent: AgentId,
+    include_raw: bool,
+) -> impl futures::Stream<Item = Result<Event, Infallible>> {
+    let state = TurnStreamState {
+        initial_events: VecDeque::from(subscription.initial_events),
+        receiver: subscription.receiver,
+        include_raw,
+        done: false,
+        agent,
+    };
+    stream::unfold(state, |mut state| async move {
+        if state.done {
+            return None;
+        }
+
+        let mut event = if let Some(event) = state.initial_events.pop_front() {
+            event
+        } else {
+            loop {
+                match state.receiver.recv().await {
+                    Ok(event) => break event,
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => return None,
+                }
+            }
+        };
+
+        if !state.include_raw {
+            event.raw = None;
+        }
+
+        if is_turn_terminal(&event, state.agent) {
+            state.done = true;
+        }
+
+        Some((Ok::<Event, Infallible>(to_sse_event(event)), state))
+    })
+}
+
+fn is_turn_terminal(event: &UniversalEvent, agent: AgentId) -> bool {
+    match event.event_type {
+        UniversalEventType::SessionEnded
+        | UniversalEventType::Error
+        | UniversalEventType::AgentUnparsed
+        | UniversalEventType::PermissionRequested
+        | UniversalEventType::QuestionRequested => true,
+        UniversalEventType::ItemCompleted => {
+            let UniversalEventData::Item(ItemEventData { item }) = &event.data else {
+                return false;
+            };
+            if let Some(label) = status_label(item) {
+                if label == "turn.completed" || label == "session.idle" {
+                    return true;
+                }
+            }
+            if matches!(item.role, Some(ItemRole::Assistant)) && item.kind == ItemKind::Message {
+                return agent != AgentId::Codex;
+            }
+            false
+        }
+        _ => false,
+    }
+}
+
+fn status_label(item: &UniversalItem) -> Option<&str> {
+    if item.kind != ItemKind::Status {
+        return None;
+    }
+    item.content.iter().find_map(|part| {
+        if let ContentPart::Status { label, .. } = part {
+            Some(label.as_str())
+        } else {
+            None
+        }
+    })
 }
 
 fn to_sse_event(event: UniversalEvent) -> Event {

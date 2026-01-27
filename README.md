@@ -150,6 +150,7 @@ Create a session and send a message:
 ```bash
 sandbox-agent sessions create my-session --agent codex --endpoint http://127.0.0.1:2468 --token "$SANDBOX_TOKEN"
 sandbox-agent sessions send-message my-session --message "Hello" --endpoint http://127.0.0.1:2468 --token "$SANDBOX_TOKEN"
+sandbox-agent sessions send-message-stream my-session --message "Hello" --endpoint http://127.0.0.1:2468 --token "$SANDBOX_TOKEN"
 ```
 
 Docs: https://rivet.dev/docs/cli

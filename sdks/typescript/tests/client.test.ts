@@ -164,6 +164,31 @@ describe("SandboxAgent", () => {
     });
   });
 
+  describe("postMessageStream", () => {
+    it("posts message and requests SSE", async () => {
+      const mockFetch = vi.fn().mockResolvedValue(
+        new Response("", {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        })
+      );
+      const client = await SandboxAgent.connect({
+        baseUrl: "http://localhost:8080",
+        fetch: mockFetch,
+      });
+
+      await client.postMessageStream("test-session", { message: "Hello" }, { includeRaw: true });
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        "http://localhost:8080/v1/sessions/test-session/messages/stream?includeRaw=true",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ message: "Hello" }),
+        })
+      );
+    });
+  });
+
   describe("getEvents", () => {
     it("returns events", async () => {
       const events = { events: [], hasMore: false };

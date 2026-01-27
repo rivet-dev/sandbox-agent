@@ -383,7 +383,7 @@
         flex-direction: column;
         border-right: 1px solid var(--border);
         background: var(--surface-2);
-        overflow: hidden;
+        overflow: visible;
       }
 
       .sidebar-header {
@@ -394,12 +394,15 @@
         align-items: center;
         justify-content: space-between;
         flex-shrink: 0;
+        overflow: visible;
       }
 
       .sidebar-header-actions {
         display: flex;
         align-items: center;
         gap: 8px;
+        position: relative;
+        overflow: visible;
       }
 
       .sidebar-icon-btn {
@@ -447,6 +450,53 @@
 
       .sidebar-add-btn:hover {
         background: var(--accent-hover);
+      }
+
+      .sidebar-add-menu-wrapper {
+        position: relative;
+      }
+
+      .sidebar-add-menu {
+        position: absolute;
+        top: 30px;
+        right: 0;
+        min-width: 140px;
+        background: var(--surface);
+        border: 1px solid var(--border-2);
+        border-radius: 8px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+        padding: 6px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        z-index: 60;
+      }
+
+      .sidebar-add-option {
+        background: transparent;
+        border: 1px solid transparent;
+        color: var(--text);
+        text-align: left;
+        padding: 6px 8px;
+        border-radius: 6px;
+        font-size: 12px;
+        cursor: pointer;
+        transition: all var(--transition);
+      }
+
+      .sidebar-add-option:hover {
+        background: var(--accent);
+        color: #fff;
+      }
+
+      .sidebar-add-status {
+        padding: 6px 8px;
+        font-size: 11px;
+        color: var(--muted);
+      }
+
+      .sidebar-add-status.error {
+        color: var(--danger);
       }
 
       .session-list {
@@ -520,6 +570,10 @@
         font-size: 11px;
       }
 
+      .sidebar-empty.error {
+        color: var(--danger);
+      }
+
       /* Chat Panel */
       .chat-panel {
         display: flex;
@@ -558,6 +612,21 @@
         font-family: ui-monospace, SFMono-Regular, 'SF Mono', Consolas, monospace;
         font-size: 12px;
         color: var(--text-secondary);
+      }
+
+      .session-agent-display {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--accent);
+        background: color-mix(in srgb, var(--accent) 18%, transparent);
+        padding: 2px 6px;
+        border-radius: 999px;
+      }
+
+      .panel-header-right {
+        display: flex;
+        align-items: center;
+        gap: 8px;
       }
 
       .messages-container {
@@ -947,6 +1016,13 @@
         width: 50px;
       }
 
+      .setup-select-small:disabled,
+      .setup-select:disabled,
+      .setup-input:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+      }
+
       .setup-stream-btn {
         display: flex;
         align-items: center;
@@ -971,6 +1047,16 @@
       .setup-stream-btn:hover {
         border-color: var(--accent);
         color: var(--accent);
+      }
+
+      .setup-stream-btn:disabled {
+        cursor: default;
+        opacity: 0.6;
+      }
+
+      .setup-stream-btn:disabled:hover {
+        border-color: var(--border-2);
+        color: var(--muted);
       }
 
       .setup-stream-btn.active {

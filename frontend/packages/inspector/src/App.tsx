@@ -62,6 +62,12 @@ export default function App() {
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [modesByAgent, setModesByAgent] = useState<Record<string, AgentModeInfo[]>>({});
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  const [agentsLoading, setAgentsLoading] = useState(false);
+  const [agentsError, setAgentsError] = useState<string | null>(null);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [sessionsError, setSessionsError] = useState<string | null>(null);
+  const [modesLoadingByAgent, setModesLoadingByAgent] = useState<Record<string, boolean>>({});
+  const [modesErrorByAgent, setModesErrorByAgent] = useState<Record<string, string | null>>({});
 
   const [agentId, setAgentId] = useState("claude");
   const [agentMode, setAgentMode] = useState("");
@@ -75,10 +81,12 @@ export default function App() {
   const [events, setEvents] = useState<UniversalEvent[]>([]);
   const [offset, setOffset] = useState(0);
   const offsetRef = useRef(0);
+  const [eventsLoading, setEventsLoading] = useState(false);
 
   const [polling, setPolling] = useState(false);
   const pollTimerRef = useRef<number | null>(null);
-  const [streamMode, setStreamMode] = useState<"poll" | "sse">("sse");
+  const [turnStreaming, setTurnStreaming] = useState(false);
+  const [streamMode, setStreamMode] = useState<"poll" | "sse" | "turn">("sse");
   const [eventError, setEventError] = useState<string | null>(null);
 
   const [questionSelections, setQuestionSelections] = useState<Record<string, string[][]>>({});
@@ -95,6 +103,7 @@ export default function App() {
 
   const clientRef = useRef<SandboxAgent | null>(null);
   const sseAbortRef = useRef<AbortController | null>(null);
+  const turnAbortRef = useRef<AbortController | null>(null);
 
   const logRequest = useCallback((entry: RequestLog) => {
     setRequestLog((prev) => {
@@ -200,9 +209,18 @@ export default function App() {
     setEventError(null);
     stopPolling();
     stopSse();
+    stopTurnStream();
+    setAgents([]);
+    setSessions([]);
+    setAgentsLoading(false);
+    setSessionsLoading(false);
+    setAgentsError(null);
+    setSessionsError(null);
   };
 
   const refreshAgents = async () => {
+    setAgentsLoading(true);
+    setAgentsError(null);
     try {
       const data = await getClient().listAgents();
       const agentList = data.agents ?? [];
@@ -213,17 +231,23 @@ export default function App() {
         }
       }
     } catch (error) {
-      setConnectError(getErrorMessage(error, "Unable to refresh agents"));
+      setAgentsError(getErrorMessage(error, "Unable to refresh agents"));
+    } finally {
+      setAgentsLoading(false);
     }
   };
 
   const fetchSessions = async () => {
+    setSessionsLoading(true);
+    setSessionsError(null);
     try {
       const data = await getClient().listSessions();
       const sessionList = data.sessions ?? [];
       setSessions(sessionList);
     } catch {
-      // Silently fail - sessions list is supplementary
+      setSessionsError("Unable to load sessions.");
+    } finally {
+      setSessionsLoading(false);
     }
   };
 
@@ -237,22 +261,32 @@ export default function App() {
   };
 
   const loadModes = async (targetId: string) => {
+    setModesLoadingByAgent((prev) => ({ ...prev, [targetId]: true }));
+    setModesErrorByAgent((prev) => ({ ...prev, [targetId]: null }));
     try {
       const data = await getClient().getAgentModes(targetId);
       const modes = data.modes ?? [];
       setModesByAgent((prev) => ({ ...prev, [targetId]: modes }));
     } catch {
-      // Silently fail - modes are optional
+      setModesErrorByAgent((prev) => ({ ...prev, [targetId]: "Unable to load modes." }));
+    } finally {
+      setModesLoadingByAgent((prev) => ({ ...prev, [targetId]: false }));
     }
   };
 
   const sendMessage = async () => {
-    if (!message.trim()) return;
+    const prompt = message.trim();
+    if (!prompt || !sessionId || turnStreaming) return;
     setSessionError(null);
-    try {
-      await getClient().postMessage(sessionId, { message });
-      setMessage("");
+    setMessage("");
 
+    if (streamMode === "turn") {
+      await startTurnStream(prompt);
+      return;
+    }
+
+    try {
+      await getClient().postMessage(sessionId, { message: prompt });
       if (!polling) {
         if (streamMode === "poll") {
           startPolling();
@@ -266,6 +300,7 @@ export default function App() {
   };
 
   const selectSession = (session: SessionInfo) => {
+    stopTurnStream();
     setSessionId(session.sessionId);
     setAgentId(session.agent);
     setAgentMode(session.agentMode);
@@ -278,7 +313,12 @@ export default function App() {
     setSessionError(null);
   };
 
-  const createNewSession = async () => {
+  const createNewSession = async (nextAgentId?: string) => {
+    stopTurnStream();
+    const selectedAgent = nextAgentId ?? agentId;
+    if (nextAgentId) {
+      setAgentId(nextAgentId);
+    }
     const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
     let id = "session-";
     for (let i = 0; i < 8; i++) {
@@ -297,7 +337,7 @@ export default function App() {
         permissionMode?: string;
         model?: string;
         variant?: string;
-      } = { agent: agentId };
+      } = { agent: selectedAgent };
       if (agentMode) body.agentMode = agentMode;
       if (permissionMode) body.permissionMode = permissionMode;
       if (model) body.model = model;
@@ -320,6 +360,7 @@ export default function App() {
 
   const fetchEvents = useCallback(async () => {
     if (!sessionId) return;
+    setEventsLoading(true);
     try {
       const response = await getClient().getEvents(sessionId, {
         offset: offsetRef.current,
@@ -330,6 +371,8 @@ export default function App() {
       setEventError(null);
     } catch (error) {
       setEventError(getErrorMessage(error, "Unable to fetch events"));
+    } finally {
+      setEventsLoading(false);
     }
   }, [appendEvents, getClient, sessionId]);
 
@@ -392,6 +435,48 @@ export default function App() {
       sseAbortRef.current = null;
     }
     setPolling(false);
+  };
+
+  const startTurnStream = async (prompt: string) => {
+    stopPolling();
+    stopSse();
+    if (turnAbortRef.current) return;
+    if (!sessionId) {
+      setEventError("Select or create a session first.");
+      return;
+    }
+    setEventError(null);
+    setTurnStreaming(true);
+    const controller = new AbortController();
+    turnAbortRef.current = controller;
+    try {
+      for await (const event of getClient().streamTurn(
+        sessionId,
+        { message: prompt },
+        undefined,
+        controller.signal
+      )) {
+        appendEvents([event]);
+      }
+    } catch (error) {
+      if (controller.signal.aborted) {
+        return;
+      }
+      setEventError(getErrorMessage(error, "Turn stream error."));
+    } finally {
+      if (turnAbortRef.current === controller) {
+        turnAbortRef.current = null;
+        setTurnStreaming(false);
+      }
+    }
+  };
+
+  const stopTurnStream = () => {
+    if (turnAbortRef.current) {
+      turnAbortRef.current.abort();
+      turnAbortRef.current = null;
+    }
+    setTurnStreaming(false);
   };
 
   const resetEvents = () => {
@@ -580,6 +665,7 @@ export default function App() {
     return () => {
       stopPolling();
       stopSse();
+      stopTurnStream();
     };
   }, []);
 
@@ -604,6 +690,7 @@ export default function App() {
 
   useEffect(() => {
     if (!connected || !sessionId || polling) return;
+    if (streamMode === "turn") return;
     const hasSession = sessions.some((session) => session.sessionId === sessionId);
     if (!hasSession) return;
     if (streamMode === "poll") {
@@ -612,6 +699,15 @@ export default function App() {
       startSse();
     }
   }, [connected, sessionId, polling, streamMode, sessions]);
+
+  useEffect(() => {
+    if (streamMode === "turn") {
+      stopPolling();
+      stopSse();
+    } else if (turnStreaming) {
+      stopTurnStream();
+    }
+  }, [streamMode, turnStreaming]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -633,6 +729,16 @@ export default function App() {
   const availableAgents = agents.length ? agents.map((agent) => agent.id) : defaultAgents;
   const currentAgent = agents.find((agent) => agent.id === agentId);
   const activeModes = modesByAgent[agentId] ?? [];
+  const modesLoading = modesLoadingByAgent[agentId] ?? false;
+  const modesError = modesErrorByAgent[agentId] ?? null;
+  const agentDisplayNames: Record<string, string> = {
+    claude: "Claude Code",
+    codex: "Codex",
+    opencode: "OpenCode",
+    amp: "Amp",
+    mock: "Mock"
+  };
+  const agentLabel = agentDisplayNames[agentId] ?? agentId;
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey) {
@@ -642,6 +748,9 @@ export default function App() {
   };
 
   const toggleStream = () => {
+    if (streamMode === "turn") {
+      return;
+    }
     if (polling) {
       if (streamMode === "poll") {
         stopPolling();
@@ -695,11 +804,17 @@ export default function App() {
           onSelectSession={selectSession}
           onRefresh={fetchSessions}
           onCreateSession={createNewSession}
+          availableAgents={availableAgents}
+          agentsLoading={agentsLoading}
+          agentsError={agentsError}
+          sessionsLoading={sessionsLoading}
+          sessionsError={sessionsError}
         />
 
         <ChatPanel
           sessionId={sessionId}
           polling={polling}
+          turnStreaming={turnStreaming}
           transcriptEntries={transcriptEntries}
           sessionError={sessionError}
           message={message}
@@ -708,22 +823,24 @@ export default function App() {
           onKeyDown={handleKeyDown}
           onCreateSession={createNewSession}
           messagesEndRef={messagesEndRef}
-          agentId={agentId}
+          agentLabel={agentLabel}
           agentMode={agentMode}
           permissionMode={permissionMode}
           model={model}
           variant={variant}
           streamMode={streamMode}
-          availableAgents={availableAgents}
           activeModes={activeModes}
           currentAgentVersion={currentAgent?.version ?? null}
-          onAgentChange={setAgentId}
+          modesLoading={modesLoading}
+          modesError={modesError}
           onAgentModeChange={setAgentMode}
           onPermissionModeChange={setPermissionMode}
           onModelChange={setModel}
           onVariantChange={setVariant}
           onStreamModeChange={setStreamMode}
           onToggleStream={toggleStream}
+          hasSession={Boolean(sessionId)}
+          eventError={eventError}
           questionRequests={questionRequests}
           permissionRequests={permissionRequests}
           questionSelections={questionSelections}
@@ -740,6 +857,8 @@ export default function App() {
           offset={offset}
           onFetchEvents={fetchEvents}
           onResetEvents={resetEvents}
+          eventsLoading={eventsLoading}
+          eventsError={eventError}
           requestLog={requestLog}
           copiedLogId={copiedLogId}
           onClearRequestLog={() => setRequestLog([])}
@@ -749,6 +868,8 @@ export default function App() {
           modesByAgent={modesByAgent}
           onRefreshAgents={refreshAgents}
           onInstallAgent={installAgent}
+          agentsLoading={agentsLoading}
+          agentsError={agentsError}
         />
       </main>
     </div>

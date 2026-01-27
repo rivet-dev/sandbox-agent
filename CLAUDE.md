@@ -24,6 +24,7 @@ Research on how different agents operate (CLI flags, streaming formats, HITL pat
 Universal schema guidance:
 - The universal schema should cover the full feature set of all agents.
 - Conversions must be best-effort overlap without being lossy; preserve raw payloads when needed.
+- **The mock agent acts as the reference implementation** for correct event behavior. Real agents should use synthetic events to match the mock agent's event patterns (e.g., emitting both daemon synthetic and agent native `session.started` events, proper `item.started` → `item.delta` → `item.completed` sequences).
 
 ## Spec Tracking
 
@@ -54,6 +55,7 @@ Universal schema guidance:
 - `sandbox-agent sessions list` ↔ `GET /v1/sessions`
 - `sandbox-agent sessions create` ↔ `POST /v1/sessions/{sessionId}`
 - `sandbox-agent sessions send-message` ↔ `POST /v1/sessions/{sessionId}/messages`
+- `sandbox-agent sessions send-message-stream` ↔ `POST /v1/sessions/{sessionId}/messages/stream`
 - `sandbox-agent sessions events` / `get-messages` ↔ `GET /v1/sessions/{sessionId}/events`
 - `sandbox-agent sessions events-sse` ↔ `GET /v1/sessions/{sessionId}/events/sse`
 - `sandbox-agent sessions reply-question` ↔ `POST /v1/sessions/{sessionId}/questions/{questionId}/reply`

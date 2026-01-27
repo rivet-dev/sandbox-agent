@@ -291,6 +291,57 @@ async fn read_sse_events(
     events
 }
 
+async fn read_turn_stream_events(
+    app: &Router,
+    session_id: &str,
+    timeout: Duration,
+) -> Vec<Value> {
+    let request = Request::builder()
+        .method(Method::POST)
+        .uri(format!("/v1/sessions/{session_id}/messages/stream"))
+        .header("content-type", "application/json")
+        .body(Body::from(json!({ "message": PROMPT }).to_string()))
+        .expect("turn stream request");
+    let response = app
+        .clone()
+        .oneshot(request)
+        .await
+        .expect("turn stream response");
+    assert_eq!(response.status(), StatusCode::OK, "turn stream status");
+
+    let mut stream = response.into_body().into_data_stream();
+    let mut buffer = String::new();
+    let mut events = Vec::new();
+    let start = Instant::now();
+    let mut ended = false;
+    loop {
+        let remaining = match timeout.checked_sub(start.elapsed()) {
+            Some(remaining) if !remaining.is_zero() => remaining,
+            _ => break,
+        };
+        let next = tokio::time::timeout(remaining, stream.next()).await;
+        let chunk: Bytes = match next {
+            Ok(Some(Ok(chunk))) => chunk,
+            Ok(Some(Err(_))) => break,
+            Ok(None) => {
+                ended = true;
+                break;
+            }
+            Err(_) => break,
+        };
+        buffer.push_str(&String::from_utf8_lossy(&chunk));
+        while let Some(idx) = buffer.find("\n\n") {
+            let block = buffer[..idx].to_string();
+            buffer = buffer[idx + 2..].to_string();
+            if let Some(event) = parse_sse_block(&block) {
+                events.push(event);
+            }
+        }
+    }
+    assert!(ended, "turn stream did not close before timeout");
+    events
+}
+
 fn parse_sse_block(block: &str) -> Option<Value> {
     let mut data_lines = Vec::new();
     for line in block.lines() {
@@ -798,6 +849,27 @@ async fn run_sse_events_snapshot(app: &Router, config: &TestAgentConfig) {
     });
 }
 
+async fn run_turn_stream_check(app: &Router, config: &TestAgentConfig) {
+    let _guard = apply_credentials(&config.credentials);
+    install_agent(app, config.agent).await;
+
+    let session_id = format!("turn-{}", config.agent.as_str());
+    create_session(app, config.agent, &session_id, test_permission_mode(config.agent)).await;
+
+    let events = read_turn_stream_events(app, &session_id, Duration::from_secs(120)).await;
+    let events = truncate_after_first_stop(&events);
+    assert!(
+        !events.is_empty(),
+        "no turn stream events collected for {}",
+        config.agent
+    );
+    assert!(
+        should_stop(&events),
+        "timed out waiting for assistant/error event for {}",
+        config.agent
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn auth_snapshots() {
     let token = "test-token";
@@ -1291,6 +1363,20 @@ async fn sse_events_snapshots() {
             continue;
         }
         run_sse_events_snapshot(&app.app, config).await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn turn_stream_route() {
+    let configs = test_agents_from_env().expect("configure SANDBOX_TEST_AGENTS or install agents");
+    let app = TestApp::new();
+    for config in &configs {
+        // OpenCode's embedded bun hangs when installing plugins, blocking SSE event streaming.
+        // See: https://github.com/opencode-ai/opencode/issues/XXX
+        if config.agent == AgentId::Opencode {
+            continue;
+        }
+        run_turn_stream_check(&app.app, config).await;
     }
 }
 

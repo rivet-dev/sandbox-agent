@@ -5,10 +5,12 @@ import type { TimelineEntry } from "./types";
 const ChatMessages = ({
   entries,
   sessionError,
+  eventError,
   messagesEndRef
 }: {
   entries: TimelineEntry[];
   sessionError: string | null;
+  eventError: string | null;
   messagesEndRef: React.RefObject<HTMLDivElement>;
 }) => {
   return (
@@ -67,6 +69,7 @@ const ChatMessages = ({
         );
       })}
       {sessionError && <div className="message-error">{sessionError}</div>}
+      {eventError && <div className="message-error">{eventError}</div>}
       <div ref={messagesEndRef} />
     </div>
   );

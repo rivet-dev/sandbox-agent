@@ -1,4 +1,4 @@
-import { MessageSquare, Plus, Terminal } from "lucide-react";
+import { MessageSquare, PauseCircle, PlayCircle, Plus, Terminal } from "lucide-react";
 import type { AgentModeInfo, PermissionEventData, QuestionEventData } from "sandbox-agent";
 import ApprovalsTab from "../debug/ApprovalsTab";
 import ChatInput from "./ChatInput";
@@ -9,6 +9,7 @@ import type { TimelineEntry } from "./types";
 const ChatPanel = ({
   sessionId,
   polling,
+  turnStreaming,
   transcriptEntries,
   sessionError,
   message,
@@ -17,22 +18,24 @@ const ChatPanel = ({
   onKeyDown,
   onCreateSession,
   messagesEndRef,
-  agentId,
+  agentLabel,
   agentMode,
   permissionMode,
   model,
   variant,
   streamMode,
-  availableAgents,
   activeModes,
   currentAgentVersion,
-  onAgentChange,
+  hasSession,
+  modesLoading,
+  modesError,
   onAgentModeChange,
   onPermissionModeChange,
   onModelChange,
   onVariantChange,
   onStreamModeChange,
   onToggleStream,
+  eventError,
   questionRequests,
   permissionRequests,
   questionSelections,
@@ -43,6 +46,7 @@ const ChatPanel = ({
 }: {
   sessionId: string;
   polling: boolean;
+  turnStreaming: boolean;
   transcriptEntries: TimelineEntry[];
   sessionError: string | null;
   message: string;
@@ -51,22 +55,24 @@ const ChatPanel = ({
   onKeyDown: (event: React.KeyboardEvent<HTMLTextAreaElement>) => void;
   onCreateSession: () => void;
   messagesEndRef: React.RefObject<HTMLDivElement>;
-  agentId: string;
+  agentLabel: string;
   agentMode: string;
   permissionMode: string;
   model: string;
   variant: string;
-  streamMode: "poll" | "sse";
-  availableAgents: string[];
+  streamMode: "poll" | "sse" | "turn";
   activeModes: AgentModeInfo[];
   currentAgentVersion?: string | null;
-  onAgentChange: (value: string) => void;
+  hasSession: boolean;
+  modesLoading: boolean;
+  modesError: string | null;
   onAgentModeChange: (value: string) => void;
   onPermissionModeChange: (value: string) => void;
   onModelChange: (value: string) => void;
   onVariantChange: (value: string) => void;
-  onStreamModeChange: (value: "poll" | "sse") => void;
+  onStreamModeChange: (value: "poll" | "sse" | "turn") => void;
   onToggleStream: () => void;
+  eventError: string | null;
   questionRequests: QuestionEventData[];
   permissionRequests: PermissionEventData[];
   questionSelections: Record<string, string[][]>;
@@ -76,16 +82,57 @@ const ChatPanel = ({
   onReplyPermission: (requestId: string, reply: "once" | "always" | "reject") => void;
 }) => {
   const hasApprovals = questionRequests.length > 0 || permissionRequests.length > 0;
+  const isTurnMode = streamMode === "turn";
+  const isStreaming = isTurnMode ? turnStreaming : polling;
+  const turnLabel = turnStreaming ? "Streaming" : "On Send";
 
   return (
     <div className="chat-panel">
       <div className="panel-header">
         <div className="panel-header-left">
           <MessageSquare className="button-icon" />
-          <span className="panel-title">Session</span>
+          <span className="panel-title">{sessionId ? "Session" : "No Session"}</span>
           {sessionId && <span className="session-id-display">{sessionId}</span>}
+          {sessionId && <span className="session-agent-display">{agentLabel}</span>}
         </div>
-        {polling && <span className="pill accent">Live</span>}
+        <div className="panel-header-right">
+          <div className="setup-stream">
+            <select
+              className="setup-select-small"
+              value={streamMode}
+              onChange={(e) => onStreamModeChange(e.target.value as "poll" | "sse" | "turn")}
+              title="Stream Mode"
+              disabled={!sessionId}
+            >
+              <option value="poll">Poll</option>
+              <option value="sse">SSE</option>
+              <option value="turn">Turn</option>
+            </select>
+            <button
+              className={`setup-stream-btn ${isStreaming ? "active" : ""}`}
+              onClick={onToggleStream}
+              title={isTurnMode ? "Turn streaming starts on send" : polling ? "Stop streaming" : "Start streaming"}
+              disabled={!sessionId || isTurnMode}
+            >
+              {isTurnMode ? (
+                <>
+                  <PlayCircle size={14} />
+                  <span>{turnLabel}</span>
+                </>
+              ) : polling ? (
+                <>
+                  <PauseCircle size={14} />
+                  <span>Pause</span>
+                </>
+              ) : (
+                <>
+                  <PlayCircle size={14} />
+                  <span>Resume</span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
       </div>
 
       <div className="messages-container">
@@ -109,6 +156,7 @@ const ChatPanel = ({
           <ChatMessages
             entries={transcriptEntries}
             sessionError={sessionError}
+            eventError={eventError}
             messagesEndRef={messagesEndRef}
           />
         )}
@@ -135,27 +183,24 @@ const ChatPanel = ({
         onSendMessage={onSendMessage}
         onKeyDown={onKeyDown}
         placeholder={sessionId ? "Send a message..." : "Select or create a session first"}
-        disabled={!sessionId}
+        disabled={!sessionId || turnStreaming}
       />
 
       <ChatSetup
-        agentId={agentId}
+        agentLabel={agentLabel}
         agentMode={agentMode}
         permissionMode={permissionMode}
         model={model}
         variant={variant}
-        streamMode={streamMode}
-        polling={polling}
-        availableAgents={availableAgents}
         activeModes={activeModes}
         currentAgentVersion={currentAgentVersion}
-        onAgentChange={onAgentChange}
+        modesLoading={modesLoading}
+        modesError={modesError}
         onAgentModeChange={onAgentModeChange}
         onPermissionModeChange={onPermissionModeChange}
         onModelChange={onModelChange}
         onVariantChange={onVariantChange}
-        onStreamModeChange={onStreamModeChange}
-        onToggleStream={onToggleStream}
+        hasSession={hasSession}
       />
     </div>
   );

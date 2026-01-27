@@ -1,36 +1,109 @@
 ---
 source: server/packages/sandbox-agent/tests/http_sse_snapshots.rs
-assertion_line: 734
 expression: normalized
 ---
-- agent: codex
-  kind: started
+- metadata: true
   seq: 1
-  started:
-    message: session.created
-- agent: codex
-  kind: started
+  session: started
+  source: daemon
+  synthetic: true
+  type: session.started
+- item:
+    content_types:
+      - status
+    kind: status
+    role: system
+    status: completed
   seq: 2
-  started:
-    message: thread/started
-- agent: codex
-  kind: started
-  seq: 3
-  started:
-    message: turn/started
-- agent: codex
-  kind: message
-  message:
-    parts:
-      - text: "<redacted>"
-        type: text
+  source: agent
+  synthetic: false
+  type: item.completed
+- item:
+    content_types:
+      - text
+    kind: message
     role: user
+    status: in_progress
+  seq: 3
+  source: agent
+  synthetic: false
+  type: item.started
+- delta:
+    delta: "<redacted>"
+    item_id: "<redacted>"
+    native_item_id: "<redacted>"
   seq: 4
-- agent: codex
-  kind: message
-  message:
-    parts:
-      - text: "<redacted>"
-        type: text
-    role: assistant
+  source: daemon
+  synthetic: true
+  type: item.delta
+- item:
+    content_types:
+      - text
+    kind: message
+    role: user
+    status: completed
   seq: 5
+  source: agent
+  synthetic: false
+  type: item.completed
+- item:
+    content_types: []
+    kind: message
+    role: assistant
+    status: in_progress
+  seq: 6
+  source: agent
+  synthetic: false
+  type: item.started
+- item:
+    content_types:
+      - status
+    kind: status
+    role: system
+    status: completed
+  seq: 7
+  source: agent
+  synthetic: false
+  type: item.completed
+- delta:
+    delta: "<redacted>"
+    item_id: "<redacted>"
+    native_item_id: "<redacted>"
+  seq: 8
+  source: agent
+  synthetic: false
+  type: item.delta
+- delta:
+    delta: "<redacted>"
+    item_id: "<redacted>"
+    native_item_id: "<redacted>"
+  seq: 9
+  source: agent
+  synthetic: false
+  type: item.delta
+- delta:
+    delta: "<redacted>"
+    item_id: "<redacted>"
+    native_item_id: "<redacted>"
+  seq: 10
+  source: agent
+  synthetic: false
+  type: item.delta
+- delta:
+    delta: "<redacted>"
+    item_id: "<redacted>"
+    native_item_id: "<redacted>"
+  seq: 11
+  source: agent
+  synthetic: false
+  type: item.delta
+- item:
+    content_types:
+      - reasoning
+    kind: message
+    role: assistant
+    status: completed
+  seq: 12
+  source: agent
+  synthetic: false
+  type: item.completed

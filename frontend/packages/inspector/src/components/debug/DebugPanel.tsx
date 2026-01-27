@@ -14,6 +14,8 @@ const DebugPanel = ({
   offset,
   onFetchEvents,
   onResetEvents,
+  eventsLoading,
+  eventsError,
   requestLog,
   copiedLogId,
   onClearRequestLog,
@@ -22,7 +24,9 @@ const DebugPanel = ({
   defaultAgents,
   modesByAgent,
   onRefreshAgents,
-  onInstallAgent
+  onInstallAgent,
+  agentsLoading,
+  agentsError
 }: {
   debugTab: DebugTab;
   onDebugTabChange: (tab: DebugTab) => void;
@@ -30,6 +34,8 @@ const DebugPanel = ({
   offset: number;
   onFetchEvents: () => void;
   onResetEvents: () => void;
+  eventsLoading: boolean;
+  eventsError: string | null;
   requestLog: RequestLog[];
   copiedLogId: number | null;
   onClearRequestLog: () => void;
@@ -39,6 +45,8 @@ const DebugPanel = ({
   modesByAgent: Record<string, AgentModeInfo[]>;
   onRefreshAgents: () => void;
   onInstallAgent: (agentId: string, reinstall: boolean) => void;
+  agentsLoading: boolean;
+  agentsError: string | null;
 }) => {
   return (
     <div className="debug-panel">
@@ -69,7 +77,14 @@ const DebugPanel = ({
         )}
 
         {debugTab === "events" && (
-          <EventsTab events={events} offset={offset} onFetch={onFetchEvents} onClear={onResetEvents} />
+          <EventsTab
+            events={events}
+            offset={offset}
+            onFetch={onFetchEvents}
+            onClear={onResetEvents}
+            loading={eventsLoading}
+            error={eventsError}
+          />
         )}
 
         {debugTab === "agents" && (
@@ -79,6 +94,8 @@ const DebugPanel = ({
             modesByAgent={modesByAgent}
             onRefresh={onRefreshAgents}
             onInstall={onInstallAgent}
+            loading={agentsLoading}
+            error={agentsError}
           />
         )}
       </div>

@@ -86,10 +86,21 @@ for await (const event of client.streamEvents("demo-session", {
 The SDK parses `text/event-stream` into `UniversalEvent` objects. If you want full control, use
 `getEventsSse()` and parse the stream yourself.
 
+## Stream a single turn
+
+```ts
+for await (const event of client.streamTurn("demo-session", { message: "Hello" })) {
+  console.log(event.type, event.data);
+}
+```
+
+This method posts the message and streams only the next turn. For manual control, call
+`postMessageStream()` and parse the SSE response yourself.
+
 ## Optional raw payloads
 
-Set `includeRaw: true` on `getEvents` or `streamEvents` to include the raw provider payload in
-`event.raw`. This is useful for debugging and conversion analysis.
+Set `includeRaw: true` on `getEvents`, `streamEvents`, or `streamTurn` to include the raw provider
+payload in `event.raw`. This is useful for debugging and conversion analysis.
 
 ## Error handling
 

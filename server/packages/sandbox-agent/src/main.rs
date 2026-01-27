@@ -122,6 +122,9 @@ enum SessionsCommand {
     #[command(name = "send-message")]
     /// Send a message to an existing session.
     SendMessage(SessionMessageArgs),
+    #[command(name = "send-message-stream")]
+    /// Send a message and stream the response for one turn.
+    SendMessageStream(SessionMessageStreamArgs),
     #[command(name = "terminate")]
     /// Terminate a session.
     Terminate(SessionTerminateArgs),
@@ -191,6 +194,17 @@ struct SessionMessageArgs {
     session_id: String,
     #[arg(long, short = 'm')]
     message: String,
+    #[command(flatten)]
+    client: ClientArgs,
+}
+
+#[derive(Args, Debug)]
+struct SessionMessageStreamArgs {
+    session_id: String,
+    #[arg(long, short = 'm')]
+    message: String,
+    #[arg(long)]
+    include_raw: bool,
     #[command(flatten)]
     client: ClientArgs,
 }
@@ -442,6 +456,22 @@ fn run_sessions(command: &SessionsCommand, cli: &Cli) -> Result<(), CliError> {
             let path = format!("{API_PREFIX}/sessions/{}/messages", args.session_id);
             let response = ctx.post(&path, &body)?;
             print_empty_response(response)
+        }
+        SessionsCommand::SendMessageStream(args) => {
+            let ctx = ClientContext::new(cli, &args.client)?;
+            let body = MessageRequest {
+                message: args.message.clone(),
+            };
+            let path = format!("{API_PREFIX}/sessions/{}/messages/stream", args.session_id);
+            let response = ctx.post_with_query(
+                &path,
+                &body,
+                &[(
+                    "include_raw",
+                    if args.include_raw { Some("true".to_string()) } else { None },
+                )],
+            )?;
+            print_text_response(response)
         }
         SessionsCommand::Terminate(args) => {
             let ctx = ClientContext::new(cli, &args.client)?;
@@ -848,6 +878,21 @@ impl ClientContext {
 
     fn post<T: Serialize>(&self, path: &str, body: &T) -> Result<reqwest::blocking::Response, CliError> {
         Ok(self.request(Method::POST, path).json(body).send()?)
+    }
+
+    fn post_with_query<T: Serialize>(
+        &self,
+        path: &str,
+        body: &T,
+        query: &[(&str, Option<String>)],
+    ) -> Result<reqwest::blocking::Response, CliError> {
+        let mut request = self.request(Method::POST, path).json(body);
+        for (key, value) in query {
+            if let Some(value) = value {
+                request = request.query(&[(key, value)]);
+            }
+        }
+        Ok(request.send()?)
     }
 
     fn post_empty(&self, path: &str) -> Result<reqwest::blocking::Response, CliError> {

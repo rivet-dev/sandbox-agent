@@ -13,6 +13,7 @@ import type {
   ProblemDetails,
   QuestionReplyRequest,
   SessionListResponse,
+  TurnStreamQuery,
   UniversalEvent,
 } from "./types.ts";
 
@@ -142,45 +143,37 @@ export class SandboxAgent {
     });
   }
 
+  async postMessageStream(
+    sessionId: string,
+    request: MessageRequest,
+    query?: TurnStreamQuery,
+    signal?: AbortSignal,
+  ): Promise<Response> {
+    return this.requestRaw("POST", `${API_PREFIX}/sessions/${encodeURIComponent(sessionId)}/messages/stream`, {
+      query,
+      body: request,
+      accept: "text/event-stream",
+      signal,
+    });
+  }
+
   async *streamEvents(
     sessionId: string,
     query?: EventsQuery,
     signal?: AbortSignal,
   ): AsyncGenerator<UniversalEvent, void, void> {
     const response = await this.getEventsSse(sessionId, query, signal);
-    if (!response.body) {
-      throw new Error("SSE stream is not readable in this environment.");
-    }
+    yield* this.parseSseStream(response);
+  }
 
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) {
-        break;
-      }
-      // Normalize CRLF to LF for consistent parsing
-      buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
-      let index = buffer.indexOf("\n\n");
-      while (index !== -1) {
-        const chunk = buffer.slice(0, index);
-        buffer = buffer.slice(index + 2);
-        const dataLines = chunk
-          .split("\n")
-          .filter((line) => line.startsWith("data:"));
-        if (dataLines.length > 0) {
-          const payload = dataLines
-            .map((line) => line.slice(5).trim())
-            .join("\n");
-          if (payload) {
-            yield JSON.parse(payload) as UniversalEvent;
-          }
-        }
-        index = buffer.indexOf("\n\n");
-      }
-    }
+  async *streamTurn(
+    sessionId: string,
+    request: MessageRequest,
+    query?: TurnStreamQuery,
+    signal?: AbortSignal,
+  ): AsyncGenerator<UniversalEvent, void, void> {
+    const response = await this.postMessageStream(sessionId, request, query, signal);
+    yield* this.parseSseStream(response);
   }
 
   async replyQuestion(
@@ -295,6 +288,42 @@ export class SandboxAgent {
       return JSON.parse(text) as ProblemDetails;
     } catch {
       return undefined;
+    }
+  }
+
+  private async *parseSseStream(response: Response): AsyncGenerator<UniversalEvent, void, void> {
+    if (!response.body) {
+      throw new Error("SSE stream is not readable in this environment.");
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      // Normalize CRLF to LF for consistent parsing
+      buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+      let index = buffer.indexOf("\n\n");
+      while (index !== -1) {
+        const chunk = buffer.slice(0, index);
+        buffer = buffer.slice(index + 2);
+        const dataLines = chunk
+          .split("\n")
+          .filter((line) => line.startsWith("data:"));
+        if (dataLines.length > 0) {
+          const payload = dataLines
+            .map((line) => line.slice(5).trim())
+            .join("\n");
+          if (payload) {
+            yield JSON.parse(payload) as UniversalEvent;
+          }
+        }
+        index = buffer.indexOf("\n\n");
+      }
     }
   }
 }

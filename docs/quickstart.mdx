@@ -70,6 +70,15 @@ curl "http://127.0.0.1:2468/v1/sessions/my-session/events/sse?offset=0" \
   -H "Authorization: Bearer $SANDBOX_TOKEN"
 ```
 
+For a single-turn stream (post a message and get one streamed response):
+
+```bash
+curl -N -X POST "http://127.0.0.1:2468/v1/sessions/my-session/messages/stream" \
+  -H "Authorization: Bearer $SANDBOX_TOKEN" \
+  -H "content-type: application/json" \
+  -d '{"message":"Hello"}'
+```
+
 ## 5. CLI shortcuts
 
 The CLI mirrors the HTTP API:
@@ -78,4 +87,6 @@ The CLI mirrors the HTTP API:
 sandbox-agent sessions create my-session --agent claude --endpoint http://127.0.0.1:2468 --token "$SANDBOX_TOKEN"
 
 sandbox-agent sessions send-message my-session --message "Hello" --endpoint http://127.0.0.1:2468 --token "$SANDBOX_TOKEN"
+
+sandbox-agent sessions send-message-stream my-session --message "Hello" --endpoint http://127.0.0.1:2468 --token "$SANDBOX_TOKEN"
 ```

@@ -31,10 +31,10 @@ pub fn event_to_universal_with_session(
     let event_type = event.get("type").and_then(Value::as_str).unwrap_or("");
     let mut conversions = match event_type {
         "system" => vec![system_event_to_universal(event)],
-        "assistant" => assistant_event_to_universal(event),
-        "tool_use" => tool_use_event_to_universal(event, session_id),
+        "assistant" => assistant_event_to_universal(event, &session_id),
+        "tool_use" => tool_use_event_to_universal(event, &session_id),
         "tool_result" => tool_result_event_to_universal(event),
-        "result" => result_event_to_universal(event),
+        "result" => result_event_to_universal(event, &session_id),
         _ => return Err(format!("unsupported Claude event type: {event_type}")),
     };
 
@@ -53,7 +53,7 @@ fn system_event_to_universal(event: &Value) -> EventConversion {
         .with_raw(Some(event.clone()))
 }
 
-fn assistant_event_to_universal(event: &Value) -> Vec<EventConversion> {
+fn assistant_event_to_universal(event: &Value, session_id: &str) -> Vec<EventConversion> {
     let mut conversions = Vec::new();
     let content = event
         .get("message")
@@ -62,7 +62,8 @@ fn assistant_event_to_universal(event: &Value) -> Vec<EventConversion> {
         .cloned()
         .unwrap_or_default();
 
-    let message_id = next_temp_id("tmp_claude_message");
+    // Use session-based native_item_id so `result` event can reference the same item
+    let native_message_id = format!("{session_id}_message");
     let mut message_parts = Vec::new();
 
     for block in content {
@@ -85,9 +86,9 @@ fn assistant_event_to_universal(event: &Value) -> Vec<EventConversion> {
                         .unwrap_or_else(|| next_temp_id("tmp_claude_tool"));
                     let arguments = serde_json::to_string(&input).unwrap_or_else(|_| "{}".to_string());
                     let tool_item = UniversalItem {
-                        item_id: next_temp_id("tmp_claude_tool_item"),
+                        item_id: String::new(),
                         native_item_id: Some(call_id.clone()),
-                        parent_id: Some(message_id.clone()),
+                        parent_id: Some(native_message_id.clone()),
                         kind: ItemKind::ToolCall,
                         role: Some(ItemRole::Assistant),
                         content: vec![ContentPart::ToolCall {
@@ -106,21 +107,23 @@ fn assistant_event_to_universal(event: &Value) -> Vec<EventConversion> {
         }
     }
 
+    // `assistant` event emits item.started + item.delta only (in-progress state)
+    // The `result` event will emit item.completed to finalize
     let message_item = UniversalItem {
-        item_id: message_id,
-        native_item_id: None,
+        item_id: String::new(),
+        native_item_id: Some(native_message_id.clone()),
         parent_id: None,
         kind: ItemKind::Message,
         role: Some(ItemRole::Assistant),
         content: message_parts.clone(),
-        status: ItemStatus::Completed,
+        status: ItemStatus::InProgress,
     };
 
-    conversions.extend(message_events(message_item, message_parts, true));
+    conversions.extend(message_started_events(message_item, message_parts));
     conversions
 }
 
-fn tool_use_event_to_universal(event: &Value, session_id: String) -> Vec<EventConversion> {
+fn tool_use_event_to_universal(event: &Value, session_id: &str) -> Vec<EventConversion> {
     let mut conversions = Vec::new();
     let tool_use = event.get("tool_use");
     let name = tool_use
@@ -156,7 +159,7 @@ fn tool_use_event_to_universal(event: &Value, session_id: String) -> Vec<EventCo
 
     let arguments = serde_json::to_string(&input).unwrap_or_else(|_| "{}".to_string());
     let tool_item = UniversalItem {
-        item_id: next_temp_id("tmp_claude_tool_item"),
+        item_id: String::new(),
         native_item_id: Some(id.clone()),
         parent_id: None,
         kind: ItemKind::ToolCall,
@@ -222,22 +225,30 @@ fn tool_result_event_to_universal(event: &Value) -> Vec<EventConversion> {
     conversions
 }
 
-fn result_event_to_universal(event: &Value) -> Vec<EventConversion> {
+fn result_event_to_universal(event: &Value, session_id: &str) -> Vec<EventConversion> {
+    // The `result` event completes the message started by `assistant`.
+    // Use the same native_item_id so they link to the same universal item.
+    let native_message_id = format!("{session_id}_message");
     let result_text = event
         .get("result")
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_string();
+
     let message_item = UniversalItem {
-        item_id: next_temp_id("tmp_claude_result"),
-        native_item_id: None,
+        item_id: String::new(),
+        native_item_id: Some(native_message_id),
         parent_id: None,
         kind: ItemKind::Message,
         role: Some(ItemRole::Assistant),
-        content: vec![ContentPart::Text { text: result_text.clone() }],
+        content: vec![ContentPart::Text { text: result_text }],
         status: ItemStatus::Completed,
     };
-    message_events(message_item, vec![ContentPart::Text { text: result_text }], true)
+
+    vec![EventConversion::new(
+        UniversalEventType::ItemCompleted,
+        UniversalEventData::Item(ItemEventData { item: message_item }),
+    )]
 }
 
 fn item_events(item: UniversalItem, synthetic_start: bool) -> Vec<EventConversion> {
@@ -260,20 +271,18 @@ fn item_events(item: UniversalItem, synthetic_start: bool) -> Vec<EventConversio
     events
 }
 
-fn message_events(item: UniversalItem, parts: Vec<ContentPart>, synthetic_start: bool) -> Vec<EventConversion> {
+/// Emits item.started + item.delta only (for `assistant` event).
+/// The item.completed will come from the `result` event.
+fn message_started_events(item: UniversalItem, parts: Vec<ContentPart>) -> Vec<EventConversion> {
     let mut events = Vec::new();
-    if synthetic_start {
-        let mut started_item = item.clone();
-        started_item.status = ItemStatus::InProgress;
-        events.push(
-            EventConversion::new(
-                UniversalEventType::ItemStarted,
-                UniversalEventData::Item(ItemEventData { item: started_item }),
-            )
-            .synthetic(),
-        );
-    }
 
+    // Emit item.started (in-progress)
+    events.push(EventConversion::new(
+        UniversalEventType::ItemStarted,
+        UniversalEventData::Item(ItemEventData { item: item.clone() }),
+    ));
+
+    // Emit item.delta with the text content
     let mut delta_text = String::new();
     for part in &parts {
         if let ContentPart::Text { text } = part {
@@ -281,23 +290,16 @@ fn message_events(item: UniversalItem, parts: Vec<ContentPart>, synthetic_start:
         }
     }
     if !delta_text.is_empty() {
-        events.push(
-            EventConversion::new(
-                UniversalEventType::ItemDelta,
-                UniversalEventData::ItemDelta(crate::ItemDeltaData {
-                    item_id: item.item_id.clone(),
-                    native_item_id: item.native_item_id.clone(),
-                    delta: delta_text,
-                }),
-            )
-            .synthetic(),
-        );
+        events.push(EventConversion::new(
+            UniversalEventType::ItemDelta,
+            UniversalEventData::ItemDelta(crate::ItemDeltaData {
+                item_id: item.item_id.clone(),
+                native_item_id: item.native_item_id.clone(),
+                delta: delta_text,
+            }),
+        ));
     }
 
-    events.push(EventConversion::new(
-        UniversalEventType::ItemCompleted,
-        UniversalEventData::Item(ItemEventData { item }),
-    ));
     events
 }
 

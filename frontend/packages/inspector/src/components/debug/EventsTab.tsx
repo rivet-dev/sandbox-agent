@@ -8,12 +8,16 @@ const EventsTab = ({
   events,
   offset,
   onFetch,
-  onClear
+  onClear,
+  loading,
+  error
 }: {
   events: UniversalEvent[];
   offset: number;
   onFetch: () => void;
   onClear: () => void;
+  loading: boolean;
+  error: string | null;
 }) => {
   const [collapsedEvents, setCollapsedEvents] = useState<Record<string, boolean>>({});
 
@@ -28,8 +32,8 @@ const EventsTab = ({
       <div className="inline-row" style={{ marginBottom: 12, justifyContent: "space-between" }}>
         <span className="card-meta">Offset: {offset}</span>
         <div className="inline-row">
-          <button className="button ghost small" onClick={onFetch}>
-            Fetch
+          <button className="button ghost small" onClick={onFetch} disabled={loading}>
+            {loading ? "Loading..." : "Fetch"}
           </button>
           <button className="button ghost small" onClick={onClear}>
             Clear
@@ -37,8 +41,12 @@ const EventsTab = ({
         </div>
       </div>
 
+      {error && <div className="banner error">{error}</div>}
+
       {events.length === 0 ? (
-        <div className="card-meta">No events yet. Start streaming to receive events.</div>
+        <div className="card-meta">
+          {loading ? "Loading events..." : "No events yet. Start streaming to receive events."}
+        </div>
       ) : (
         <div className="event-list">
           {[...events].reverse().map((event) => {

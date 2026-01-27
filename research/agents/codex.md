@@ -254,6 +254,70 @@ Codex output is converted via `convertCodexOutput()`:
 - Use `resumeThread(threadId)` to continue conversation
 - Thread ID is captured from `thread.started` event or thread object
 
+## Shared App-Server Architecture (Daemon Implementation)
+
+The sandbox daemon uses a **single shared Codex app-server process** to handle multiple sessions, similar to OpenCode's server model. This differs from Claude/Amp which spawn a new process per turn.
+
+### Architecture Comparison
+
+| Agent | Model | Process Lifetime | Session ID |
+|-------|-------|------------------|------------|
+| Claude | Subprocess | Per-turn (killed on TurnCompleted) | `--resume` flag |
+| Amp | Subprocess | Per-turn | `--continue` flag |
+| OpenCode | HTTP Server | Daemon lifetime | Session ID via API |
+| **Codex** | **Stdio Server** | **Daemon lifetime** | **Thread ID via JSON-RPC** |
+
+### Daemon Flow
+
+1. **First Codex session created**: Spawns `codex app-server` process, performs `initialize`/`initialized` handshake
+2. **Session creation**: Sends `thread/start` request, captures `thread_id` as `native_session_id`
+3. **Message sent**: Sends `turn/start` request with `thread_id`, streams notifications back to session
+4. **Multi-turn**: Reuses same `thread_id`, process stays alive, no respawn needed
+5. **Daemon shutdown**: Process terminated with daemon
+
+### Why This Approach?
+
+1. **Performance**: No process spawn overhead per message
+2. **Multi-turn support**: Thread persists in server memory, no resume needed
+3. **Consistent with OpenCode**: Similar server-based pattern reduces code complexity
+4. **API alignment**: Matches Codex's intended app-server usage pattern
+
+### Protocol Details
+
+The shared server uses JSON-RPC 2.0 for request/response correlation:
+
+```
+Daemon                           Codex App-Server
+   |                                   |
+   |-- initialize {id: 1} ------------>|
+   |<-- response {id: 1} --------------|
+   |-- initialized (notification) ---->|
+   |                                   |
+   |-- thread/start {id: 2} ---------->|
+   |<-- response {id: 2, thread.id} ---|
+   |<-- thread/started (notification) -|
+   |                                   |
+   |-- turn/start {id: 3, threadId} -->|
+   |<-- turn/started (notification) ---|
+   |<-- item/* (notifications) --------|
+   |<-- turn/completed (notification) -|
+```
+
+### Thread-to-Session Routing
+
+Notifications are routed to the correct session by extracting `threadId` from each notification:
+
+```rust
+fn codex_thread_id_from_server_notification(notification) -> Option<String> {
+    // All thread-scoped notifications include threadId field
+    match notification {
+        TurnStarted(params) => Some(params.thread_id),
+        ItemCompleted(params) => Some(params.thread_id),
+        // ... etc
+    }
+}
+```
+
 ## Notes
 
 - SDK is dynamically imported to reduce bundle size

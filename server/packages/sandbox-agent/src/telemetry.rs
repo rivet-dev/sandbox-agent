@@ -8,11 +8,15 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use reqwest::Client;
 use serde::Serialize;
 use time::OffsetDateTime;
+use tokio::time::Instant;
 
 const TELEMETRY_URL: &str = "https://tc.rivet.dev";
 const TELEMETRY_ENV_DEBUG: &str = "SANDBOX_AGENT_TELEMETRY_DEBUG";
 const TELEMETRY_ID_FILE: &str = "telemetry_id";
-const TELEMETRY_TIMEOUT_MS: u64 = 800;
+const TELEMETRY_LAST_SENT_FILE: &str = "telemetry_last_sent";
+const TELEMETRY_TIMEOUT_MS: u64 = 2_000;
+const TELEMETRY_INTERVAL_SECS: u64 = 300;
+const TELEMETRY_MIN_GAP_SECS: i64 = 300;
 
 #[derive(Debug, Serialize)]
 struct TelemetryEvent {
@@ -49,7 +53,6 @@ struct OsInfo {
 #[derive(Debug, Serialize)]
 struct ProviderInfo {
     name: String,
-    confidence: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     method: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -69,11 +72,10 @@ pub fn telemetry_enabled(no_telemetry: bool) -> bool {
 }
 
 pub fn log_enabled_message() {
-    tracing::info!("anonymous telemetry is enabled; disable with --no-telemetry");
+    tracing::info!("anonymous telemetry is enabled, disable with --no-telemetry");
 }
 
 pub fn spawn_telemetry_task() {
-    let event = build_event();
     tokio::spawn(async move {
         let client = match Client::builder()
             .timeout(Duration::from_millis(TELEMETRY_TIMEOUT_MS))
@@ -86,21 +88,38 @@ pub fn spawn_telemetry_task() {
             }
         };
 
-        if let Err(err) = client.post(TELEMETRY_URL).json(&event).send().await {
-            tracing::debug!(error = %err, "telemetry request failed");
+        attempt_send(&client).await;
+        let start = Instant::now() + Duration::from_secs(TELEMETRY_INTERVAL_SECS);
+        let mut interval = tokio::time::interval_at(start, Duration::from_secs(TELEMETRY_INTERVAL_SECS));
+        loop {
+            interval.tick().await;
+            attempt_send(&client).await;
         }
     });
 }
 
-fn build_event() -> TelemetryEvent {
+async fn attempt_send(client: &Client) {
     let dt = OffsetDateTime::now_utc().unix_timestamp();
+    if !should_send(dt) {
+        return;
+    }
+
+    let event = build_event(dt);
+    if let Err(err) = client.post(TELEMETRY_URL).json(&event).send().await {
+        tracing::debug!(error = %err, "telemetry request failed");
+        return;
+    }
+    write_last_sent(dt);
+}
+
+fn build_event(dt: i64) -> TelemetryEvent {
     let eid = load_or_create_id();
     TelemetryEvent {
         p: "sandbox-agent".to_string(),
         dt,
         et: "sandbox".to_string(),
         eid,
-        ev: "entity_snapshot".to_string(),
+        ev: "entity_beacon".to_string(),
         d: TelemetryData {
             version: env!("CARGO_PKG_VERSION").to_string(),
             os: OsInfo {
@@ -138,9 +157,46 @@ fn load_or_create_id() -> String {
 }
 
 fn telemetry_id_path() -> PathBuf {
+    telemetry_dir().join(TELEMETRY_ID_FILE)
+}
+
+fn telemetry_last_sent_path() -> PathBuf {
+    telemetry_dir().join(TELEMETRY_LAST_SENT_FILE)
+}
+
+fn telemetry_dir() -> PathBuf {
     dirs::data_dir()
-        .map(|dir| dir.join("sandbox-agent").join(TELEMETRY_ID_FILE))
-        .unwrap_or_else(|| PathBuf::from(".sandbox-agent").join(TELEMETRY_ID_FILE))
+        .map(|dir| dir.join("sandbox-agent"))
+        .unwrap_or_else(|| PathBuf::from(".sandbox-agent"))
+}
+
+fn should_send(now: i64) -> bool {
+    if let Some(last) = read_last_sent() {
+        if now >= last && now - last < TELEMETRY_MIN_GAP_SECS {
+            return false;
+        }
+    }
+    true
+}
+
+fn read_last_sent() -> Option<i64> {
+    let path = telemetry_last_sent_path();
+    fs::read_to_string(&path)
+        .ok()
+        .and_then(|value| value.trim().parse::<i64>().ok())
+}
+
+fn write_last_sent(timestamp: i64) {
+    let path = telemetry_last_sent_path();
+    if let Some(parent) = path.parent() {
+        if let Err(err) = fs::create_dir_all(parent) {
+            tracing::debug!(error = %err, "failed to create telemetry directory");
+            return;
+        }
+    }
+    if let Ok(mut file) = fs::OpenOptions::new().create(true).write(true).truncate(true).open(&path) {
+        let _ = file.write_all(timestamp.to_string().as_bytes());
+    }
 }
 
 fn generate_id() -> String {
@@ -185,7 +241,6 @@ fn detect_provider() -> ProviderInfo {
         ]);
         return ProviderInfo {
             name: "e2b".to_string(),
-            confidence: "high".to_string(),
             method: Some("env".to_string()),
             metadata,
         };
@@ -206,7 +261,6 @@ fn detect_provider() -> ProviderInfo {
         ]);
         return ProviderInfo {
             name: "vercel".to_string(),
-            confidence: "high".to_string(),
             method: Some("env".to_string()),
             metadata,
         };
@@ -219,7 +273,6 @@ fn detect_provider() -> ProviderInfo {
         ]);
         return ProviderInfo {
             name: "modal".to_string(),
-            confidence: "high".to_string(),
             method: Some("env".to_string()),
             metadata,
         };
@@ -232,7 +285,6 @@ fn detect_provider() -> ProviderInfo {
         ]);
         return ProviderInfo {
             name: "fly.io".to_string(),
-            confidence: "high".to_string(),
             method: Some("env".to_string()),
             metadata,
         };
@@ -245,7 +297,6 @@ fn detect_provider() -> ProviderInfo {
         ]);
         return ProviderInfo {
             name: "replit".to_string(),
-            confidence: "high".to_string(),
             method: Some("env".to_string()),
             metadata,
         };
@@ -254,7 +305,6 @@ fn detect_provider() -> ProviderInfo {
     if env::var("CODESANDBOX_HOST").is_ok() || env::var("CSB_BASE_PREVIEW_HOST").is_ok() {
         return ProviderInfo {
             name: "codesandbox".to_string(),
-            confidence: "high".to_string(),
             method: Some("env".to_string()),
             metadata: None,
         };
@@ -264,7 +314,6 @@ fn detect_provider() -> ProviderInfo {
         let metadata = metadata_or_none([("name", env::var("CODESPACE_NAME").ok())]);
         return ProviderInfo {
             name: "github-codespaces".to_string(),
-            confidence: "high".to_string(),
             method: Some("env".to_string()),
             metadata,
         };
@@ -274,7 +323,6 @@ fn detect_provider() -> ProviderInfo {
         let metadata = metadata_or_none([("environment", env::var("RAILWAY_ENVIRONMENT").ok())]);
         return ProviderInfo {
             name: "railway".to_string(),
-            confidence: "high".to_string(),
             method: Some("env".to_string()),
             metadata,
         };
@@ -284,7 +332,6 @@ fn detect_provider() -> ProviderInfo {
         let metadata = metadata_or_none([("serviceId", env::var("RENDER_SERVICE_ID").ok())]);
         return ProviderInfo {
             name: "render".to_string(),
-            confidence: "high".to_string(),
             method: Some("env".to_string()),
             metadata,
         };
@@ -293,7 +340,6 @@ fn detect_provider() -> ProviderInfo {
     if detect_daytona() {
         return ProviderInfo {
             name: "daytona".to_string(),
-            confidence: "medium".to_string(),
             method: Some("filesystem".to_string()),
             metadata: None,
         };
@@ -302,7 +348,6 @@ fn detect_provider() -> ProviderInfo {
     if detect_docker() {
         return ProviderInfo {
             name: "docker".to_string(),
-            confidence: "high".to_string(),
             method: Some("filesystem".to_string()),
             metadata: None,
         };
@@ -310,7 +355,6 @@ fn detect_provider() -> ProviderInfo {
 
     ProviderInfo {
         name: "unknown".to_string(),
-        confidence: "low".to_string(),
         method: None,
         metadata: None,
     }

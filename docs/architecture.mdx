@@ -105,6 +105,7 @@ Each session tracks:
 POST /v1/sessions/{sessionId}     Create session, auto-install agent
         ↓
 POST /v1/sessions/{id}/messages   Spawn agent subprocess, stream output
+POST /v1/sessions/{id}/messages/stream   Post and stream a single turn
         ↓
 GET /v1/sessions/{id}/events      Poll for new events (offset-based)
 GET /v1/sessions/{id}/events/sse  Subscribe to SSE stream
@@ -133,16 +134,30 @@ When a message is sent:
 
 ## Agent Execution
 
-Each agent has a different execution model and communication pattern.
+Each agent has a different execution model and communication pattern. There are two main architectural patterns:
+
+### Architecture Patterns
+
+**Subprocess Model (Claude, Amp):**
+- New process spawned per message/turn
+- Process terminates after turn completes
+- Multi-turn via CLI resume flags (`--resume`, `--continue`)
+- Simple but has process spawn overhead
+
+**Client/Server Model (OpenCode, Codex):**
+- Single long-running server process
+- Multiple sessions/threads multiplexed via RPC
+- Multi-turn via server-side thread persistence
+- More efficient for repeated interactions
 
 ### Overview
 
-| Agent | Execution Model | Binary Source | Session Resume |
-|-------|-----------------|---------------|----------------|
-| Claude Code | CLI subprocess | GCS (Anthropic) | Yes (`--resume`) |
-| Codex | App Server subprocess (JSON-RPC) | GitHub releases | No |
-| OpenCode | HTTP server + SSE | GitHub releases | Yes (server-side) |
-| Amp | CLI subprocess | GCS (Amp) | Yes (`--continue`) |
+| Agent | Architecture | Binary Source | Multi-Turn Method |
+|-------|--------------|---------------|-------------------|
+| Claude Code | Subprocess (per-turn) | GCS (Anthropic) | `--resume` flag |
+| Codex | **Shared Server (JSON-RPC)** | GitHub releases | **Thread persistence** |
+| OpenCode | HTTP Server (SSE) | GitHub releases | Server-side sessions |
+| Amp | Subprocess (per-turn) | GCS (Amp) | `--continue` flag |
 
 ### Claude Code
 
@@ -161,15 +176,25 @@ claude --print --output-format stream-json --verbose \
 
 ### Codex
 
-Spawned as a subprocess using the App Server JSON-RPC protocol:
+Uses a **shared app-server process** that handles multiple sessions via JSON-RPC over stdio:
 
 ```bash
 codex app-server
 ```
 
-- JSON-RPC over stdio (JSONL)
-- Uses `initialize`, `thread/start`, and `turn/start` requests
-- Approval requests arrive as server JSON-RPC requests
+**Daemon flow:**
+1. First Codex session triggers `codex app-server` spawn
+2. Performs `initialize` / `initialized` handshake
+3. Each session creation sends `thread/start` → receives `thread_id`
+4. Messages sent via `turn/start` with `thread_id`
+5. Notifications routed back to session by `thread_id`
+
+**Key characteristics:**
+- Single process handles all Codex sessions
+- JSON-RPC over stdio (JSONL format)
+- Thread IDs map to daemon session IDs
+- Approval requests arrive as server-to-client JSON-RPC requests
+- Process lifetime matches daemon lifetime (not per-turn)
 
 ### OpenCode
 
@@ -208,12 +233,21 @@ amp [--execute|--print] [--output-format stream-json] \
 
 ### Communication Patterns
 
-**Subprocess agents (Claude, Codex, Amp):**
+**Per-turn subprocess agents (Claude, Amp):**
 1. Agent CLI spawned with appropriate flags
 2. Stdout/stderr read line-by-line
 3. Each line parsed as JSON
 4. Events converted via `parse_agent_line()` → agent-specific converter
 5. Universal events recorded and broadcast to SSE subscribers
+6. Process terminated on turn completion
+
+**Shared stdio server agent (Codex):**
+1. Single `codex app-server` process started on first session
+2. `initialize`/`initialized` handshake performed once
+3. New sessions send `thread/start`, receive `thread_id`
+4. Messages sent via `turn/start` with `thread_id`
+5. Notifications read from stdout, routed by `thread_id`
+6. Process persists across sessions and turns
 
 **HTTP server agent (OpenCode):**
 1. Server started on available port (if not running)

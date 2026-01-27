@@ -131,13 +131,15 @@ timestamps, not ordering.
 
 ## Optional raw payloads
 
-If you need provider-level debugging, pass `include_raw=true` when streaming or polling events to
-receive the `raw` payload for each event.
+If you need provider-level debugging, pass `include_raw=true` when streaming or polling events
+(including one-turn streams) to receive the `raw` payload for each event.
 
-## SSE vs polling
+## SSE vs polling vs turn streaming
 
 - SSE gives low-latency updates and simplifies streaming UIs.
 - Polling is simpler to debug and works in any environment.
+- Turn streaming (`POST /v1/sessions/{session_id}/messages/stream`) is a one-shot stream tied to a
+  single prompt. The stream closes automatically once the turn completes.
 
 Both yield the same event payloads.
 

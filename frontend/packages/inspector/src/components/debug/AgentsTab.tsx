@@ -8,23 +8,31 @@ const AgentsTab = ({
   defaultAgents,
   modesByAgent,
   onRefresh,
-  onInstall
+  onInstall,
+  loading,
+  error
 }: {
   agents: AgentInfo[];
   defaultAgents: string[];
   modesByAgent: Record<string, AgentModeInfo[]>;
   onRefresh: () => void;
   onInstall: (agentId: string, reinstall: boolean) => void;
+  loading: boolean;
+  error: string | null;
 }) => {
   return (
     <>
       <div className="inline-row" style={{ marginBottom: 16 }}>
-        <button className="button secondary small" onClick={onRefresh}>
+        <button className="button secondary small" onClick={onRefresh} disabled={loading}>
           <RefreshCw className="button-icon" /> Refresh
         </button>
       </div>
 
-      {agents.length === 0 && <div className="card-meta">No agents reported. Click refresh to check.</div>}
+      {error && <div className="banner error">{error}</div>}
+      {loading && <div className="card-meta">Loading agents...</div>}
+      {!loading && agents.length === 0 && (
+        <div className="card-meta">No agents reported. Click refresh to check.</div>
+      )}
 
       {(agents.length
         ? agents

@@ -1,4 +1,5 @@
 import { Plus, RefreshCw } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import type { SessionInfo } from "sandbox-agent";
 
 const SessionSidebar = ({
@@ -6,14 +7,47 @@ const SessionSidebar = ({
   selectedSessionId,
   onSelectSession,
   onRefresh,
-  onCreateSession
+  onCreateSession,
+  availableAgents,
+  agentsLoading,
+  agentsError,
+  sessionsLoading,
+  sessionsError
 }: {
   sessions: SessionInfo[];
   selectedSessionId: string;
   onSelectSession: (session: SessionInfo) => void;
   onRefresh: () => void;
-  onCreateSession: () => void;
+  onCreateSession: (agentId: string) => void;
+  availableAgents: string[];
+  agentsLoading: boolean;
+  agentsError: string | null;
+  sessionsLoading: boolean;
+  sessionsError: string | null;
 }) => {
+  const [showMenu, setShowMenu] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!showMenu) return;
+    const handler = (event: MouseEvent) => {
+      if (!menuRef.current) return;
+      if (!menuRef.current.contains(event.target as Node)) {
+        setShowMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showMenu]);
+
+  const agentLabels: Record<string, string> = {
+    claude: "Claude Code",
+    codex: "Codex",
+    opencode: "OpenCode",
+    amp: "Amp",
+    mock: "Mock"
+  };
+
   return (
     <div className="session-sidebar">
       <div className="sidebar-header">
@@ -22,14 +56,46 @@ const SessionSidebar = ({
           <button className="sidebar-icon-btn" onClick={onRefresh} title="Refresh sessions">
             <RefreshCw size={14} />
           </button>
-          <button className="sidebar-add-btn" onClick={onCreateSession} title="New session">
-            <Plus size={14} />
-          </button>
+          <div className="sidebar-add-menu-wrapper" ref={menuRef}>
+            <button
+              className="sidebar-add-btn"
+              onClick={() => setShowMenu((value) => !value)}
+              title="New session"
+            >
+              <Plus size={14} />
+            </button>
+            {showMenu && (
+              <div className="sidebar-add-menu">
+                {agentsLoading && <div className="sidebar-add-status">Loading agents...</div>}
+                {agentsError && <div className="sidebar-add-status error">{agentsError}</div>}
+                {!agentsLoading && !agentsError && availableAgents.length === 0 && (
+                  <div className="sidebar-add-status">No agents available.</div>
+                )}
+                {!agentsLoading && !agentsError &&
+                  availableAgents.map((id) => (
+                    <button
+                      key={id}
+                      className="sidebar-add-option"
+                      onClick={() => {
+                        onCreateSession(id);
+                        setShowMenu(false);
+                      }}
+                    >
+                      {agentLabels[id] ?? id}
+                    </button>
+                  ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
       <div className="session-list">
-        {sessions.length === 0 ? (
+        {sessionsLoading ? (
+          <div className="sidebar-empty">Loading sessions...</div>
+        ) : sessionsError ? (
+          <div className="sidebar-empty error">{sessionsError}</div>
+        ) : sessions.length === 0 ? (
           <div className="sidebar-empty">No sessions yet.</div>
         ) : (
           sessions.map((session) => (

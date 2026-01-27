@@ -148,6 +148,19 @@ function isStable(version: string) {
   return parseSemver(version).prerelease.length === 0;
 }
 
+function getNpmTag(version: string, latest: boolean) {
+  if (latest) return null;
+  const prerelease = parseSemver(version).prerelease;
+  if (prerelease.length === 0) {
+    return "next";
+  }
+  const hasRc = prerelease.some((part) => part.toLowerCase().startsWith("rc"));
+  if (hasRc) {
+    return "rc";
+  }
+  throw new Error(`Prerelease versions must use rc tag when not latest: ${version}`);
+}
+
 function getAllGitVersions() {
   try {
     execFileSync("git", ["fetch", "--tags", "--force", "--quiet"], {
@@ -411,18 +424,22 @@ function publishCrates(rootDir: string, version: string) {
   }
 }
 
-function publishNpmSdk(rootDir: string, version: string) {
+function publishNpmSdk(rootDir: string, version: string, latest: boolean) {
   const sdkDir = path.join(rootDir, "sdks", "typescript");
   console.log("==> Publishing TypeScript SDK to npm");
+  const npmTag = getNpmTag(version, latest);
   run("npm", ["version", version, "--no-git-tag-version", "--allow-same-version"], { cwd: sdkDir });
   run("pnpm", ["install"], { cwd: sdkDir });
   run("pnpm", ["run", "build"], { cwd: sdkDir });
-  run("npm", ["publish", "--access", "public"], { cwd: sdkDir });
+  const publishArgs = ["publish", "--access", "public"];
+  if (npmTag) publishArgs.push("--tag", npmTag);
+  run("npm", publishArgs, { cwd: sdkDir });
 }
 
-function publishNpmCli(rootDir: string, version: string) {
+function publishNpmCli(rootDir: string, version: string, latest: boolean) {
   const cliDir = path.join(rootDir, "sdks", "cli");
   const distDir = path.join(rootDir, "dist");
+  const npmTag = getNpmTag(version, latest);
 
   for (const [target, info] of Object.entries(PLATFORM_MAP)) {
     const platformDir = path.join(cliDir, "platforms", info.pkg);
@@ -436,7 +453,9 @@ function publishNpmCli(rootDir: string, version: string) {
 
     console.log(`==> Publishing @sandbox-agent/cli-${info.pkg}`);
     run("npm", ["version", version, "--no-git-tag-version", "--allow-same-version"], { cwd: platformDir });
-    run("npm", ["publish", "--access", "public"], { cwd: platformDir });
+    const publishArgs = ["publish", "--access", "public"];
+    if (npmTag) publishArgs.push("--tag", npmTag);
+    run("npm", publishArgs, { cwd: platformDir });
   }
 
   console.log("==> Publishing @sandbox-agent/cli");
@@ -447,7 +466,9 @@ function publishNpmCli(rootDir: string, version: string) {
     pkg.optionalDependencies[dep] = version;
   }
   fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
-  run("npm", ["publish", "--access", "public"], { cwd: cliDir });
+  const publishArgs = ["publish", "--access", "public"];
+  if (npmTag) publishArgs.push("--tag", npmTag);
+  run("npm", publishArgs, { cwd: cliDir });
 }
 
 function validateGit(rootDir: string) {
@@ -542,10 +563,10 @@ async function main() {
       publishCrates(rootDir, version);
     }
     if (flags.has("--publish-npm-sdk")) {
-      publishNpmSdk(rootDir, version);
+      publishNpmSdk(rootDir, version, latest);
     }
     if (flags.has("--publish-npm-cli")) {
-      publishNpmCli(rootDir, version);
+      publishNpmCli(rootDir, version, latest);
     }
     if (flags.has("--upload-typescript")) {
       uploadTypescriptArtifacts(rootDir, version, latest);
@@ -626,11 +647,11 @@ async function main() {
   }
 
   if (shouldRun("publish-npm-sdk")) {
-    publishNpmSdk(rootDir, version);
+    publishNpmSdk(rootDir, version, latest);
   }
 
   if (shouldRun("publish-npm-cli")) {
-    publishNpmCli(rootDir, version);
+    publishNpmCli(rootDir, version, latest);
   }
 
   if (shouldRun("upload-typescript")) {
