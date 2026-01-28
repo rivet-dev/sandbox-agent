@@ -4,26 +4,37 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version (e.g. 0.1.0 or v0.1.0)"
+        description: 'Version'
         required: true
         type: string
       latest:
-        description: "Latest"
+        description: 'Latest'
         required: true
         type: boolean
         default: true
+      reuse_engine_version:
+        description: 'Reuse artifacts from this version (skips building)'
+        required: false
+        type: string
 
 defaults:
   run:
+    # Enable fail-fast behavior
     shell: bash -e {0}
 
 env:
+  # Disable incremental compilation for faster from-scratch builds
   CARGO_INCREMENTAL: 0
 
 jobs:
   setup:
     name: "Setup"
     runs-on: ubuntu-24.04
+    permissions:
+      # Allow pushing to GitHub
+      contents: write
+      # Allows authentication
+      id-token: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -31,89 +42,160 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - uses: pnpm/action-setup@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: pnpm
 
-      - name: Install tsx
-        run: npm install -g tsx
+      - run: corepack enable
 
-      - name: Install workspace dependencies
-        run: pnpm install --no-frozen-lockfile
-
-      - name: Install release script dependencies
+      - name: Setup
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          R2_RELEASES_ACCESS_KEY_ID: ${{ secrets.R2_RELEASES_ACCESS_KEY_ID }}
+          R2_RELEASES_SECRET_ACCESS_KEY: ${{ secrets.R2_RELEASES_SECRET_ACCESS_KEY }}
         run: |
-          cd scripts/release
-          pnpm install --no-frozen-lockfile --ignore-workspace
+          # Configure Git
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Run setup phase
-        run: |
-          CMD="./scripts/release/main.ts --version '${{ inputs.version }}' --phase setup-ci"
+          # Authenticate with NPM
+          cat << EOF > ~/.npmrc
+          //registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}
+          EOF
+
+          # Install dependencies
+          pnpm install
+
+          # Install tsx globally
+          npm install -g tsx
+
+          # Build command based on inputs
+          CMD="./scripts/release/main.ts --version \"${{ github.event.inputs.version }}\" --phase setup-ci"
+
           if [ "${{ inputs.latest }}" != "true" ]; then
             CMD="$CMD --no-latest"
           fi
+
+          if [ -n "${{ inputs.reuse_engine_version }}" ]; then
+            CMD="$CMD --reuse-engine-version \"${{ inputs.reuse_engine_version }}\""
+          fi
+
           eval "$CMD"
 
   binaries:
-    name: "Build Binaries"
+    name: "Build & Upload Binaries"
     needs: [setup]
+    if: ${{ !inputs.reuse_engine_version }}
     strategy:
       matrix:
         include:
           - platform: linux
+            runner: depot-ubuntu-24.04-8
             target: x86_64-unknown-linux-musl
             binary_ext: ""
             arch: x86_64
           - platform: windows
+            runner: depot-ubuntu-24.04-8
             target: x86_64-pc-windows-gnu
             binary_ext: ".exe"
             arch: x86_64
           - platform: macos
+            runner: depot-ubuntu-24.04-8
             target: x86_64-apple-darwin
             binary_ext: ""
             arch: x86_64
           - platform: macos
+            runner: depot-ubuntu-24.04-8
             target: aarch64-apple-darwin
             binary_ext: ""
             arch: aarch64
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: pnpm
-
-      - name: Build inspector frontend
-        run: |
-          pnpm install --no-frozen-lockfile
-          SANDBOX_AGENT_SKIP_INSPECTOR=1 pnpm --filter @sandbox-agent/inspector build
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
       - name: Build binary
         run: |
+          # Use Docker BuildKit
+          export DOCKER_BUILDKIT=1
+
+          # Build the binary using our Dockerfile
           docker/release/build.sh ${{ matrix.target }}
+
+          # Make sure dist directory exists and binary is there
           ls -la dist/
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - name: Upload to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_RELEASES_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_RELEASES_SECRET_ACCESS_KEY }}
+        run: |
+          # Install dependencies for AWS CLI
+          sudo apt-get update
+          sudo apt-get install -y unzip curl
+
+          # Install AWS CLI
+          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+          unzip awscliv2.zip
+          sudo ./aws/install --update
+
+          COMMIT_SHA_SHORT="${GITHUB_SHA::7}"
+          BINARY_PATH="dist/sandbox-agent-${{ matrix.target }}${{ matrix.binary_ext }}"
+
+          # Must specify --checksum-algorithm for compatibility with R2
+          aws s3 cp \
+            "${BINARY_PATH}" \
+            "s3://rivet-releases/sandbox-agent/${COMMIT_SHA_SHORT}/binaries/sandbox-agent-${{ matrix.target }}${{ matrix.binary_ext }}" \
+            --region auto \
+            --endpoint-url https://2a94c6a0ced8d35ea63cddc86c2681e7.r2.cloudflarestorage.com \
+            --checksum-algorithm CRC32
+
+  docker:
+    name: "Build & Push Docker Images"
+    needs: [setup]
+    if: ${{ !inputs.reuse_engine_version }}
+    strategy:
+      matrix:
+        include:
+          - platform: linux/arm64
+            runner: depot-ubuntu-24.04-arm-8
+            arch_suffix: -arm64
+          - platform: linux/amd64
+            runner: depot-ubuntu-24.04-8
+            arch_suffix: -amd64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
         with:
-          name: binary-${{ matrix.target }}
-          path: dist/sandbox-agent-${{ matrix.target }}${{ matrix.binary_ext }}
+          fetch-depth: 0
+
+      - name: Set outputs
+        id: vars
+        run: echo "sha_short=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+
+      - uses: ./.github/actions/docker-setup
+        with:
+          docker_username: ${{ secrets.DOCKER_CI_USERNAME }}
+          docker_password: ${{ secrets.DOCKER_CI_ACCESS_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & Push
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          tags: rivetdev/sandbox-agent:${{ steps.vars.outputs.sha_short }}${{ matrix.arch_suffix }}
+          file: docker/runtime/Dockerfile
+          platforms: ${{ matrix.platform }}
 
   complete:
     name: "Complete"
-    needs: [setup, binaries]
+    needs: [setup, docker, binaries]
+    if: ${{ always() && !cancelled() && needs.setup.result == 'success' && (needs.docker.result == 'success' || needs.docker.result == 'skipped') && (needs.binaries.result == 'success' || needs.binaries.result == 'skipped') }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -122,53 +204,47 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - uses: pnpm/action-setup@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           registry-url: "https://registry.npmjs.org"
-          cache: pnpm
 
-      - name: Install tsx
-        run: npm install -g tsx
+      - run: corepack enable
 
-      - name: Install workspace dependencies
-        run: pnpm install --no-frozen-lockfile
-
-      - name: Install release script dependencies
-        run: |
-          cd scripts/release
-          pnpm install --no-frozen-lockfile --ignore-workspace
-
-      - name: Install AWS CLI
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y unzip curl
-
-          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-          unzip awscliv2.zip
-          sudo ./aws/install --update
-
-      - name: Download binaries
-        uses: actions/download-artifact@v4
+      - uses: ./.github/actions/docker-setup
         with:
-          path: dist/
-          pattern: binary-*
-          merge-multiple: true
+          docker_username: ${{ secrets.DOCKER_CI_USERNAME }}
+          docker_password: ${{ secrets.DOCKER_CI_ACCESS_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: List downloaded binaries
-        run: ls -la dist/
-
-      - name: Publish & upload artifacts
+      - name: Complete
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           R2_RELEASES_ACCESS_KEY_ID: ${{ secrets.R2_RELEASES_ACCESS_KEY_ID }}
           R2_RELEASES_SECRET_ACCESS_KEY: ${{ secrets.R2_RELEASES_SECRET_ACCESS_KEY }}
         run: |
-          CMD="./scripts/release/main.ts --version '${{ inputs.version }}' --phase complete-ci --no-validate-git"
+          # Authenticate with NPM
+          cat << EOF > ~/.npmrc
+          //registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}
+          EOF
+
+          # Install dependencies
+          pnpm install
+
+          # Install tsx globally
+          npm install -g tsx
+
+          # Build command based on inputs
+          CMD="./scripts/release/main.ts --version \"${{ github.event.inputs.version }}\" --phase complete-ci --no-validate-git"
+
           if [ "${{ inputs.latest }}" != "true" ]; then
             CMD="$CMD --no-latest"
           fi
+
+          if [ -n "${{ inputs.reuse_engine_version }}" ]; then
+            CMD="$CMD --reuse-engine-version \"${{ inputs.reuse_engine_version }}\""
+          fi
+
           eval "$CMD"
