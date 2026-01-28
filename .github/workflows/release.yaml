@@ -214,6 +214,7 @@ jobs:
       - run: corepack enable
 
       - uses: ./.github/actions/docker-setup
+        if: ${{ secrets.DOCKER_CI_USERNAME != '' }}
         with:
           docker_username: ${{ secrets.DOCKER_CI_USERNAME }}
           docker_password: ${{ secrets.DOCKER_CI_ACCESS_TOKEN }}
