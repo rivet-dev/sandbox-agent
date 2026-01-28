@@ -3,7 +3,7 @@
 import { Code, Cloud, GitBranch } from 'lucide-react';
 import { CopyButton } from './ui/CopyButton';
 
-const sdkCode = `import { SandboxAgent } from "sandbox-agent";
+const sdkCodeRaw = `import { SandboxAgent } from "sandbox-agent";
 
 const client = await SandboxAgent.start();
 
@@ -18,6 +18,73 @@ await client.postMessage("my-session", {
 for await (const event of client.streamEvents("my-session")) {
   console.log(event.type, event.data);
 }`;
+
+function SdkCodeHighlighted() {
+  return (
+    <pre className="overflow-x-auto p-3 font-mono text-[11px] leading-relaxed">
+      <code>
+        <span className="text-purple-400">import</span>
+        <span className="text-zinc-300">{" { "}</span>
+        <span className="text-white">SandboxAgent</span>
+        <span className="text-zinc-300">{" } "}</span>
+        <span className="text-purple-400">from</span>
+        <span className="text-zinc-300"> </span>
+        <span className="text-green-400">"sandbox-agent"</span>
+        <span className="text-zinc-300">;</span>
+        {"\n\n"}
+        <span className="text-purple-400">const</span>
+        <span className="text-zinc-300"> client = </span>
+        <span className="text-purple-400">await</span>
+        <span className="text-zinc-300"> SandboxAgent.</span>
+        <span className="text-blue-400">start</span>
+        <span className="text-zinc-300">();</span>
+        {"\n\n"}
+        <span className="text-purple-400">await</span>
+        <span className="text-zinc-300"> client.</span>
+        <span className="text-blue-400">createSession</span>
+        <span className="text-zinc-300">(</span>
+        <span className="text-green-400">"my-session"</span>
+        <span className="text-zinc-300">{", {"}</span>
+        {"\n"}
+        <span className="text-zinc-300">{"  agent: "}</span>
+        <span className="text-green-400">"claude-code"</span>
+        <span className="text-zinc-300">,</span>
+        {"\n"}
+        <span className="text-zinc-300">{"});"}</span>
+        {"\n\n"}
+        <span className="text-purple-400">await</span>
+        <span className="text-zinc-300"> client.</span>
+        <span className="text-blue-400">postMessage</span>
+        <span className="text-zinc-300">(</span>
+        <span className="text-green-400">"my-session"</span>
+        <span className="text-zinc-300">{", {"}</span>
+        {"\n"}
+        <span className="text-zinc-300">{"  message: "}</span>
+        <span className="text-green-400">"Hello, world!"</span>
+        <span className="text-zinc-300">,</span>
+        {"\n"}
+        <span className="text-zinc-300">{"});"}</span>
+        {"\n\n"}
+        <span className="text-purple-400">for await</span>
+        <span className="text-zinc-300"> (</span>
+        <span className="text-purple-400">const</span>
+        <span className="text-zinc-300"> event </span>
+        <span className="text-purple-400">of</span>
+        <span className="text-zinc-300"> client.</span>
+        <span className="text-blue-400">streamEvents</span>
+        <span className="text-zinc-300">(</span>
+        <span className="text-green-400">"my-session"</span>
+        <span className="text-zinc-300">{")) {"}</span>
+        {"\n"}
+        <span className="text-zinc-300">{"  console."}</span>
+        <span className="text-blue-400">log</span>
+        <span className="text-zinc-300">(event.type, event.data);</span>
+        {"\n"}
+        <span className="text-zinc-300">{"}"}</span>
+      </code>
+    </pre>
+  );
+}
 
 const sandboxCommand = `curl -sSL https://sandboxagent.dev/install | sh`;
 
@@ -63,11 +130,9 @@ export function GetStarted() {
               <div className="overflow-hidden rounded-lg border border-white/5 bg-black/50">
                 <div className="flex items-center justify-between border-b border-white/5 bg-white/5 px-3 py-2">
                   <span className="text-[10px] font-medium text-zinc-500">example.ts</span>
-                  <CopyButton text={sdkCode} />
+                  <CopyButton text={sdkCodeRaw} />
                 </div>
-                <pre className="overflow-x-auto p-3 font-mono text-[11px] leading-relaxed text-zinc-300">
-                  <code>{sdkCode}</code>
-                </pre>
+                <SdkCodeHighlighted />
               </div>
             </div>
           </div>
@@ -102,16 +167,6 @@ export function GetStarted() {
                   <span className="text-zinc-500">$ </span>
                   <span className="text-green-400">{sandboxCommand}</span>
                 </div>
-              </div>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {['E2B', 'Daytona', 'Vercel', 'Docker'].map((provider) => (
-                  <span
-                    key={provider}
-                    className="rounded-md border border-white/5 bg-zinc-800/50 px-2 py-1 text-[10px] font-mono text-zinc-400"
-                  >
-                    {provider}
-                  </span>
-                ))}
               </div>
             </div>
           </div>
