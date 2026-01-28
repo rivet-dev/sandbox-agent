@@ -1,13 +1,11 @@
 import type { AgentModeInfo } from "sandbox-agent";
 
 const ChatSetup = ({
-  agentLabel,
   agentMode,
   permissionMode,
   model,
   variant,
   activeModes,
-  currentAgentVersion,
   hasSession,
   modesLoading,
   modesError,
@@ -16,13 +14,11 @@ const ChatSetup = ({
   onModelChange,
   onVariantChange
 }: {
-  agentLabel: string;
   agentMode: string;
   permissionMode: string;
   model: string;
   variant: string;
   activeModes: AgentModeInfo[];
-  currentAgentVersion?: string | null;
   hasSession: boolean;
   modesLoading: boolean;
   modesError: string | null;
@@ -31,9 +27,6 @@ const ChatSetup = ({
   onModelChange: (value: string) => void;
   onVariantChange: (value: string) => void;
 }) => {
-  const agentVersionLabel = currentAgentVersion
-    ? `${agentLabel} v${currentAgentVersion}`
-    : agentLabel;
   return (
     <div className="setup-row">
       <select
@@ -87,12 +80,6 @@ const ChatSetup = ({
         title="Variant"
         disabled={!hasSession}
       />
-
-      {hasSession && (
-        <span className="setup-version" title="Session agent">
-          {agentVersionLabel}
-        </span>
-      )}
     </div>
   );
 };

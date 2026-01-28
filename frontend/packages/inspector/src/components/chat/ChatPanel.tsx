@@ -123,7 +123,12 @@ const ChatPanel = ({
           <MessageSquare className="button-icon" />
           <span className="panel-title">{sessionId ? "Session" : "No Session"}</span>
           {sessionId && <span className="session-id-display">{sessionId}</span>}
-          {sessionId && <span className="session-agent-display">{agentLabel}</span>}
+          {sessionId && (
+            <span className="session-agent-display">
+              {agentLabel}
+              {currentAgentVersion && <span className="session-agent-version">v{currentAgentVersion}</span>}
+            </span>
+          )}
         </div>
         <div className="panel-header-right">
           <div className="setup-stream">
@@ -244,13 +249,11 @@ const ChatPanel = ({
       />
 
       <ChatSetup
-        agentLabel={agentLabel}
         agentMode={agentMode}
         permissionMode={permissionMode}
         model={model}
         variant={variant}
         activeModes={activeModes}
-        currentAgentVersion={currentAgentVersion}
         modesLoading={modesLoading}
         modesError={modesError}
         onAgentModeChange={onAgentModeChange}
