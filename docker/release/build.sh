@@ -7,7 +7,7 @@ case $TARGET in
   x86_64-unknown-linux-musl)
     echo "Building for Linux x86_64 musl"
     DOCKERFILE="linux-x86_64.Dockerfile"
-    TARGET_STAGE="builder"
+    TARGET_STAGE="x86_64-builder"
     BINARY="sandbox-agent-$TARGET"
     ;;
   x86_64-pc-windows-gnu)
