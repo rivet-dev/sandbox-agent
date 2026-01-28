@@ -200,7 +200,7 @@ async function runLocalChecks(opts: ReleaseOpts) {
 	// TypeScript type check
 	console.log("Running TypeScript type check...");
 	try {
-		await $({ stdio: "inherit", cwd: opts.root })`pnpm check-types`;
+		await $({ stdio: "inherit", cwd: opts.root })`pnpm typecheck`;
 		console.log("✅ TypeScript type check passed");
 	} catch (err) {
 		console.error("❌ TypeScript type check failed");
@@ -216,7 +216,7 @@ async function runCiChecks(opts: ReleaseOpts) {
 	// TypeScript type check
 	console.log("Running TypeScript type check...");
 	try {
-		await $({ stdio: "inherit", cwd: opts.root })`pnpm check-types`;
+		await $({ stdio: "inherit", cwd: opts.root })`pnpm typecheck`;
 		console.log("✅ TypeScript type check passed");
 	} catch (err) {
 		console.error("❌ TypeScript type check failed");
