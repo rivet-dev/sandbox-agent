@@ -46,10 +46,11 @@ WORKDIR /build
 COPY . .
 
 # Build for Windows
+# SANDBOX_AGENT_SKIP_INSPECTOR=1 skips embedding the inspector frontend
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/build/target \
-    cargo build -p sandbox-agent --release --target x86_64-pc-windows-gnu && \
+    SANDBOX_AGENT_SKIP_INSPECTOR=1 cargo build -p sandbox-agent --release --target x86_64-pc-windows-gnu && \
     mkdir -p /artifacts && \
     cp target/x86_64-pc-windows-gnu/release/sandbox-agent.exe /artifacts/sandbox-agent-x86_64-pc-windows-gnu.exe
 

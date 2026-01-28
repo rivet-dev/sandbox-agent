@@ -62,10 +62,11 @@ ENV OPENSSL_DIR=/musl \
 COPY . .
 
 # Build for Linux with musl (static binary) - x86_64
+# SANDBOX_AGENT_SKIP_INSPECTOR=1 skips embedding the inspector frontend
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/build/target \
-    cargo build -p sandbox-agent --release --target x86_64-unknown-linux-musl && \
+    SANDBOX_AGENT_SKIP_INSPECTOR=1 cargo build -p sandbox-agent --release --target x86_64-unknown-linux-musl && \
     mkdir -p /artifacts && \
     cp target/x86_64-unknown-linux-musl/release/sandbox-agent /artifacts/sandbox-agent-x86_64-unknown-linux-musl
 

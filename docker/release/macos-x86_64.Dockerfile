@@ -60,10 +60,11 @@ ar = "x86_64-apple-darwin20.4-ar"\n\
 COPY . .
 
 # Build for x86_64 macOS
+# SANDBOX_AGENT_SKIP_INSPECTOR=1 skips embedding the inspector frontend
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/build/target \
-    cargo build -p sandbox-agent --release --target x86_64-apple-darwin && \
+    SANDBOX_AGENT_SKIP_INSPECTOR=1 cargo build -p sandbox-agent --release --target x86_64-apple-darwin && \
     mkdir -p /artifacts && \
     cp target/x86_64-apple-darwin/release/sandbox-agent /artifacts/sandbox-agent-x86_64-apple-darwin
 
