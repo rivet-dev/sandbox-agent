@@ -54,6 +54,7 @@
 				"group": "Reference",
 				"pages": [
 					"cli",
+					"inspector",
 					"universal-schema",
 					"agent-compatibility",
 					"cors",

@@ -170,6 +170,14 @@ npx sandbox-agent --help
 
 [Documentation](https://sandboxagent.dev/docs/cli)
 
+### Inspector
+
+Debug sessions and events with the [Inspector UI](https://inspect.sandboxagent.dev).
+
+![Sandbox Agent Inspector](./.github/media/inspector.png)
+
+[Documentation](https://sandboxagent.dev/docs/inspector)
+
 ### OpenAPI Specification
 
 [Explore API](https://sandboxagent.dev/docs/api-reference) — [View Specification](https://github.com/rivet-dev/sandbox-agent/blob/main/docs/openapi.json)
