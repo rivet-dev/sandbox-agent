@@ -31,48 +31,44 @@
 		]
 	},
 	"navigation": {
-		"tabs": [
+		"pages": [
 			{
-				"tab": "Docs",
-				"groups": [
+				"group": "Getting started",
+				"pages": ["quickstart", "building-chat-ui", "manage-sessions"]
+			},
+			{
+				"group": "Deploy",
+				"pages": [
+					"deploy/index",
+					"deploy/local",
+					"deploy/e2b",
+					"deploy/daytona",
+					"deploy/docker"
+				]
+			},
+			{
+				"group": "SDKs",
+				"pages": ["sdks/typescript", "sdks/python"]
+			},
+			{
+				"group": "Reference",
+				"pages": [
+					"cli",
+					"universal-schema",
+					"agent-compatibility",
+					"cors",
 					{
-						"group": "Getting started",
-						"pages": ["quickstart", "building-chat-ui", "manage-sessions"]
+						"group": "AI",
+						"pages": ["ai/skill", "ai/llms-txt"]
 					},
 					{
-						"group": "Deploy",
-						"pages": [
-							"deploy/index",
-							"deploy/local",
-							"deploy/e2b",
-							"deploy/daytona",
-							"deploy/docker"
-						]
-					},
-					{
-						"group": "SDKs",
-						"pages": ["sdks/typescript", "sdks/python"]
-					},
-					{
-						"group": "Reference",
-						"pages": [
-							"cli",
-							"cors",
-							"glossary",
-							{
-								"group": "AI",
-								"pages": ["ai/skill", "ai/llms-txt"]
-							},
-							{
-								"group": "Advanced",
-								"pages": ["telemetry", "architecture", "agent-compatibility"]
-							}
-						]
+						"group": "Advanced",
+						"pages": ["telemetry"]
 					}
 				]
 			},
 			{
-				"tab": "API",
+				"group": "HTTP API Reference",
 				"openapi": "openapi.json"
 			}
 		]

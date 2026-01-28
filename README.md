@@ -9,7 +9,7 @@
 
 - **Any coding agent**: Universal API to interact with all agents with full feature coverage
 - **Server or SDK mode**: Run as an HTTP server or with the TypeScript SDK
-- **Universal session schema**: Universal schema to store agent transcripts
+- **Universal session schema**: [Universal schema](https://sandboxagent.dev/docs/universal-schema) to store agent transcripts
 - **Supports your sandbox provider**: Daytona, E2B, Vercel Sandboxes, and more
 - **Lightweight, portable Rust binary**: Install anywhere with 1 curl command
 - **Automatic agent installation**: Agents are installed on-demand when first used
@@ -116,7 +116,7 @@ for await (const event of client.streamEvents("demo", { offset: 0 })) {
 }
 ```
 
-[Documentation](https://sandboxagent.dev/docs/sdks/typescript)
+[Documentation](https://sandboxagent.dev/docs/sdks/typescript) — [Building a Chat UI](https://sandboxagent.dev/docs/building-chat-ui) — [Managing Sessions](https://sandboxagent.dev/docs/manage-sessions)
 
 ### Server
 
@@ -168,11 +168,15 @@ You can also use npx like:
 npx sandbox-agent --help
 ```
 
-[Documentation](https://rivet.dev/docs/cli)
+[Documentation](https://sandboxagent.dev/docs/cli)
 
 ### OpenAPI Specification
 
-[Expore API](https://sandboxagent.dev/docs/http-api) - [View Specification](https://github.com/rivet-dev/sandbox-agent/blob/main/docs/openapi.json)
+[Explore API](https://sandboxagent.dev/docs/api-reference) — [View Specification](https://github.com/rivet-dev/sandbox-agent/blob/main/docs/openapi.json)
+
+### Universal Schema
+
+All events follow a [universal schema](https://sandboxagent.dev/docs/universal-schema) that normalizes differences between agents.
 
 ### Tip: Extract credentials
 
@@ -201,7 +205,7 @@ Claude Code, Codex, OpenCode, and Amp. The SDK normalizes their APIs so you can 
 <details>
 <summary><strong>How is session data persisted?</strong></summary>
 
-This SDK does not handle persisting session data. Events stream in a universal JSON schema that you can persist anywhere. Consider using Postgres or [Rivet Actors](https://rivet.gg) for data persistence.
+This SDK does not handle persisting session data. Events stream in a universal JSON schema that you can persist anywhere. See [Managing Sessions](https://sandboxagent.dev/docs/manage-sessions) for patterns using Postgres or [Rivet Actors](https://rivet.gg).
 </details>
 
 <details>

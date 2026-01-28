@@ -1,7 +1,6 @@
----
-title: "Architecture"
-description: "How the daemon, schemas, and agents fit together."
----
+# Architecture
+
+How the daemon, schemas, and agents fit together.
 
 Sandbox Agent SDK is built around a single daemon that runs inside the sandbox and exposes a universal HTTP API. Clients use the API (or the TypeScript SDK / CLI) to create sessions, send messages, and stream events.
 
@@ -348,3 +347,31 @@ The daemon uses a **global token** configured at startup. All HTTP and CLI opera
 | Event converters | `server/packages/universal-agent-schema/src/agents/*.rs` |
 | Schema extractors | `resources/agent-schemas/src/*.ts` |
 | TypeScript SDK | `sdks/typescript/src/` |
+
+---
+
+# Agent Compatibility
+
+Supported agents, install methods, and streaming formats.
+
+## Compatibility Matrix
+
+| Agent | Provider | Binary | Install method | Session ID | Streaming format |
+|-------|----------|--------|----------------|------------|------------------|
+| Claude Code | Anthropic | `claude` | curl raw binary from GCS | `session_id` | JSONL via stdout |
+| Codex | OpenAI | `codex` | curl tarball from GitHub releases | `thread_id` | JSON-RPC over stdio |
+| OpenCode | Multi-provider | `opencode` | curl tarball from GitHub releases | `session_id` | SSE or JSONL |
+| Amp | Sourcegraph | `amp` | curl raw binary from GCS | `session_id` | JSONL via stdout |
+| Mock | Built-in | — | bundled | `mock-*` | daemon-generated |
+
+## Agent Modes
+
+- **OpenCode**: discovered via the server API.
+- **Claude Code / Codex / Amp**: hardcoded modes (typically `build`, `plan`, or `custom`).
+
+## Capability Notes
+
+- **Questions / permissions**: OpenCode natively supports these workflows. Claude plan approval is normalized into a question event (tests do not currently exercise Claude question/permission flows).
+- **Streaming**: all agents stream events; OpenCode uses SSE, Codex uses JSON-RPC over stdio, others use JSONL. Codex is currently normalized to thread/turn starts plus user/assistant completed items (deltas and tool/reasoning items are not emitted yet).
+- **User messages**: Claude CLI output does not include explicit user-message events in our snapshots, so only assistant messages are surfaced for Claude today.
+- **Files and images**: normalized via `UniversalMessagePart` with `File` and `Image` parts.

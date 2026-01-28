@@ -1,3 +1,7 @@
+# Server
+
+See [ARCHITECTURE.md](./ARCHITECTURE.md) for detailed architecture documentation covering the daemon, agent schema pipeline, session management, agent execution patterns, and SDK modes.
+
 # Server Testing
 
 ## Test placement

@@ -1,28 +1,96 @@
 ---
 title: "Agent Compatibility"
-description: "Supported agents, install methods, and streaming formats."
+description: "Feature support across coding agents."
+icon: "table"
 ---
 
-## Compatibility matrix
+The universal API normalizes different coding agents into a consistent interface. Each agent has different native capabilities; the daemon fills gaps with synthetic events where possible.
 
-| Agent | Provider | Binary | Install method | Session ID | Streaming format |
-|-------|----------|--------|----------------|------------|------------------|
-| Claude Code | Anthropic | `claude` | curl raw binary from GCS | `session_id` | JSONL via stdout |
-| Codex | OpenAI | `codex` | curl tarball from GitHub releases | `thread_id` | JSON-RPC over stdio |
-| OpenCode | Multi-provider | `opencode` | curl tarball from GitHub releases | `session_id` | SSE or JSONL |
-| Amp | Sourcegraph | `amp` | curl raw binary from GCS | `session_id` | JSONL via stdout |
-| Mock | Built-in | — | bundled | `mock-*` | daemon-generated |
+## Feature Matrix
 
-## Agent modes
+| Feature | [Claude Code](https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview)* | [Codex](https://github.com/openai/codex) | [OpenCode](https://github.com/opencode-ai/opencode) | [Amp](https://ampcode.com) |
+|---------|:-----------:|:-----:|:--------:|:---:|
+| Stability | Stable | Stable | Experimental | Experimental |
+| Text Messages | ✓ | ✓ | ✓ | ✓ |
+| Tool Calls | —* | ✓ | ✓ | ✓ |
+| Tool Results | —* | ✓ | ✓ | ✓ |
+| Questions (HITL) | —* | | ✓ | |
+| Permissions (HITL) | —* | | ✓ | |
+| Images | | ✓ | ✓ | |
+| File Attachments | | ✓ | ✓ | |
+| Session Lifecycle | | ✓ | ✓ | |
+| Error Events | | ✓ | ✓ | ✓ |
+| Reasoning/Thinking | | ✓ | | |
+| Command Execution | | ✓ | | |
+| File Changes | | ✓ | | |
+| MCP Tools | | ✓ | | |
+| Streaming Deltas | | ✓ | ✓ | |
 
-- **OpenCode**: discovered via the server API.
-- **Claude Code / Codex / Amp**: hardcoded modes (typically `build`, `plan`, or `custom`).
+\* Coming imminently
 
-## Capability notes
+## Feature Descriptions
 
-- **Questions / permissions**: OpenCode natively supports these workflows. Claude plan approval is normalized into a question event (tests do not currently exercise Claude question/permission flows).
-- **Streaming**: all agents stream events; OpenCode uses SSE, Codex uses JSON-RPC over stdio, others use JSONL. Codex is currently normalized to thread/turn starts plus user/assistant completed items (deltas and tool/reasoning items are not emitted yet).
-- **User messages**: Claude CLI output does not include explicit user-message events in our snapshots, so only assistant messages are surfaced for Claude today.
-- **Files and images**: normalized via `UniversalMessagePart` with `File` and `Image` parts.
+### Text Messages
 
-See [Universal API](/universal-api) for feature coverage details.
+Basic message exchange between user and assistant.
+
+### Tool Calls & Results
+
+Visibility into tool invocations (file reads, command execution, etc.) and their results. When not natively supported, tool activity is embedded in message content.
+
+### Questions (HITL)
+
+Interactive questions the agent asks the user. Emits `question.requested` and `question.resolved` events.
+
+### Permissions (HITL)
+
+Permission requests for sensitive operations. Emits `permission.requested` and `permission.resolved` events.
+
+### Images
+
+Support for image attachments in messages.
+
+### File Attachments
+
+Support for file attachments in messages.
+
+### Session Lifecycle
+
+Native `session.started` and `session.ended` events. When not supported, the daemon emits synthetic lifecycle events.
+
+### Error Events
+
+Structured error events for runtime failures.
+
+### Reasoning/Thinking
+
+Extended thinking or reasoning content with visibility controls.
+
+### Command Execution
+
+Detailed command execution events with stdout/stderr.
+
+### File Changes
+
+Structured file modification events with diffs.
+
+### MCP Tools
+
+Model Context Protocol tool support.
+
+### Streaming Deltas
+
+Native streaming of content deltas. When not supported, the daemon emits a single synthetic delta before `item.completed`.
+
+## Synthetic Events
+
+For features not natively supported, the daemon generates synthetic events to maintain a consistent event stream. Synthetic events have:
+
+- `source: "daemon"`
+- `synthetic: true`
+
+This lets you build UIs that work with any agent without special-casing each provider.
+
+## Request Support
+
+Want support for another agent? [Open an issue](https://github.com/rivet-dev/sandbox-agent/issues/new) to request it.
