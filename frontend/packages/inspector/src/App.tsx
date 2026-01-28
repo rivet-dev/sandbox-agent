@@ -42,13 +42,18 @@ const buildStubItem = (itemId: string, nativeItemId?: string | null): UniversalI
   } as UniversalItem;
 };
 
-const getDefaultEndpoint = () => {
-  return "http://localhost:2468";
+const DEFAULT_ENDPOINT = "http://localhost:2468";
+
+const getCurrentOriginEndpoint = () => {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  return window.location.origin;
 };
 
 const getInitialConnection = () => {
   if (typeof window === "undefined") {
-    return { endpoint: "http://127.0.0.1:2468", token: "", headers: {} as Record<string, string> };
+    return { endpoint: "http://127.0.0.1:2468", token: "", headers: {} as Record<string, string>, hasUrlParam: false };
   }
   const params = new URLSearchParams(window.location.search);
   const urlParam = params.get("url")?.trim();
@@ -62,10 +67,12 @@ const getInitialConnection = () => {
       console.warn("Invalid headers query param, ignoring");
     }
   }
+  const hasUrlParam = urlParam != null && urlParam.length > 0;
   return {
-    endpoint: urlParam && urlParam.length > 0 ? urlParam : getDefaultEndpoint(),
+    endpoint: hasUrlParam ? urlParam : (getCurrentOriginEndpoint() ?? DEFAULT_ENDPOINT),
     token: tokenParam,
-    headers
+    headers,
+    hasUrlParam
   };
 };
 
@@ -132,7 +139,8 @@ export default function App() {
     });
   }, []);
 
-  const createClient = useCallback(async () => {
+  const createClient = useCallback(async (overrideEndpoint?: string) => {
+    const targetEndpoint = overrideEndpoint ?? endpoint;
     const fetchWithLog: typeof fetch = async (input, init) => {
       const method = init?.method ?? "GET";
       const url =
@@ -175,14 +183,14 @@ export default function App() {
     };
 
     const client = await SandboxAgent.connect({
-      baseUrl: endpoint,
+      baseUrl: targetEndpoint,
       token: token || undefined,
       fetch: fetchWithLog,
       headers: Object.keys(extraHeaders).length > 0 ? extraHeaders : undefined
     });
     clientRef.current = client;
     return client;
-  }, [endpoint, token, logRequest]);
+  }, [endpoint, token, extraHeaders, logRequest]);
 
   const getClient = useCallback((): SandboxAgent => {
     if (!clientRef.current) {
@@ -198,14 +206,17 @@ export default function App() {
     return error instanceof Error ? error.message : fallback;
   };
 
-  const connectToDaemon = async (reportError: boolean) => {
+  const connectToDaemon = async (reportError: boolean, overrideEndpoint?: string) => {
     setConnecting(true);
     if (reportError) {
       setConnectError(null);
     }
     try {
-      const client = await createClient();
+      const client = await createClient(overrideEndpoint);
       await client.getHealth();
+      if (overrideEndpoint) {
+        setEndpoint(overrideEndpoint);
+      }
       setConnected(true);
       await refreshAgents();
       await fetchSessions();
@@ -219,6 +230,7 @@ export default function App() {
       }
       setConnected(false);
       clientRef.current = null;
+      throw error;
     } finally {
       setConnecting(false);
     }
@@ -735,7 +747,37 @@ export default function App() {
   useEffect(() => {
     let active = true;
     const attempt = async () => {
-      await connectToDaemon(false);
+      const { hasUrlParam } = initialConnectionRef.current;
+
+      // If URL param was provided, just try that endpoint (don't fall back)
+      if (hasUrlParam) {
+        try {
+          await connectToDaemon(false);
+        } catch {
+          // Keep the URL param endpoint in the form even if connection failed
+        }
+        return;
+      }
+
+      // No URL param: try current origin first
+      const originEndpoint = getCurrentOriginEndpoint();
+      if (originEndpoint) {
+        try {
+          await connectToDaemon(false, originEndpoint);
+          return;
+        } catch {
+          // Origin failed, continue to fallback
+        }
+      }
+
+      // Fall back to localhost:2468
+      if (!active) return;
+      try {
+        await connectToDaemon(false, DEFAULT_ENDPOINT);
+      } catch {
+        // Keep localhost:2468 as the default in the form
+        setEndpoint(DEFAULT_ENDPOINT);
+      }
     };
     attempt().catch(() => {
       if (!active) return;

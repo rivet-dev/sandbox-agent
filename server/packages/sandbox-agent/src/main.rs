@@ -77,6 +77,10 @@ struct ServerArgs {
     #[arg(long = "cors-allow-credentials", short = 'C')]
     cors_allow_credentials: bool,
 
+    /// Disable default CORS for the inspector (https://inspect.sandboxagent.dev)
+    #[arg(long = "no-inspector-cors")]
+    no_inspector_cors: bool,
+
     #[arg(long = "no-telemetry")]
     no_telemetry: bool,
 }
@@ -381,9 +385,8 @@ fn run_server(cli: &Cli, server: &ServerArgs) -> Result<(), CliError> {
     let state = Arc::new(AppState::new(auth, agent_manager));
     let (mut router, state) = build_router_with_state(state);
 
-    if let Some(cors) = build_cors_layer(server)? {
-        router = router.layer(cors);
-    }
+    let cors = build_cors_layer(server)?;
+    router = router.layer(cors);
 
     let addr = format!("{}:{}", server.host, server.port);
     let display_host = match server.host.as_str() {
@@ -827,31 +830,33 @@ fn available_providers(credentials: &ExtractedCredentials) -> Vec<String> {
     providers
 }
 
-fn build_cors_layer(server: &ServerArgs) -> Result<Option<CorsLayer>, CliError> {
-    let has_config = !server.cors_allow_origin.is_empty()
-        || !server.cors_allow_method.is_empty()
-        || !server.cors_allow_header.is_empty()
-        || server.cors_allow_credentials;
+const INSPECTOR_ORIGIN: &str = "https://inspect.sandboxagent.dev";
 
-    if !has_config {
-        return Ok(None);
-    }
-
+fn build_cors_layer(server: &ServerArgs) -> Result<CorsLayer, CliError> {
     let mut cors = CorsLayer::new();
 
-    if server.cors_allow_origin.is_empty() {
-        cors = cors.allow_origin(Any);
+    // Build origins list: inspector by default + any additional origins
+    let mut origins = Vec::new();
+    if !server.no_inspector_cors {
+        let inspector_origin = INSPECTOR_ORIGIN
+            .parse()
+            .map_err(|_| CliError::InvalidCorsOrigin(INSPECTOR_ORIGIN.to_string()))?;
+        origins.push(inspector_origin);
+    }
+    for origin in &server.cors_allow_origin {
+        let value = origin
+            .parse()
+            .map_err(|_| CliError::InvalidCorsOrigin(origin.clone()))?;
+        origins.push(value);
+    }
+    if origins.is_empty() {
+        // No origins allowed - use permissive CORS with no origins (effectively disabled)
+        cors = cors.allow_origin(tower_http::cors::AllowOrigin::predicate(|_, _| false));
     } else {
-        let mut origins = Vec::new();
-        for origin in &server.cors_allow_origin {
-            let value = origin
-                .parse()
-                .map_err(|_| CliError::InvalidCorsOrigin(origin.clone()))?;
-            origins.push(value);
-        }
         cors = cors.allow_origin(origins);
     }
 
+    // Methods: allow any if not specified, otherwise use provided list
     if server.cors_allow_method.is_empty() {
         cors = cors.allow_methods(Any);
     } else {
@@ -865,6 +870,7 @@ fn build_cors_layer(server: &ServerArgs) -> Result<Option<CorsLayer>, CliError> 
         cors = cors.allow_methods(methods);
     }
 
+    // Headers: allow any if not specified, otherwise use provided list
     if server.cors_allow_header.is_empty() {
         cors = cors.allow_headers(Any);
     } else {
@@ -882,7 +888,7 @@ fn build_cors_layer(server: &ServerArgs) -> Result<Option<CorsLayer>, CliError> 
         cors = cors.allow_credentials(true);
     }
 
-    Ok(Some(cors))
+    Ok(cors)
 }
 
 struct ClientContext {
