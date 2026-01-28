@@ -3,8 +3,8 @@ import Layout from '../layouts/Layout.astro';
 import { Navigation } from '../components/Navigation';
 import { Hero } from '../components/Hero';
 import { FeatureGrid } from '../components/FeatureGrid';
+import { GetStarted } from '../components/GetStarted';
 import { FAQ } from '../components/FAQ';
-import { CTASection } from '../components/CTASection';
 import { Footer } from '../components/Footer';
 ---
 
@@ -14,8 +14,8 @@ import { Footer } from '../components/Footer';
     <main>
       <Hero client:load />
       <FeatureGrid client:visible />
+      <GetStarted client:visible />
       <FAQ client:visible />
-      <CTASection client:visible />
     </main>
     <Footer client:visible />
   </div>

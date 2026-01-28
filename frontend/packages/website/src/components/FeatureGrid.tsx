@@ -44,7 +44,7 @@ export function FeatureGrid() {
         <div className="mb-16">
           <h2 className="mb-6 text-3xl font-medium tracking-tight text-white md:text-5xl">
             Full feature coverage. <br />
-            <span className="text-zinc-500">Solving the fundamental friction points.</span>
+            <span className="text-zinc-500">Available as an HTTP API or TypeScript SDK.</span>
           </h2>
           <p className="text-lg leading-relaxed text-zinc-400">
             Everything you need to integrate coding agents in record time.
@@ -98,7 +98,7 @@ export function FeatureGrid() {
                     const curvedPaths = [
                       { d: "M480 225 C540 225, 560 90, 620 90", label: "Claude", color: "#d97757" },
                       { d: "M480 225 C540 225, 560 180, 620 180", label: "OpenAI", color: "#ffffff" },
-                      { d: "M480 225 C540 225, 560 270, 620 270", label: "Devin", color: "#10B981" },
+                      { d: "M480 225 C540 225, 560 270, 620 270", label: "OpenCode", color: "#10B981" },
                       { d: "M480 225 C540 225, 560 360, 620 360", label: "Amp", color: "#F59E0B" }
                     ];
 
@@ -146,53 +146,54 @@ export function FeatureGrid() {
                     <text x="80" y="52" fill="white" textAnchor="middle" fontSize="14" fontWeight="800">Sandbox Agent SDK</text>
                   </g>
 
-                  {/* Provider Nodes with Logos */}
+                  {/* Provider Nodes with Logos - Vertical Layout (centered) */}
                   {/* Claude */}
-                  <g transform="translate(620, 60)">
-                    <rect width="140" height="60" rx="10" fill="#111" stroke="#222" strokeWidth="1" />
-                    <foreignObject x="25" y="15" width="30" height="30">
-                      <img 
-                        src="/logos/claude.svg" 
-                        alt="Claude" 
-                        className="w-full h-full"
-                      />
+                  <g transform="translate(620, 50)">
+                    <rect width="140" height="80" rx="10" fill="#111" stroke="#222" strokeWidth="1" />
+                    <foreignObject x="0" y="10" width="140" height="32">
+                      <div className="flex justify-center">
+                        <img src="/logos/claude.svg" alt="Claude" className="h-8 w-8" />
+                      </div>
                     </foreignObject>
-                    <text x="85" y="35" fill="#999" textAnchor="middle" fontSize="12" fontWeight="600">Claude</text>
+                    <text x="70" y="62" fill="#999" textAnchor="middle" fontSize="11" fontWeight="600">Claude Code</text>
                   </g>
 
-                  {/* OpenAI */}
-                  <g transform="translate(620, 150)">
-                    <rect width="140" height="60" rx="10" fill="#111" stroke="#222" strokeWidth="1" />
-                    <g transform="translate(25, 15) scale(1.25)">
-                      <path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z" fill="#ffffff" />
-                    </g>
-                    <text x="85" y="35" fill="#999" textAnchor="middle" fontSize="12" fontWeight="600">OpenAI</text>
+                  {/* Codex */}
+                  <g transform="translate(620, 140)">
+                    <rect width="140" height="80" rx="10" fill="#111" stroke="#222" strokeWidth="1" />
+                    <foreignObject x="0" y="10" width="140" height="32">
+                      <div className="flex justify-center">
+                        <svg className="h-8 w-8" viewBox="0 0 24 24" fill="none">
+                          <path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z" fill="#ffffff" />
+                        </svg>
+                      </div>
+                    </foreignObject>
+                    <text x="70" y="62" fill="#999" textAnchor="middle" fontSize="11" fontWeight="600">Codex</text>
                   </g>
 
-                  {/* Devin */}
-                  <g transform="translate(620, 240)">
-                    <rect width="140" height="60" rx="10" fill="#111" stroke="#222" strokeWidth="1" />
-                    <foreignObject x="25" y="15" width="30" height="30">
-                      <img 
-                        src="https://mintcdn.com/cognitionai/k89q9Lsp7DOurdC0/logo/devin.png?fit=max&auto=format&n=k89q9Lsp7DOurdC0&q=85&s=e83fbc727ea2cae8f1b80442fa772c50" 
-                        alt="Devin" 
-                        className="w-full h-full"
-                      />
+                  {/* OpenCode */}
+                  <g transform="translate(620, 230)">
+                    <rect width="140" height="80" rx="10" fill="#111" stroke="#222" strokeWidth="1" />
+                    <foreignObject x="0" y="10" width="140" height="32">
+                      <div className="flex justify-center">
+                        <svg className="h-8 w-auto" viewBox="0 0 32 40" fill="none">
+                          <path d="M24 32H8V16H24V32Z" fill="#4B4646"/>
+                          <path d="M24 8H8V32H24V8ZM32 40H0V0H32V40Z" fill="#F1ECEC"/>
+                        </svg>
+                      </div>
                     </foreignObject>
-                    <text x="85" y="35" fill="#999" textAnchor="middle" fontSize="12" fontWeight="600">Devin</text>
+                    <text x="70" y="62" fill="#999" textAnchor="middle" fontSize="11" fontWeight="600">OpenCode</text>
                   </g>
 
-                  {/* Amp / Custom */}
-                  <g transform="translate(620, 330)">
-                    <rect width="140" height="60" rx="10" fill="#111" stroke="#222" strokeWidth="1" />
-                    <foreignObject x="25" y="15" width="30" height="30">
-                      <img 
-                        src="/logos/amp.svg" 
-                        alt="Amp" 
-                        className="w-full h-full"
-                      />
+                  {/* Amp */}
+                  <g transform="translate(620, 320)">
+                    <rect width="140" height="80" rx="10" fill="#111" stroke="#222" strokeWidth="1" />
+                    <foreignObject x="0" y="12" width="140" height="28">
+                      <div className="flex justify-center">
+                        <img src="/logos/amp.svg" alt="Amp" className="h-6 w-auto" style={{ filter: 'brightness(0) invert(1)' }} />
+                      </div>
                     </foreignObject>
-                    <text x="85" y="35" fill="#999" textAnchor="middle" fontSize="12" fontWeight="600">Amp</text>
+                    <text x="70" y="62" fill="#999" textAnchor="middle" fontSize="11" fontWeight="600">Amp</text>
                   </g>
                 </svg>
               </div>
