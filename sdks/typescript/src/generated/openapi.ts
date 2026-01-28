@@ -65,6 +65,8 @@ export interface components {
       questions: boolean;
       reasoning: boolean;
       sessionLifecycle: boolean;
+      /** @description Whether this agent uses a shared long-running server process (vs per-turn subprocess) */
+      sharedProcess: boolean;
       streamingDeltas: boolean;
       textMessages: boolean;
       toolCalls: boolean;
@@ -82,6 +84,7 @@ export interface components {
       id: string;
       installed: boolean;
       path?: string | null;
+      serverStatus?: components["schemas"]["ServerStatusInfo"] | null;
       version?: string | null;
     };
     AgentInstallRequest: {
@@ -235,6 +238,20 @@ export interface components {
     QuestionStatus: "requested" | "answered" | "rejected";
     /** @enum {string} */
     ReasoningVisibility: "public" | "private";
+    /**
+     * @description Status of a shared server process for an agent
+     * @enum {string}
+     */
+    ServerStatus: "running" | "stopped" | "error";
+    ServerStatusInfo: {
+      baseUrl?: string | null;
+      lastError?: string | null;
+      /** Format: int64 */
+      restartCount: number;
+      status: components["schemas"]["ServerStatus"];
+      /** Format: int64 */
+      uptimeMs?: number | null;
+    };
     /** @enum {string} */
     SessionEndReason: "completed" | "error" | "terminated";
     SessionEndedData: {

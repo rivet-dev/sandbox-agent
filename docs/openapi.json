@@ -665,7 +665,8 @@
           "commandExecution",
           "fileChanges",
           "mcpTools",
-          "streamingDeltas"
+          "streamingDeltas",
+          "sharedProcess"
         ],
         "properties": {
           "commandExecution": {
@@ -700,6 +701,10 @@
           },
           "sessionLifecycle": {
             "type": "boolean"
+          },
+          "sharedProcess": {
+            "type": "boolean",
+            "description": "Whether this agent uses a shared long-running server process (vs per-turn subprocess)"
           },
           "streamingDeltas": {
             "type": "boolean"
@@ -760,6 +765,14 @@
           },
           "path": {
             "type": "string",
+            "nullable": true
+          },
+          "serverStatus": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ServerStatusInfo"
+              }
+            ],
             "nullable": true
           },
           "version": {
@@ -1387,6 +1400,46 @@
           "public",
           "private"
         ]
+      },
+      "ServerStatus": {
+        "type": "string",
+        "description": "Status of a shared server process for an agent",
+        "enum": [
+          "running",
+          "stopped",
+          "error"
+        ]
+      },
+      "ServerStatusInfo": {
+        "type": "object",
+        "required": [
+          "status",
+          "restartCount"
+        ],
+        "properties": {
+          "baseUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "lastError": {
+            "type": "string",
+            "nullable": true
+          },
+          "restartCount": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "status": {
+            "$ref": "#/components/schemas/ServerStatus"
+          },
+          "uptimeMs": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true,
+            "minimum": 0
+          }
+        }
       },
       "SessionEndReason": {
         "type": "string",
