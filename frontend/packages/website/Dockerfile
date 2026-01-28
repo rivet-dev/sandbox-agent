@@ -2,21 +2,20 @@ FROM node:22-alpine AS build
 WORKDIR /app
 RUN npm install -g pnpm
 
-# Copy package files for all workspaces
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-COPY frontend/packages/website/package.json ./frontend/packages/website/
+# Copy website package
+COPY frontend/packages/website/package.json ./
 
 # Install dependencies
-RUN pnpm install --filter @sandbox-agent/website...
+RUN pnpm install
 
 # Copy website source
-COPY frontend/packages/website ./frontend/packages/website
+COPY frontend/packages/website/ .
 
 # Build
-RUN pnpm --filter @sandbox-agent/website build
+RUN pnpm build
 
 FROM caddy:alpine
-COPY --from=build /app/frontend/packages/website/dist /srv
+COPY --from=build /app/dist /srv
 RUN cat > /etc/caddy/Caddyfile <<'EOF'
 :80 {
 	root * /srv
