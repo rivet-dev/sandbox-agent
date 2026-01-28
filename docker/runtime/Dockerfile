@@ -23,16 +23,14 @@ RUN apt-get update && apt-get install -y \
     wget && \
     rm -rf /var/lib/apt/lists/*
 
-# Install musl cross toolchain based on architecture
+# Install musl cross toolchain for amd64 only
+# On arm64, we build natively using musl-gcc from musl-tools (already installed)
 RUN if [ "$TARGETARCH" = "amd64" ]; then \
         wget -q https://github.com/cross-tools/musl-cross/releases/latest/download/x86_64-unknown-linux-musl.tar.xz && \
         tar -xf x86_64-unknown-linux-musl.tar.xz -C /opt/ && \
         rm x86_64-unknown-linux-musl.tar.xz && \
         rustup target add x86_64-unknown-linux-musl; \
     elif [ "$TARGETARCH" = "arm64" ]; then \
-        wget -q https://github.com/cross-tools/musl-cross/releases/latest/download/aarch64-unknown-linux-musl.tar.xz && \
-        tar -xf aarch64-unknown-linux-musl.tar.xz -C /opt/ && \
-        rm aarch64-unknown-linux-musl.tar.xz && \
         rustup target add aarch64-unknown-linux-musl; \
     fi
 
@@ -55,7 +53,7 @@ RUN if [ "$TARGETARCH" = "amd64" ]; then \
         cd .. && \
         rm -rf openssl-$SSL_VER*; \
     elif [ "$TARGETARCH" = "arm64" ]; then \
-        export PATH="/opt/aarch64-unknown-linux-musl/bin:$PATH" && \
+        export CC=musl-gcc && \
         wget https://www.openssl.org/source/openssl-$SSL_VER.tar.gz && \
         tar -xzf openssl-$SSL_VER.tar.gz && \
         cd openssl-$SSL_VER && \
@@ -89,12 +87,10 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
         SANDBOX_AGENT_SKIP_INSPECTOR=1 cargo build -p sandbox-agent --release --target x86_64-unknown-linux-musl && \
         cp target/x86_64-unknown-linux-musl/release/sandbox-agent /sandbox-agent; \
     elif [ "$TARGETARCH" = "arm64" ]; then \
-        export PATH="/opt/aarch64-unknown-linux-musl/bin:$PATH" && \
-        export CC_aarch64_unknown_linux_musl=aarch64-unknown-linux-musl-gcc && \
-        export CXX_aarch64_unknown_linux_musl=aarch64-unknown-linux-musl-g++ && \
-        export AR_aarch64_unknown_linux_musl=aarch64-unknown-linux-musl-ar && \
-        export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-unknown-linux-musl-gcc && \
-        export RUSTFLAGS="-C target-feature=+crt-static -C link-arg=-static-libgcc" && \
+        export CC_aarch64_unknown_linux_musl=musl-gcc && \
+        export AR_aarch64_unknown_linux_musl=ar && \
+        export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc && \
+        export RUSTFLAGS="-C target-feature=+crt-static" && \
         SANDBOX_AGENT_SKIP_INSPECTOR=1 cargo build -p sandbox-agent --release --target aarch64-unknown-linux-musl && \
         cp target/aarch64-unknown-linux-musl/release/sandbox-agent /sandbox-agent; \
     fi
