@@ -102,7 +102,7 @@ const ConnectScreen = ({
             <p className="hint">
               Start the server with CORS enabled for browser access:
               <br />
-              <code>sandbox-agent server --cors-allow-origin http://localhost:5173</code>
+              <code>sandbox-agent server --cors-allow-origin {window.location.origin}</code>
             </p>
           </div>
         </div>
