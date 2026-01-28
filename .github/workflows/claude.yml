@@ -9,6 +9,12 @@ on:
     types: [opened, assigned, labeled]
   pull_request_review:
     types: [submitted]
+  workflow_dispatch:
+    inputs:
+      prompt:
+        description: "Prompt to send to Claude"
+        required: false
+        type: string
 
 jobs:
   claude-response:
@@ -29,3 +35,4 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: ${{ inputs.prompt }}
