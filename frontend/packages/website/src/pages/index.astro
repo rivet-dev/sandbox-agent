@@ -4,6 +4,7 @@ import { Navigation } from '../components/Navigation';
 import { Hero } from '../components/Hero';
 import { FeatureGrid } from '../components/FeatureGrid';
 import { GetStarted } from '../components/GetStarted';
+import { Inspector } from '../components/Inspector';
 import { FAQ } from '../components/FAQ';
 import { Footer } from '../components/Footer';
 ---
@@ -15,6 +16,7 @@ import { Footer } from '../components/Footer';
       <Hero client:load />
       <FeatureGrid client:visible />
       <GetStarted client:visible />
+      <Inspector client:visible />
       <FAQ client:visible />
     </main>
     <Footer client:visible />
