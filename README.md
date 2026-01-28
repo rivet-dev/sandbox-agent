@@ -13,7 +13,7 @@
 - **Supports your sandbox provider**: Daytona, E2B, Vercel Sandboxes, and more
 - **Lightweight, portable Rust binary**: Install anywhere with 1 curl command
 - **Automatic agent installation**: Agents are installed on-demand when first used
-- **OpenAPI spec**: https://sandboxagent.dev/docs/api
+- **OpenAPI spec**: Well documented and easy to integrate
 
 [Documentation](https://sandboxagent.dev/docs) — [Discord](https://rivet.dev/discord)
 
@@ -37,7 +37,7 @@
 | MCP Tools | | ✓ | | |
 | Streaming Deltas | | ✓ | ✓ | |
 
-* Claude headless CLI does not natively support tool calls/results or HITL questions/permissions yet; these are WIP.
+\* Coming imminently
 
 Want support for another agent? [Open an issue](https://github.com/anthropics/sandbox-agent/issues/new) to request it.
 
@@ -144,8 +144,7 @@ To disable auth locally:
 sandbox-agent server --no-token --host 127.0.0.1 --port 2468
 ```
 
-[Documentation](https://sandboxagent.dev/docs/quickstart)
-[Integration guides](https://sandboxagent.dev/docs/deployments)
+[Documentation](https://sandboxagent.dev/docs/quickstart) - [Integration guides](https://sandboxagent.dev/docs/deploy)
 
 ### CLI
 
@@ -171,6 +170,10 @@ npx sandbox-agent --help
 
 [Documentation](https://rivet.dev/docs/cli)
 
+### OpenAPI Specification
+
+[Expore API](https://sandboxagent.dev/docs/http-api) - [View Specification](https://github.com/rivet-dev/sandbox-agent/blob/main/docs/openapi.json)
+
 ### Tip: Extract credentials
 
 Often you need to use your personal API tokens to test agents on sandboxes:
@@ -183,33 +186,47 @@ This prints environment variables for your OpenAI/Anthropic/etc API keys to test
 
 ## FAQ
 
-**Does this replace the Vercel AI SDK?**
+<details>
+<summary><strong>Does this replace the Vercel AI SDK?</strong></summary>
 
 No, they're complementary. AI SDK is for building chat interfaces and calling LLMs. This SDK is for controlling autonomous coding agents that write code and run commands. Use AI SDK for your UI, use this when you need an agent to actually code.
+</details>
 
-**Which coding agents are supported?**
+<details>
+<summary><strong>Which coding agents are supported?</strong></summary>
 
 Claude Code, Codex, OpenCode, and Amp. The SDK normalizes their APIs so you can swap between them without changing your code.
+</details>
 
-**How is session data persisted?**
+<details>
+<summary><strong>How is session data persisted?</strong></summary>
 
 This SDK does not handle persisting session data. Events stream in a universal JSON schema that you can persist anywhere. Consider using Postgres or [Rivet Actors](https://rivet.gg) for data persistence.
+</details>
 
-**Can I run this locally or does it require a sandbox provider?**
+<details>
+<summary><strong>Can I run this locally or does it require a sandbox provider?</strong></summary>
 
 Both. Run locally for development, deploy to E2B, Daytona, or Vercel Sandboxes for production.
+</details>
 
-**Does it support [platform]?**
+<details>
+<summary><strong>Does it support [platform]?</strong></summary>
 
 The server is a single Rust binary that runs anywhere with a curl install. If your platform can run Linux binaries (Docker, VMs, etc.), it works. See the deployment guides for E2B, Daytona, and Vercel Sandboxes.
+</details>
 
-**Can I use this with my personal API keys?**
+<details>
+<summary><strong>Can I use this with my personal API keys?</strong></summary>
 
 Yes. Use `sandbox-agent credentials extract-env` to extract API keys from your local agent configs (Claude Code, Codex, OpenCode, Amp) and pass them to the sandbox environment.
+</details>
 
-**Why Rust and not [language]?**
+<details>
+<summary><strong>Why Rust and not [language]?</strong></summary>
 
 Rust gives us a single static binary, fast startup, and predictable memory usage. That makes it easy to run inside sandboxes or in CI without shipping a large runtime, such as Node.js.
+</details>
 
 ## Project Goals
 

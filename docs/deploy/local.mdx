@@ -1,0 +1,43 @@
+---
+title: "Local"
+description: "Run the daemon locally for development."
+---
+
+For local development, you can run the daemon directly on your machine.
+
+## With the CLI
+
+```bash
+# Install
+curl -fsSL https://releases.rivet.dev/sandbox-agent/latest/install.sh | sh
+
+# Run
+sandbox-agent server --no-token --host 127.0.0.1 --port 2468
+```
+
+Or with npm:
+
+```bash
+npx sandbox-agent server --no-token --host 127.0.0.1 --port 2468
+```
+
+## With the TypeScript SDK
+
+The SDK can automatically spawn and manage the server as a subprocess:
+
+```typescript
+import { SandboxAgent } from "sandbox-agent";
+
+// Spawns sandbox-agent server as a subprocess
+const client = await SandboxAgent.start();
+
+await client.createSession("my-session", {
+  agent: "claude",
+  permissionMode: "default",
+});
+
+// When done
+await client.dispose();
+```
+
+This installs the binary (if needed) and starts the server on a random available port. No manual setup required.

@@ -1,140 +1,308 @@
 ---
-title: "CLI"
-description: "CLI reference and server flags."
+title: "CLI Reference"
+description: "Complete CLI reference for sandbox-agent."
 ---
 
-The `sandbox-agent api` subcommand mirrors the HTTP API so you can script everything without writing client code.
+## Server
 
-## Server flags
+Start the HTTP server:
 
 ```bash
-sandbox-agent server --token "$SANDBOX_TOKEN" --host 127.0.0.1 --port 2468
+sandbox-agent server [OPTIONS]
 ```
 
-- `--token`: global token for all requests.
-- `--no-token`: disable auth (local dev only).
-- `--host`, `--port`: bind address.
-- `--cors-allow-origin`, `--cors-allow-method`, `--cors-allow-header`, `--cors-allow-credentials`: configure CORS.
-- `--no-telemetry`: disable anonymous telemetry.
+| Option | Default | Description |
+|--------|---------|-------------|
+| `-t, --token <TOKEN>` | - | Authentication token for all requests |
+| `-n, --no-token` | - | Disable authentication (local dev only) |
+| `-H, --host <HOST>` | `127.0.0.1` | Host to bind to |
+| `-p, --port <PORT>` | `2468` | Port to bind to |
+| `-O, --cors-allow-origin <ORIGIN>` | - | CORS allowed origin (repeatable) |
+| `-M, --cors-allow-method <METHOD>` | - | CORS allowed method (repeatable) |
+| `-A, --cors-allow-header <HEADER>` | - | CORS allowed header (repeatable) |
+| `-C, --cors-allow-credentials` | - | Enable CORS credentials |
+| `--no-telemetry` | - | Disable anonymous telemetry |
 
-## Install agent (no server required)
+```bash
+sandbox-agent server --token "$TOKEN" --port 3000
+```
 
-<details>
-<summary><strong>install-agent</strong></summary>
+---
+
+## Install Agent (Local)
+
+Install an agent without running the server:
+
+```bash
+sandbox-agent install-agent <AGENT> [OPTIONS]
+```
+
+| Option | Description |
+|--------|-------------|
+| `-r, --reinstall` | Force reinstall even if already installed |
 
 ```bash
 sandbox-agent install-agent claude --reinstall
 ```
-</details>
 
-## API agent commands
+---
 
-<details>
-<summary><strong>api agents list</strong></summary>
+## Credentials
 
-```bash
-sandbox-agent api agents list --endpoint http://127.0.0.1:2468
-```
-</details>
+### Extract
 
-<details>
-<summary><strong>api agents install</strong></summary>
+Extract locally discovered credentials:
 
 ```bash
-sandbox-agent api agents install claude --reinstall --endpoint http://127.0.0.1:2468
+sandbox-agent credentials extract [OPTIONS]
 ```
-</details>
 
-<details>
-<summary><strong>api agents modes</strong></summary>
+| Option | Description |
+|--------|-------------|
+| `-a, --agent <AGENT>` | Filter by agent (`claude`, `codex`, `opencode`, `amp`) |
+| `-p, --provider <PROVIDER>` | Filter by provider (`anthropic`, `openai`) |
+| `-d, --home-dir <DIR>` | Custom home directory for credential search |
+| `-r, --reveal` | Show full credential values (default: redacted) |
+| `--no-oauth` | Exclude OAuth credentials |
 
 ```bash
-sandbox-agent api agents modes claude --endpoint http://127.0.0.1:2468
+sandbox-agent credentials extract --agent claude --reveal
+sandbox-agent credentials extract --provider anthropic
 ```
-</details>
 
-## API session commands
+### Extract as Environment Variables
 
-<details>
-<summary><strong>api sessions list</strong></summary>
+Output credentials as shell environment variables:
 
 ```bash
-sandbox-agent api sessions list --endpoint http://127.0.0.1:2468
+sandbox-agent credentials extract-env [OPTIONS]
 ```
-</details>
 
-<details>
-<summary><strong>api sessions create</strong></summary>
+| Option | Description |
+|--------|-------------|
+| `-e, --export` | Prefix each line with `export` |
+| `-d, --home-dir <DIR>` | Custom home directory for credential search |
+| `--no-oauth` | Exclude OAuth credentials |
+
+```bash
+# Source directly into shell
+eval "$(sandbox-agent credentials extract-env --export)"
+```
+
+---
+
+## API Commands
+
+The `sandbox-agent api` subcommand mirrors the HTTP API for scripting without client code.
+
+All API commands support:
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `-e, --endpoint <URL>` | `http://127.0.0.1:2468` | API endpoint |
+| `-t, --token <TOKEN>` | - | Authentication token |
+
+---
+
+### Agents
+
+#### List Agents
+
+```bash
+sandbox-agent api agents list
+```
+
+#### Install Agent
+
+```bash
+sandbox-agent api agents install <AGENT> [OPTIONS]
+```
+
+| Option | Description |
+|--------|-------------|
+| `-r, --reinstall` | Force reinstall |
+
+```bash
+sandbox-agent api agents install claude --reinstall
+```
+
+#### Get Agent Modes
+
+```bash
+sandbox-agent api agents modes <AGENT>
+```
+
+```bash
+sandbox-agent api agents modes claude
+```
+
+---
+
+### Sessions
+
+#### List Sessions
+
+```bash
+sandbox-agent api sessions list
+```
+
+#### Create Session
+
+```bash
+sandbox-agent api sessions create <SESSION_ID> [OPTIONS]
+```
+
+| Option | Description |
+|--------|-------------|
+| `-a, --agent <AGENT>` | Agent identifier (required) |
+| `-g, --agent-mode <MODE>` | Agent mode |
+| `-p, --permission-mode <MODE>` | Permission mode (`default`, `plan`, `bypass`) |
+| `-m, --model <MODEL>` | Model override |
+| `-v, --variant <VARIANT>` | Model variant |
+| `-A, --agent-version <VERSION>` | Agent version |
 
 ```bash
 sandbox-agent api sessions create my-session \
   --agent claude \
-  --agent-mode build \
-  --permission-mode default \
-  --endpoint http://127.0.0.1:2468
+  --agent-mode code \
+  --permission-mode default
 ```
-</details>
 
-<details>
-<summary><strong>api sessions send-message</strong></summary>
+#### Send Message
+
+```bash
+sandbox-agent api sessions send-message <SESSION_ID> [OPTIONS]
+```
+
+| Option | Description |
+|--------|-------------|
+| `-m, --message <TEXT>` | Message text (required) |
 
 ```bash
 sandbox-agent api sessions send-message my-session \
-  --message "Summarize the repository" \
-  --endpoint http://127.0.0.1:2468
+  --message "Summarize the repository"
 ```
-</details>
 
-<details>
-<summary><strong>api sessions send-message-stream</strong></summary>
+#### Send Message (Streaming)
+
+Send a message and stream the response:
+
+```bash
+sandbox-agent api sessions send-message-stream <SESSION_ID> [OPTIONS]
+```
+
+| Option | Description |
+|--------|-------------|
+| `-m, --message <TEXT>` | Message text (required) |
+| `--include-raw` | Include raw agent data |
 
 ```bash
 sandbox-agent api sessions send-message-stream my-session \
-  --message "Summarize the repository" \
-  --endpoint http://127.0.0.1:2468
+  --message "Help me debug this"
 ```
-</details>
 
-<details>
-<summary><strong>api sessions events</strong></summary>
+#### Terminate Session
 
 ```bash
-sandbox-agent api sessions events my-session --offset 0 --limit 50 --endpoint http://127.0.0.1:2468
+sandbox-agent api sessions terminate <SESSION_ID>
 ```
-</details>
-
-<details>
-<summary><strong>api sessions events-sse</strong></summary>
 
 ```bash
-sandbox-agent api sessions events-sse my-session --offset 0 --endpoint http://127.0.0.1:2468
+sandbox-agent api sessions terminate my-session
 ```
-</details>
 
-<details>
-<summary><strong>api sessions reply-question</strong></summary>
+#### Get Events
+
+Fetch session events:
 
 ```bash
-sandbox-agent api sessions reply-question my-session QUESTION_ID \
-  --answers "yes" \
-  --endpoint http://127.0.0.1:2468
+sandbox-agent api sessions events <SESSION_ID> [OPTIONS]
 ```
-</details>
 
-<details>
-<summary><strong>api sessions reject-question</strong></summary>
+| Option | Description |
+|--------|-------------|
+| `-o, --offset <N>` | Event offset |
+| `-l, --limit <N>` | Max events to return |
+| `--include-raw` | Include raw agent data |
 
 ```bash
-sandbox-agent api sessions reject-question my-session QUESTION_ID --endpoint http://127.0.0.1:2468
+sandbox-agent api sessions events my-session --offset 0 --limit 50
 ```
-</details>
 
-<details>
-<summary><strong>api sessions reply-permission</strong></summary>
+`get-messages` is an alias for `events`.
+
+#### Stream Events (SSE)
+
+Stream session events via Server-Sent Events:
 
 ```bash
-sandbox-agent api sessions reply-permission my-session PERMISSION_ID \
-  --reply once \
-  --endpoint http://127.0.0.1:2468
+sandbox-agent api sessions events-sse <SESSION_ID> [OPTIONS]
 ```
-</details>
+
+| Option | Description |
+|--------|-------------|
+| `-o, --offset <N>` | Event offset to start from |
+| `--include-raw` | Include raw agent data |
+
+```bash
+sandbox-agent api sessions events-sse my-session --offset 0
+```
+
+#### Reply to Question
+
+```bash
+sandbox-agent api sessions reply-question <SESSION_ID> <QUESTION_ID> [OPTIONS]
+```
+
+| Option | Description |
+|--------|-------------|
+| `-a, --answers <JSON>` | JSON array of answers (required) |
+
+```bash
+sandbox-agent api sessions reply-question my-session q1 \
+  --answers '[["yes"]]'
+```
+
+#### Reject Question
+
+```bash
+sandbox-agent api sessions reject-question <SESSION_ID> <QUESTION_ID>
+```
+
+```bash
+sandbox-agent api sessions reject-question my-session q1
+```
+
+#### Reply to Permission
+
+```bash
+sandbox-agent api sessions reply-permission <SESSION_ID> <PERMISSION_ID> [OPTIONS]
+```
+
+| Option | Description |
+|--------|-------------|
+| `-r, --reply <REPLY>` | `once`, `always`, or `reject` (required) |
+
+```bash
+sandbox-agent api sessions reply-permission my-session perm1 --reply once
+```
+
+---
+
+## CLI to HTTP Mapping
+
+| CLI Command | HTTP Endpoint |
+|-------------|---------------|
+| `api agents list` | `GET /v1/agents` |
+| `api agents install` | `POST /v1/agents/{agent}/install` |
+| `api agents modes` | `GET /v1/agents/{agent}/modes` |
+| `api sessions list` | `GET /v1/sessions` |
+| `api sessions create` | `POST /v1/sessions/{sessionId}` |
+| `api sessions send-message` | `POST /v1/sessions/{sessionId}/messages` |
+| `api sessions send-message-stream` | `POST /v1/sessions/{sessionId}/messages/stream` |
+| `api sessions terminate` | `POST /v1/sessions/{sessionId}/terminate` |
+| `api sessions events` | `GET /v1/sessions/{sessionId}/events` |
+| `api sessions events-sse` | `GET /v1/sessions/{sessionId}/events/sse` |
+| `api sessions reply-question` | `POST /v1/sessions/{sessionId}/questions/{questionId}/reply` |
+| `api sessions reject-question` | `POST /v1/sessions/{sessionId}/questions/{questionId}/reject` |
+| `api sessions reply-permission` | `POST /v1/sessions/{sessionId}/permissions/{permissionId}/reply` |

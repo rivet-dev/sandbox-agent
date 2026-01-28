@@ -1,57 +1,76 @@
 ---
 title: "Building a Chat UI"
-description: "Design a client that renders universal session events consistently across providers."
+description: "Build a chat interface using the universal event stream."
+icon: "comments"
 ---
 
-This guide explains how to build a chat UI that works across all agents using the universal event
-stream.
+## Setup
 
-## High-level flow
+### List agents
 
-1. List agents and read their capabilities.
-2. Create a session for the selected agent.
-3. Send user messages.
-4. Subscribe to events (polling or SSE).
-5. Render items and deltas into a stable message timeline.
+```ts
+const { agents } = await client.listAgents();
 
-## Use agent capabilities
+// Each agent has capabilities that determine what UI to show
+const claude = agents.find((a) => a.id === "claude");
+if (claude?.capabilities.permissions) {
+  // Show permission approval UI
+}
+if (claude?.capabilities.questions) {
+  // Show question response UI
+}
+```
 
-Capabilities tell you which features are supported for the selected agent:
+### Create a session
 
-- `tool_calls` and `tool_results` indicate tool execution events.
-- `questions` and `permissions` indicate HITL flows.
-- `plan_mode` indicates that the agent supports plan-only execution.
-- `reasoning` and `status` indicate that the agent can emit reasoning/status content parts.
-- `item_started` indicates that the agent emits `item.started` on its own; when false the daemon will emit a synthetic `item.started` immediately after sending a user message.
+```ts
+const sessionId = `session-${crypto.randomUUID()}`;
 
-Use these to enable or disable UI affordances (tool panels, approval buttons, etc.).
+await client.createSession(sessionId, {
+  agent: "claude",
+  agentMode: "code",        // Optional: agent-specific mode
+  permissionMode: "default", // Optional: "default" | "plan" | "bypass"
+  model: "claude-sonnet-4", // Optional: model override
+});
+```
 
-## Event model
+### Send a message
 
-Every event includes:
+```ts
+await client.postMessage(sessionId, { message: "Hello, world!" });
+```
 
-- `event_id`, `sequence`, and `time` for ordering.
-- `session_id` for the universal session.
-- `native_session_id` for provider-specific debugging.
-- `type` with one of:
-  - `session.started`, `session.ended`
-  - `item.started`, `item.delta`, `item.completed`
-  - `permission.requested`, `permission.resolved`
-  - `question.requested`, `question.resolved`
-  - `error`, `agent.unparsed`
-- `data` which holds the payload for the event type.
-- `synthetic` and `source` to show daemon-generated events.
-- `raw` (optional) when `include_raw=true`.
+### Stream events
 
-## Rendering items
+Three options for receiving events:
 
-Items are emitted in three phases:
+```ts
+// Option 1: SSE (recommended for real-time UI)
+const stream = client.streamEvents(sessionId, { offset: 0 });
+for await (const event of stream) {
+  handleEvent(event);
+}
 
-- `item.started`: first snapshot of a message or tool item.
-- `item.delta`: incremental updates (token streaming or synthetic deltas).
-- `item.completed`: final snapshot.
+// Option 2: Polling
+const { events, hasMore } = await client.getEvents(sessionId, { offset: 0 });
+events.forEach(handleEvent);
 
-Recommended render flow:
+// Option 3: Turn streaming (send + stream in one call)
+const stream = client.streamTurn(sessionId, { message: "Hello" });
+for await (const event of stream) {
+  handleEvent(event);
+}
+```
+
+Use `offset` to track the last seen `sequence` number and resume from where you left off.
+
+---
+
+## Handling Events
+
+### Bare minimum
+
+Handle these three events to render a basic chat:
 
 ```ts
 type ItemState = {
@@ -60,108 +79,278 @@ type ItemState = {
 };
 
 const items = new Map<string, ItemState>();
-const order: string[] = [];
 
-function applyEvent(event: UniversalEvent) {
-  if (event.type === "item.started") {
-    const item = event.data.item;
-    items.set(item.item_id, { item, deltas: [] });
-    order.push(item.item_id);
-  }
-
-  if (event.type === "item.delta") {
-    const { item_id, delta } = event.data;
-    const state = items.get(item_id);
-    if (state) {
-      state.deltas.push(delta);
+function handleEvent(event: UniversalEvent) {
+  switch (event.type) {
+    case "item.started": {
+      const { item } = event.data as ItemEventData;
+      items.set(item.item_id, { item, deltas: [] });
+      break;
     }
-  }
 
-  if (event.type === "item.completed") {
-    const item = event.data.item;
-    const state = items.get(item.item_id);
-    if (state) {
-      state.item = item;
+    case "item.delta": {
+      const { item_id, delta } = event.data as ItemDeltaData;
+      const state = items.get(item_id);
+      if (state) {
+        state.deltas.push(delta);
+      }
+      break;
+    }
+
+    case "item.completed": {
+      const { item } = event.data as ItemEventData;
+      const state = items.get(item.item_id);
+      if (state) {
+        state.item = item;
+        state.deltas = []; // Clear deltas, use final content
+      }
+      break;
     }
   }
 }
 ```
 
-When rendering, combine the item content with accumulated deltas. If you receive a delta before a
-started event (should not happen), treat it as an error.
+When rendering, show a loading indicator while `item.status === "in_progress"`:
 
-## Content parts
+```ts
+function renderItem(state: ItemState) {
+  const { item, deltas } = state;
+  const isLoading = item.status === "in_progress";
 
-Each `UniversalItem` has `content` parts. Your UI can branch on `part.type`:
+  // For streaming text, combine item content with accumulated deltas
+  const text = item.content
+    .filter((p) => p.type === "text")
+    .map((p) => p.text)
+    .join("");
+  const streamedText = text + deltas.join("");
 
-- `text` for normal chat text.
-- `tool_call` and `tool_result` for tool execution.
-- `file_ref` for file read/write/patch previews.
-- `reasoning` if you display public reasoning text.
-- `status` for progress updates.
-- `image` for image outputs.
-
-Treat `item.kind` as the primary layout decision (message vs tool call vs system), and use content
-parts for the detailed rendering.
-
-## Questions and permissions
-
-Question and permission events are out-of-band from item flow. Render them as modal or inline UI
-blocks that must be resolved via:
-
-- `POST /v1/sessions/{session_id}/questions/{question_id}/reply`
-- `POST /v1/sessions/{session_id}/questions/{question_id}/reject`
-- `POST /v1/sessions/{session_id}/permissions/{permission_id}/reply`
-
-If an agent does not advertise these capabilities, keep those UI controls hidden.
-
-## Error and unparsed events
-
-- `error` events are structured failures from the daemon or agent.
-- `agent.unparsed` indicates the provider emitted something the converter could not parse.
-
-Treat `agent.unparsed` as a hard failure in development so you can fix converters quickly.
-
-## Event ordering
-
-Prefer `sequence` for ordering. It is monotonic for a given session. The `time` field is for
-timestamps, not ordering.
-
-## Handling session end
-
-`session.ended` includes the reason and who terminated it. Disable input after a terminal event.
-
-## Optional raw payloads
-
-If you need provider-level debugging, pass `include_raw=true` when streaming or polling events
-(including one-turn streams) to receive the `raw` payload for each event.
-
-## SSE vs polling vs turn streaming
-
-- SSE gives low-latency updates and simplifies streaming UIs.
-- Polling is simpler to debug and works in any environment.
-- Turn streaming (`POST /v1/sessions/{session_id}/messages/stream`) is a one-shot stream tied to a
-  single prompt. The stream closes automatically once the turn completes.
-
-Both yield the same event payloads.
-
-## Mock agent for UI testing
-
-Use the built-in `mock` agent to exercise UI behaviors without external credentials:
-
-```bash
-curl -X POST http://127.0.0.1:2468/v1/sessions/demo-session \
-  -H "content-type: application/json" \
-  -d '{"agent":"mock"}'
+  return {
+    content: streamedText,
+    isLoading,
+    role: item.role,
+    kind: item.kind,
+  };
+}
 ```
 
-The mock agent sends a prompt telling you what commands it accepts. Send messages like `demo`,
-`markdown`, or `permission` to emit specific event sequences. Any other text is echoed back as an
-assistant message so you can test rendering, streaming, and approval flows on demand.
+### Extra events
 
-## Reference implementation
+Handle these for a complete implementation:
 
-The [Inspector chat UI](https://github.com/rivet-dev/sandbox-agent/blob/main/frontend/packages/inspector/src/App.tsx)
-is a complete reference implementation showing how to build a chat interface using the universal event
-stream. It demonstrates session management, event rendering, item lifecycle handling, and HITL approval
-flows.
+```ts
+function handleEvent(event: UniversalEvent) {
+  switch (event.type) {
+    // ... bare minimum events above ...
+
+    case "session.started": {
+      // Session is ready
+      break;
+    }
+
+    case "session.ended": {
+      const { reason, terminated_by } = event.data as SessionEndedData;
+      // Disable input, show end reason
+      // reason: "completed" | "error" | "terminated"
+      // terminated_by: "agent" | "daemon"
+      break;
+    }
+
+    case "error": {
+      const { message, code } = event.data as ErrorData;
+      // Display error to user
+      break;
+    }
+
+    case "agent.unparsed": {
+      const { error, location } = event.data as AgentUnparsedData;
+      // Parsing failure - treat as bug in development
+      console.error(`Parse error at ${location}: ${error}`);
+      break;
+    }
+  }
+}
+```
+
+### Content parts
+
+Each item has `content` parts. Render based on `type`:
+
+```ts
+function renderContentPart(part: ContentPart) {
+  switch (part.type) {
+    case "text":
+      return <Markdown>{part.text}</Markdown>;
+
+    case "tool_call":
+      return <ToolCall name={part.name} args={part.arguments} />;
+
+    case "tool_result":
+      return <ToolResult output={part.output} />;
+
+    case "file_ref":
+      return <FileChange path={part.path} action={part.action} diff={part.diff} />;
+
+    case "reasoning":
+      return <Reasoning>{part.text}</Reasoning>;
+
+    case "status":
+      return <Status label={part.label} detail={part.detail} />;
+
+    case "image":
+      return <Image src={part.path} />;
+  }
+}
+```
+
+---
+
+## Handling Permissions
+
+When `permission.requested` arrives, show an approval UI:
+
+```ts
+const pendingPermissions = new Map<string, PermissionEventData>();
+
+function handleEvent(event: UniversalEvent) {
+  if (event.type === "permission.requested") {
+    const data = event.data as PermissionEventData;
+    pendingPermissions.set(data.permission_id, data);
+  }
+
+  if (event.type === "permission.resolved") {
+    const data = event.data as PermissionEventData;
+    pendingPermissions.delete(data.permission_id);
+  }
+}
+
+// User clicks approve/deny
+async function replyPermission(id: string, reply: "once" | "always" | "reject") {
+  await client.replyPermission(sessionId, id, { reply });
+  pendingPermissions.delete(id);
+}
+```
+
+Render permission requests:
+
+```ts
+function PermissionRequest({ data }: { data: PermissionEventData }) {
+  return (
+    <div>
+      <p>Allow: {data.action}</p>
+      <button onClick={() => replyPermission(data.permission_id, "once")}>
+        Allow Once
+      </button>
+      <button onClick={() => replyPermission(data.permission_id, "always")}>
+        Always Allow
+      </button>
+      <button onClick={() => replyPermission(data.permission_id, "reject")}>
+        Reject
+      </button>
+    </div>
+  );
+}
+```
+
+---
+
+## Handling Questions
+
+When `question.requested` arrives, show a selection UI:
+
+```ts
+const pendingQuestions = new Map<string, QuestionEventData>();
+
+function handleEvent(event: UniversalEvent) {
+  if (event.type === "question.requested") {
+    const data = event.data as QuestionEventData;
+    pendingQuestions.set(data.question_id, data);
+  }
+
+  if (event.type === "question.resolved") {
+    const data = event.data as QuestionEventData;
+    pendingQuestions.delete(data.question_id);
+  }
+}
+
+// User selects answer(s)
+async function answerQuestion(id: string, answers: string[][]) {
+  await client.replyQuestion(sessionId, id, { answers });
+  pendingQuestions.delete(id);
+}
+
+async function rejectQuestion(id: string) {
+  await client.rejectQuestion(sessionId, id);
+  pendingQuestions.delete(id);
+}
+```
+
+Render question requests:
+
+```ts
+function QuestionRequest({ data }: { data: QuestionEventData }) {
+  const [selected, setSelected] = useState<string[]>([]);
+
+  return (
+    <div>
+      <p>{data.prompt}</p>
+      {data.options.map((option) => (
+        <label key={option}>
+          <input
+            type="checkbox"
+            checked={selected.includes(option)}
+            onChange={(e) => {
+              if (e.target.checked) {
+                setSelected([...selected, option]);
+              } else {
+                setSelected(selected.filter((s) => s !== option));
+              }
+            }}
+          />
+          {option}
+        </label>
+      ))}
+      <button onClick={() => answerQuestion(data.question_id, [selected])}>
+        Submit
+      </button>
+      <button onClick={() => rejectQuestion(data.question_id)}>
+        Reject
+      </button>
+    </div>
+  );
+}
+```
+
+---
+
+## Testing with Mock Agent
+
+The `mock` agent lets you test UI behaviors without external credentials:
+
+```ts
+await client.createSession("test-session", { agent: "mock" });
+```
+
+Send `help` to see available commands:
+
+| Command | Tests |
+|---------|-------|
+| `help` | Lists all commands |
+| `demo` | Full UI coverage sequence with markers |
+| `markdown` | Streaming markdown rendering |
+| `tool` | Tool call + result with file refs |
+| `status` | Status item updates |
+| `image` | Image content part |
+| `permission` | Permission request flow |
+| `question` | Question request flow |
+| `error` | Error + unparsed events |
+| `end` | Session ended event |
+| `echo <text>` | Echo text as assistant message |
+
+Any unrecognized text is echoed back as an assistant message.
+
+---
+
+## Reference Implementation
+
+The [Inspector UI](https://github.com/rivet-dev/sandbox-agent/blob/main/frontend/packages/inspector/src/App.tsx)
+is a complete reference showing session management, event rendering, and HITL flows.

@@ -1,103 +1,284 @@
 ---
 title: "Quickstart"
 description: "Start the server and send your first message."
+icon: "rocket"
 ---
 
-## 1. Run the server
+<Steps>
+  <Step title="Install skill (optional)">
+    ```bash
+    npx skills add https://sandboxagent.dev/docs
+    ```
+  </Step>
 
-Use the installed binary, or `cargo run` in development.
+  <Step title="Set environment variables">
+    Each coding agent requires API keys to connect to their respective LLM providers.
 
-```bash
-sandbox-agent server --token "$SANDBOX_TOKEN" --host 127.0.0.1 --port 2468
-```
+    <Tabs>
+      <Tab title="Local shell">
+        ```bash
+        export ANTHROPIC_API_KEY="sk-ant-..."
+        export OPENAI_API_KEY="sk-..."
+        ```
+      </Tab>
 
-If you want to run without auth (local dev only):
+      <Tab title="E2B">
+        ```typescript
+        import { Sandbox } from "@e2b/code-interpreter";
 
-```bash
-sandbox-agent server --no-token --host 127.0.0.1 --port 2468
-```
+        const envs: Record<string, string> = {};
+        if (process.env.ANTHROPIC_API_KEY) envs.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+        if (process.env.OPENAI_API_KEY) envs.OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
-If you're running from source instead of the installed CLI:
+        const sandbox = await Sandbox.create({ envs });
+        ```
+      </Tab>
 
-```bash
-cargo run -p sandbox-agent -- server --token "$SANDBOX_TOKEN" --host 127.0.0.1 --port 2468
-```
+      <Tab title="Daytona">
+        ```typescript
+        import { Daytona } from "@daytonaio/sdk";
 
-### CORS (frontend usage)
+        const envVars: Record<string, string> = {};
+        if (process.env.ANTHROPIC_API_KEY) envVars.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+        if (process.env.OPENAI_API_KEY) envVars.OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
-If you are calling the server from a browser, enable CORS explicitly:
+        const daytona = new Daytona();
+        const sandbox = await daytona.create({
+          snapshot: "sandbox-agent-ready",
+          envVars,
+        });
+        ```
+      </Tab>
 
-```bash
-sandbox-agent server \
-  --token "$SANDBOX_TOKEN" \
-  --cors-allow-origin "http://localhost:5173" \
-  --cors-allow-method "GET" \
-  --cors-allow-method "POST" \
-  --cors-allow-header "Authorization" \
-  --cors-allow-header "Content-Type" \
-  --cors-allow-credentials
-```
+      <Tab title="Docker">
+        ```bash
+        docker run -e ANTHROPIC_API_KEY="sk-ant-..." \
+          -e OPENAI_API_KEY="sk-..." \
+          your-image
+        ```
+      </Tab>
+    </Tabs>
 
-## 2. Install agents (optional)
+	<AccordionGroup>
+		<Accordion title="Extracting API keys from current machine">
+		  Use `sandbox-agent credentials extract-env --export` to extract your existing API keys (Anthropic, OpenAI, etc.) from your existing Claude Code or Codex config files on your machine.
+		</Accordion>
+		<Accordion title="Testing without API keys">
+			If you want to test Sandbox Agent without API keys, use the `mock` agent to test the SDK without any credentials. It simulates agent responses for development and testing.
+		</Accordion>
+	</AccordionGroup>
+  </Step>
 
-Agents install lazily on first use. To preinstall everything up front:
+  <Step title="Run the server">
+    <Tabs>
+      <Tab title="curl">
+        Install and run the binary directly.
 
-```bash
-sandbox-agent install-agent claude
-sandbox-agent install-agent codex
-sandbox-agent install-agent opencode
-sandbox-agent install-agent amp
-```
+        ```bash
+        curl -fsSL https://releases.rivet.dev/sandbox-agent/latest/install.sh | sh
+        sandbox-agent server --token "$SANDBOX_TOKEN" --host 127.0.0.1 --port 2468
+        ```
+      </Tab>
 
-## 3. Create a session
+      <Tab title="npx">
+        Run without installing globally.
 
-```bash
-curl -X POST "http://127.0.0.1:2468/v1/sessions/my-session" \
-  -H "Authorization: Bearer $SANDBOX_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"agent":"claude","agentMode":"build","permissionMode":"default"}'
-```
+        ```bash
+        npx sandbox-agent server --token "$SANDBOX_TOKEN" --host 127.0.0.1 --port 2468
+        ```
+      </Tab>
 
-## 4. Send a message
+      <Tab title="npm i -g">
+        Install globally, then run.
 
-```bash
-curl -X POST "http://127.0.0.1:2468/v1/sessions/my-session/messages" \
-  -H "Authorization: Bearer $SANDBOX_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"message":"Summarize the repository and suggest next steps."}'
-```
+        ```bash
+        npm install -g @sandbox-agent/cli
+        sandbox-agent server --token "$SANDBOX_TOKEN" --host 127.0.0.1 --port 2468
+        ```
+      </Tab>
 
-## 5. Read events
+      <Tab title="Build from source">
+        If you're running from source instead of the installed CLI.
 
-```bash
-curl "http://127.0.0.1:2468/v1/sessions/my-session/events?offset=0&limit=50" \
-  -H "Authorization: Bearer $SANDBOX_TOKEN"
-```
+        ```bash
+        cargo run -p sandbox-agent -- server --token "$SANDBOX_TOKEN" --host 127.0.0.1 --port 2468
+        ```
+      </Tab>
 
-For streaming output, use SSE:
+      <Tab title="TypeScript (local)">
+        For local development, use `SandboxAgent.start()` to automatically spawn and manage the server as a subprocess.
 
-```bash
-curl "http://127.0.0.1:2468/v1/sessions/my-session/events/sse?offset=0" \
-  -H "Authorization: Bearer $SANDBOX_TOKEN"
-```
+        ```typescript
+        import { SandboxAgent } from "sandbox-agent";
 
-For a single-turn stream (post a message and get one streamed response):
+        const client = await SandboxAgent.start();
+        ```
 
-```bash
-curl -N -X POST "http://127.0.0.1:2468/v1/sessions/my-session/messages/stream" \
-  -H "Authorization: Bearer $SANDBOX_TOKEN" \
-  -H "content-type: application/json" \
-  -d '{"message":"Hello"}'
-```
+        This installs the binary and starts the server for you. No manual setup required.
+      </Tab>
+    </Tabs>
 
-## 6. CLI shortcuts
+	<AccordionGroup>
+		<Accordion title="Running without tokens">
+			If endpoint is not public, use `--no-token` to disable authentication. Most sandbox providers already secure their networking, so tokens are not required.
+		</Accordion>
+		<Accordion title="CORS">
+			If you're calling the server from a browser, see the [CORS configuration guide](/docs/cors).
+		</Accordion>
+	</AccordionGroup>
+  </Step>
 
-The `sandbox-agent api` subcommand mirrors the HTTP API:
+  <Step title="Install agents (optional)">
+    To preinstall agents:
 
-```bash
-sandbox-agent api sessions create my-session --agent claude --endpoint http://127.0.0.1:2468 --token "$SANDBOX_TOKEN"
+    ```bash
+    sandbox-agent install-agent claude
+    sandbox-agent install-agent codex
+    sandbox-agent install-agent opencode
+    sandbox-agent install-agent amp
+    ```
 
-sandbox-agent api sessions send-message my-session --message "Hello" --endpoint http://127.0.0.1:2468 --token "$SANDBOX_TOKEN"
+	If agents are not installed up front, they will be lazily installed when creating a session. It's recommended to pre-install agents then take a snapshot of the sandbox for faster coldstarts.
+  </Step>
 
-sandbox-agent api sessions send-message-stream my-session --message "Hello" --endpoint http://127.0.0.1:2468 --token "$SANDBOX_TOKEN"
-```
+  <Step title="Create a session">
+    <Tabs>
+      <Tab title="TypeScript">
+        ```typescript
+        import { SandboxAgent } from "sandbox-agent";
+
+        const client = await SandboxAgent.connect({
+          baseUrl: "http://127.0.0.1:2468",
+          token: process.env.SANDBOX_TOKEN,
+        });
+
+        await client.createSession("my-session", {
+          agent: "claude",
+          agentMode: "build",
+          permissionMode: "default",
+        });
+        ```
+      </Tab>
+
+      <Tab title="curl">
+        ```bash
+        curl -X POST "http://127.0.0.1:2468/v1/sessions/my-session" \
+          -H "Authorization: Bearer $SANDBOX_TOKEN" \
+          -H "Content-Type: application/json" \
+          -d '{"agent":"claude","agentMode":"build","permissionMode":"default"}'
+        ```
+      </Tab>
+
+      <Tab title="CLI">
+        ```bash
+        sandbox-agent api sessions create my-session \
+          --agent claude \
+          --endpoint http://127.0.0.1:2468 \
+          --token "$SANDBOX_TOKEN"
+        ```
+      </Tab>
+    </Tabs>
+  </Step>
+
+  <Step title="Send a message">
+    <Tabs>
+      <Tab title="TypeScript">
+        ```typescript
+        await client.postMessage("my-session", {
+          message: "Summarize the repository and suggest next steps.",
+        });
+        ```
+      </Tab>
+
+      <Tab title="curl">
+        ```bash
+        curl -X POST "http://127.0.0.1:2468/v1/sessions/my-session/messages" \
+          -H "Authorization: Bearer $SANDBOX_TOKEN" \
+          -H "Content-Type: application/json" \
+          -d '{"message":"Summarize the repository and suggest next steps."}'
+        ```
+      </Tab>
+
+      <Tab title="CLI">
+        ```bash
+        sandbox-agent api sessions send-message my-session \
+          --message "Summarize the repository and suggest next steps." \
+          --endpoint http://127.0.0.1:2468 \
+          --token "$SANDBOX_TOKEN"
+        ```
+      </Tab>
+    </Tabs>
+  </Step>
+
+  <Step title="Read events">
+    <Tabs>
+      <Tab title="TypeScript">
+        ```typescript
+        // Poll for events
+        const events = await client.getEvents("my-session", { offset: 0, limit: 50 });
+
+        // Or stream events
+        for await (const event of client.streamEvents("my-session", { offset: 0 })) {
+          console.log(event.type, event.data);
+        }
+        ```
+      </Tab>
+
+      <Tab title="curl">
+        ```bash
+        # Poll for events
+        curl "http://127.0.0.1:2468/v1/sessions/my-session/events?offset=0&limit=50" \
+          -H "Authorization: Bearer $SANDBOX_TOKEN"
+
+        # Stream events via SSE
+        curl "http://127.0.0.1:2468/v1/sessions/my-session/events/sse?offset=0" \
+          -H "Authorization: Bearer $SANDBOX_TOKEN"
+
+        # Single-turn stream (post message and get streamed response)
+        curl -N -X POST "http://127.0.0.1:2468/v1/sessions/my-session/messages/stream" \
+          -H "Authorization: Bearer $SANDBOX_TOKEN" \
+          -H "Content-Type: application/json" \
+          -d '{"message":"Hello"}'
+        ```
+      </Tab>
+
+      <Tab title="CLI">
+        ```bash
+        # Poll for events
+        sandbox-agent api sessions events my-session \
+          --endpoint http://127.0.0.1:2468 \
+          --token "$SANDBOX_TOKEN"
+
+        # Stream events via SSE
+        sandbox-agent api sessions events-sse my-session \
+          --endpoint http://127.0.0.1:2468 \
+          --token "$SANDBOX_TOKEN"
+
+        # Single-turn stream
+        sandbox-agent api sessions send-message-stream my-session \
+          --message "Hello" \
+          --endpoint http://127.0.0.1:2468 \
+          --token "$SANDBOX_TOKEN"
+        ```
+      </Tab>
+    </Tabs>
+  </Step>
+
+  <Step title="Test with Inspector">
+    Open the [Inspector UI](https://inspect.sandboxagent.dev) to inspect session state using a GUI.
+  </Step>
+</Steps>
+
+## Next steps
+
+<CardGroup cols={3}>
+  <Card title="Build a Chat UI" icon="comments" href="/building-chat-ui">
+    Learn how to build a chat interface for your agent.
+  </Card>
+  <Card title="Manage Sessions" icon="database" href="/manage-sessions">
+    Persist and replay agent transcripts.
+  </Card>
+  <Card title="Deploy to a Sandbox" icon="box" href="/deploy">
+    Deploy your agent to E2B, Daytona, or Vercel Sandboxes.
+  </Card>
+</CardGroup>

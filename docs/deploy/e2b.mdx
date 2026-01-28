@@ -3,23 +3,77 @@ title: "E2B"
 description: "Deploy the daemon inside an E2B sandbox."
 ---
 
-## Steps
+## Prerequisites
 
-1. Start an E2B sandbox with network access.
-2. Install the agent binaries you need (Claude, Codex, OpenCode, Amp).
-3. Run the daemon and expose its port.
+- `E2B_API_KEY` environment variable
+- `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` for the coding agents
 
-Example startup script:
+## TypeScript Example
 
-```bash
-export SANDBOX_TOKEN="..."
+```typescript
+import { Sandbox } from "@e2b/code-interpreter";
+import { SandboxAgent } from "sandbox-agent";
 
-# Install sandbox-agent binary (or build from source)
-# TODO: replace with release download once published
-cargo run -p sandbox-agent -- server \
-  --token "$SANDBOX_TOKEN" \
-  --host 0.0.0.0 \
-  --port 2468
+// Pass API keys to the sandbox
+const envs: Record<string, string> = {};
+if (process.env.ANTHROPIC_API_KEY) envs.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+if (process.env.OPENAI_API_KEY) envs.OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+
+const sandbox = await Sandbox.create({ envs });
+
+// Install sandbox-agent
+await sandbox.commands.run(
+  "curl -fsSL https://releases.rivet.dev/sandbox-agent/latest/install.sh | sh"
+);
+
+// Start the server in the background
+await sandbox.commands.run(
+  "sandbox-agent server --no-token --host 0.0.0.0 --port 3000",
+  { background: true }
+);
+
+// Connect to the server
+const baseUrl = `https://${sandbox.getHost(3000)}`;
+const client = await SandboxAgent.connect({ baseUrl });
+
+// Wait for server to be ready
+for (let i = 0; i < 30; i++) {
+  try {
+    await client.getHealth();
+    break;
+  } catch {
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+}
+
+// Install agents (or pre-install in a custom template)
+await client.installAgent("claude");
+await client.installAgent("codex");
+
+// Create a session and start coding
+await client.createSession("my-session", {
+  agent: "claude",
+  permissionMode: "default",
+});
+
+await client.postMessage("my-session", {
+  message: "Summarize this repository",
+});
+
+for await (const event of client.streamEvents("my-session")) {
+  console.log(event.type, event.data);
+}
+
+// Cleanup
+await sandbox.kill();
 ```
 
-4. Configure your client to connect to the sandbox endpoint.
+## Faster Cold Starts
+
+For faster startup, create a custom E2B template with sandbox-agent and agents pre-installed:
+
+1. Create a template with the install script baked in
+2. Pre-install agents: `sandbox-agent install-agent claude codex`
+3. Use the template ID when creating sandboxes
+
+See [E2B Custom Templates](https://e2b.dev/docs/sandbox-template) for details.

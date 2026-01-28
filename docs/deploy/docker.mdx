@@ -1,27 +1,75 @@
 ---
-title: "Docker (dev)"
+title: "Docker"
 description: "Build and run the daemon in a Docker container."
 ---
 
-## Build the binary
+<Warning>
+Docker is not recommended for production. Standard Docker containers don't provide sufficient isolation for running untrusted code. Use a dedicated sandbox provider like E2B or Daytona for production workloads.
+</Warning>
 
-Use the release Dockerfile to build a static binary:
+## Quick Start
+
+Run sandbox-agent in a container with agents pre-installed:
+
+```bash
+docker run --rm -p 3000:3000 \
+  -e ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
+  -e OPENAI_API_KEY="$OPENAI_API_KEY" \
+  debian:bookworm-slim bash -lc "\
+    apt-get update && apt-get install -y curl ca-certificates && \
+    curl -fsSL https://releases.rivet.dev/sandbox-agent/latest/install.sh | sh && \
+    sandbox-agent install-agent claude && \
+    sandbox-agent install-agent codex && \
+    sandbox-agent server --no-token --host 0.0.0.0 --port 3000"
+```
+
+Access the API at `http://localhost:3000`.
+
+## TypeScript with dockerode
+
+```typescript
+import Docker from "dockerode";
+import { SandboxAgent } from "sandbox-agent";
+
+const docker = new Docker();
+const PORT = 3000;
+
+const container = await docker.createContainer({
+  Image: "debian:bookworm-slim",
+  Cmd: ["bash", "-lc", [
+    "apt-get update && apt-get install -y curl ca-certificates",
+    "curl -fsSL https://releases.rivet.dev/sandbox-agent/latest/install.sh | sh",
+    "sandbox-agent install-agent claude",
+    "sandbox-agent install-agent codex",
+    `sandbox-agent server --no-token --host 0.0.0.0 --port ${PORT}`,
+  ].join(" && ")],
+  ExposedPorts: { [`${PORT}/tcp`]: {} },
+  HostConfig: {
+    AutoRemove: true,
+    PortBindings: { [`${PORT}/tcp`]: [{ HostPort: `${PORT}` }] },
+  },
+});
+
+await container.start();
+
+// Wait for server and connect
+const baseUrl = `http://127.0.0.1:${PORT}`;
+const client = await SandboxAgent.connect({ baseUrl });
+
+// Use the client...
+await client.createSession("my-session", {
+  agent: "claude",
+  permissionMode: "default",
+});
+```
+
+## Building from Source
+
+To build a static binary for use in minimal containers:
 
 ```bash
 docker build -f docker/release/linux-x86_64.Dockerfile -t sandbox-agent-build .
-
 docker run --rm -v "$PWD/artifacts:/artifacts" sandbox-agent-build
 ```
 
-The binary will be written to `./artifacts/sandbox-agent-x86_64-unknown-linux-musl`.
-
-## Run the daemon
-
-```bash
-docker run --rm -p 2468:2468 \
-  -v "$PWD/artifacts:/artifacts" \
-  debian:bookworm-slim \
-  /artifacts/sandbox-agent-x86_64-unknown-linux-musl server --token "$SANDBOX_TOKEN" --host 0.0.0.0 --port 2468
-```
-
-You can now access the API at `http://localhost:2468`.
+The binary will be at `./artifacts/sandbox-agent-x86_64-unknown-linux-musl`.

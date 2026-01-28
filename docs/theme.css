@@ -20,6 +20,7 @@ body {
   color: var(--sa-text);
 }
 
+/*
 a {
   color: var(--sa-primary);
 }
@@ -37,13 +38,6 @@ textarea,
 select {
   background-color: var(--sa-input-bg);
   border: 1px solid var(--sa-input-border);
-  color: var(--sa-text);
-}
-
-code,
-pre {
-  background-color: var(--sa-card);
-  border: 1px solid var(--sa-border);
   color: var(--sa-text);
 }
 
@@ -70,3 +64,4 @@ pre {
 .alert-danger {
   border-color: var(--sa-danger);
 }
+*/

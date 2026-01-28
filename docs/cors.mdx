@@ -1,0 +1,58 @@
+---
+title: "CORS Configuration"
+description: "Configure CORS for browser-based applications."
+---
+
+When calling the Sandbox Agent server from a browser, you need to enable CORS (Cross-Origin Resource Sharing) explicitly.
+
+## Basic Configuration
+
+```bash
+sandbox-agent server \
+  --token "$SANDBOX_TOKEN" \
+  --cors-allow-origin "http://localhost:5173" \
+  --cors-allow-method "GET" \
+  --cors-allow-method "POST" \
+  --cors-allow-header "Authorization" \
+  --cors-allow-header "Content-Type" \
+  --cors-allow-credentials
+```
+
+## Options
+
+| Flag | Description |
+|------|-------------|
+| `--cors-allow-origin` | Origins allowed to make requests (e.g., `http://localhost:5173`) |
+| `--cors-allow-method` | HTTP methods to allow (can be specified multiple times) |
+| `--cors-allow-header` | Headers to allow (can be specified multiple times) |
+| `--cors-allow-credentials` | Allow credentials (cookies, authorization headers) |
+
+## Multiple Origins
+
+You can allow multiple origins by specifying the flag multiple times:
+
+```bash
+sandbox-agent server \
+  --token "$SANDBOX_TOKEN" \
+  --cors-allow-origin "http://localhost:5173" \
+  --cors-allow-origin "http://localhost:3000" \
+  --cors-allow-method "GET" \
+  --cors-allow-method "POST" \
+  --cors-allow-header "Authorization" \
+  --cors-allow-header "Content-Type"
+```
+
+## Production
+
+In production, replace `localhost` origins with your actual domain:
+
+```bash
+sandbox-agent server \
+  --token "$SANDBOX_TOKEN" \
+  --cors-allow-origin "https://your-app.com" \
+  --cors-allow-method "GET" \
+  --cors-allow-method "POST" \
+  --cors-allow-header "Authorization" \
+  --cors-allow-header "Content-Type" \
+  --cors-allow-credentials
+```

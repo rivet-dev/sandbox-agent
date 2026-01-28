@@ -31,41 +31,49 @@
 		]
 	},
 	"navigation": {
-		"pages": [
+		"tabs": [
 			{
-				"group": "Getting started",
-				"pages": [
-					"index",
-					"quickstart",
-					"architecture",
-					"agent-compatibility",
-					"universal-api",
-					"frontend",
-					"building-chat-ui",
-					"manage-session-state"
+				"tab": "Docs",
+				"groups": [
+					{
+						"group": "Getting started",
+						"pages": ["quickstart", "building-chat-ui", "manage-sessions"]
+					},
+					{
+						"group": "Deploy",
+						"pages": [
+							"deploy/index",
+							"deploy/local",
+							"deploy/e2b",
+							"deploy/daytona",
+							"deploy/docker"
+						]
+					},
+					{
+						"group": "SDKs",
+						"pages": ["sdks/typescript", "sdks/python"]
+					},
+					{
+						"group": "Reference",
+						"pages": [
+							"cli",
+							"cors",
+							"glossary",
+							{
+								"group": "AI",
+								"pages": ["ai/skill", "ai/llms-txt"]
+							},
+							{
+								"group": "Advanced",
+								"pages": ["telemetry", "architecture", "agent-compatibility"]
+							}
+						]
+					}
 				]
 			},
 			{
-				"group": "SDKs",
-				"pages": ["sdks/typescript"]
-			},
-			{
-				"group": "AI",
-				"pages": ["ai/skill", "ai/llms-txt"]
-			},
-			{
-				"group": "Reference",
-				"pages": ["cli", "telemetry", "http-api"]
-			},
-			{
-				"group": "Deploy",
-				"pages": [
-					"deploy/index",
-					"deploy/docker",
-					"deploy/e2b",
-					"deploy/daytona",
-					"deploy/vercel-sandboxes"
-				]
+				"tab": "API",
+				"openapi": "openapi.json"
 			}
 		]
 	}

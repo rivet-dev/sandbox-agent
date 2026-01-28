@@ -1,4 +1,20 @@
 ---
-sidebarTitle: Overview
+title: "Deploy"
+sidebarTitle: "Overview"
+description: "Choose where to run the sandbox-agent server."
 ---
 
+<CardGroup cols={2}>
+  <Card title="Local" icon="laptop" href="/deploy/local">
+    Run locally for development. The SDK can auto-spawn the server.
+  </Card>
+  <Card title="E2B" icon="cube" href="/deploy/e2b">
+    Deploy inside an E2B sandbox with network access.
+  </Card>
+  <Card title="Daytona" icon="cloud" href="/deploy/daytona">
+    Run in a Daytona workspace with port forwarding.
+  </Card>
+  <Card title="Docker" icon="docker" href="/deploy/docker">
+    Build and run in a container (development only).
+  </Card>
+</CardGroup>

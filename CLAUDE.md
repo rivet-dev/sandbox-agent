@@ -30,6 +30,7 @@ Universal schema guidance:
 
 - Keep CLI subcommands in sync with every HTTP endpoint.
 - Update `CLAUDE.md` to keep CLI endpoints in sync with HTTP API changes.
+- When adding or modifying CLI commands, update `docs/cli.mdx` to reflect the changes.
 - When changing the HTTP API, update the TypeScript SDK and CLI together.
 - Do not make breaking changes to API endpoints.
 - When changing API routes, ensure the HTTP/SSE test suite has full coverage of every route.
@@ -56,6 +57,7 @@ Universal schema guidance:
 - `sandbox-agent api sessions create` ↔ `POST /v1/sessions/{sessionId}`
 - `sandbox-agent api sessions send-message` ↔ `POST /v1/sessions/{sessionId}/messages`
 - `sandbox-agent api sessions send-message-stream` ↔ `POST /v1/sessions/{sessionId}/messages/stream`
+- `sandbox-agent api sessions terminate` ↔ `POST /v1/sessions/{sessionId}/terminate`
 - `sandbox-agent api sessions events` / `get-messages` ↔ `GET /v1/sessions/{sessionId}/events`
 - `sandbox-agent api sessions events-sse` ↔ `GET /v1/sessions/{sessionId}/events/sse`
 - `sandbox-agent api sessions reply-question` ↔ `POST /v1/sessions/{sessionId}/questions/{questionId}/reply`
