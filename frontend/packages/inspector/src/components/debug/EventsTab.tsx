@@ -22,14 +22,35 @@ const EventsTab = ({
   const [collapsedEvents, setCollapsedEvents] = useState<Record<string, boolean>>({});
   const [copied, setCopied] = useState(false);
 
-  const handleCopy = async () => {
+  const handleCopy = () => {
+    const text = JSON.stringify(events, null, 2);
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      }).catch(() => {
+        fallbackCopy(text);
+      });
+    } else {
+      fallbackCopy(text);
+    }
+  };
+
+  const fallbackCopy = (text: string) => {
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+    textarea.select();
     try {
-      await navigator.clipboard.writeText(JSON.stringify(events, null, 2));
+      document.execCommand("copy");
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
       console.error("Failed to copy events:", err);
     }
+    document.body.removeChild(textarea);
   };
 
   useEffect(() => {
@@ -47,6 +68,7 @@ const EventsTab = ({
             {loading ? "Loading..." : "Fetch"}
           </button>
           <button
+            type="button"
             className="button ghost small"
             onClick={handleCopy}
             disabled={events.length === 0}
