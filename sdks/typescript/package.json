@@ -23,7 +23,7 @@
     "generate:openapi": "cargo check -p sandbox-agent-openapi-gen && cargo run -p sandbox-agent-openapi-gen -- --out ../../docs/openapi.json",
     "generate:types": "openapi-typescript ../../docs/openapi.json -o src/generated/openapi.ts",
     "generate": "pnpm run generate:openapi && pnpm run generate:types",
-    "build": "pnpm run generate && tsup",
+    "build": "if [ -z \"$SKIP_OPENAPI_GEN\" ]; then pnpm run generate:openapi; fi && pnpm run generate:types && tsup",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"

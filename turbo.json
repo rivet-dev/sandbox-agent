@@ -1,6 +1,6 @@
 {
   "$schema": "https://turbo.build/schema.json",
-  "globalPassThroughEnv": ["SANDBOX_AGENT_SKIP_INSPECTOR"],
+  "globalPassThroughEnv": ["SANDBOX_AGENT_SKIP_INSPECTOR", "SKIP_OPENAPI_GEN"],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],

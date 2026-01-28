@@ -27,6 +27,8 @@ env:
   CARGO_INCREMENTAL: 0
   # Skip inspector frontend for CI (not needed for type checking)
   SANDBOX_AGENT_SKIP_INSPECTOR: 1
+  # Skip OpenAPI generation in CI (use pre-committed docs/openapi.json)
+  SKIP_OPENAPI_GEN: 1
 
 jobs:
   setup:
