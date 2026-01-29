@@ -1,7 +1,8 @@
-import { createInterface } from "node:readline/promises";
+import { createInterface, Interface } from "node:readline/promises";
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { SandboxAgent } from "sandbox-agent";
+import type { PermissionReply, PermissionEventData, QuestionEventData } from "sandbox-agent";
 
 export function normalizeBaseUrl(baseUrl: string): string {
   return baseUrl.replace(/\/+$/, "");
@@ -278,17 +279,84 @@ function detectAgent(): string {
   return "claude";
 }
 
-export async function runPrompt({
-  baseUrl,
-  token,
-  extraHeaders,
-  agentId,
-}: {
+export type PermissionHandler = (
+  data: PermissionEventData
+) => Promise<PermissionReply> | PermissionReply;
+
+export type QuestionHandler = (
+  data: QuestionEventData
+) => Promise<string[][] | null> | string[][] | null;
+
+export interface RunPromptOptions {
   baseUrl: string;
   token?: string;
   extraHeaders?: Record<string, string>;
   agentId?: string;
-}): Promise<void> {
+  agentMode?: string;
+  permissionMode?: string;
+  model?: string;
+  /** Auto-approve all permissions with "once" (default: false, prompts interactively) */
+  autoApprovePermissions?: boolean;
+  /** Custom permission handler (overrides autoApprovePermissions) */
+  onPermission?: PermissionHandler;
+  /** Custom question handler (return null to reject) */
+  onQuestion?: QuestionHandler;
+}
+
+async function promptForPermission(
+  rl: Interface,
+  data: PermissionEventData
+): Promise<PermissionReply> {
+  console.log(`\n[Permission Required] ${data.action}`);
+  if (data.metadata) {
+    console.log(`  Details: ${JSON.stringify(data.metadata, null, 2)}`);
+  }
+  while (true) {
+    const answer = await rl.question("  Allow? [y]es / [n]o / [a]lways: ");
+    const lower = answer.trim().toLowerCase();
+    if (lower === "y" || lower === "yes") return "once";
+    if (lower === "a" || lower === "always") return "always";
+    if (lower === "n" || lower === "no") return "reject";
+    console.log("  Please enter y, n, or a");
+  }
+}
+
+async function promptForQuestion(
+  rl: Interface,
+  data: QuestionEventData
+): Promise<string[][] | null> {
+  console.log(`\n[Question] ${data.prompt}`);
+  if (data.options.length > 0) {
+    console.log("  Options:");
+    data.options.forEach((opt, i) => console.log(`    ${i + 1}. ${opt}`));
+    const answer = await rl.question("  Enter option number (or 'skip' to reject): ");
+    if (answer.trim().toLowerCase() === "skip") return null;
+    const idx = parseInt(answer.trim(), 10) - 1;
+    if (idx >= 0 && idx < data.options.length) {
+      return [[data.options[idx]]];
+    }
+    console.log("  Invalid option, rejecting question");
+    return null;
+  }
+  const answer = await rl.question("  Your answer (or 'skip' to reject): ");
+  if (answer.trim().toLowerCase() === "skip") return null;
+  return [[answer.trim()]];
+}
+
+export async function runPrompt(options: RunPromptOptions): Promise<void> {
+  const {
+    baseUrl,
+    token,
+    extraHeaders,
+    agentId,
+    agentMode,
+    permissionMode,
+    model,
+    autoApprovePermissions = false,
+    onPermission,
+    onQuestion,
+  } = options;
+
   const client = await SandboxAgent.connect({
     baseUrl,
     token,
@@ -296,14 +364,60 @@ export async function runPrompt({
   });
 
   const agent = agentId || detectAgent();
+  console.log(`Using agent: ${agent}`);
   const sessionId = randomUUID();
-  await client.createSession(sessionId, { agent });
-  console.log(`Session ${sessionId} using ${agent}. Press Ctrl+C to quit.`);
+  await client.createSession(sessionId, {
+    agent,
+    agentMode,
+    permissionMode,
+    model,
+  });
+  console.log(`Session ${sessionId}. Press Ctrl+C to quit.`);
+
+  // Create readline interface for interactive prompts
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
 
   let isThinking = false;
   let hasStartedOutput = false;
   let turnResolve: (() => void) | null = null;
   let sessionEnded = false;
+
+  // Handle permission request
+  const handlePermission = async (data: PermissionEventData): Promise<void> => {
+    try {
+      let reply: PermissionReply;
+      if (onPermission) {
+        reply = await onPermission(data);
+      } else if (autoApprovePermissions) {
+        console.log(`\n[Auto-approved] ${data.action}`);
+        reply = "once";
+      } else {
+        reply = await promptForPermission(rl, data);
+      }
+      await client.replyPermission(sessionId, data.permission_id, { reply });
+    } catch (err) {
+      console.error("Failed to reply to permission:", err instanceof Error ? err.message : err);
+    }
+  };
+
+  // Handle question request
+  const handleQuestion = async (data: QuestionEventData): Promise<void> => {
+    try {
+      let answers: string[][] | null;
+      if (onQuestion) {
+        answers = await onQuestion(data);
+      } else {
+        answers = await promptForQuestion(rl, data);
+      }
+      if (answers === null) {
+        await client.rejectQuestion(sessionId, data.question_id);
+      } else {
+        await client.replyQuestion(sessionId, data.question_id, { answers });
+      }
+    } catch (err) {
+      console.error("Failed to reply to question:", err instanceof Error ? err.message : err);
+    }
+  };
 
   // Stream events in background using SDK
   const processEvents = async () => {
@@ -342,6 +456,26 @@ export async function runPrompt({
         }
       }
 
+      // Handle permission requests
+      if (event.type === "permission.requested") {
+        const data = event.data as PermissionEventData;
+        // Clear thinking indicator if shown
+        if (isThinking && !hasStartedOutput) {
+          process.stdout.write("\r\x1b[K");
+        }
+        await handlePermission(data);
+      }
+
+      // Handle question requests
+      if (event.type === "question.requested") {
+        const data = event.data as QuestionEventData;
+        // Clear thinking indicator if shown
+        if (isThinking && !hasStartedOutput) {
+          process.stdout.write("\r\x1b[K");
+        }
+        await handleQuestion(data);
+      }
+
       // Handle errors
       if (event.type === "error") {
         const data = event.data as any;
@@ -351,7 +485,36 @@ export async function runPrompt({
       // Handle session ended
       if (event.type === "session.ended") {
         const data = event.data as any;
-        console.log(`Agent Process Exited${data?.reason ? `: ${data.reason}` : ""}`);
+        const reason = data?.reason || "unknown";
+        const exitCode = data?.exit_code;
+        const message = data?.message;
+        const stderr = data?.stderr;
+
+        if (reason === "error") {
+          console.error(`\nAgent exited with error:`);
+          if (exitCode !== undefined) {
+            console.error(`  Exit code: ${exitCode}`);
+          }
+          if (message) {
+            console.error(`  Message: ${message}`);
+          }
+          if (stderr) {
+            console.error(`\n--- Agent Stderr ---`);
+            if (stderr.head) {
+              console.error(stderr.head);
+            }
+            if (stderr.truncated && stderr.tail) {
+              const omitted = stderr.total_lines
+                ? stderr.total_lines - 70 // 20 head + 50 tail
+                : "...";
+              console.error(`\n... ${omitted} lines omitted ...\n`);
+              console.error(stderr.tail);
+            }
+            console.error(`--- End Stderr ---`);
+          }
+        } else {
+          console.log(`Agent session ${reason}`);
+        }
         sessionEnded = true;
         turnResolve?.();
         turnResolve = null;
@@ -365,7 +528,6 @@ export async function runPrompt({
   });
 
   // Read user input and post messages
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
   while (true) {
     const line = await rl.question("> ");
     if (!line.trim()) continue;
