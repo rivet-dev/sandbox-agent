@@ -5,14 +5,13 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowRight, Terminal, Check } from 'lucide-react';
 
 const CTA_TITLES = [
-  'Control any coding agent with one SDK.',
-  'Claude Code, Codex, OpenCode, Amp — unified.',
-  'Swap agents without refactoring.',
-  'Universal events. Universal sessions.',
-  'Stream, store, and replay agent transcripts.',
-  'Human-in-the-loop, built in.',
-  'One SDK. Every coding agent.',
-  'Deploy anywhere. Same API everywhere.',
+  'Run coding agents in sandboxes. Control them over HTTP.',
+  'A server inside your sandbox. An API for your app.',
+  'Claude Code, Codex, OpenCode, Amp — one HTTP API.',
+  'Your app connects remotely. The coding agent runs isolated.',
+  'Streaming events. Handling permissions. Managing sessions.',
+  'Install with curl. Connect over HTTP. Control any coding agent.',
+  'The bridge between your app and sandboxed coding agents.',
 ];
 
 function AnimatedCTATitle() {
@@ -72,7 +71,6 @@ const CopyInstallButton = () => {
 export function CTASection() {
   return (
     <section className='relative overflow-hidden border-t border-white/10 px-6 py-32 text-center'>
-      <div className='absolute inset-0 z-0 bg-gradient-to-b from-black to-zinc-900/50' />
       <motion.div
         animate={{ opacity: [0.3, 0.5, 0.3] }}
         transition={{ duration: 4, repeat: Infinity }}
@@ -89,8 +87,8 @@ export function CTASection() {
           transition={{ duration: 0.5, delay: 0.1 }}
           className='mb-10 text-lg leading-relaxed text-zinc-400'
         >
-          Universal SDK for coding agents. <br className='hidden md:block' />
-          Control Claude Code, Codex, OpenCode, and Amp with one API.
+          A server that runs inside isolated environments. <br className='hidden md:block' />
+          Your app connects remotely to control any coding agent.
         </motion.p>
         <motion.div
           initial={{ opacity: 0, y: 20 }}

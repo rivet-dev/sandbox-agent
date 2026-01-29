@@ -8,7 +8,7 @@ const faqs = [
   {
     question: 'Does this replace the Vercel AI SDK?',
     answer:
-      "No, they're complementary. AI SDK is for building chat interfaces and calling LLMs. This SDK is for controlling autonomous coding agents that write code and run commands. Use AI SDK for your UI, use this when you need an agent to actually code.",
+      "No, they're complementary. AI SDK is for building chat interfaces and calling LLMs. This SDK is for controlling autonomous coding agents that write code and run commands. Use AI SDK for your UI, use this when you need a coding agent to actually code.",
   },
   {
     question: 'Which coding agents are supported?',
@@ -23,7 +23,7 @@ const faqs = [
   {
     question: 'Can I run this locally or does it require a sandbox provider?',
     answer:
-      "Both. Run locally for development, deploy to E2B, Daytona, or Vercel Sandboxes for production.",
+      'Both. Run locally for development, deploy to E2B, Daytona, or Vercel Sandboxes for production.',
   },
   {
     question: 'Does it support [platform]?',
@@ -39,6 +39,21 @@ const faqs = [
     question: 'Why Rust and not [language]?',
     answer:
       "Rust gives us a single static binary, fast startup, and predictable memory usage. That makes it easy to run inside sandboxes or in CI without shipping a large runtime, such as Node.js.",
+  },
+  {
+    question: "Why can't I just run coding agents locally?",
+    answer:
+      "You can for development. But in production, you need isolation. Coding agents execute arbitrary code — that can't happen on your servers. Sandboxes provide the isolation; this SDK provides the HTTP API to control coding agents remotely.",
+  },
+  {
+    question: "How is this different from the agent's official SDK?",
+    answer:
+      "Official SDKs assume local execution. They spawn processes and expect interactive terminals. This SDK runs a server inside a sandbox that you connect to over HTTP — designed for remote control from the start.",
+  },
+  {
+    question: 'Why not just SSH into the sandbox?',
+    answer:
+      "Coding agents expect interactive terminals with proper TTY handling. SSH with piped commands breaks tool confirmations, streaming output, and human-in-the-loop flows. The SDK handles all of this over a clean HTTP API.",
   },
 ];
 
@@ -84,7 +99,7 @@ export function FAQ() {
             Frequently Asked Questions
           </h2>
           <p className="text-zinc-400">
-            Common questions about the Coding Agent SDK.
+            Common questions about running agents in sandboxes.
           </p>
         </div>
 
