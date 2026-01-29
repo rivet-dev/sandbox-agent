@@ -199,6 +199,12 @@ Codex separates sandbox levels (permissions) from behavioral modes (prompt prefi
 | `danger-full-access` | `-s danger-full-access` | Full system access |
 | `bypass` | `--dangerously-bypass-approvals-and-sandbox` | Skip all checks |
 
+### Root Restrictions
+
+**Codex has no root restrictions** - unlike Claude, Codex does not check if running as root (uid 0).
+
+The `--dangerously-bypass-approvals-and-sandbox` flag works regardless of user privileges. This makes Codex more suitable for automated container environments that commonly run as root.
+
 ### Agent Modes (Prompt Prefixes)
 
 Codex doesn't have true agent modes - behavior is controlled via prompt prefixing:

@@ -109,6 +109,9 @@ pub fn event_to_universal(event: &schema::StreamJsonMessage) -> Result<Vec<Event
                     UniversalEventData::SessionEnded(SessionEndedData {
                         reason: SessionEndReason::Completed,
                         terminated_by: TerminatedBy::Agent,
+                        message: None,
+                        exit_code: None,
+                        stderr: None,
                     }),
                 )
                 .with_raw(serde_json::to_value(event).ok()),

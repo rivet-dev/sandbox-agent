@@ -153,6 +153,10 @@ Or via SDK:
 execute(prompt, { dangerouslyAllowAll: true });
 ```
 
+### Root Restrictions
+
+**Amp has no known root restrictions** - the `--dangerously-skip-permissions` flag works regardless of user privileges. This makes Amp suitable for automated container environments that commonly run as root.
+
 ## Human-in-the-Loop
 
 ### No Interactive HITL API

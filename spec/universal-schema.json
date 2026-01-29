@@ -436,8 +436,34 @@
         "terminated_by"
       ],
       "properties": {
+        "exit_code": {
+          "description": "Process exit code when reason is Error",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int32"
+        },
+        "message": {
+          "description": "Error message when reason is Error",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "reason": {
           "$ref": "#/definitions/SessionEndReason"
+        },
+        "stderr": {
+          "description": "Agent stderr output when reason is Error",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/StderrOutput"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "terminated_by": {
           "$ref": "#/definitions/TerminatedBy"
@@ -448,6 +474,41 @@
       "type": "object",
       "properties": {
         "metadata": true
+      }
+    },
+    "StderrOutput": {
+      "type": "object",
+      "required": [
+        "truncated"
+      ],
+      "properties": {
+        "head": {
+          "description": "First N lines of stderr (if truncated) or full stderr (if not truncated)",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tail": {
+          "description": "Last N lines of stderr (only present if truncated)",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "total_lines": {
+          "description": "Total number of lines in stderr",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "truncated": {
+          "description": "Whether the output was truncated",
+          "type": "boolean"
+        }
       }
     },
     "TerminatedBy": {

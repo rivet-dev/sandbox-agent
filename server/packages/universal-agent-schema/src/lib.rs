@@ -79,9 +79,33 @@ pub struct SessionStartedData {
 pub struct SessionEndedData {
     pub reason: SessionEndReason,
     pub terminated_by: TerminatedBy,
+    /// Error message when reason is Error
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    /// Process exit code when reason is Error
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    /// Agent stderr output when reason is Error
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stderr: Option<StderrOutput>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct StderrOutput {
+    /// First N lines of stderr (if truncated) or full stderr (if not truncated)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head: Option<String>,
+    /// Last N lines of stderr (only present if truncated)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tail: Option<String>,
+    /// Whether the output was truncated
+    pub truncated: bool,
+    /// Total number of lines in stderr
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total_lines: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionEndReason {
     Completed,

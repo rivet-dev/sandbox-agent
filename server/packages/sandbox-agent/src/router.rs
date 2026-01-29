@@ -24,8 +24,8 @@ use sandbox_agent_universal_agent_schema::{
     AgentUnparsedData, ContentPart, ErrorData, EventConversion, EventSource, FileAction,
     ItemDeltaData, ItemEventData, ItemKind, ItemRole, ItemStatus, PermissionEventData,
     PermissionStatus, QuestionEventData, QuestionStatus, ReasoningVisibility, SessionEndReason,
-    SessionEndedData, SessionStartedData, TerminatedBy, UniversalEvent, UniversalEventData,
-    UniversalEventType, UniversalItem,
+    SessionEndedData, SessionStartedData, StderrOutput, TerminatedBy, UniversalEvent,
+    UniversalEventData, UniversalEventType, UniversalItem,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -264,6 +264,7 @@ struct SessionState {
     broadcaster: broadcast::Sender<UniversalEvent>,
     opencode_stream_started: bool,
     codex_sender: Option<mpsc::UnboundedSender<String>>,
+    claude_sender: Option<mpsc::UnboundedSender<String>>,
     session_started_emitted: bool,
     last_claude_message_id: Option<String>,
     claude_message_counter: u64,
@@ -321,6 +322,7 @@ impl SessionState {
             broadcaster,
             opencode_stream_started: false,
             codex_sender: None,
+            claude_sender: None,
             session_started_emitted: false,
             last_claude_message_id: None,
             claude_message_counter: 0,
@@ -374,11 +376,20 @@ impl SessionState {
         self.codex_sender = sender;
     }
 
+    fn set_claude_sender(&mut self, sender: Option<mpsc::UnboundedSender<String>>) {
+        self.claude_sender = sender;
+    }
+
     // Note: This is unused now that Codex uses the shared server model,
     // but keeping it for potential future use with other agents.
     #[allow(dead_code)]
     fn codex_sender(&self) -> Option<mpsc::UnboundedSender<String>> {
         self.codex_sender.clone()
+    }
+
+    #[allow(dead_code)]
+    fn claude_sender(&self) -> Option<mpsc::UnboundedSender<String>> {
+        self.claude_sender.clone()
     }
 
     fn normalize_conversion(&mut self, mut conversion: EventConversion) -> Vec<EventConversion> {
@@ -1377,6 +1388,7 @@ impl AgentServerManager {
 
         let owner = { self.owner.lock().expect("owner lock").clone() };
         if let Some(owner) = owner.and_then(|weak| weak.upgrade()) {
+            let logs = owner.read_agent_stderr(agent);
             for session_id in session_ids {
                 owner
                     .record_error(
@@ -1393,6 +1405,7 @@ impl AgentServerManager {
                         message,
                         SessionEndReason::Error,
                         TerminatedBy::Daemon,
+                        logs.clone(),
                     )
                     .await;
             }
@@ -1440,6 +1453,15 @@ impl SessionManager {
         session_id: &str,
     ) -> Option<&'a mut SessionState> {
         sessions.iter_mut().find(|session| session.session_id == session_id)
+    }
+
+    /// Read agent stderr for error diagnostics
+    fn read_agent_stderr(&self, agent: AgentId) -> Option<StderrOutput> {
+        let logs = AgentServerLogs::new(
+            self.server_manager.log_base_dir.clone(),
+            agent.as_str(),
+        );
+        logs.read_stderr()
     }
 
     async fn create_session(
@@ -1609,6 +1631,11 @@ impl SessionManager {
 
         let manager = self.agent_manager.clone();
         let prompt = message;
+        let initial_input = if session_snapshot.agent == AgentId::Claude {
+            Some(claude_user_message_line(&session_snapshot, &prompt))
+        } else {
+            None
+        };
         let credentials = tokio::task::spawn_blocking(move || {
             let options = CredentialExtractionOptions::new();
             extract_all_credentials(&options)
@@ -1618,7 +1645,7 @@ impl SessionManager {
             message: err.to_string(),
         })?;
 
-        let spawn_options = build_spawn_options(&session_snapshot, prompt, credentials);
+        let spawn_options = build_spawn_options(&session_snapshot, prompt.clone(), credentials);
         let agent_id = session_snapshot.agent;
         let spawn_result =
             tokio::task::spawn_blocking(move || manager.spawn_streaming(agent_id, spawn_options))
@@ -1637,7 +1664,7 @@ impl SessionManager {
         let manager = Arc::clone(self);
         tokio::spawn(async move {
             manager
-                .consume_spawn(session_id, agent_id, spawn_result)
+                .consume_spawn(session_id, agent_id, spawn_result, initial_input)
                 .await;
         });
 
@@ -1697,6 +1724,9 @@ impl SessionManager {
             UniversalEventData::SessionEnded(SessionEndedData {
                 reason: SessionEndReason::Terminated,
                 terminated_by: TerminatedBy::Daemon,
+                message: None,
+                exit_code: None,
+                stderr: None,
             }),
         )
         .synthetic()
@@ -1832,7 +1862,7 @@ impl SessionManager {
         question_id: &str,
         answers: Vec<Vec<String>>,
     ) -> Result<(), SandboxError> {
-        let (agent, native_session_id, pending_question) = {
+        let (agent, native_session_id, pending_question, claude_sender) = {
             let mut sessions = self.sessions.lock().await;
             let session = Self::session_mut(&mut sessions, session_id).ok_or_else(|| {
                 SandboxError::SessionNotFound {
@@ -1848,7 +1878,12 @@ impl SessionManager {
             if let Some(err) = session.ended_error() {
                 return Err(err);
             }
-            (session.agent, session.native_session_id.clone(), pending)
+            (
+                session.agent,
+                session.native_session_id.clone(),
+                pending,
+                session.claude_sender(),
+            )
         };
 
         let response = answers.first().and_then(|inner| inner.first()).cloned();
@@ -1862,6 +1897,16 @@ impl SessionManager {
                     })?;
             self.opencode_question_reply(&agent_session_id, question_id, answers)
                 .await?;
+        } else if agent == AgentId::Claude {
+            let sender = claude_sender.ok_or_else(|| SandboxError::InvalidRequest {
+                message: "Claude session is not active".to_string(),
+            })?;
+            let session_id = native_session_id.clone().unwrap_or_else(|| session_id.to_string());
+            let response_text = response.clone().unwrap_or_default();
+            let line = claude_tool_result_line(&session_id, question_id, &response_text, false);
+            sender.send(line).map_err(|_| SandboxError::InvalidRequest {
+                message: "Claude session is not active".to_string(),
+            })?;
         } else {
             // TODO: Forward question replies to subprocess agents.
         }
@@ -1890,7 +1935,7 @@ impl SessionManager {
         session_id: &str,
         question_id: &str,
     ) -> Result<(), SandboxError> {
-        let (agent, native_session_id, pending_question) = {
+        let (agent, native_session_id, pending_question, claude_sender) = {
             let mut sessions = self.sessions.lock().await;
             let session = Self::session_mut(&mut sessions, session_id).ok_or_else(|| {
                 SandboxError::SessionNotFound {
@@ -1906,7 +1951,12 @@ impl SessionManager {
             if let Some(err) = session.ended_error() {
                 return Err(err);
             }
-            (session.agent, session.native_session_id.clone(), pending)
+            (
+                session.agent,
+                session.native_session_id.clone(),
+                pending,
+                session.claude_sender(),
+            )
         };
 
         if agent == AgentId::Opencode {
@@ -1918,6 +1968,20 @@ impl SessionManager {
                     })?;
             self.opencode_question_reject(&agent_session_id, question_id)
                 .await?;
+        } else if agent == AgentId::Claude {
+            let sender = claude_sender.ok_or_else(|| SandboxError::InvalidRequest {
+                message: "Claude session is not active".to_string(),
+            })?;
+            let session_id = native_session_id.clone().unwrap_or_else(|| session_id.to_string());
+            let line = claude_tool_result_line(
+                &session_id,
+                question_id,
+                "User rejected the question.",
+                true,
+            );
+            sender.send(line).map_err(|_| SandboxError::InvalidRequest {
+                message: "Claude session is not active".to_string(),
+            })?;
         } else {
             // TODO: Forward question rejections to subprocess agents.
         }
@@ -1948,7 +2012,7 @@ impl SessionManager {
         reply: PermissionReply,
     ) -> Result<(), SandboxError> {
         let reply_for_status = reply.clone();
-        let (agent, native_session_id, pending_permission) = {
+        let (agent, native_session_id, pending_permission, claude_sender) = {
             let mut sessions = self.sessions.lock().await;
             let session = Self::session_mut(&mut sessions, session_id).ok_or_else(|| {
                 SandboxError::SessionNotFound {
@@ -1968,6 +2032,7 @@ impl SessionManager {
                 session.agent,
                 session.native_session_id.clone(),
                 pending,
+                session.claude_sender(),
             )
         };
 
@@ -2035,6 +2100,44 @@ impl SessionManager {
                     })?;
             self.opencode_permission_reply(&agent_session_id, permission_id, reply.clone())
                 .await?;
+        } else if agent == AgentId::Claude {
+            let sender = claude_sender.ok_or_else(|| SandboxError::InvalidRequest {
+                message: "Claude session is not active".to_string(),
+            })?;
+            let metadata = pending_permission
+                .as_ref()
+                .and_then(|pending| pending.metadata.as_ref())
+                .and_then(Value::as_object);
+            let updated_input = metadata
+                .and_then(|map| map.get("input"))
+                .cloned()
+                .unwrap_or(Value::Null);
+
+            let mut response_map = serde_json::Map::new();
+            match reply {
+                PermissionReply::Reject => {
+                    response_map.insert(
+                        "message".to_string(),
+                        Value::String("Permission denied.".to_string()),
+                    );
+                }
+                PermissionReply::Once | PermissionReply::Always => {
+                    if !updated_input.is_null() {
+                        response_map.insert("updatedInput".to_string(), updated_input);
+                    }
+                }
+            }
+            let response_value = Value::Object(response_map);
+
+            let behavior = match reply {
+                PermissionReply::Reject => "deny",
+                PermissionReply::Once | PermissionReply::Always => "allow",
+            };
+
+            let line = claude_control_response_line(permission_id, behavior, response_value);
+            sender.send(line).map_err(|_| SandboxError::InvalidRequest {
+                message: "Claude session is not active".to_string(),
+            })?;
         } else {
             // TODO: Forward permission replies to subprocess agents.
         }
@@ -2136,6 +2239,7 @@ impl SessionManager {
         session_id: String,
         agent: AgentId,
         spawn: StreamingSpawn,
+        initial_input: Option<String>,
     ) {
         let StreamingSpawn {
             mut child,
@@ -2182,6 +2286,22 @@ impl SessionManager {
             if let (Some(state), Some(sender)) = (codex_state.as_mut(), codex_sender.as_ref()) {
                 state.start(sender);
             }
+        } else if agent == AgentId::Claude {
+            if let Some(stdin) = stdin {
+                let (writer_tx, writer_rx) = mpsc::unbounded_channel::<String>();
+                {
+                    let mut sessions = self.sessions.lock().await;
+                    if let Some(session) = Self::session_mut(&mut sessions, &session_id) {
+                        session.set_claude_sender(Some(writer_tx.clone()));
+                    }
+                }
+                if let Some(initial) = initial_input {
+                    let _ = writer_tx.send(initial);
+                }
+                tokio::task::spawn_blocking(move || {
+                    write_lines(stdin, writer_rx);
+                });
+            }
         }
 
         while let Some(line) = rx.recv().await {
@@ -2199,6 +2319,14 @@ impl SessionManager {
                     }
                 }
             } else if agent == AgentId::Claude {
+                if let Ok(value) = serde_json::from_str::<Value>(&line) {
+                    if value.get("type").and_then(Value::as_str) == Some("result") {
+                        let mut sessions = self.sessions.lock().await;
+                        if let Some(session) = Self::session_mut(&mut sessions, &session_id) {
+                            session.set_claude_sender(None);
+                        }
+                    }
+                }
                 let conversions = self.parse_claude_line(&line, &session_id).await;
                 if !conversions.is_empty() {
                     let _ = self.record_conversions(&session_id, conversions).await;
@@ -2216,6 +2344,11 @@ impl SessionManager {
             if let Some(session) = Self::session_mut(&mut sessions, &session_id) {
                 session.set_codex_sender(None);
             }
+        } else if agent == AgentId::Claude {
+            let mut sessions = self.sessions.lock().await;
+            if let Some(session) = Self::session_mut(&mut sessions, &session_id) {
+                session.set_claude_sender(None);
+            }
         }
 
         if terminate_early {
@@ -2232,12 +2365,14 @@ impl SessionManager {
                         &message,
                         SessionEndReason::Completed,
                         TerminatedBy::Agent,
+                        None, // No logs for successful completion
                     )
                     .await;
                 }
             }
             Ok(Ok(status)) => {
                 let message = format!("agent exited with status {:?}", status);
+                let logs = self.read_agent_stderr(agent);
                 if !terminate_early {
                     self.record_error(
                         &session_id,
@@ -2253,11 +2388,13 @@ impl SessionManager {
                     &message,
                     SessionEndReason::Error,
                     TerminatedBy::Agent,
+                    logs,
                 )
                 .await;
             }
             Ok(Err(err)) => {
                 let message = format!("failed to wait for agent: {err}");
+                let logs = self.read_agent_stderr(agent);
                 if !terminate_early {
                     self.record_error(
                         &session_id,
@@ -2273,11 +2410,13 @@ impl SessionManager {
                     &message,
                     SessionEndReason::Error,
                     TerminatedBy::Daemon,
+                    logs,
                 )
                 .await;
             }
             Err(err) => {
                 let message = format!("failed to join agent task: {err}");
+                let logs = self.read_agent_stderr(agent);
                 if !terminate_early {
                     self.record_error(
                         &session_id,
@@ -2293,6 +2432,7 @@ impl SessionManager {
                     &message,
                     SessionEndReason::Error,
                     TerminatedBy::Daemon,
+                    logs,
                 )
                 .await;
             }
@@ -2419,6 +2559,7 @@ impl SessionManager {
         message: &str,
         reason: SessionEndReason,
         terminated_by: TerminatedBy,
+        stderr: Option<StderrOutput>,
     ) {
         let mut sessions = self.sessions.lock().await;
         if let Some(session) = Self::session_mut(&mut sessions, session_id) {
@@ -2431,11 +2572,20 @@ impl SessionManager {
                 reason.clone(),
                 terminated_by.clone(),
             );
+            let (error_message, error_exit_code, error_stderr) =
+                if reason == SessionEndReason::Error {
+                    (Some(message.to_string()), exit_code, stderr)
+                } else {
+                    (None, None, None)
+                };
             let ended = EventConversion::new(
                 UniversalEventType::SessionEnded,
                 UniversalEventData::SessionEnded(SessionEndedData {
                     reason,
                     terminated_by,
+                    message: error_message,
+                    exit_code: error_exit_code,
+                    stderr: error_stderr,
                 }),
             )
             .synthetic()
@@ -2493,12 +2643,14 @@ impl SessionManager {
                     None,
                 )
                 .await;
+                let logs = self.read_agent_stderr(AgentId::Opencode);
                 self.mark_session_ended(
                     &session_id,
                     None,
                     "opencode server unavailable",
                     SessionEndReason::Error,
                     TerminatedBy::Daemon,
+                    logs,
                 )
                 .await;
                 return;
@@ -2516,12 +2668,14 @@ impl SessionManager {
                     None,
                 )
                 .await;
+                let logs = self.read_agent_stderr(AgentId::Opencode);
                 self.mark_session_ended(
                     &session_id,
                     None,
                     "opencode sse connection failed",
                     SessionEndReason::Error,
                     TerminatedBy::Daemon,
+                    logs,
                 )
                 .await;
                 return;
@@ -2538,12 +2692,14 @@ impl SessionManager {
                 None,
             )
             .await;
+            let logs = self.read_agent_stderr(AgentId::Opencode);
             self.mark_session_ended(
                 &session_id,
                 None,
                 "opencode sse error",
                 SessionEndReason::Error,
                 TerminatedBy::Daemon,
+                logs,
             )
             .await;
             return;
@@ -2562,12 +2718,14 @@ impl SessionManager {
                         None,
                     )
                     .await;
+                    let logs = self.read_agent_stderr(AgentId::Opencode);
                     self.mark_session_ended(
                         &session_id,
                         None,
                         "opencode sse stream error",
                         SessionEndReason::Error,
                         TerminatedBy::Daemon,
+                        logs,
                     )
                     .await;
                     return;
@@ -3739,14 +3897,14 @@ fn agent_supports_item_started(agent: AgentId) -> bool {
 
 fn agent_capabilities_for(agent: AgentId) -> AgentCapabilities {
     match agent {
-        // Headless Claude CLI does not expose AskUserQuestion and does not emit tool_result,
-        // so we keep these capabilities off until we switch to an SDK-backed wrapper.
+        // Claude CLI supports tool calls/results and permission prompts via the SDK control protocol,
+        // but we still emit synthetic item.started events.
         AgentId::Claude => AgentCapabilities {
             plan_mode: false,
-            permissions: false,
-            questions: false,
-            tool_calls: false,
-            tool_results: false,
+            permissions: true,
+            questions: true,
+            tool_calls: true,
+            tool_results: true,
             text_messages: true,
             images: false,
             file_attachments: false,
@@ -3757,7 +3915,7 @@ fn agent_capabilities_for(agent: AgentId) -> AgentCapabilities {
             command_execution: false,
             file_changes: false,
             mcp_tools: false,
-            streaming_deltas: false,
+            streaming_deltas: true,
             item_started: false,
             shared_process: false, // per-turn subprocess with --resume
         },
@@ -3950,12 +4108,24 @@ fn normalize_agent_mode(agent: AgentId, agent_mode: Option<&str>) -> Result<Stri
     }
 }
 
+/// Check if the current process is running as root (uid 0)
+fn is_running_as_root() -> bool {
+    #[cfg(unix)]
+    {
+        unsafe { libc::getuid() == 0 }
+    }
+    #[cfg(not(unix))]
+    {
+        false
+    }
+}
+
 fn normalize_permission_mode(
     agent: AgentId,
     permission_mode: Option<&str>,
 ) -> Result<String, SandboxError> {
     let mode = match permission_mode.unwrap_or("default") {
-        "default" | "plan" | "bypass" => permission_mode.unwrap_or("default"),
+        "default" | "plan" | "bypass" | "acceptEdits" => permission_mode.unwrap_or("default"),
         value => {
             return Err(SandboxError::InvalidRequest {
                 message: format!("invalid permission mode: {value}"),
@@ -3964,14 +4134,20 @@ fn normalize_permission_mode(
         }
     };
     if agent == AgentId::Claude {
-        if mode == "plan" {
-            return Err(SandboxError::ModeNotSupported {
-                agent: agent.as_str().to_string(),
-                mode: mode.to_string(),
+        // Claude refuses --dangerously-skip-permissions when running as root,
+        // which is common in container environments (Docker, Daytona, E2B).
+        // Return an error if user explicitly requests bypass while running as root.
+        if mode == "bypass" && is_running_as_root() {
+            return Err(SandboxError::InvalidRequest {
+                message: "permission mode 'bypass' is not supported when running as root (Claude refuses --dangerously-skip-permissions with root privileges)".to_string(),
             }
             .into());
         }
-        return Ok("bypass".to_string());
+        // Pass through bypass/acceptEdits/plan if explicitly requested, otherwise use default
+        if mode == "bypass" || mode == "acceptEdits" || mode == "plan" {
+            return Ok(mode.to_string());
+        }
+        return Ok("default".to_string());
     }
     let supported = match agent {
         AgentId::Claude => false,
@@ -4075,6 +4251,87 @@ fn build_spawn_options(
             .or_insert(openai.api_key);
     }
     options
+}
+
+fn claude_input_session_id(session: &SessionSnapshot) -> String {
+    session
+        .native_session_id
+        .clone()
+        .unwrap_or_else(|| session.session_id.clone())
+}
+
+fn claude_user_message_line(session: &SessionSnapshot, message: &str) -> String {
+    let session_id = claude_input_session_id(session);
+    serde_json::json!({
+        "type": "user",
+        "message": {
+            "role": "user",
+            "content": message,
+        },
+        "parent_tool_use_id": null,
+        "session_id": session_id,
+    })
+    .to_string()
+}
+
+fn claude_tool_result_line(
+    session_id: &str,
+    tool_use_id: &str,
+    content: &str,
+    is_error: bool,
+) -> String {
+    serde_json::json!({
+        "type": "user",
+        "message": {
+            "role": "user",
+            "content": [{
+                "type": "tool_result",
+                "tool_use_id": tool_use_id,
+                "content": content,
+                "is_error": is_error,
+            }],
+        },
+        "parent_tool_use_id": null,
+        "session_id": session_id,
+    })
+    .to_string()
+}
+
+fn claude_control_response_line(
+    request_id: &str,
+    behavior: &str,
+    response: Value,
+) -> String {
+    let mut response_obj = serde_json::Map::new();
+    response_obj.insert(
+        "behavior".to_string(),
+        Value::String(behavior.to_string()),
+    );
+    if let Some(message) = response.get("message") {
+        response_obj.insert("message".to_string(), message.clone());
+    }
+    if let Some(updated_input) = response.get("updatedInput") {
+        response_obj.insert("updatedInput".to_string(), updated_input.clone());
+    }
+    if let Some(updated_permissions) = response.get("updatedPermissions") {
+        response_obj.insert(
+            "updatedPermissions".to_string(),
+            updated_permissions.clone(),
+        );
+    }
+    if let Some(interrupt) = response.get("interrupt") {
+        response_obj.insert("interrupt".to_string(), interrupt.clone());
+    }
+
+    serde_json::json!({
+        "type": "control_response",
+        "response": {
+            "subtype": "success",
+            "request_id": request_id,
+            "response": Value::Object(response_obj),
+        }
+    })
+    .to_string()
 }
 
 fn read_lines<R: std::io::Read>(reader: R, sender: mpsc::UnboundedSender<String>) {
@@ -5804,6 +6061,9 @@ fn mock_session_end_sequence(_prefix: &str) -> Vec<EventConversion> {
         UniversalEventData::SessionEnded(SessionEndedData {
             reason: SessionEndReason::Completed,
             terminated_by: TerminatedBy::Agent,
+            message: None,
+            exit_code: None,
+            stderr: None,
         }),
     )
     .synthetic()]

@@ -8,11 +8,12 @@
  * Providers: daytona, e2b, docker
  *
  * Options:
- *   --skip-build     Skip cargo build step
- *   --use-release    Use pre-built release binary from releases.rivet.dev
- *   --agent <name>   Test specific agent (claude, codex, mock)
- *   --keep-alive     Don't cleanup sandbox after test
- *   --verbose        Show all logs
+ *   --skip-build          Skip cargo build step
+ *   --use-release         Use pre-built release binary from releases.rivet.dev
+ *   --agent <name>        Test specific agent (claude, codex, mock)
+ *   --skip-agent-install  Skip pre-installing agents (tests on-demand install like Daytona example)
+ *   --keep-alive          Don't cleanup sandbox after test
+ *   --verbose             Show all logs
  */
 
 import { execSync, spawn } from "node:child_process";
@@ -30,6 +31,7 @@ const args = process.argv.slice(2);
 const provider = args.find((a) => !a.startsWith("--")) || "docker";
 const skipBuild = args.includes("--skip-build");
 const useRelease = args.includes("--use-release");
+const skipAgentInstall = args.includes("--skip-agent-install");
 const keepAlive = args.includes("--keep-alive");
 const verbose = args.includes("--verbose");
 const agentArg = args.find((a) => a.startsWith("--agent="))?.split("=")[1];
@@ -117,7 +119,7 @@ interface Sandbox {
 }
 
 // Docker provider
-// Uses Alpine because Claude Code binary is built for musl libc
+// Uses Ubuntu because Claude Code and sandbox-agent are glibc binaries
 const dockerProvider: SandboxProvider = {
 	name: "docker",
 	requiredEnv: [],
@@ -129,12 +131,12 @@ const dockerProvider: SandboxProvider = {
 
 		log.info(`Creating Docker container: ${id}`);
 		execSync(
-			`docker run -d --name ${id} ${envArgs} -p 0:3000 alpine:latest tail -f /dev/null`,
+			`docker run -d --name ${id} ${envArgs} -p 0:3000 ubuntu:22.04 tail -f /dev/null`,
 			{ stdio: verbose ? "inherit" : "pipe" },
 		);
 
-		// Install dependencies (Alpine uses apk; musl C++ libs needed for Claude Code)
-		execSync(`docker exec ${id} sh -c "apk add --no-cache curl ca-certificates libstdc++ libgcc bash"`, {
+		// Install dependencies
+		execSync(`docker exec ${id} sh -c "apt-get update && apt-get install -y curl ca-certificates"`, {
 			stdio: verbose ? "inherit" : "pipe",
 		});
 
@@ -153,6 +155,7 @@ const dockerProvider: SandboxProvider = {
 			},
 			async upload(localPath, remotePath) {
 				execSync(`docker cp "${localPath}" ${id}:${remotePath}`, { stdio: verbose ? "inherit" : "pipe" });
+				execSync(`docker exec ${id} chmod +x ${remotePath}`, { stdio: verbose ? "inherit" : "pipe" });
 			},
 			async getBaseUrl(port) {
 				const portMapping = execSync(`docker port ${id} ${port}`, { encoding: "utf-8" }).trim();
@@ -191,15 +194,17 @@ const daytonaProvider: SandboxProvider = {
 			id,
 			async exec(cmd) {
 				const result = await sandbox.process.executeCommand(cmd);
+				// Daytona SDK returns: { exitCode, result: string, artifacts: { stdout: string } }
 				return {
-					stdout: result.result.output || "",
-					stderr: result.result.error || "",
-					exitCode: result.result.exitCode,
+					stdout: result.result || "",
+					stderr: "",
+					exitCode: result.exitCode ?? 0,
 				};
 			},
 			async upload(localPath, remotePath) {
 				const content = readFileSync(localPath);
-				await sandbox.fs.uploadFile(remotePath, content);
+				// Daytona SDK signature: uploadFile(Buffer, remotePath)
+				await sandbox.fs.uploadFile(content, remotePath);
 				await sandbox.process.executeCommand(`chmod +x ${remotePath}`);
 			},
 			async getBaseUrl(port) {
@@ -355,26 +360,10 @@ async function startServerAndCheckHealth(sandbox: Sandbox): Promise<string> {
 	throw new Error("Health check failed after 30 seconds");
 }
 
-// Test agent interaction
-async function testAgent(baseUrl: string, agent: string, message: string): Promise<void> {
-	log.section(`Testing ${agent} agent`);
-
-	const sessionId = crypto.randomUUID();
-
-	// Create session
-	log.info(`Creating session ${sessionId}...`);
-	const createRes = await fetch(`${baseUrl}/v1/sessions/${sessionId}`, {
-		method: "POST",
-		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify({ agent }),
-	});
-	if (!createRes.ok) {
-		throw new Error(`Failed to create session: ${await createRes.text()}`);
-	}
-	log.success("Session created");
-
-	// Send message with streaming
-	log.info(`Sending message: "${message}"`);
+// Send a message and wait for response, auto-approving permissions
+// Returns the response text
+async function sendMessage(baseUrl: string, sessionId: string, message: string): Promise<string> {
+	log.info(`Sending message: "${message.slice(0, 60)}${message.length > 60 ? "..." : ""}"`);
 	const msgRes = await fetch(`${baseUrl}/v1/sessions/${sessionId}/messages/stream`, {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
@@ -388,9 +377,11 @@ async function testAgent(baseUrl: string, agent: string, message: string): Promi
 	const reader = msgRes.body.getReader();
 	const decoder = new TextDecoder();
 	let buffer = "";
+	let responseText = "";
 	let receivedText = false;
 	let hasError = false;
 	let errorMessage = "";
+	let pendingPermission: string | null = null;
 
 	while (true) {
 		const { done, value } = await reader.read();
@@ -418,6 +409,16 @@ async function testAgent(baseUrl: string, agent: string, message: string): Promi
 							receivedText = true;
 						}
 						process.stdout.write(text);
+						responseText += text;
+					}
+				}
+
+				// Handle permission requests - auto-approve
+				if (event.type === "permission.requested") {
+					const permissionId = event.data?.permission_id;
+					if (permissionId) {
+						pendingPermission = permissionId;
+						log.info(`Permission requested (${permissionId}), auto-approving...`);
 					}
 				}
 
@@ -427,22 +428,123 @@ async function testAgent(baseUrl: string, agent: string, message: string): Promi
 					log.error(`Error event: ${errorMessage}`);
 				}
 
-				if (event.type === "session.ended") {
-					const reason = event.data?.reason;
-					log.info(`Session ended: ${reason || "unknown reason"}`);
+				if (event.type === "agent.unparsed") {
+					hasError = true;
+					errorMessage = `Agent unparsed: ${JSON.stringify(event.data)}`;
+					log.error(errorMessage);
 				}
 			} catch {}
+		}
+
+		// If we have a pending permission, approve it
+		if (pendingPermission) {
+			const permId = pendingPermission;
+			pendingPermission = null;
+			try {
+				const approveRes = await fetch(`${baseUrl}/v1/sessions/${sessionId}/permissions/${permId}/reply`, {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ reply: "once" }),
+				});
+				if (approveRes.ok) {
+					log.success(`Permission ${permId} approved`);
+				} else {
+					log.warn(`Failed to approve permission: ${await approveRes.text()}`);
+				}
+			} catch (err) {
+				log.warn(`Error approving permission: ${err}`);
+			}
 		}
 	}
 
 	if (receivedText) {
 		console.log(); // newline after response
-		log.success("Received response from agent");
-	} else if (hasError) {
+	}
+
+	if (hasError) {
 		throw new Error(`Agent returned error: ${errorMessage}`);
-	} else {
+	}
+
+	return responseText;
+}
+
+// Test agent interaction
+async function testAgent(baseUrl: string, agent: string, message: string): Promise<void> {
+	log.section(`Testing ${agent} agent`);
+
+	const sessionId = crypto.randomUUID();
+
+	// Create session
+	log.info(`Creating session ${sessionId}...`);
+	const createRes = await fetch(`${baseUrl}/v1/sessions/${sessionId}`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ agent }),
+	});
+	if (!createRes.ok) {
+		throw new Error(`Failed to create session: ${await createRes.text()}`);
+	}
+	log.success("Session created");
+
+	const response = await sendMessage(baseUrl, sessionId, message);
+	if (!response) {
 		throw new Error("No response received from agent");
 	}
+	log.success("Received response from agent");
+}
+
+// Test that agent can actually modify files and run commands
+async function testAgentActions(baseUrl: string, agent: string, sandbox: Sandbox): Promise<void> {
+	log.section(`Testing ${agent} agent actions (file + command)`);
+
+	const sessionId = crypto.randomUUID();
+	const testFile = "/tmp/sandbox-test-file.txt";
+	const expectedContent = "Hello from sandbox test!";
+
+	// For Claude running as root in containers, we must use default permission mode
+	// and handle permissions via the API (bypass mode is not supported as root).
+	// For other agents, we can use bypass mode.
+	const permissionMode = agent === "claude" ? "default" : "bypass";
+	log.info(`Creating session ${sessionId} with permissionMode=${permissionMode}...`);
+	const createRes = await fetch(`${baseUrl}/v1/sessions/${sessionId}`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ agent, permissionMode }),
+	});
+	if (!createRes.ok) {
+		throw new Error(`Failed to create session: ${await createRes.text()}`);
+	}
+	log.success("Session created");
+
+	// Ask agent to create a file
+	const fileMessage = `Create a file at ${testFile} with exactly this content (no quotes, no extra text): ${expectedContent}`;
+	await sendMessage(baseUrl, sessionId, fileMessage);
+
+	// Verify file was created
+	log.info("Verifying file was created...");
+	const fileCheck = await sandbox.exec(`cat ${testFile} 2>&1`);
+	if (fileCheck.exitCode !== 0) {
+		throw new Error(`File was not created: ${fileCheck.stderr || fileCheck.stdout}`);
+	}
+	if (!fileCheck.stdout.includes("Hello from sandbox test")) {
+		throw new Error(`File content mismatch. Expected "${expectedContent}", got "${fileCheck.stdout.trim()}"`);
+	}
+	log.success(`File created with correct content: "${fileCheck.stdout.trim()}"`);
+
+	// Ask agent to run a command and create output
+	const cmdMessage = `Run this command and tell me the output: echo "command-test-$(date +%s)" > /tmp/cmd-output.txt && cat /tmp/cmd-output.txt`;
+	await sendMessage(baseUrl, sessionId, cmdMessage);
+
+	// Verify command was executed
+	log.info("Verifying command was executed...");
+	const cmdCheck = await sandbox.exec("cat /tmp/cmd-output.txt 2>&1");
+	if (cmdCheck.exitCode !== 0) {
+		throw new Error(`Command output file not found: ${cmdCheck.stderr || cmdCheck.stdout}`);
+	}
+	if (!cmdCheck.stdout.includes("command-test-")) {
+		throw new Error(`Command output mismatch. Expected "command-test-*", got "${cmdCheck.stdout.trim()}"`);
+	}
+	log.success(`Command executed successfully: "${cmdCheck.stdout.trim()}"`);
 }
 
 // Check environment diagnostics
@@ -453,9 +555,10 @@ async function checkEnvironment(sandbox: Sandbox): Promise<void> {
 		{ name: "Environment variables", cmd: "env | grep -E 'ANTHROPIC|OPENAI|CLAUDE|CODEX' | sed 's/=.*/=<set>/'" },
 		// Check both /root (Alpine) and /home/user (E2B/Debian) paths
 		{ name: "Agent binaries", cmd: "ls -la ~/.local/share/sandbox-agent/bin/ 2>/dev/null || ls -la /root/.local/share/sandbox-agent/bin/ 2>/dev/null || ls -la /home/user/.local/share/sandbox-agent/bin/ 2>/dev/null || echo 'No agents installed'" },
+		{ name: "Claude version", cmd: "~/.local/share/sandbox-agent/bin/claude --version 2>&1 || /root/.local/share/sandbox-agent/bin/claude --version 2>&1 || echo 'Claude not installed'" },
 		{ name: "sandbox-agent version", cmd: "sandbox-agent --version 2>/dev/null || echo 'Not installed'" },
 		{ name: "Server process", cmd: "pgrep -a sandbox-agent 2>/dev/null || ps aux | grep sandbox-agent | grep -v grep || echo 'Not running'" },
-		{ name: "Server logs (last 20 lines)", cmd: "tail -20 /tmp/sandbox-agent.log 2>/dev/null || echo 'No logs'" },
+		{ name: "Server logs (last 50 lines)", cmd: "tail -50 /tmp/sandbox-agent.log 2>/dev/null || echo 'No logs'" },
 		{ name: "Network: api.anthropic.com", cmd: "curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 https://api.anthropic.com/v1/messages 2>&1 || echo 'UNREACHABLE'" },
 		{ name: "Network: api.openai.com", cmd: "curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 https://api.openai.com/v1/models 2>&1 || echo 'UNREACHABLE'" },
 	];
@@ -519,8 +622,12 @@ async function main() {
 		// Install sandbox-agent
 		await installSandboxAgent(sandbox, binaryPath);
 
-		// Install agents
-		await installAgents(sandbox, agents);
+		// Install agents (unless --skip-agent-install to test on-demand install like Daytona example)
+		if (skipAgentInstall) {
+			log.info("Skipping agent pre-install (testing on-demand installation)");
+		} else {
+			await installAgents(sandbox, agents);
+		}
 
 		// Check environment
 		await checkEnvironment(sandbox);
@@ -530,8 +637,16 @@ async function main() {
 
 		// Test each agent
 		for (const agent of agents) {
+			// Basic response test
 			const message = agent === "mock" ? "hello" : "Say hello in 10 words or less";
 			await testAgent(baseUrl, agent, message);
+
+			// For real agents, also test file/command actions with permission handling.
+			// Claude uses default permission mode and we auto-approve via API.
+			// Other agents can use bypass mode.
+			if (agent !== "mock") {
+				await testAgentActions(baseUrl, agent, sandbox);
+			}
 		}
 
 		log.section("All tests passed!");

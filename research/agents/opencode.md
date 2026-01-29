@@ -444,6 +444,10 @@ interface PermissionRuleset {
 }
 ```
 
+### Root Restrictions
+
+**OpenCode has no known root restrictions** - it operates as an HTTP server and does not check user privileges. This makes OpenCode suitable for automated container environments that commonly run as root.
+
 ### Human-in-the-Loop
 
 OpenCode has full interactive HITL via SSE events:

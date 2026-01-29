@@ -160,6 +160,36 @@ Claude conflates agent mode and permission mode - `plan` is a permission restric
 | `plan` | `--permission-mode plan` | Read-only, must ExitPlanMode to execute |
 | `bypassPermissions` | `--dangerously-skip-permissions` | Skip all permission checks |
 
+### Root Restrictions
+
+**Claude refuses to run with `--dangerously-skip-permissions` when running as root (uid 0).**
+
+This is a security measure built into Claude Code. When running as root:
+- The CLI outputs: `--dangerously-skip-permissions cannot be used with root/sudo privileges for security reasons`
+- The process exits immediately without executing
+
+This affects container environments (Docker, Daytona, E2B, etc.) which commonly run as root.
+
+**Workarounds:**
+1. Run as a non-root user in the container
+2. Use `default` permission mode (but this requires interactive approval)
+3. Use `acceptEdits` mode for file operations (still requires Bash approval)
+
+### Headless Permission Behavior
+
+When permissions are denied in headless mode (`--print --output-format stream-json`):
+
+1. Claude emits a `tool_use` event for the tool (e.g., Write, Bash)
+2. A `user` event follows with `tool_result` containing `is_error: true`
+3. Error message: `"Claude requested permissions to X, but you haven't granted it yet."`
+4. Final `result` event includes `permission_denials` array listing all denied tools
+
+```json
+{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{...}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","is_error":true,"content":"Claude requested permissions to write to /tmp/test.txt, but you haven't granted it yet."}]}}
+{"type":"result","permission_denials":[{"tool_name":"Write","tool_use_id":"...","tool_input":{...}}]}
+```
+
 ### Subagent Types
 
 Claude supports spawning subagents via the `Task` tool with `subagent_type`:

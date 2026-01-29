@@ -515,12 +515,20 @@ fn user_input_to_content(input: &schema::UserInput) -> ContentPart {
     }
 }
 
-pub fn session_ended_event(thread_id: &str, reason: SessionEndReason) -> EventConversion {
+pub fn session_ended_event(
+    thread_id: &str,
+    reason: SessionEndReason,
+    message: Option<String>,
+    exit_code: Option<i32>,
+) -> EventConversion {
     EventConversion::new(
         UniversalEventType::SessionEnded,
         UniversalEventData::SessionEnded(SessionEndedData {
             reason,
             terminated_by: TerminatedBy::Agent,
+            message,
+            exit_code,
+            stderr: None,
         }),
     )
     .with_native_session(Some(thread_id.to_string()))

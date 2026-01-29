@@ -31,13 +31,13 @@ Events / Message Flow
 | session.ended          | SDKMessage.type=result       | no explicit session end (turn/completed)   | no explicit session end (session.deleted)| type=done                        |
 | message (user)         | SDKMessage.type=user         | item/completed (ThreadItem.type=userMessage)| message.updated (Message.role=user)    | type=message                     |
 | message (assistant)    | SDKMessage.type=assistant    | item/completed (ThreadItem.type=agentMessage)| message.updated (Message.role=assistant)| type=message                  |
-| message.delta          | synthetic                   | method=item/agentMessage/delta             | type=message.part.updated (delta)       | synthetic                        |
-| tool call              | synthetic from tool usage    | method=item/mcpToolCall/progress           | message.part.updated (part.type=tool)   | type=tool_call                   |
-| tool result            | synthetic from tool usage    | item/completed (tool result ThreadItem variants) | message.part.updated (part.type=tool, state=completed) | type=tool_result     |
-| permission.requested   | none                         | none                                       | type=permission.asked                   | none                             |
-| permission.resolved    | none                         | none                                       | type=permission.replied                 | none                             |
-| question.requested     | ExitPlanMode tool (synthetic)| experimental request_user_input (payload)  | type=question.asked                     | none                             |
-| question.resolved      | ExitPlanMode reply (synthetic)| experimental request_user_input (payload) | type=question.replied / question.rejected | none                          |
+| message.delta          | stream_event (partial) or synthetic | method=item/agentMessage/delta      | type=message.part.updated (delta)       | synthetic                        |
+| tool call              | type=tool_use               | method=item/mcpToolCall/progress           | message.part.updated (part.type=tool)   | type=tool_call                   |
+| tool result            | user.message.content.tool_result | item/completed (tool result ThreadItem variants) | message.part.updated (part.type=tool, state=completed) | type=tool_result     |
+| permission.requested   | control_request.can_use_tool | none                                      | type=permission.asked                   | none                             |
+| permission.resolved    | daemon reply to can_use_tool | none                                      | type=permission.replied                 | none                             |
+| question.requested     | tool_use (AskUserQuestion)  | experimental request_user_input (payload) | type=question.asked                     | none                             |
+| question.resolved      | tool_result (AskUserQuestion) | experimental request_user_input (payload) | type=question.replied / question.rejected | none                          |
 | error                  | SDKResultMessage.error       | method=error                               | type=session.error (or message error)   | type=error                        |
 +------------------------+------------------------------+--------------------------------------------+-----------------------------------------+----------------------------------+
 
@@ -50,10 +50,11 @@ Synthetics
 | session.ended                | When agent emits no explicit end   | session.ended event   | Mark source=daemon; reason may be inferred                    |
 | item_id (Claude)             | Claude provides no item IDs        | item_id               | Maintain provider_item_id map when possible                   |
 | user message (Claude)        | Claude emits only assistant output | item.completed        | Mark source=daemon; preserve raw input in event metadata       |
-| question events (Claude)     | Plan mode ExitPlanMode tool usage  | question.requested/resolved | Synthetic mapping from tool call/result                       |
+| question events (Claude)     | AskUserQuestion tool usage         | question.requested/resolved | Derived from tool_use blocks (source=agent)                   |
 | native_session_id (Codex)    | Codex uses threadId                | native_session_id     | Intentionally merged threadId into native_session_id          |
 +------------------------------+------------------------+--------------------------+--------------------------------------------------------------+
-| message.delta (Claude/Amp)   | No native deltas               | item.delta             | Synthetic delta with full message content; source=daemon       |
+| message.delta (Claude)       | No native deltas emitted        | item.delta             | Synthetic delta with full message content; source=daemon       |
+| message.delta (Amp)          | No native deltas                | item.delta             | Synthetic delta with full message content; source=daemon       |
 +------------------------------+------------------------+--------------------------+--------------------------------------------------------------+
 | message.delta (OpenCode)     | part delta before message       | item.delta             | If part arrives first, create item.started stub then delta     |
 +------------------------------+------------------------+--------------------------+--------------------------------------------------------------+
@@ -62,11 +63,12 @@ Delta handling
 
 - Codex emits agent message and other deltas (e.g., item/agentMessage/delta).
 - OpenCode emits part deltas via message.part.updated with a delta string.
-- Claude and Amp do not emit deltas in their schemas.
+- Claude can emit stream_event deltas when partial streaming is enabled; Amp does not emit deltas.
 
 Policy:
 - Always emit item.delta across all providers.
 - For providers without native deltas, emit a single synthetic delta containing the full content prior to item.completed.
+- For Claude when partial streaming is enabled, forward native deltas and skip the synthetic full-content delta.
 - For providers with native deltas, forward as-is; also emit item.completed when final content is known.
 
 Message normalization notes
