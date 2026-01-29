@@ -24,8 +24,7 @@ const ConnectScreen = ({
     <div className="app">
       <header className="header">
         <div className="header-left">
-          <div className="logo">SA</div>
-          <span className="header-title">Sandbox Agent</span>
+          <img src="/logos/sandboxagent.svg" alt="Sandbox Agent" className="logo-text" style={{ height: '20px', width: 'auto' }} />
         </div>
         {reportUrl && (
           <div className="header-right">
@@ -39,11 +38,7 @@ const ConnectScreen = ({
       <main className="landing">
         <div className="landing-container">
           <div className="landing-hero">
-            <div className="landing-logo">SA</div>
-            <h1 className="landing-title">Sandbox Agent</h1>
-            <p className="landing-subtitle">
-              Universal API for running Claude Code, Codex, OpenCode, and Amp inside sandboxes.
-            </p>
+            <img src="/logos/sandboxagent.svg" alt="Sandbox Agent" style={{ height: '32px', width: 'auto', marginBottom: '20px' }} />
           </div>
 
           <div className="connect-card">

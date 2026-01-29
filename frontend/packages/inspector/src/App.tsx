@@ -887,8 +887,7 @@ export default function App() {
     <div className="app">
       <header className="header">
         <div className="header-left">
-          <div className="logo">SA</div>
-          <span className="header-title">Sandbox Agent</span>
+          <img src="/logos/sandboxagent.svg" alt="Sandbox Agent" className="logo-text" style={{ height: '20px', width: 'auto' }} />
         </div>
         <div className="header-right">
           <a className="button ghost small" href={issueTrackerUrl} target="_blank" rel="noreferrer">
