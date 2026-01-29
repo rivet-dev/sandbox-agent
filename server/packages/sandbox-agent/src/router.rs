@@ -264,6 +264,7 @@ struct SessionState {
     broadcaster: broadcast::Sender<UniversalEvent>,
     opencode_stream_started: bool,
     codex_sender: Option<mpsc::UnboundedSender<String>>,
+    claude_sender: Option<mpsc::UnboundedSender<String>>,
     session_started_emitted: bool,
     last_claude_message_id: Option<String>,
     claude_message_counter: u64,
@@ -321,6 +322,7 @@ impl SessionState {
             broadcaster,
             opencode_stream_started: false,
             codex_sender: None,
+            claude_sender: None,
             session_started_emitted: false,
             last_claude_message_id: None,
             claude_message_counter: 0,
@@ -379,6 +381,15 @@ impl SessionState {
     #[allow(dead_code)]
     fn codex_sender(&self) -> Option<mpsc::UnboundedSender<String>> {
         self.codex_sender.clone()
+    }
+
+    fn set_claude_sender(&mut self, sender: Option<mpsc::UnboundedSender<String>>) {
+        self.claude_sender = sender;
+    }
+
+    #[allow(dead_code)]
+    fn claude_sender(&self) -> Option<mpsc::UnboundedSender<String>> {
+        self.claude_sender.clone()
     }
 
     fn normalize_conversion(&mut self, mut conversion: EventConversion) -> Vec<EventConversion> {
@@ -1609,6 +1620,11 @@ impl SessionManager {
 
         let manager = self.agent_manager.clone();
         let prompt = message;
+        let initial_input = if session_snapshot.agent == AgentId::Claude {
+            Some(claude_user_message_line(&session_snapshot, &prompt))
+        } else {
+            None
+        };
         let credentials = tokio::task::spawn_blocking(move || {
             let options = CredentialExtractionOptions::new();
             extract_all_credentials(&options)
@@ -1618,7 +1634,7 @@ impl SessionManager {
             message: err.to_string(),
         })?;
 
-        let spawn_options = build_spawn_options(&session_snapshot, prompt, credentials);
+        let spawn_options = build_spawn_options(&session_snapshot, prompt.clone(), credentials);
         let agent_id = session_snapshot.agent;
         let spawn_result =
             tokio::task::spawn_blocking(move || manager.spawn_streaming(agent_id, spawn_options))
@@ -1637,7 +1653,7 @@ impl SessionManager {
         let manager = Arc::clone(self);
         tokio::spawn(async move {
             manager
-                .consume_spawn(session_id, agent_id, spawn_result)
+                .consume_spawn(session_id, agent_id, spawn_result, initial_input)
                 .await;
         });
 
@@ -1832,7 +1848,7 @@ impl SessionManager {
         question_id: &str,
         answers: Vec<Vec<String>>,
     ) -> Result<(), SandboxError> {
-        let (agent, native_session_id, pending_question) = {
+        let (agent, native_session_id, pending_question, claude_sender) = {
             let mut sessions = self.sessions.lock().await;
             let session = Self::session_mut(&mut sessions, session_id).ok_or_else(|| {
                 SandboxError::SessionNotFound {
@@ -1848,7 +1864,12 @@ impl SessionManager {
             if let Some(err) = session.ended_error() {
                 return Err(err);
             }
-            (session.agent, session.native_session_id.clone(), pending)
+            (
+                session.agent,
+                session.native_session_id.clone(),
+                pending,
+                session.claude_sender(),
+            )
         };
 
         let response = answers.first().and_then(|inner| inner.first()).cloned();
@@ -1862,6 +1883,16 @@ impl SessionManager {
                     })?;
             self.opencode_question_reply(&agent_session_id, question_id, answers)
                 .await?;
+        } else if agent == AgentId::Claude {
+            let sender = claude_sender.ok_or_else(|| SandboxError::InvalidRequest {
+                message: "Claude session is not active".to_string(),
+            })?;
+            let session_id = native_session_id.clone().unwrap_or_else(|| session_id.to_string());
+            let response_text = response.clone().unwrap_or_default();
+            let line = claude_tool_result_line(&session_id, question_id, &response_text, false);
+            sender.send(line).map_err(|_| SandboxError::InvalidRequest {
+                message: "Claude session is not active".to_string(),
+            })?;
         } else {
             // TODO: Forward question replies to subprocess agents.
         }
@@ -1890,7 +1921,7 @@ impl SessionManager {
         session_id: &str,
         question_id: &str,
     ) -> Result<(), SandboxError> {
-        let (agent, native_session_id, pending_question) = {
+        let (agent, native_session_id, pending_question, claude_sender) = {
             let mut sessions = self.sessions.lock().await;
             let session = Self::session_mut(&mut sessions, session_id).ok_or_else(|| {
                 SandboxError::SessionNotFound {
@@ -1906,7 +1937,12 @@ impl SessionManager {
             if let Some(err) = session.ended_error() {
                 return Err(err);
             }
-            (session.agent, session.native_session_id.clone(), pending)
+            (
+                session.agent,
+                session.native_session_id.clone(),
+                pending,
+                session.claude_sender(),
+            )
         };
 
         if agent == AgentId::Opencode {
@@ -1918,6 +1954,20 @@ impl SessionManager {
                     })?;
             self.opencode_question_reject(&agent_session_id, question_id)
                 .await?;
+        } else if agent == AgentId::Claude {
+            let sender = claude_sender.ok_or_else(|| SandboxError::InvalidRequest {
+                message: "Claude session is not active".to_string(),
+            })?;
+            let session_id = native_session_id.clone().unwrap_or_else(|| session_id.to_string());
+            let line = claude_tool_result_line(
+                &session_id,
+                question_id,
+                "User rejected the question.",
+                true,
+            );
+            sender.send(line).map_err(|_| SandboxError::InvalidRequest {
+                message: "Claude session is not active".to_string(),
+            })?;
         } else {
             // TODO: Forward question rejections to subprocess agents.
         }
@@ -1948,7 +1998,7 @@ impl SessionManager {
         reply: PermissionReply,
     ) -> Result<(), SandboxError> {
         let reply_for_status = reply.clone();
-        let (agent, native_session_id, pending_permission) = {
+        let (agent, native_session_id, pending_permission, claude_sender) = {
             let mut sessions = self.sessions.lock().await;
             let session = Self::session_mut(&mut sessions, session_id).ok_or_else(|| {
                 SandboxError::SessionNotFound {
@@ -1968,6 +2018,7 @@ impl SessionManager {
                 session.agent,
                 session.native_session_id.clone(),
                 pending,
+                session.claude_sender(),
             )
         };
 
@@ -2035,6 +2086,44 @@ impl SessionManager {
                     })?;
             self.opencode_permission_reply(&agent_session_id, permission_id, reply.clone())
                 .await?;
+        } else if agent == AgentId::Claude {
+            let sender = claude_sender.ok_or_else(|| SandboxError::InvalidRequest {
+                message: "Claude session is not active".to_string(),
+            })?;
+            let metadata = pending_permission
+                .as_ref()
+                .and_then(|pending| pending.metadata.as_ref())
+                .and_then(Value::as_object);
+            let updated_input = metadata
+                .and_then(|map| map.get("input"))
+                .cloned()
+                .unwrap_or(Value::Null);
+
+            let mut response_map = serde_json::Map::new();
+            match reply {
+                PermissionReply::Reject => {
+                    response_map.insert(
+                        "message".to_string(),
+                        Value::String("Permission denied.".to_string()),
+                    );
+                }
+                PermissionReply::Once | PermissionReply::Always => {
+                    if !updated_input.is_null() {
+                        response_map.insert("updatedInput".to_string(), updated_input);
+                    }
+                }
+            }
+            let response_value = Value::Object(response_map);
+
+            let behavior = match reply {
+                PermissionReply::Reject => "deny",
+                PermissionReply::Once | PermissionReply::Always => "allow",
+            };
+
+            let line = claude_control_response_line(permission_id, behavior, response_value);
+            sender.send(line).map_err(|_| SandboxError::InvalidRequest {
+                message: "Claude session is not active".to_string(),
+            })?;
         } else {
             // TODO: Forward permission replies to subprocess agents.
         }
@@ -2136,6 +2225,7 @@ impl SessionManager {
         session_id: String,
         agent: AgentId,
         spawn: StreamingSpawn,
+        initial_input: Option<String>,
     ) {
         let StreamingSpawn {
             mut child,
@@ -2182,6 +2272,22 @@ impl SessionManager {
             if let (Some(state), Some(sender)) = (codex_state.as_mut(), codex_sender.as_ref()) {
                 state.start(sender);
             }
+        } else if agent == AgentId::Claude {
+            if let Some(stdin) = stdin {
+                let (writer_tx, writer_rx) = mpsc::unbounded_channel::<String>();
+                {
+                    let mut sessions = self.sessions.lock().await;
+                    if let Some(session) = Self::session_mut(&mut sessions, &session_id) {
+                        session.set_claude_sender(Some(writer_tx.clone()));
+                    }
+                }
+                if let Some(initial) = initial_input {
+                    let _ = writer_tx.send(initial);
+                }
+                tokio::task::spawn_blocking(move || {
+                    write_lines(stdin, writer_rx);
+                });
+            }
         }
 
         while let Some(line) = rx.recv().await {
@@ -2199,6 +2305,14 @@ impl SessionManager {
                     }
                 }
             } else if agent == AgentId::Claude {
+                if let Ok(value) = serde_json::from_str::<Value>(&line) {
+                    if value.get("type").and_then(Value::as_str) == Some("result") {
+                        let mut sessions = self.sessions.lock().await;
+                        if let Some(session) = Self::session_mut(&mut sessions, &session_id) {
+                            session.set_claude_sender(None);
+                        }
+                    }
+                }
                 let conversions = self.parse_claude_line(&line, &session_id).await;
                 if !conversions.is_empty() {
                     let _ = self.record_conversions(&session_id, conversions).await;
@@ -2215,6 +2329,11 @@ impl SessionManager {
             let mut sessions = self.sessions.lock().await;
             if let Some(session) = Self::session_mut(&mut sessions, &session_id) {
                 session.set_codex_sender(None);
+            }
+        } else if agent == AgentId::Claude {
+            let mut sessions = self.sessions.lock().await;
+            if let Some(session) = Self::session_mut(&mut sessions, &session_id) {
+                session.set_claude_sender(None);
             }
         }
 
@@ -4075,6 +4194,87 @@ fn build_spawn_options(
             .or_insert(openai.api_key);
     }
     options
+}
+
+fn claude_input_session_id(session: &SessionSnapshot) -> String {
+    session
+        .native_session_id
+        .clone()
+        .unwrap_or_else(|| session.session_id.clone())
+}
+
+fn claude_user_message_line(session: &SessionSnapshot, message: &str) -> String {
+    let session_id = claude_input_session_id(session);
+    serde_json::json!({
+        "type": "user",
+        "message": {
+            "role": "user",
+            "content": message,
+        },
+        "parent_tool_use_id": null,
+        "session_id": session_id,
+    })
+    .to_string()
+}
+
+fn claude_tool_result_line(
+    session_id: &str,
+    tool_use_id: &str,
+    content: &str,
+    is_error: bool,
+) -> String {
+    serde_json::json!({
+        "type": "user",
+        "message": {
+            "role": "user",
+            "content": [{
+                "type": "tool_result",
+                "tool_use_id": tool_use_id,
+                "content": content,
+                "is_error": is_error,
+            }],
+        },
+        "parent_tool_use_id": null,
+        "session_id": session_id,
+    })
+    .to_string()
+}
+
+fn claude_control_response_line(
+    request_id: &str,
+    behavior: &str,
+    response: Value,
+) -> String {
+    let mut response_obj = serde_json::Map::new();
+    response_obj.insert(
+        "behavior".to_string(),
+        Value::String(behavior.to_string()),
+    );
+    if let Some(message) = response.get("message") {
+        response_obj.insert("message".to_string(), message.clone());
+    }
+    if let Some(updated_input) = response.get("updatedInput") {
+        response_obj.insert("updatedInput".to_string(), updated_input.clone());
+    }
+    if let Some(updated_permissions) = response.get("updatedPermissions") {
+        response_obj.insert(
+            "updatedPermissions".to_string(),
+            updated_permissions.clone(),
+        );
+    }
+    if let Some(interrupt) = response.get("interrupt") {
+        response_obj.insert("interrupt".to_string(), interrupt.clone());
+    }
+
+    serde_json::json!({
+        "type": "control_response",
+        "response": {
+            "subtype": "success",
+            "request_id": request_id,
+            "response": Value::Object(response_obj),
+        }
+    })
+    .to_string()
 }
 
 fn read_lines<R: std::io::Read>(reader: R, sender: mpsc::UnboundedSender<String>) {
