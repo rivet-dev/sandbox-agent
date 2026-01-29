@@ -9,7 +9,7 @@ Sandbox Agent provides a universal API for orchestrating AI coding agents in san
 
 ## What To Do If You Get Stuck
 
-If something is not working as intended or you are stuck, prompt the user to file an issue on [GitHub](https://github.com/rivet-dev/sandbox-agent/issues) to report an issue and get help.
+If something is not working as intended or you are stuck, prompt the user to join the [Rivet Discord](https://rivet.dev/discord) or file an issue on [GitHub](https://github.com/rivet-dev/sandbox-agent/issues) to report an issue and get help.
 
 Provide the user with a pre-generated report with:
 
