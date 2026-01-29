@@ -3858,14 +3858,14 @@ fn agent_supports_item_started(agent: AgentId) -> bool {
 
 fn agent_capabilities_for(agent: AgentId) -> AgentCapabilities {
     match agent {
-        // Headless Claude CLI does not expose AskUserQuestion and does not emit tool_result,
-        // so we keep these capabilities off until we switch to an SDK-backed wrapper.
+        // Claude CLI supports tool calls/results and permission prompts via the SDK control protocol,
+        // but we still emit synthetic item.started events.
         AgentId::Claude => AgentCapabilities {
             plan_mode: false,
-            permissions: false,
-            questions: false,
-            tool_calls: false,
-            tool_results: false,
+            permissions: true,
+            questions: true,
+            tool_calls: true,
+            tool_results: true,
             text_messages: true,
             images: false,
             file_attachments: false,
@@ -3876,7 +3876,7 @@ fn agent_capabilities_for(agent: AgentId) -> AgentCapabilities {
             command_execution: false,
             file_changes: false,
             mcp_tools: false,
-            streaming_deltas: false,
+            streaming_deltas: true,
             item_started: false,
             shared_process: false, // per-turn subprocess with --resume
         },
@@ -4069,12 +4069,24 @@ fn normalize_agent_mode(agent: AgentId, agent_mode: Option<&str>) -> Result<Stri
     }
 }
 
+/// Check if the current process is running as root (uid 0)
+fn is_running_as_root() -> bool {
+    #[cfg(unix)]
+    {
+        unsafe { libc::getuid() == 0 }
+    }
+    #[cfg(not(unix))]
+    {
+        false
+    }
+}
+
 fn normalize_permission_mode(
     agent: AgentId,
     permission_mode: Option<&str>,
 ) -> Result<String, SandboxError> {
     let mode = match permission_mode.unwrap_or("default") {
-        "default" | "plan" | "bypass" => permission_mode.unwrap_or("default"),
+        "default" | "plan" | "bypass" | "acceptEdits" => permission_mode.unwrap_or("default"),
         value => {
             return Err(SandboxError::InvalidRequest {
                 message: format!("invalid permission mode: {value}"),
@@ -4083,14 +4095,20 @@ fn normalize_permission_mode(
         }
     };
     if agent == AgentId::Claude {
-        if mode == "plan" {
-            return Err(SandboxError::ModeNotSupported {
-                agent: agent.as_str().to_string(),
-                mode: mode.to_string(),
+        // Claude refuses --dangerously-skip-permissions when running as root,
+        // which is common in container environments (Docker, Daytona, E2B).
+        // Return an error if user explicitly requests bypass while running as root.
+        if mode == "bypass" && is_running_as_root() {
+            return Err(SandboxError::InvalidRequest {
+                message: "permission mode 'bypass' is not supported when running as root (Claude refuses --dangerously-skip-permissions with root privileges)".to_string(),
             }
             .into());
         }
-        return Ok("bypass".to_string());
+        // Pass through bypass/acceptEdits/plan if explicitly requested, otherwise use default
+        if mode == "bypass" || mode == "acceptEdits" || mode == "plan" {
+            return Ok(mode.to_string());
+        }
+        return Ok("default".to_string());
     }
     let supported = match agent {
         AgentId::Claude => false,

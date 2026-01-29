@@ -36,6 +36,9 @@ tracing-subscriber.workspace = true
 include_dir.workspace = true
 tempfile = { workspace = true, optional = true }
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 http-body-util.workspace = true
 insta.workspace = true

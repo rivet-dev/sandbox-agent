@@ -217,7 +217,6 @@ impl AgentManager {
         match agent {
             AgentId::Claude => {
                 command
-                    .arg("--print")
                     .arg("--output-format")
                     .arg("stream-json")
                     .arg("--verbose");
@@ -234,9 +233,21 @@ impl AgentManager {
                     Some("bypass") => {
                         command.arg("--dangerously-skip-permissions");
                     }
+                    Some("acceptEdits") => {
+                        command.arg("--permission-mode").arg("acceptEdits");
+                    }
                     _ => {}
                 }
-                command.arg(&options.prompt);
+                if options.streaming_input {
+                    command
+                        .arg("--input-format")
+                        .arg("stream-json")
+                        .arg("--permission-prompt-tool")
+                        .arg("stdio")
+                        .arg("--include-partial-messages");
+                } else {
+                    command.arg("--print").arg("--").arg(&options.prompt);
+                }
             }
             AgentId::Codex => {
                 if options.session_id.is_some() {
@@ -305,15 +316,18 @@ impl AgentManager {
     pub fn spawn_streaming(
         &self,
         agent: AgentId,
-        options: SpawnOptions,
+        mut options: SpawnOptions,
     ) -> Result<StreamingSpawn, AgentError> {
         let codex_options = if agent == AgentId::Codex {
             Some(options.clone())
         } else {
             None
         };
+        if agent == AgentId::Claude {
+            options.streaming_input = true;
+        }
         let mut command = self.build_command(agent, &options)?;
-        if agent == AgentId::Codex {
+        if matches!(agent, AgentId::Codex | AgentId::Claude) {
             command.stdin(Stdio::piped());
         }
         command.stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -539,7 +553,6 @@ impl AgentManager {
         match agent {
             AgentId::Claude => {
                 command
-                    .arg("--print")
                     .arg("--output-format")
                     .arg("stream-json")
                     .arg("--verbose");
@@ -556,9 +569,21 @@ impl AgentManager {
                     Some("bypass") => {
                         command.arg("--dangerously-skip-permissions");
                     }
+                    Some("acceptEdits") => {
+                        command.arg("--permission-mode").arg("acceptEdits");
+                    }
                     _ => {}
                 }
-                command.arg(&options.prompt);
+                if options.streaming_input {
+                    command
+                        .arg("--input-format")
+                        .arg("stream-json")
+                        .arg("--permission-prompt-tool")
+                        .arg("stdio")
+                        .arg("--include-partial-messages");
+                } else {
+                    command.arg(&options.prompt);
+                }
             }
             AgentId::Codex => {
                 if options.session_id.is_some() {
@@ -646,6 +671,8 @@ pub struct SpawnOptions {
     pub session_id: Option<String>,
     pub working_dir: Option<PathBuf>,
     pub env: HashMap<String, String>,
+    /// Use stream-json input via stdin (Claude only).
+    pub streaming_input: bool,
 }
 
 impl SpawnOptions {
@@ -659,6 +686,7 @@ impl SpawnOptions {
             session_id: None,
             working_dir: None,
             env: HashMap::new(),
+            streaming_input: false,
         }
     }
 }
