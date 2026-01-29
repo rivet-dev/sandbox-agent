@@ -1,0 +1,27 @@
+{
+  "name": "@sandbox-agent/example-netlify",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/netlify.ts",
+    "typecheck": "tsc --noEmit",
+    "build": "netlify build",
+    "dev": "netlify dev",
+    "deploy": "netlify deploy",
+    "deploy:prod": "netlify deploy --prod",
+    "test": "vitest",
+    "test:integration": "tsx src/test-integration.ts"
+  },
+  "dependencies": {
+    "@sandbox-agent/example-shared": "workspace:*",
+    "sandbox-agent": "workspace:*"
+  },
+  "devDependencies": {
+    "@netlify/functions": "latest",
+    "@types/node": "latest",
+    "netlify-cli": "latest",
+    "tsx": "latest",
+    "typescript": "latest",
+    "vitest": "^3.0.0"
+  }
+}

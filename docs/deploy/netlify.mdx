@@ -1,0 +1,179 @@
+---
+title: "Netlify"
+description: "Deploy sandbox-agent as Netlify Functions for serverless execution."
+---
+
+## Prerequisites
+
+- Netlify account
+- `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` for the coding agents
+- Netlify CLI (optional, for local development)
+
+## Quick Deploy
+
+Deploy directly from the example:
+
+```bash
+# Clone and navigate to the Netlify example
+git clone https://github.com/rivet-dev/sandbox-agent
+cd sandbox-agent/examples/netlify
+
+# Install dependencies
+npm install
+
+# Login to Netlify (if not already logged in)
+netlify login
+
+# Set environment variables
+netlify env:set ANTHROPIC_API_KEY "your-api-key"
+
+# Deploy to production
+netlify deploy --prod
+```
+
+Your sandbox-agent will be available at your Netlify site URL (e.g., `https://your-site.netlify.app`).
+
+## TypeScript Example
+
+```typescript
+import { SandboxAgent } from "sandbox-agent";
+
+// Your Netlify deployment URL
+const baseUrl = "https://your-site.netlify.app";
+
+// Connect to the Netlify-hosted sandbox agent
+const client = await SandboxAgent.connect({ baseUrl });
+
+// Wait for cold start (first request may take 1-2 minutes)
+console.log("Connecting to Netlify deployment...");
+await client.getHealth();
+
+// Create a session and start coding
+await client.createSession("my-session", {
+  agent: "claude",
+  permissionMode: "default",
+});
+
+await client.postMessage("my-session", {
+  message: "Create a simple Node.js web server",
+});
+
+for await (const event of client.streamEvents("my-session")) {
+  console.log(event.type, event.data);
+}
+```
+
+## Configuration
+
+### Environment Variables
+
+Set these in your Netlify site dashboard (Site Settings > Environment Variables):
+
+- **`ANTHROPIC_API_KEY`** - Your Anthropic API key (for Claude agent)
+- **`OPENAI_API_KEY`** - Your OpenAI API key (alternative to Anthropic, for Codex agent)
+
+### netlify.toml
+
+Configure your deployment with `netlify.toml`:
+
+```toml
+[build]
+  functions = "netlify/functions"
+  
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+[[redirects]]
+  from = "/*"
+  to = "/.netlify/functions/sandbox-agent"
+  status = 200
+
+# Environment variables can also be set here
+# [build.environment]
+# ANTHROPIC_API_KEY = "your-key-here"  # Not recommended for public repos
+```
+
+## Local Development
+
+Test your deployment locally with Netlify Dev:
+
+```bash
+# Install Netlify CLI globally
+npm install -g netlify-cli
+
+# Start local development
+netlify dev
+
+# Your local server will be available at http://localhost:8888
+```
+
+## Important Considerations
+
+<Warning>
+Netlify Functions have inherent limitations for long-running processes like sandbox-agent. Consider these factors:
+</Warning>
+
+### Performance
+
+- **Cold starts:** First request may take 1-2 minutes to install and start sandbox-agent
+- **Timeouts:** Functions have a 10-second timeout for synchronous responses
+- **Resource limits:** Limited CPU and memory compared to dedicated servers
+- **Stateless:** Sessions don't persist between function invocations
+
+### Best Practices
+
+1. **Warm-up:** Consider scheduled functions to prevent cold starts
+2. **Caching:** Cache the sandbox-agent binary in the deployment if possible
+3. **Error handling:** Implement robust retry logic for cold start scenarios
+4. **Monitoring:** Use Netlify's function logs to monitor performance
+
+### Alternatives
+
+For production workloads requiring:
+- Persistent sessions
+- Low latency
+- High performance
+
+Consider using [E2B](/deploy/e2b) or [Daytona](/deploy/daytona) instead.
+
+## Troubleshooting
+
+### Function Timeouts
+
+If functions timeout during installation:
+
+1. Check Netlify function logs in your dashboard
+2. Consider pre-building the sandbox-agent binary
+3. Use background functions for longer operations
+
+### Cold Start Issues
+
+```typescript
+// Add retry logic for cold starts
+const connectWithRetry = async (baseUrl: string, maxRetries = 3) => {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      const client = await SandboxAgent.connect({ baseUrl });
+      await client.getHealth();
+      return client;
+    } catch (error) {
+      if (i === maxRetries - 1) throw error;
+      console.log(`Retry ${i + 1}/${maxRetries} after cold start...`);
+      await new Promise(r => setTimeout(r, 30000)); // Wait 30 seconds
+    }
+  }
+};
+```
+
+### Environment Variable Issues
+
+Verify your API keys are set correctly:
+
+```bash
+# List all environment variables
+netlify env:list
+
+# Set missing variables
+netlify env:set ANTHROPIC_API_KEY "your-key"
+```

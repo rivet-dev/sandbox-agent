@@ -1,0 +1,31 @@
+[build]
+  command = "npm run build"
+  functions = "netlify/functions"
+  publish = "dist"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+[dev]
+  command = "npm run dev"
+  port = 8888
+  targetPort = 3000
+  autoLaunch = true
+
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/:splat"
+  status = 200
+
+[[redirects]]
+  from = "/*"
+  to = "/.netlify/functions/sandbox-agent"
+  status = 200
+
+[build.environment]
+  NODE_VERSION = "18"
+
+# Required environment variables (set these in Netlify UI)
+# ANTHROPIC_API_KEY - Your Anthropic API key
+# OPENAI_API_KEY - Your OpenAI API key (alternative to Anthropic)
