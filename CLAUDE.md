@@ -40,7 +40,7 @@ Universal schema guidance:
 - Never use synthetic data or mocked responses in tests.
 - Never manually write agent types; always use generated types in `resources/agent-schemas/`. If types are broken, fix the generated types.
 - The universal schema must provide consistent behavior across providers; avoid requiring frontend/client logic to special-case agents.
-- The UI must reflect every field in AgentCapabilities; keep it in sync with the README feature matrix, `docs/agent-compatibility.mdx`, and `agent_capabilities_for`.
+- The UI must reflect every field in AgentCapabilities; keep it in sync with `docs/agent-compatibility.mdx` and `agent_capabilities_for`.
 - When parsing agent data, if something is unexpected or does not match the schema, bail out and surface the error rather than trying to continue with partial parsing.
 - When defining the universal schema, choose the option most compatible with native agent APIs, and add synthetics to fill gaps for other agents.
 - Use `docs/universal-schema.mdx` as the source of truth for universal schema terminology and keep it updated alongside schema changes.
