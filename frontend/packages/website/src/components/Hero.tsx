@@ -181,11 +181,11 @@ export function Hero() {
       <div className="max-w-7xl mx-auto px-6 relative z-10">
         <div className="flex flex-col lg:flex-row items-center gap-16">
           <div className="flex-1 text-center lg:text-left">
-            <h1 className="mb-6 text-5xl font-medium leading-[1.1] tracking-tighter text-white md:text-7xl">
+            <h1 className="mb-6 text-3xl font-medium leading-[1.1] tracking-tight text-white sm:text-4xl md:text-5xl lg:text-6xl">
               Run Coding Agents in Sandboxes.<br />
-              Control Them Over HTTP.
+              <span className="text-zinc-400">Control Them Over HTTP.</span>
             </h1>
-            <p className="mt-8 text-xl text-zinc-400 leading-relaxed max-w-2xl mx-auto lg:mx-0">
+            <p className="mt-6 text-lg text-zinc-500 leading-relaxed max-w-xl mx-auto lg:mx-0">
               The Sandbox Agent SDK is a server that runs inside your sandbox. Your app connects remotely to control Claude Code, Codex, OpenCode, or Amp — streaming events, handling permissions, managing sessions.
             </p>
 
