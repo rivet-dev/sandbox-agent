@@ -46,7 +46,7 @@ Every event from the API is wrapped in a `UniversalEvent` envelope.
 | Type | Description | Data |
 |------|-------------|------|
 | `session.started` | Session has started | `{ metadata?: any }` |
-| `session.ended` | Session has ended | `{ reason, terminated_by }` |
+| `session.ended` | Session has ended | `{ reason, terminated_by, message?, exit_code? }` |
 
 **SessionEndedData**
 
@@ -54,6 +54,18 @@ Every event from the API is wrapped in a `UniversalEvent` envelope.
 |-------|------|--------|
 | `reason` | string | `completed`, `error`, `terminated` |
 | `terminated_by` | string | `agent`, `daemon` |
+| `message` | string? | Error message (only present when reason is `error`) |
+| `exit_code` | int? | Process exit code (only present when reason is `error`) |
+| `stderr` | StderrOutput? | Structured stderr output (only present when reason is `error`) |
+
+**StderrOutput**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `head` | string? | First 20 lines of stderr (if truncated) or full stderr (if not truncated) |
+| `tail` | string? | Last 50 lines of stderr (only present if truncated) |
+| `truncated` | boolean | Whether the output was truncated |
+| `total_lines` | int? | Total number of lines in stderr |
 
 ### Item Lifecycle
 

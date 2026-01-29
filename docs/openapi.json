@@ -1465,8 +1465,27 @@
           "terminated_by"
         ],
         "properties": {
+          "exit_code": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Process exit code when reason is Error",
+            "nullable": true
+          },
+          "message": {
+            "type": "string",
+            "description": "Error message when reason is Error",
+            "nullable": true
+          },
           "reason": {
             "$ref": "#/components/schemas/SessionEndReason"
+          },
+          "stderr": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/StderrOutput"
+              }
+            ],
+            "nullable": true
           },
           "terminated_by": {
             "$ref": "#/components/schemas/TerminatedBy"

@@ -521,6 +521,9 @@ pub fn session_ended_event(thread_id: &str, reason: SessionEndReason) -> EventCo
         UniversalEventData::SessionEnded(SessionEndedData {
             reason,
             terminated_by: TerminatedBy::Agent,
+            message: None,
+            exit_code: None,
+            stderr: None,
         }),
     )
     .with_native_session(Some(thread_id.to_string()))

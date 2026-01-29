@@ -257,7 +257,15 @@ export interface components {
     /** @enum {string} */
     SessionEndReason: "completed" | "error" | "terminated";
     SessionEndedData: {
+      /**
+       * Format: int32
+       * @description Process exit code when reason is Error
+       */
+      exit_code?: number | null;
+      /** @description Error message when reason is Error */
+      message?: string | null;
       reason: components["schemas"]["SessionEndReason"];
+      stderr?: components["schemas"]["StderrOutput"] | null;
       terminated_by: components["schemas"]["TerminatedBy"];
     };
     SessionInfo: {

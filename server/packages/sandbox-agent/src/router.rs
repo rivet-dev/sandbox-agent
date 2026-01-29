@@ -24,7 +24,8 @@ use sandbox_agent_universal_agent_schema::{
     AgentUnparsedData, ContentPart, ErrorData, EventConversion, EventSource, FileAction,
     ItemDeltaData, ItemEventData, ItemKind, ItemRole, ItemStatus, PermissionEventData,
     PermissionStatus, QuestionEventData, QuestionStatus, ReasoningVisibility, SessionEndReason,
-    SessionEndedData, SessionStartedData, TerminatedBy, UniversalEvent, UniversalEventData,
+    SessionEndedData, SessionStartedData, StderrOutput, TerminatedBy, UniversalEvent,
+    UniversalEventData,
     UniversalEventType, UniversalItem,
 };
 use schemars::JsonSchema;
@@ -1377,6 +1378,7 @@ impl AgentServerManager {
 
         let owner = { self.owner.lock().expect("owner lock").clone() };
         if let Some(owner) = owner.and_then(|weak| weak.upgrade()) {
+            let logs = owner.read_agent_stderr(agent);
             for session_id in session_ids {
                 owner
                     .record_error(
@@ -1393,6 +1395,7 @@ impl AgentServerManager {
                         message,
                         SessionEndReason::Error,
                         TerminatedBy::Daemon,
+                        logs.clone(),
                     )
                     .await;
             }
@@ -1440,6 +1443,15 @@ impl SessionManager {
         session_id: &str,
     ) -> Option<&'a mut SessionState> {
         sessions.iter_mut().find(|session| session.session_id == session_id)
+    }
+
+    /// Read agent stderr for error diagnostics
+    fn read_agent_stderr(&self, agent: AgentId) -> Option<StderrOutput> {
+        let logs = AgentServerLogs::new(
+            self.server_manager.log_base_dir.clone(),
+            agent.as_str(),
+        );
+        logs.read_stderr()
     }
 
     async fn create_session(
@@ -1697,6 +1709,9 @@ impl SessionManager {
             UniversalEventData::SessionEnded(SessionEndedData {
                 reason: SessionEndReason::Terminated,
                 terminated_by: TerminatedBy::Daemon,
+                message: None,
+                exit_code: None,
+                stderr: None,
             }),
         )
         .synthetic()
@@ -2232,6 +2247,7 @@ impl SessionManager {
                         &message,
                         SessionEndReason::Completed,
                         TerminatedBy::Agent,
+                        None,
                     )
                     .await;
                 }
@@ -2247,12 +2263,14 @@ impl SessionManager {
                     )
                     .await;
                 }
+                let logs = self.read_agent_stderr(agent);
                 self.mark_session_ended(
                     &session_id,
                     status.code(),
                     &message,
                     SessionEndReason::Error,
                     TerminatedBy::Agent,
+                    logs,
                 )
                 .await;
             }
@@ -2267,12 +2285,14 @@ impl SessionManager {
                     )
                     .await;
                 }
+                let logs = self.read_agent_stderr(agent);
                 self.mark_session_ended(
                     &session_id,
                     None,
                     &message,
                     SessionEndReason::Error,
                     TerminatedBy::Daemon,
+                    logs,
                 )
                 .await;
             }
@@ -2287,12 +2307,14 @@ impl SessionManager {
                     )
                     .await;
                 }
+                let logs = self.read_agent_stderr(agent);
                 self.mark_session_ended(
                     &session_id,
                     None,
                     &message,
                     SessionEndReason::Error,
                     TerminatedBy::Daemon,
+                    logs,
                 )
                 .await;
             }
@@ -2419,6 +2441,7 @@ impl SessionManager {
         message: &str,
         reason: SessionEndReason,
         terminated_by: TerminatedBy,
+        stderr: Option<StderrOutput>,
     ) {
         let mut sessions = self.sessions.lock().await;
         if let Some(session) = Self::session_mut(&mut sessions, session_id) {
@@ -2431,11 +2454,20 @@ impl SessionManager {
                 reason.clone(),
                 terminated_by.clone(),
             );
+            let (error_message, error_exit_code, error_stderr) =
+                if reason == SessionEndReason::Error {
+                    (Some(message.to_string()), exit_code, stderr)
+                } else {
+                    (None, None, None)
+                };
             let ended = EventConversion::new(
                 UniversalEventType::SessionEnded,
                 UniversalEventData::SessionEnded(SessionEndedData {
                     reason,
                     terminated_by,
+                    message: error_message,
+                    exit_code: error_exit_code,
+                    stderr: error_stderr,
                 }),
             )
             .synthetic()
@@ -2493,12 +2525,14 @@ impl SessionManager {
                     None,
                 )
                 .await;
+                let logs = self.read_agent_stderr(AgentId::Opencode);
                 self.mark_session_ended(
                     &session_id,
                     None,
                     "opencode server unavailable",
                     SessionEndReason::Error,
                     TerminatedBy::Daemon,
+                    logs,
                 )
                 .await;
                 return;
@@ -2516,12 +2550,14 @@ impl SessionManager {
                     None,
                 )
                 .await;
+                let logs = self.read_agent_stderr(AgentId::Opencode);
                 self.mark_session_ended(
                     &session_id,
                     None,
                     "opencode sse connection failed",
                     SessionEndReason::Error,
                     TerminatedBy::Daemon,
+                    logs,
                 )
                 .await;
                 return;
@@ -2538,12 +2574,14 @@ impl SessionManager {
                 None,
             )
             .await;
+            let logs = self.read_agent_stderr(AgentId::Opencode);
             self.mark_session_ended(
                 &session_id,
                 None,
                 "opencode sse error",
                 SessionEndReason::Error,
                 TerminatedBy::Daemon,
+                logs,
             )
             .await;
             return;
@@ -2562,12 +2600,14 @@ impl SessionManager {
                         None,
                     )
                     .await;
+                    let logs = self.read_agent_stderr(AgentId::Opencode);
                     self.mark_session_ended(
                         &session_id,
                         None,
                         "opencode sse stream error",
                         SessionEndReason::Error,
                         TerminatedBy::Daemon,
+                        logs,
                     )
                     .await;
                     return;
@@ -5804,6 +5844,9 @@ fn mock_session_end_sequence(_prefix: &str) -> Vec<EventConversion> {
         UniversalEventData::SessionEnded(SessionEndedData {
             reason: SessionEndReason::Completed,
             terminated_by: TerminatedBy::Agent,
+            message: None,
+            exit_code: None,
+            stderr: None,
         }),
     )
     .synthetic()]
