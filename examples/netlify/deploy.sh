@@ -84,8 +84,12 @@ echo
 echo "🎉 Deployment completed!"
 echo
 
-# Get the site URL
-SITE_URL=$(netlify status --json | grep -o '"url":"[^"]*"' | cut -d'"' -f4)
+# Get the site URL (try jq first, fallback to grep)
+if command -v jq >/dev/null 2>&1; then
+    SITE_URL=$(netlify status --json 2>/dev/null | jq -r '.site.url // ""' 2>/dev/null)
+else
+    SITE_URL=$(netlify status --json 2>/dev/null | grep -o '"url":"[^"]*"' | cut -d'"' -f4)
+fi
 
 if [ -n "$SITE_URL" ]; then
     echo "📍 Your sandbox-agent is deployed at: $SITE_URL"
