@@ -13,6 +13,9 @@
   "cpu": [
     "x64"
   ],
+  "scripts": {
+    "postinstall": "chmod +x bin/sandbox-agent || true"
+  },
   "files": [
     "bin"
   ]
