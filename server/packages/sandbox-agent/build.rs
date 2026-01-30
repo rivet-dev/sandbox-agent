@@ -16,10 +16,14 @@ fn main() {
         .join("dist");
 
     println!("cargo:rerun-if-env-changed=SANDBOX_AGENT_SKIP_INSPECTOR");
+    println!("cargo:rerun-if-env-changed=SANDBOX_AGENT_VERSION");
     println!("cargo:rerun-if-changed={}", dist_dir.display());
 
-    let skip = env::var("SANDBOX_AGENT_SKIP_INSPECTOR").is_ok();
+    // Generate version constant from environment variable or fallback to Cargo.toml version
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
+    generate_version(&out_dir);
+
+    let skip = env::var("SANDBOX_AGENT_SKIP_INSPECTOR").is_ok();
     let out_file = out_dir.join("inspector_assets.rs");
 
     if skip {
@@ -60,4 +64,20 @@ fn quote_path(path: &Path) -> String {
         .expect("valid path")
         .replace('\\', "\\\\")
         .replace('"', "\\\"")
+}
+
+fn generate_version(out_dir: &Path) {
+    // Use SANDBOX_AGENT_VERSION env var if set, otherwise fall back to CARGO_PKG_VERSION
+    let version = env::var("SANDBOX_AGENT_VERSION")
+        .unwrap_or_else(|_| env::var("CARGO_PKG_VERSION").expect("CARGO_PKG_VERSION"));
+
+    let out_file = out_dir.join("version.rs");
+    let contents = format!(
+        "/// Version string for this build.\n\
+         /// Set via SANDBOX_AGENT_VERSION env var at build time, or falls back to Cargo.toml version.\n\
+         pub const VERSION: &str = \"{}\";\n",
+        version
+    );
+
+    fs::write(&out_file, contents).expect("write version.rs");
 }

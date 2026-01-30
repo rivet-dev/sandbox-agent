@@ -125,8 +125,8 @@ jobs:
           # Use Docker BuildKit
           export DOCKER_BUILDKIT=1
 
-          # Build the binary using our Dockerfile
-          docker/release/build.sh ${{ matrix.target }}
+          # Build the binary using our Dockerfile with version
+          docker/release/build.sh ${{ matrix.target }} ${{ github.event.inputs.version }}
 
           # Make sure dist directory exists and binary is there
           ls -la dist/

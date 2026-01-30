@@ -2,6 +2,14 @@
 set -euo pipefail
 
 TARGET=${1:-x86_64-unknown-linux-musl}
+VERSION=${2:-}
+
+# Build arguments for Docker
+BUILD_ARGS=""
+if [ -n "$VERSION" ]; then
+  BUILD_ARGS="--build-arg SANDBOX_AGENT_VERSION=$VERSION"
+  echo "Building with version: $VERSION"
+fi
 
 case $TARGET in
   x86_64-unknown-linux-musl)
@@ -36,9 +44,9 @@ case $TARGET in
 
 DOCKER_BUILDKIT=1
 if [ -n "$TARGET_STAGE" ]; then
-  docker build --target "$TARGET_STAGE" -f "docker/release/$DOCKERFILE" -t "sandbox-agent-builder-$TARGET" .
+  docker build --target "$TARGET_STAGE" $BUILD_ARGS -f "docker/release/$DOCKERFILE" -t "sandbox-agent-builder-$TARGET" .
 else
-  docker build -f "docker/release/$DOCKERFILE" -t "sandbox-agent-builder-$TARGET" .
+  docker build $BUILD_ARGS -f "docker/release/$DOCKERFILE" -t "sandbox-agent-builder-$TARGET" .
 fi
 
 CONTAINER_ID=$(docker create "sandbox-agent-builder-$TARGET")

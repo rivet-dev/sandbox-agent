@@ -4,6 +4,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use clap::{Args, Parser, Subcommand};
+
+// Include the generated version constant
+mod build_version {
+    include!(concat!(env!("OUT_DIR"), "/version.rs"));
+}
 use reqwest::blocking::Client as HttpClient;
 use reqwest::Method;
 use sandbox_agent::router::{build_router_with_state, shutdown_servers};
@@ -34,7 +39,7 @@ const DEFAULT_PORT: u16 = 2468;
 
 #[derive(Parser, Debug)]
 #[command(name = "sandbox-agent", bin_name = "sandbox-agent")]
-#[command(about = "https://sandboxagent.dev", version)]
+#[command(about = "https://sandboxagent.dev", version = build_version::VERSION)]
 #[command(arg_required_else_help = true)]
 struct Cli {
     #[command(subcommand)]

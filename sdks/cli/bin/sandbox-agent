@@ -1,21 +1,6 @@
 #!/usr/bin/env node
 const { execFileSync } = require("child_process");
 const path = require("path");
-const fs = require("fs");
-
-// Handle --version / -V at the launcher level to report npm package version
-// This ensures version matches what's installed via npm, not what's compiled into the binary
-const args = process.argv.slice(2);
-if (args.length === 1 && (args[0] === "--version" || args[0] === "-V")) {
-  const pkgJsonPath = path.join(__dirname, "..", "package.json");
-  try {
-    const pkgJson = JSON.parse(fs.readFileSync(pkgJsonPath, "utf-8"));
-    console.log(`sandbox-agent ${pkgJson.version}`);
-    process.exit(0);
-  } catch (e) {
-    // Fall through to binary if we can't read package.json
-  }
-}
 
 const PLATFORMS = {
   "darwin-arm64": "@sandbox-agent/cli-darwin-arm64",
@@ -34,7 +19,7 @@ if (!pkg) {
 try {
   const pkgPath = require.resolve(`${pkg}/package.json`);
   const bin = process.platform === "win32" ? "sandbox-agent.exe" : "sandbox-agent";
-  execFileSync(path.join(path.dirname(pkgPath), "bin", bin), args, { stdio: "inherit" });
+  execFileSync(path.join(path.dirname(pkgPath), "bin", bin), process.argv.slice(2), { stdio: "inherit" });
 } catch (e) {
   if (e.status !== undefined) process.exit(e.status);
   throw e;
