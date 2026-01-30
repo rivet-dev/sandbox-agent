@@ -70,6 +70,10 @@ WORKDIR /build
 # Build for ARM64 macOS
 FROM base AS aarch64-builder
 
+# Accept version as build arg
+ARG SANDBOX_AGENT_VERSION
+ENV SANDBOX_AGENT_VERSION=${SANDBOX_AGENT_VERSION}
+
 # Install macOS ARM64 target
 RUN rustup target add aarch64-apple-darwin
 

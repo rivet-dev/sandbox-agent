@@ -66,6 +66,10 @@ WORKDIR /build
 # Build for x86_64
 FROM base AS x86_64-builder
 
+# Accept version as build arg
+ARG SANDBOX_AGENT_VERSION
+ENV SANDBOX_AGENT_VERSION=${SANDBOX_AGENT_VERSION}
+
 # Set up OpenSSL for x86_64 musl target
 ENV SSL_VER=1.1.1w
 RUN wget https://www.openssl.org/source/openssl-$SSL_VER.tar.gz \

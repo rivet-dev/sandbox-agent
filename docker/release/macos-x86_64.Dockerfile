@@ -70,6 +70,10 @@ WORKDIR /build
 # Build for x86_64 macOS
 FROM base AS x86_64-builder
 
+# Accept version as build arg
+ARG SANDBOX_AGENT_VERSION
+ENV SANDBOX_AGENT_VERSION=${SANDBOX_AGENT_VERSION}
+
 # Install macOS x86_64 target
 RUN rustup target add x86_64-apple-darwin
 

@@ -26,6 +26,10 @@ RUN cd frontend/packages/inspector && pnpm exec vite build
 
 FROM rust:1.88.0
 
+# Accept version as build arg
+ARG SANDBOX_AGENT_VERSION
+ENV SANDBOX_AGENT_VERSION=${SANDBOX_AGENT_VERSION}
+
 # Install dependencies
 RUN apt-get update && apt-get install -y \
     llvm-14-dev \
