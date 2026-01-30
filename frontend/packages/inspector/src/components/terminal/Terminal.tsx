@@ -1,8 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Terminal as XTerm } from "@xterm/xterm";
-import { FitAddon } from "@xterm/addon-fit";
-import { WebLinksAddon } from "@xterm/addon-web-links";
-import "@xterm/xterm/css/xterm.css";
+import { init, Terminal as GhosttyTerminal, FitAddon } from "ghostty-web";
 
 export interface TerminalProps {
   /** WebSocket URL for terminal connection */
@@ -28,6 +25,21 @@ interface TerminalMessage {
   message?: string;
 }
 
+// Module-level initialization state
+let ghosttyInitialized = false;
+let ghosttyInitPromise: Promise<void> | null = null;
+
+async function ensureGhosttyInitialized(): Promise<void> {
+  if (ghosttyInitialized) return;
+  if (ghosttyInitPromise) return ghosttyInitPromise;
+  
+  ghosttyInitPromise = init().then(() => {
+    ghosttyInitialized = true;
+  });
+  
+  return ghosttyInitPromise;
+}
+
 const Terminal = ({
   wsUrl,
   active = true,
@@ -37,79 +49,12 @@ const Terminal = ({
   rows = 24,
 }: TerminalProps) => {
   const terminalRef = useRef<HTMLDivElement>(null);
-  const xtermRef = useRef<XTerm | null>(null);
+  const termRef = useRef<GhosttyTerminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  // Initialize terminal
-  useEffect(() => {
-    if (!terminalRef.current) return;
-
-    const term = new XTerm({
-      cursorBlink: true,
-      fontSize: 13,
-      fontFamily: '"JetBrains Mono", "Fira Code", "Cascadia Code", Menlo, Monaco, "Courier New", monospace',
-      theme: {
-        background: "#1a1a1a",
-        foreground: "#d4d4d4",
-        cursor: "#d4d4d4",
-        cursorAccent: "#1a1a1a",
-        selectionBackground: "#264f78",
-        black: "#000000",
-        red: "#cd3131",
-        green: "#0dbc79",
-        yellow: "#e5e510",
-        blue: "#2472c8",
-        magenta: "#bc3fbc",
-        cyan: "#11a8cd",
-        white: "#e5e5e5",
-        brightBlack: "#666666",
-        brightRed: "#f14c4c",
-        brightGreen: "#23d18b",
-        brightYellow: "#f5f543",
-        brightBlue: "#3b8eea",
-        brightMagenta: "#d670d6",
-        brightCyan: "#29b8db",
-        brightWhite: "#e5e5e5",
-      },
-      cols,
-      rows,
-    });
-
-    const fitAddon = new FitAddon();
-    const webLinksAddon = new WebLinksAddon();
-
-    term.loadAddon(fitAddon);
-    term.loadAddon(webLinksAddon);
-    term.open(terminalRef.current);
-
-    // Fit terminal to container
-    setTimeout(() => fitAddon.fit(), 0);
-
-    xtermRef.current = term;
-    fitAddonRef.current = fitAddon;
-
-    // Handle window resize
-    const handleResize = () => {
-      if (fitAddonRef.current && xtermRef.current) {
-        fitAddonRef.current.fit();
-        // Send resize to server
-        const { cols, rows } = xtermRef.current;
-        sendResize(cols, rows);
-      }
-    };
-
-    window.addEventListener("resize", handleResize);
-
-    return () => {
-      window.removeEventListener("resize", handleResize);
-      term.dispose();
-      xtermRef.current = null;
-      fitAddonRef.current = null;
-    };
-  }, [cols, rows]);
+  const [initialized, setInitialized] = useState(false);
 
   // Send resize message
   const sendResize = useCallback((cols: number, rows: number) => {
@@ -119,9 +64,95 @@ const Terminal = ({
     }
   }, []);
 
-  // Connect WebSocket
+  // Initialize ghostty-web and terminal
   useEffect(() => {
-    if (!wsUrl || !xtermRef.current) return;
+    if (!terminalRef.current) return;
+
+    let disposed = false;
+    let term: GhosttyTerminal | null = null;
+    let fitAddon: FitAddon | null = null;
+
+    const initTerminal = async () => {
+      // Initialize WASM module
+      await ensureGhosttyInitialized();
+      
+      if (disposed || !terminalRef.current) return;
+
+      term = new GhosttyTerminal({
+        cursorBlink: true,
+        fontSize: 13,
+        fontFamily: '"JetBrains Mono", "Fira Code", "Cascadia Code", Menlo, Monaco, "Courier New", monospace',
+        theme: {
+          background: "#1a1a1a",
+          foreground: "#d4d4d4",
+          cursor: "#d4d4d4",
+          cursorAccent: "#1a1a1a",
+          selectionBackground: "#264f78",
+          black: "#000000",
+          red: "#cd3131",
+          green: "#0dbc79",
+          yellow: "#e5e510",
+          blue: "#2472c8",
+          magenta: "#bc3fbc",
+          cyan: "#11a8cd",
+          white: "#e5e5e5",
+          brightBlack: "#666666",
+          brightRed: "#f14c4c",
+          brightGreen: "#23d18b",
+          brightYellow: "#f5f543",
+          brightBlue: "#3b8eea",
+          brightMagenta: "#d670d6",
+          brightCyan: "#29b8db",
+          brightWhite: "#e5e5e5",
+        },
+        cols,
+        rows,
+        scrollback: 5000,
+      });
+
+      fitAddon = new FitAddon();
+      term.loadAddon(fitAddon);
+      term.open(terminalRef.current);
+
+      // Fit terminal to container
+      setTimeout(() => fitAddon?.fit(), 0);
+
+      // Enable auto-resize when container changes
+      fitAddon.observeResize();
+
+      // Handle terminal resize events from ghostty-web
+      term.onResize((size: { cols: number; rows: number }) => {
+        sendResize(size.cols, size.rows);
+      });
+
+      termRef.current = term;
+      fitAddonRef.current = fitAddon;
+      setInitialized(true);
+    };
+
+    initTerminal().catch((err) => {
+      console.error("Failed to initialize ghostty-web:", err);
+      setError("Failed to initialize terminal");
+    });
+
+    // Handle window resize (backup for browsers that don't trigger ResizeObserver)
+    const handleResize = () => {
+      fitAddonRef.current?.fit();
+    };
+    window.addEventListener("resize", handleResize);
+
+    return () => {
+      disposed = true;
+      window.removeEventListener("resize", handleResize);
+      term?.dispose();
+      termRef.current = null;
+      fitAddonRef.current = null;
+    };
+  }, [cols, rows, sendResize]);
+
+  // Connect WebSocket after terminal is initialized
+  useEffect(() => {
+    if (!wsUrl || !initialized || !termRef.current) return;
 
     setError(null);
     const ws = new WebSocket(wsUrl);
@@ -130,12 +161,12 @@ const Terminal = ({
     ws.onopen = () => {
       setConnected(true);
       onConnectionChange?.(true);
-      xtermRef.current?.writeln("\x1b[32m● Connected to terminal\x1b[0m\r\n");
+      termRef.current?.writeln("\x1b[32m● Connected to terminal\x1b[0m\r\n");
       
       // Send initial resize
-      if (fitAddonRef.current && xtermRef.current) {
+      if (fitAddonRef.current && termRef.current) {
         fitAddonRef.current.fit();
-        const { cols, rows } = xtermRef.current;
+        const { cols, rows } = termRef.current;
         sendResize(cols, rows);
       }
     };
@@ -147,23 +178,23 @@ const Terminal = ({
         switch (msg.type) {
           case "data":
             if (msg.data) {
-              xtermRef.current?.write(msg.data);
+              termRef.current?.write(msg.data);
             }
             break;
           case "exit":
-            xtermRef.current?.writeln(`\r\n\x1b[33m● Process exited with code ${msg.code ?? "unknown"}\x1b[0m`);
+            termRef.current?.writeln(`\r\n\x1b[33m● Process exited with code ${msg.code ?? "unknown"}\x1b[0m`);
             onClose?.();
             break;
           case "error":
             setError(msg.message || "Unknown error");
-            xtermRef.current?.writeln(`\r\n\x1b[31m● Error: ${msg.message}\x1b[0m`);
+            termRef.current?.writeln(`\r\n\x1b[31m● Error: ${msg.message}\x1b[0m`);
             break;
         }
       } catch (e) {
         // Handle binary data
         if (event.data instanceof Blob) {
           event.data.text().then((text: string) => {
-            xtermRef.current?.write(text);
+            termRef.current?.write(text);
           });
         }
       }
@@ -178,11 +209,11 @@ const Terminal = ({
     ws.onclose = () => {
       setConnected(false);
       onConnectionChange?.(false);
-      xtermRef.current?.writeln("\r\n\x1b[31m● Disconnected from terminal\x1b[0m");
+      termRef.current?.writeln("\r\n\x1b[31m● Disconnected from terminal\x1b[0m");
     };
 
     // Handle terminal input
-    const onData = xtermRef.current.onData((data) => {
+    const onData = termRef.current.onData((data: string) => {
       if (ws.readyState === WebSocket.OPEN) {
         const msg: TerminalMessage = { type: "input", data };
         ws.send(JSON.stringify(msg));
@@ -194,33 +225,14 @@ const Terminal = ({
       ws.close();
       wsRef.current = null;
     };
-  }, [wsUrl, onClose, onConnectionChange, sendResize]);
-
-  // Handle container resize with ResizeObserver
-  useEffect(() => {
-    if (!terminalRef.current) return;
-
-    const resizeObserver = new ResizeObserver(() => {
-      if (fitAddonRef.current && xtermRef.current) {
-        fitAddonRef.current.fit();
-        const { cols, rows } = xtermRef.current;
-        sendResize(cols, rows);
-      }
-    });
-
-    resizeObserver.observe(terminalRef.current);
-
-    return () => {
-      resizeObserver.disconnect();
-    };
-  }, [sendResize]);
+  }, [wsUrl, initialized, onClose, onConnectionChange, sendResize]);
 
   // Focus terminal when active
   useEffect(() => {
-    if (active && xtermRef.current) {
-      xtermRef.current.focus();
+    if (active && termRef.current) {
+      termRef.current.focus();
     }
-  }, [active]);
+  }, [active, initialized]);
 
   return (
     <div className="terminal-container" style={{ height: "100%", position: "relative" }}>
