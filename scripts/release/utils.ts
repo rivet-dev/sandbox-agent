@@ -200,3 +200,15 @@ export async function assertDirExists(dirPath: string): Promise<void> {
 		throw err;
 	}
 }
+
+export async function downloadFromReleases(
+	remotePath: string,
+	localPath: string,
+): Promise<void> {
+	const { awsEnv, endpointUrl } = await getReleasesS3Config();
+	await $({
+		env: awsEnv,
+		shell: true,
+		stdio: "inherit",
+	})`aws s3 cp s3://rivet-releases/${remotePath} ${localPath} --endpoint-url ${endpointUrl}`;
+}

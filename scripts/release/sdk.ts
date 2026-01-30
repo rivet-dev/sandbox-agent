@@ -1,7 +1,8 @@
 import { $ } from "execa";
-import { readFile } from "node:fs/promises";
+import * as fs from "node:fs/promises";
 import { join } from "node:path";
 import type { ReleaseOpts } from "./main";
+import { downloadFromReleases, PREFIX } from "./utils";
 
 // Crates to publish in dependency order
 const CRATES = [
@@ -21,6 +22,14 @@ const CLI_PACKAGES = [
 	"@sandbox-agent/cli-darwin-x64",
 	"@sandbox-agent/cli-darwin-arm64",
 ] as const;
+
+// Mapping from npm package name to Rust target and binary extension
+const CLI_PLATFORM_MAP: Record<string, { target: string; binaryExt: string }> = {
+	"@sandbox-agent/cli-linux-x64": { target: "x86_64-unknown-linux-musl", binaryExt: "" },
+	"@sandbox-agent/cli-win32-x64": { target: "x86_64-pc-windows-gnu", binaryExt: ".exe" },
+	"@sandbox-agent/cli-darwin-x64": { target: "x86_64-apple-darwin", binaryExt: "" },
+	"@sandbox-agent/cli-darwin-arm64": { target: "aarch64-apple-darwin", binaryExt: "" },
+};
 
 async function npmVersionExists(
 	packageName: string,
@@ -85,7 +94,7 @@ export async function publishCrates(opts: ReleaseOpts) {
 
 		// Read Cargo.toml to get the actual crate name
 		const cargoTomlPath = join(cratePath, "Cargo.toml");
-		const cargoToml = await readFile(cargoTomlPath, "utf-8");
+		const cargoToml = await fs.readFile(cargoTomlPath, "utf-8");
 		const nameMatch = cargoToml.match(/^name\s*=\s*"([^"]+)"/m);
 		const crateName = nameMatch ? nameMatch[1] : `sandbox-agent-${crate}`;
 
@@ -127,7 +136,7 @@ export async function publishCrates(opts: ReleaseOpts) {
 export async function publishNpmSdk(opts: ReleaseOpts) {
 	const sdkPath = join(opts.root, "sdks/typescript");
 	const packageJsonPath = join(sdkPath, "package.json");
-	const packageJson = JSON.parse(await readFile(packageJsonPath, "utf-8"));
+	const packageJson = JSON.parse(await fs.readFile(packageJsonPath, "utf-8"));
 	const name = packageJson.name;
 
 	// Check if version already exists
@@ -164,6 +173,17 @@ export async function publishNpmSdk(opts: ReleaseOpts) {
 export async function publishNpmCli(opts: ReleaseOpts) {
 	console.log("==> Publishing CLI packages to NPM");
 
+	// Determine which commit to use for downloading binaries
+	let sourceCommit = opts.commit;
+	if (opts.reuseEngineVersion) {
+		const ref = opts.reuseEngineVersion.includes(".")
+			? `v${opts.reuseEngineVersion}`
+			: opts.reuseEngineVersion;
+		const result = await $`git rev-parse ${ref}`;
+		sourceCommit = result.stdout.trim().slice(0, 7);
+		console.log(`Using binaries from commit: ${sourceCommit}`);
+	}
+
 	for (const packageName of CLI_PACKAGES) {
 		// Check if version already exists
 		const versionExists = await npmVersionExists(packageName, opts.version);
@@ -182,6 +202,30 @@ export async function publishNpmCli(opts: ReleaseOpts) {
 			// Platform-specific packages: @sandbox-agent/cli-linux-x64 -> sdks/cli/platforms/linux-x64
 			const platform = packageName.replace("@sandbox-agent/cli-", "");
 			packagePath = join(opts.root, "sdks/cli/platforms", platform);
+
+			// Download binary from R2 for platform-specific packages
+			const platformInfo = CLI_PLATFORM_MAP[packageName];
+			if (platformInfo) {
+				const binDir = join(packagePath, "bin");
+				const binaryName = `sandbox-agent${platformInfo.binaryExt}`;
+				const localBinaryPath = join(binDir, binaryName);
+				const remoteBinaryPath = `${PREFIX}/${sourceCommit}/binaries/sandbox-agent-${platformInfo.target}${platformInfo.binaryExt}`;
+
+				console.log(`==> Downloading binary for ${packageName}`);
+				console.log(`    From: ${remoteBinaryPath}`);
+				console.log(`    To: ${localBinaryPath}`);
+
+				// Create bin directory
+				await fs.mkdir(binDir, { recursive: true });
+
+				// Download binary
+				await downloadFromReleases(remoteBinaryPath, localBinaryPath);
+
+				// Make binary executable (not needed on Windows)
+				if (!platformInfo.binaryExt) {
+					await fs.chmod(localBinaryPath, 0o755);
+				}
+			}
 		}
 
 		// Publish

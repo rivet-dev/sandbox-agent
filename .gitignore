@@ -39,3 +39,6 @@ npm-debug.log*
 # Rust
 Cargo.lock
 **/*.rs.bk
+
+# CLI binaries (downloaded during npm publish)
+sdks/cli/platforms/*/bin/
