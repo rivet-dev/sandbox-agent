@@ -6,21 +6,22 @@ use std::sync::Arc;
 use clap::{Args, Parser, Subcommand};
 use reqwest::blocking::Client as HttpClient;
 use reqwest::Method;
+use sandbox_agent::router::{build_router_with_state, shutdown_servers};
+use sandbox_agent::router::{
+    AgentInstallRequest, AppState, AuthConfig, CreateSessionRequest, MessageRequest,
+    PermissionReply, PermissionReplyRequest, QuestionReplyRequest,
+};
+use sandbox_agent::router::{
+    AgentListResponse, AgentModesResponse, CreateSessionResponse, EventsResponse,
+    SessionListResponse,
+};
+use sandbox_agent::telemetry;
+use sandbox_agent::ui;
 use sandbox_agent_agent_management::agents::{AgentId, AgentManager, InstallOptions};
 use sandbox_agent_agent_management::credentials::{
     extract_all_credentials, AuthType, CredentialExtractionOptions, ExtractedCredentials,
     ProviderCredentials,
 };
-use sandbox_agent::router::{
-    AgentInstallRequest, AppState, AuthConfig, CreateSessionRequest, MessageRequest,
-    PermissionReply, PermissionReplyRequest, QuestionReplyRequest,
-};
-use sandbox_agent::telemetry;
-use sandbox_agent::router::{
-    AgentListResponse, AgentModesResponse, CreateSessionResponse, EventsResponse, SessionListResponse,
-};
-use sandbox_agent::router::{build_router_with_state, shutdown_servers};
-use sandbox_agent::ui;
 use serde::Serialize;
 use serde_json::Value;
 use thiserror::Error;
@@ -33,10 +34,11 @@ const DEFAULT_PORT: u16 = 2468;
 
 #[derive(Parser, Debug)]
 #[command(name = "sandbox-agent", bin_name = "sandbox-agent")]
-#[command(about = "Sandbox agent server for managing coding agents", version)]
+#[command(about = "https://sandboxagent.dev", version)]
+#[command(arg_required_else_help = true)]
 struct Cli {
     #[command(subcommand)]
-    command: Option<Command>,
+    command: Command,
 
     #[arg(long, short = 't', global = true)]
     token: Option<String>,
@@ -325,8 +327,6 @@ struct CredentialsExtractEnvArgs {
 
 #[derive(Debug, Error)]
 enum CliError {
-    #[error("missing command: run `sandbox-agent server` to start the server")]
-    MissingCommand,
     #[error("missing --token or --no-token for server mode")]
     MissingToken,
     #[error("invalid cors origin: {0}")]
@@ -352,9 +352,8 @@ fn main() {
     let cli = Cli::parse();
 
     let result = match &cli.command {
-        Some(Command::Server(args)) => run_server(&cli, args),
-        Some(command) => run_client(command, &cli),
-        None => Err(CliError::MissingCommand),
+        Command::Server(args) => run_server(&cli, args),
+        command => run_client(command, &cli),
     };
 
     if let Err(err) = result {
@@ -367,7 +366,11 @@ fn init_logging() {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     tracing_subscriber::registry()
         .with(filter)
-        .with(tracing_logfmt::builder().layer().with_writer(std::io::stderr))
+        .with(
+            tracing_logfmt::builder()
+                .layer()
+                .with_writer(std::io::stderr),
+        )
         .init();
 }
 
@@ -380,8 +383,8 @@ fn run_server(cli: &Cli, server: &ServerArgs) -> Result<(), CliError> {
         return Err(CliError::MissingToken);
     };
 
-    let agent_manager =
-        AgentManager::new(default_install_dir()).map_err(|err| CliError::Server(err.to_string()))?;
+    let agent_manager = AgentManager::new(default_install_dir())
+        .map_err(|err| CliError::Server(err.to_string()))?;
     let state = Arc::new(AppState::new(auth, agent_manager));
     let (mut router, state) = build_router_with_state(state);
 
@@ -514,7 +517,11 @@ fn run_sessions(command: &SessionsCommand, cli: &Cli) -> Result<(), CliError> {
                 &body,
                 &[(
                     "include_raw",
-                    if args.include_raw { Some("true".to_string()) } else { None },
+                    if args.include_raw {
+                        Some("true".to_string())
+                    } else {
+                        None
+                    },
                 )],
             )?;
             print_text_response(response)
@@ -535,7 +542,11 @@ fn run_sessions(command: &SessionsCommand, cli: &Cli) -> Result<(), CliError> {
                     ("limit", args.limit.map(|v| v.to_string())),
                     (
                         "include_raw",
-                        if args.include_raw { Some("true".to_string()) } else { None },
+                        if args.include_raw {
+                            Some("true".to_string())
+                        } else {
+                            None
+                        },
                     ),
                 ],
             )?;
@@ -550,7 +561,11 @@ fn run_sessions(command: &SessionsCommand, cli: &Cli) -> Result<(), CliError> {
                     ("offset", args.offset.map(|v| v.to_string())),
                     (
                         "include_raw",
-                        if args.include_raw { Some("true".to_string()) } else { None },
+                        if args.include_raw {
+                            Some("true".to_string())
+                        } else {
+                            None
+                        },
                     ),
                 ],
             )?;
@@ -675,8 +690,12 @@ enum CredentialAgent {
 
 fn credentials_to_output(credentials: ExtractedCredentials, reveal: bool) -> CredentialsOutput {
     CredentialsOutput {
-        anthropic: credentials.anthropic.map(|cred| summarize_credential(&cred, reveal)),
-        openai: credentials.openai.map(|cred| summarize_credential(&cred, reveal)),
+        anthropic: credentials
+            .anthropic
+            .map(|cred| summarize_credential(&cred, reveal)),
+        openai: credentials
+            .openai
+            .map(|cred| summarize_credential(&cred, reveal)),
         other: credentials
             .other
             .into_iter()
@@ -715,11 +734,10 @@ fn redact_key(key: &str) -> String {
 }
 
 fn install_agent_local(args: &InstallAgentArgs) -> Result<(), CliError> {
-    let agent_id = AgentId::parse(&args.agent).ok_or_else(|| {
-        CliError::Server(format!("unsupported agent: {}", args.agent))
-    })?;
-    let manager =
-        AgentManager::new(default_install_dir()).map_err(|err| CliError::Server(err.to_string()))?;
+    let agent_id = AgentId::parse(&args.agent)
+        .ok_or_else(|| CliError::Server(format!("unsupported agent: {}", args.agent)))?;
+    let manager = AgentManager::new(default_install_dir())
+        .map_err(|err| CliError::Server(err.to_string()))?;
     manager
         .install(
             agent_id,
@@ -903,7 +921,11 @@ impl ClientContext {
             .endpoint
             .clone()
             .unwrap_or_else(|| format!("http://{}:{}", DEFAULT_HOST, DEFAULT_PORT));
-        let token = if cli.no_token { None } else { cli.token.clone() };
+        let token = if cli.no_token {
+            None
+        } else {
+            cli.token.clone()
+        };
         let client = HttpClient::builder().build()?;
         Ok(Self {
             endpoint,
@@ -943,7 +965,11 @@ impl ClientContext {
         Ok(request.send()?)
     }
 
-    fn post<T: Serialize>(&self, path: &str, body: &T) -> Result<reqwest::blocking::Response, CliError> {
+    fn post<T: Serialize>(
+        &self,
+        path: &str,
+        body: &T,
+    ) -> Result<reqwest::blocking::Response, CliError> {
         Ok(self.request(Method::POST, path).json(body).send()?)
     }
 
