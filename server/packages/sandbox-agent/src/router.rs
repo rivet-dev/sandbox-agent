@@ -4040,7 +4040,8 @@ async fn delete_process(
         ("id" = String, Path, description = "Process ID"),
         ("tail" = Option<usize>, Query, description = "Number of lines from end"),
         ("follow" = Option<bool>, Query, description = "Stream logs via SSE"),
-        ("stream" = Option<String>, Query, description = "Log stream: stdout, stderr, or combined")
+        ("stream" = Option<String>, Query, description = "Log stream: stdout, stderr, or combined"),
+        ("strip_timestamps" = Option<bool>, Query, description = "Strip timestamp prefixes from log lines")
     ),
     responses(
         (status = 200, body = LogsResponse, description = "Log content"),
@@ -4059,6 +4060,7 @@ async fn get_process_logs(
             tail: query.tail,
             follow: false,
             stream: query.stream.clone(),
+            strip_timestamps: query.strip_timestamps,
         }).await?;
         
         let receiver = state.process_manager.subscribe_logs(&id).await?;

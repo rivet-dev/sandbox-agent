@@ -11,6 +11,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use time::format_description::well_known::Rfc3339;
+use time::OffsetDateTime;
 use tokio::io::{AsyncBufReadExt, BufReader as TokioBufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::{broadcast, Mutex, RwLock};
@@ -103,6 +105,9 @@ pub struct LogsQuery {
     /// Which log stream to read: "stdout", "stderr", or "combined" (default)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stream: Option<String>,
+    /// Strip timestamp prefixes from log lines
+    #[serde(default)]
+    pub strip_timestamps: bool,
 }
 
 /// Response with log content
@@ -356,13 +361,14 @@ impl ProcessManager {
                 };
                 
                 while let Ok(Some(line)) = lines.next_line().await {
-                    let log_line = format!("[stdout] {}\n", line);
-                    let _ = file.write_all(line.as_bytes());
-                    let _ = file.write_all(b"\n");
+                    let timestamp = format_timestamp();
+                    let timestamped_line = format!("[{}] {}\n", timestamp, line);
+                    let combined_line = format!("[{}] [stdout] {}\n", timestamp, line);
+                    let _ = file.write_all(timestamped_line.as_bytes());
                     if let Ok(mut combined) = combined.lock() {
-                        let _ = combined.write_all(log_line.as_bytes());
+                        let _ = combined.write_all(combined_line.as_bytes());
                     }
-                    let _ = log_tx.send(log_line);
+                    let _ = log_tx.send(combined_line);
                 }
             });
         }
@@ -380,13 +386,14 @@ impl ProcessManager {
                 };
                 
                 while let Ok(Some(line)) = lines.next_line().await {
-                    let log_line = format!("[stderr] {}\n", line);
-                    let _ = file.write_all(line.as_bytes());
-                    let _ = file.write_all(b"\n");
+                    let timestamp = format_timestamp();
+                    let timestamped_line = format!("[{}] {}\n", timestamp, line);
+                    let combined_line = format!("[{}] [stderr] {}\n", timestamp, line);
+                    let _ = file.write_all(timestamped_line.as_bytes());
                     if let Ok(mut combined) = combined.lock() {
-                        let _ = combined.write_all(log_line.as_bytes());
+                        let _ = combined.write_all(combined_line.as_bytes());
                     }
-                    let _ = log_tx.send(log_line);
+                    let _ = log_tx.send(combined_line);
                 }
             });
         }
@@ -588,13 +595,18 @@ impl ProcessManager {
         let content = fs::read_to_string(log_path).unwrap_or_default();
         
         let lines: Vec<&str> = content.lines().collect();
-        let (content, line_count) = if let Some(tail) = query.tail {
+        let (mut content, line_count) = if let Some(tail) = query.tail {
             let start = lines.len().saturating_sub(tail);
             let tail_lines: Vec<&str> = lines[start..].to_vec();
             (tail_lines.join("\n"), tail_lines.len())
         } else {
             (content.clone(), lines.len())
         };
+        
+        // Strip timestamps if requested
+        if query.strip_timestamps {
+            content = strip_timestamps(&content);
+        }
         
         Ok(LogsResponse {
             content,
@@ -626,6 +638,35 @@ fn process_data_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
         .join("sandbox-agent")
         .join("processes")
+}
+
+/// Format the current time as an ISO 8601 timestamp
+fn format_timestamp() -> String {
+    OffsetDateTime::now_utc()
+        .format(&Rfc3339)
+        .unwrap_or_else(|_| "unknown".to_string())
+}
+
+/// Strip timestamp prefixes from log lines
+/// Timestamps are in format: [2026-01-30T12:32:45.123Z] or [2026-01-30T12:32:45Z]
+fn strip_timestamps(content: &str) -> String {
+    content
+        .lines()
+        .map(|line| {
+            // Match pattern: [YYYY-MM-DDTHH:MM:SS...Z] at start of line
+            if line.starts_with('[') {
+                if let Some(end) = line.find("] ") {
+                    // Check if it looks like a timestamp (starts with digit after [)
+                    let potential_ts = &line[1..end];
+                    if potential_ts.len() >= 19 && potential_ts.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+                        return &line[end + 2..];
+                    }
+                }
+            }
+            line
+        })
+        .collect::<Vec<&str>>()
+        .join("\n")
 }
 
 /// Helper to save state from within a spawned task (simplified version)

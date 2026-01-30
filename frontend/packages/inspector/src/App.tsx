@@ -977,6 +977,8 @@ export default function App() {
           onInstallAgent={installAgent}
           agentsLoading={agentsLoading}
           agentsError={agentsError}
+          baseUrl={endpoint}
+          token={token}
         />
       </main>
     </div>
