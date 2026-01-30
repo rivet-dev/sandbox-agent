@@ -1,11 +1,12 @@
-import { Cloud, PlayCircle, Terminal } from "lucide-react";
+import { Cloud, PlayCircle, Terminal, Cpu } from "lucide-react";
 import type { AgentInfo, AgentModeInfo, UniversalEvent } from "sandbox-agent";
 import AgentsTab from "./AgentsTab";
 import EventsTab from "./EventsTab";
+import ProcessesTab from "./ProcessesTab";
 import RequestLogTab from "./RequestLogTab";
 import type { RequestLog } from "../../types/requestLog";
 
-export type DebugTab = "log" | "events" | "agents";
+export type DebugTab = "log" | "events" | "agents" | "processes";
 
 const DebugPanel = ({
   debugTab,
@@ -24,7 +25,9 @@ const DebugPanel = ({
   onRefreshAgents,
   onInstallAgent,
   agentsLoading,
-  agentsError
+  agentsError,
+  baseUrl,
+  token
 }: {
   debugTab: DebugTab;
   onDebugTabChange: (tab: DebugTab) => void;
@@ -43,6 +46,8 @@ const DebugPanel = ({
   onInstallAgent: (agentId: string, reinstall: boolean) => void;
   agentsLoading: boolean;
   agentsError: string | null;
+  baseUrl: string;
+  token?: string;
 }) => {
   return (
     <div className="debug-panel">
@@ -59,6 +64,10 @@ const DebugPanel = ({
         <button className={`debug-tab ${debugTab === "agents" ? "active" : ""}`} onClick={() => onDebugTabChange("agents")}>
           <Cloud className="button-icon" style={{ marginRight: 4, width: 12, height: 12 }} />
           Agents
+        </button>
+        <button className={`debug-tab ${debugTab === "processes" ? "active" : ""}`} onClick={() => onDebugTabChange("processes")}>
+          <Cpu className="button-icon" style={{ marginRight: 4, width: 12, height: 12 }} />
+          Processes
         </button>
       </div>
 
@@ -90,6 +99,13 @@ const DebugPanel = ({
             onInstall={onInstallAgent}
             loading={agentsLoading}
             error={agentsError}
+          />
+        )}
+
+        {debugTab === "processes" && (
+          <ProcessesTab
+            baseUrl={baseUrl}
+            token={token}
           />
         )}
       </div>

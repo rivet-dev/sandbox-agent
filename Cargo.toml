@@ -36,8 +36,9 @@ tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.5", features = ["cors", "trace"] }
 
 # Async runtime
-tokio = { version = "1.36", features = ["macros", "rt-multi-thread", "signal", "time"] }
+tokio = { version = "1.36", features = ["macros", "rt-multi-thread", "signal", "time", "io-util", "sync"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
+tokio-tungstenite = "0.21"
 futures = "0.3"
 
 # HTTP client
@@ -68,6 +69,10 @@ zip = { version = "0.6", default-features = false, features = ["deflate"] }
 url = "2.5"
 regress = "0.10"
 include_dir = "0.7"
+base64 = "0.21"
+
+# PTY support
+portable-pty = "0.8"
 
 # Code generation (build deps)
 typify = "0.4"

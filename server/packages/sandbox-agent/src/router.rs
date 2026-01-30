@@ -38,6 +38,12 @@ use tower_http::trace::TraceLayer;
 use utoipa::{Modify, OpenApi, ToSchema};
 
 use crate::ui;
+use crate::process_manager::{
+    ProcessManager, ProcessInfo, ProcessListResponse, ProcessLogPaths, ProcessStatus,
+    StartProcessRequest, StartProcessResponse, LogsQuery, LogsResponse,
+    ResizeTerminalRequest, TerminalSize, WriteInputRequest,
+};
+use crate::terminal::terminal_ws_handler;
 use sandbox_agent_agent_management::agents::{
     AgentError as ManagerError, AgentId, AgentManager, InstallOptions, SpawnOptions, StreamingSpawn,
 };
@@ -54,6 +60,7 @@ pub struct AppState {
     auth: AuthConfig,
     agent_manager: Arc<AgentManager>,
     session_manager: Arc<SessionManager>,
+    process_manager: Arc<ProcessManager>,
 }
 
 impl AppState {
@@ -63,10 +70,12 @@ impl AppState {
         session_manager
             .server_manager
             .set_owner(Arc::downgrade(&session_manager));
+        let process_manager = Arc::new(ProcessManager::new());
         Self {
             auth,
             agent_manager,
             session_manager,
+            process_manager,
         }
     }
 }
@@ -91,6 +100,8 @@ pub fn build_router(state: AppState) -> Router {
 }
 
 pub fn build_router_with_state(shared: Arc<AppState>) -> (Router, Arc<AppState>) {
+    use axum::routing::delete;
+
     let mut v1_router = Router::new()
         .route("/health", get(get_health))
         .route("/agents", get(list_agents))
@@ -115,6 +126,20 @@ pub fn build_router_with_state(shared: Arc<AppState>) -> (Router, Arc<AppState>)
             "/sessions/:session_id/permissions/:permission_id/reply",
             post(reply_permission),
         )
+        // Process management routes
+        .route("/process", post(start_process).get(list_processes))
+        .route("/process/:id", get(get_process).delete(delete_process))
+        .route("/process/:id/stop", post(stop_process))
+        .route("/process/:id/kill", post(kill_process))
+        .route("/process/:id/logs", get(get_process_logs))
+        // Terminal/PTY routes
+        .route("/process/:id/resize", post(resize_terminal))
+        .route("/process/:id/input", post(write_terminal_input))
+        .with_state(shared.clone());
+
+    // WebSocket routes (outside of auth middleware for easier client access)
+    let ws_router = Router::new()
+        .route("/v1/process/:id/terminal", get(terminal_ws))
         .with_state(shared.clone());
 
     if shared.auth.token.is_some() {
@@ -126,7 +151,8 @@ pub fn build_router_with_state(shared: Arc<AppState>) -> (Router, Arc<AppState>)
 
     let mut router = Router::new()
         .route("/", get(get_root))
-        .nest("/v1", v1_router);
+        .nest("/v1", v1_router)
+        .merge(ws_router);  // Add WebSocket routes
 
     if ui::is_enabled() {
         router = router.merge(ui::router());
@@ -155,7 +181,16 @@ pub async fn shutdown_servers(state: &Arc<AppState>) {
         get_events_sse,
         reply_question,
         reject_question,
-        reply_permission
+        reply_permission,
+        start_process,
+        list_processes,
+        get_process,
+        stop_process,
+        kill_process,
+        delete_process,
+        get_process_logs,
+        resize_terminal,
+        write_terminal_input
     ),
     components(
         schemas(
@@ -205,13 +240,25 @@ pub async fn shutdown_servers(state: &Arc<AppState>) {
             PermissionReply,
             ProblemDetails,
             ErrorType,
-            AgentError
+            AgentError,
+            ProcessInfo,
+            ProcessStatus,
+            ProcessLogPaths,
+            ProcessListResponse,
+            StartProcessRequest,
+            StartProcessResponse,
+            LogsQuery,
+            LogsResponse,
+            TerminalSize,
+            ResizeTerminalRequest,
+            WriteInputRequest
         )
     ),
     tags(
         (name = "meta", description = "Service metadata"),
         (name = "agents", description = "Agent management"),
-        (name = "sessions", description = "Session management")
+        (name = "sessions", description = "Session management"),
+        (name = "process", description = "Process management")
     ),
     modifiers(&ServerAddon)
 )]
@@ -3883,6 +3930,256 @@ async fn reply_permission(
         .reply_permission(&session_id, &permission_id, request.reply)
         .await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+// ============================================================================
+// Process Management Handlers
+// ============================================================================
+
+/// Start a new process
+#[utoipa::path(
+    post,
+    path = "/v1/process",
+    request_body = StartProcessRequest,
+    responses(
+        (status = 201, body = StartProcessResponse, description = "Process started"),
+        (status = 400, body = ProblemDetails),
+        (status = 500, body = ProblemDetails)
+    ),
+    tag = "process"
+)]
+async fn start_process(
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<StartProcessRequest>,
+) -> Result<(StatusCode, Json<StartProcessResponse>), ApiError> {
+    let response = state.process_manager.start_process(request).await?;
+    Ok((StatusCode::CREATED, Json(response)))
+}
+
+/// List all processes
+#[utoipa::path(
+    get,
+    path = "/v1/process",
+    responses(
+        (status = 200, body = ProcessListResponse, description = "List of processes")
+    ),
+    tag = "process"
+)]
+async fn list_processes(
+    State(state): State<Arc<AppState>>,
+) -> Json<ProcessListResponse> {
+    Json(state.process_manager.list_processes().await)
+}
+
+/// Get process details
+#[utoipa::path(
+    get,
+    path = "/v1/process/{id}",
+    params(("id" = String, Path, description = "Process ID")),
+    responses(
+        (status = 200, body = ProcessInfo, description = "Process details"),
+        (status = 404, body = ProblemDetails)
+    ),
+    tag = "process"
+)]
+async fn get_process(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<ProcessInfo>, ApiError> {
+    let info = state.process_manager.get_process(&id).await?;
+    Ok(Json(info))
+}
+
+/// Stop a process (SIGTERM)
+#[utoipa::path(
+    post,
+    path = "/v1/process/{id}/stop",
+    params(("id" = String, Path, description = "Process ID")),
+    responses(
+        (status = 204, description = "Process stopped"),
+        (status = 404, body = ProblemDetails)
+    ),
+    tag = "process"
+)]
+async fn stop_process(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    state.process_manager.stop_process(&id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Kill a process (SIGKILL)
+#[utoipa::path(
+    post,
+    path = "/v1/process/{id}/kill",
+    params(("id" = String, Path, description = "Process ID")),
+    responses(
+        (status = 204, description = "Process killed"),
+        (status = 404, body = ProblemDetails)
+    ),
+    tag = "process"
+)]
+async fn kill_process(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    state.process_manager.kill_process(&id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Delete a process and its logs
+#[utoipa::path(
+    delete,
+    path = "/v1/process/{id}",
+    params(("id" = String, Path, description = "Process ID")),
+    responses(
+        (status = 204, description = "Process deleted"),
+        (status = 400, body = ProblemDetails),
+        (status = 404, body = ProblemDetails)
+    ),
+    tag = "process"
+)]
+async fn delete_process(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    state.process_manager.delete_process(&id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Read process logs
+#[utoipa::path(
+    get,
+    path = "/v1/process/{id}/logs",
+    params(
+        ("id" = String, Path, description = "Process ID"),
+        ("tail" = Option<usize>, Query, description = "Number of lines from end"),
+        ("follow" = Option<bool>, Query, description = "Stream logs via SSE"),
+        ("stream" = Option<String>, Query, description = "Log stream: stdout, stderr, or combined"),
+        ("strip_timestamps" = Option<bool>, Query, description = "Strip timestamp prefixes from log lines")
+    ),
+    responses(
+        (status = 200, body = LogsResponse, description = "Log content"),
+        (status = 404, body = ProblemDetails)
+    ),
+    tag = "process"
+)]
+async fn get_process_logs(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Query(query): Query<LogsQuery>,
+) -> Result<Response, ApiError> {
+    if query.follow {
+        // SSE streaming mode
+        let initial_logs = state.process_manager.read_logs(&id, &LogsQuery {
+            tail: query.tail,
+            follow: false,
+            stream: query.stream.clone(),
+            strip_timestamps: query.strip_timestamps,
+        }).await?;
+        
+        let receiver = state.process_manager.subscribe_logs(&id).await?;
+        
+        // Stream initial content as first event, then live updates
+        let initial_event = Event::default()
+            .data(serde_json::to_string(&initial_logs).unwrap_or_default());
+        
+        let initial_stream = stream::once(async move {
+            Ok::<Event, Infallible>(initial_event)
+        });
+        
+        let live_stream = BroadcastStream::new(receiver)
+            .filter_map(|result| async move {
+                match result {
+                    Ok(line) => Some(Ok::<Event, Infallible>(Event::default().data(line))),
+                    Err(_) => None,
+                }
+            });
+        
+        let stream = initial_stream.chain(live_stream);
+        Ok(Sse::new(stream).into_response())
+    } else {
+        // Regular response mode
+        let logs = state.process_manager.read_logs(&id, &query).await?;
+        Ok(Json(logs).into_response())
+    }
+}
+
+/// Resize a PTY terminal
+#[utoipa::path(
+    post,
+    path = "/v1/process/{id}/resize",
+    tag = "process",
+    params(
+        ("id" = String, Path, description = "Process ID")
+    ),
+    request_body = ResizeTerminalRequest,
+    responses(
+        (status = 200, description = "Terminal resized successfully"),
+        (status = 400, description = "Process does not have a PTY"),
+        (status = 404, description = "Process not found")
+    )
+)]
+async fn resize_terminal(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(request): Json<ResizeTerminalRequest>,
+) -> Result<StatusCode, ApiError> {
+    state
+        .process_manager
+        .resize_terminal(&id, request.cols, request.rows)
+        .await?;
+    Ok(StatusCode::OK)
+}
+
+/// Write data to a PTY terminal's input
+#[utoipa::path(
+    post,
+    path = "/v1/process/{id}/input",
+    tag = "process",
+    params(
+        ("id" = String, Path, description = "Process ID")
+    ),
+    request_body = WriteInputRequest,
+    responses(
+        (status = 200, description = "Data written to terminal"),
+        (status = 400, description = "Process does not have a PTY or invalid data"),
+        (status = 404, description = "Process not found")
+    )
+)]
+async fn write_terminal_input(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(request): Json<WriteInputRequest>,
+) -> Result<StatusCode, ApiError> {
+    let data = if request.base64 {
+        use base64::Engine;
+        base64::engine::general_purpose::STANDARD
+            .decode(&request.data)
+            .map_err(|e| SandboxError::InvalidRequest {
+                message: format!("Invalid base64 data: {}", e),
+            })?
+    } else {
+        request.data.into_bytes()
+    };
+    
+    state
+        .process_manager
+        .write_terminal_input(&id, data)
+        .await?;
+    Ok(StatusCode::OK)
+}
+
+/// WebSocket endpoint for terminal I/O
+async fn terminal_ws(
+    ws: axum::extract::ws::WebSocketUpgrade,
+    Path(id): Path<String>,
+    State(state): State<Arc<AppState>>,
+) -> Result<Response, ApiError> {
+    terminal_ws_handler(ws, Path(id), State(state.process_manager.clone()))
+        .await
+        .map_err(|e| ApiError::Sandbox(e))
 }
 
 fn all_agents() -> [AgentId; 5] {
