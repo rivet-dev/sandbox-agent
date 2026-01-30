@@ -1,0 +1,6 @@
+---
+source: server/packages/sandbox-agent/tests/sessions/hooks.rs
+expression: value
+---
+content_valid: true
+hook_executed: true

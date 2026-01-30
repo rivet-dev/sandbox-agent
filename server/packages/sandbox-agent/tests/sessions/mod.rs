@@ -4,3 +4,4 @@ mod permissions;
 mod questions;
 mod reasoning;
 mod status;
+mod hooks;

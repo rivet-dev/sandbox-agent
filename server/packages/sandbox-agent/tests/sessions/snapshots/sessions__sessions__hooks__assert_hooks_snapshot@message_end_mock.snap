@@ -1,0 +1,7 @@
+---
+source: server/packages/sandbox-agent/tests/sessions/hooks.rs
+expression: value
+---
+content_valid: true
+event_count: 7
+hook_executed: true

@@ -37,6 +37,7 @@ use tokio_stream::wrappers::BroadcastStream;
 use tower_http::trace::TraceLayer;
 use utoipa::{Modify, OpenApi, ToSchema};
 
+use crate::hooks::{execute_hooks, HookContext, HookDefinition, HooksConfig, HookType};
 use crate::ui;
 use sandbox_agent_agent_management::agents::{
     AgentError as ManagerError, AgentId, AgentManager, InstallOptions, SpawnOptions, StreamingSpawn,
@@ -205,7 +206,9 @@ pub async fn shutdown_servers(state: &Arc<AppState>) {
             PermissionReply,
             ProblemDetails,
             ErrorType,
-            AgentError
+            AgentError,
+            HooksConfig,
+            HookDefinition
         )
     ),
     tags(
@@ -274,6 +277,10 @@ struct SessionState {
     claude_message_counter: u64,
     pending_assistant_native_ids: VecDeque<String>,
     pending_assistant_counter: u64,
+    /// Hooks configuration for this session.
+    hooks: HooksConfig,
+    /// Working directory for hooks execution.
+    working_dir: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -332,7 +339,21 @@ impl SessionState {
             claude_message_counter: 0,
             pending_assistant_native_ids: VecDeque::new(),
             pending_assistant_counter: 0,
+            hooks: request.hooks.clone().unwrap_or_default(),
+            working_dir: request.working_dir.clone(),
         })
+    }
+
+    /// Creates a hook context for this session.
+    fn hook_context(&self, hook_type: HookType, message: Option<String>) -> HookContext {
+        HookContext {
+            session_id: self.session_id.clone(),
+            agent: self.agent.as_str().to_string(),
+            agent_mode: self.agent_mode.clone(),
+            hook_type,
+            message,
+            working_dir: self.working_dir.clone(),
+        }
     }
 
     fn next_pending_assistant_native_id(&mut self) -> String {
@@ -1468,6 +1489,18 @@ impl SessionManager {
         logs.read_stderr()
     }
 
+    /// Gets a snapshot of the hooks configuration for a session.
+    async fn get_hooks_snapshot(&self, session_id: &str) -> Option<HooksConfig> {
+        let sessions = self.sessions.lock().await;
+        Self::session_ref(&sessions, session_id).map(|s| s.hooks.clone())
+    }
+
+    /// Gets the working directory for a session.
+    async fn get_working_dir(&self, session_id: &str) -> Option<String> {
+        let sessions = self.sessions.lock().await;
+        Self::session_ref(&sessions, session_id).and_then(|s| s.working_dir.clone())
+    }
+
     async fn create_session(
         self: &Arc<Self>,
         session_id: String,
@@ -1553,6 +1586,18 @@ impl SessionManager {
             session.record_conversions(vec![native_started]);
         }
 
+        // Execute on_session_start hooks
+        if !session.hooks.on_session_start.is_empty() {
+            let context = session.hook_context(HookType::SessionStart, None);
+            let hooks_result = execute_hooks(&session.hooks.on_session_start, &context).await;
+            tracing::debug!(
+                session_id = %session_id,
+                all_succeeded = %hooks_result.all_succeeded,
+                results = ?hooks_result.results.len(),
+                "Executed on_session_start hooks"
+            );
+        }
+
         let native_session_id = session.native_session_id.clone();
         let mut sessions = self.sessions.lock().await;
         sessions.push(session);
@@ -1599,8 +1644,31 @@ impl SessionManager {
     ) -> Result<(), SandboxError> {
         // Use allow_ended=true and do explicit check to allow resumable agents
         let session_snapshot = self.session_snapshot_for_message(&session_id).await?;
+
+        // Execute on_message_start hooks
+        let hooks_snapshot = self.get_hooks_snapshot(&session_id).await;
+        if let Some(ref hooks) = hooks_snapshot {
+            if !hooks.on_message_start.is_empty() {
+                let context = HookContext {
+                    session_id: session_id.clone(),
+                    agent: session_snapshot.agent.as_str().to_string(),
+                    agent_mode: session_snapshot.agent_mode.clone(),
+                    hook_type: HookType::MessageStart,
+                    message: Some(message.clone()),
+                    working_dir: self.get_working_dir(&session_id).await,
+                };
+                let hooks_result = execute_hooks(&hooks.on_message_start, &context).await;
+                tracing::debug!(
+                    session_id = %session_id,
+                    all_succeeded = %hooks_result.all_succeeded,
+                    results = ?hooks_result.results.len(),
+                    "Executed on_message_start hooks"
+                );
+            }
+        }
+
         if session_snapshot.agent == AgentId::Mock {
-            self.send_mock_message(session_id, message).await?;
+            self.send_mock_message(session_id, message, hooks_snapshot).await?;
             return Ok(());
         }
         if matches!(session_snapshot.agent, AgentId::Claude | AgentId::Amp) {
@@ -1666,9 +1734,19 @@ impl SessionManager {
         }
 
         let manager = Arc::clone(self);
+        let agent_mode = session_snapshot.agent_mode.clone();
+        let working_dir = self.get_working_dir(&session_id).await;
         tokio::spawn(async move {
             manager
-                .consume_spawn(session_id, agent_id, spawn_result, initial_input)
+                .consume_spawn(
+                    session_id,
+                    agent_id,
+                    spawn_result,
+                    initial_input,
+                    hooks_snapshot,
+                    agent_mode,
+                    working_dir,
+                )
                 .await;
         });
 
@@ -1708,42 +1786,78 @@ impl SessionManager {
     }
 
     async fn terminate_session(&self, session_id: String) -> Result<(), SandboxError> {
-        let mut sessions = self.sessions.lock().await;
-        let session = Self::session_mut(&mut sessions, &session_id).ok_or_else(|| {
-            SandboxError::SessionNotFound {
-                session_id: session_id.clone(),
+        let hooks_to_run: Option<(HooksConfig, AgentId, String, Option<String>)>;
+        let agent: AgentId;
+        let native_session_id: Option<String>;
+        {
+            let mut sessions = self.sessions.lock().await;
+            let session = Self::session_mut(&mut sessions, &session_id).ok_or_else(|| {
+                SandboxError::SessionNotFound {
+                    session_id: session_id.clone(),
+                }
+            })?;
+            if session.ended {
+                return Ok(());
             }
-        })?;
-        if session.ended {
-            return Ok(());
+            // Capture hooks before marking ended
+            hooks_to_run = if !session.hooks.on_session_end.is_empty() {
+                Some((
+                    session.hooks.clone(),
+                    session.agent,
+                    session.agent_mode.clone(),
+                    session.working_dir.clone(),
+                ))
+            } else {
+                None
+            };
+            session.mark_ended(
+                None,
+                "terminated by daemon".to_string(),
+                SessionEndReason::Terminated,
+                TerminatedBy::Daemon,
+            );
+            let ended = EventConversion::new(
+                UniversalEventType::SessionEnded,
+                UniversalEventData::SessionEnded(SessionEndedData {
+                    reason: SessionEndReason::Terminated,
+                    terminated_by: TerminatedBy::Daemon,
+                    message: None,
+                    exit_code: None,
+                    stderr: None,
+                }),
+            )
+            .synthetic()
+            .with_native_session(session.native_session_id.clone());
+            session.record_conversions(vec![ended]);
+            agent = session.agent;
+            native_session_id = session.native_session_id.clone();
         }
-        session.mark_ended(
-            None,
-            "terminated by daemon".to_string(),
-            SessionEndReason::Terminated,
-            TerminatedBy::Daemon,
-        );
-        let ended = EventConversion::new(
-            UniversalEventType::SessionEnded,
-            UniversalEventData::SessionEnded(SessionEndedData {
-                reason: SessionEndReason::Terminated,
-                terminated_by: TerminatedBy::Daemon,
-                message: None,
-                exit_code: None,
-                stderr: None,
-            }),
-        )
-        .synthetic()
-        .with_native_session(session.native_session_id.clone());
-        session.record_conversions(vec![ended]);
-        let agent = session.agent;
-        let native_session_id = session.native_session_id.clone();
-        drop(sessions);
+
         if agent == AgentId::Opencode || agent == AgentId::Codex {
             self.server_manager
                 .unregister_session(agent, &session_id, native_session_id.as_deref())
                 .await;
         }
+
+        // Execute on_session_end hooks (outside the lock)
+        if let Some((hooks, agent, agent_mode, working_dir)) = hooks_to_run {
+            let context = HookContext {
+                session_id: session_id.clone(),
+                agent: agent.as_str().to_string(),
+                agent_mode,
+                hook_type: HookType::SessionEnd,
+                message: None,
+                working_dir,
+            };
+            let hooks_result = execute_hooks(&hooks.on_session_end, &context).await;
+            tracing::debug!(
+                session_id = %session_id,
+                all_succeeded = %hooks_result.all_succeeded,
+                results = ?hooks_result.results.len(),
+                "Executed on_session_end hooks"
+            );
+        }
+
         Ok(())
     }
 
@@ -2191,8 +2305,9 @@ impl SessionManager {
         self: &Arc<Self>,
         session_id: String,
         message: String,
+        hooks: Option<HooksConfig>,
     ) -> Result<(), SandboxError> {
-        let prefix = {
+        let (prefix, agent_mode, working_dir) = {
             let mut sessions = self.sessions.lock().await;
             let session = Self::session_mut(&mut sessions, &session_id).ok_or_else(|| {
                 SandboxError::SessionNotFound {
@@ -2203,7 +2318,11 @@ impl SessionManager {
                 return Err(err);
             }
             session.mock_sequence = session.mock_sequence.saturating_add(1);
-            format!("mock_{}", session.mock_sequence)
+            (
+                format!("mock_{}", session.mock_sequence),
+                session.agent_mode.clone(),
+                session.working_dir.clone(),
+            )
         };
 
         let mut conversions = Vec::new();
@@ -2215,7 +2334,9 @@ impl SessionManager {
 
         let manager = Arc::clone(self);
         tokio::spawn(async move {
-            manager.emit_mock_events(session_id, conversions).await;
+            manager
+                .emit_mock_events(session_id, conversions, hooks, agent_mode, working_dir)
+                .await;
         });
 
         Ok(())
@@ -2225,6 +2346,9 @@ impl SessionManager {
         self: Arc<Self>,
         session_id: String,
         conversions: Vec<EventConversion>,
+        hooks: Option<HooksConfig>,
+        agent_mode: String,
+        working_dir: Option<String>,
     ) {
         for conversion in conversions {
             if self
@@ -2236,6 +2360,27 @@ impl SessionManager {
             }
             sleep(Duration::from_millis(MOCK_EVENT_DELAY_MS)).await;
         }
+
+        // Execute on_message_end hooks
+        if let Some(ref hooks) = hooks {
+            if !hooks.on_message_end.is_empty() {
+                let context = HookContext {
+                    session_id: session_id.clone(),
+                    agent: "mock".to_string(),
+                    agent_mode,
+                    hook_type: HookType::MessageEnd,
+                    message: None,
+                    working_dir,
+                };
+                let hooks_result = execute_hooks(&hooks.on_message_end, &context).await;
+                tracing::debug!(
+                    session_id = %session_id,
+                    all_succeeded = %hooks_result.all_succeeded,
+                    results = ?hooks_result.results.len(),
+                    "Executed on_message_end hooks"
+                );
+            }
+        }
     }
 
     async fn consume_spawn(
@@ -2244,6 +2389,9 @@ impl SessionManager {
         agent: AgentId,
         spawn: StreamingSpawn,
         initial_input: Option<String>,
+        hooks: Option<HooksConfig>,
+        agent_mode: String,
+        working_dir: Option<String>,
     ) {
         let StreamingSpawn {
             mut child,
@@ -2441,6 +2589,27 @@ impl SessionManager {
                 .await;
             }
         }
+
+        // Execute on_message_end hooks
+        if let Some(ref hooks) = hooks {
+            if !hooks.on_message_end.is_empty() {
+                let context = HookContext {
+                    session_id: session_id.clone(),
+                    agent: agent.as_str().to_string(),
+                    agent_mode,
+                    hook_type: HookType::MessageEnd,
+                    message: None,
+                    working_dir,
+                };
+                let hooks_result = execute_hooks(&hooks.on_message_end, &context).await;
+                tracing::debug!(
+                    session_id = %session_id,
+                    all_succeeded = %hooks_result.all_succeeded,
+                    results = ?hooks_result.results.len(),
+                    "Executed on_message_end hooks"
+                );
+            }
+        }
     }
 
     async fn record_conversions(
@@ -2565,37 +2734,81 @@ impl SessionManager {
         terminated_by: TerminatedBy,
         stderr: Option<StderrOutput>,
     ) {
-        let mut sessions = self.sessions.lock().await;
-        if let Some(session) = Self::session_mut(&mut sessions, session_id) {
-            if session.ended {
-                return;
-            }
-            session.mark_ended(
-                exit_code,
-                message.to_string(),
-                reason.clone(),
-                terminated_by.clone(),
-            );
-            let (error_message, error_exit_code, error_stderr) =
-                if reason == SessionEndReason::Error {
-                    (Some(message.to_string()), exit_code, stderr)
+        let hooks_to_run: Option<(HooksConfig, String, Option<String>)>;
+        {
+            let mut sessions = self.sessions.lock().await;
+            if let Some(session) = Self::session_mut(&mut sessions, session_id) {
+                if session.ended {
+                    return;
+                }
+                // Capture hooks info before marking as ended
+                hooks_to_run = if !session.hooks.on_session_end.is_empty() {
+                    Some((
+                        session.hooks.clone(),
+                        session.agent_mode.clone(),
+                        session.working_dir.clone(),
+                    ))
                 } else {
-                    (None, None, None)
+                    None
                 };
-            let ended = EventConversion::new(
-                UniversalEventType::SessionEnded,
-                UniversalEventData::SessionEnded(SessionEndedData {
-                    reason,
-                    terminated_by,
-                    message: error_message,
-                    exit_code: error_exit_code,
-                    stderr: error_stderr,
-                }),
-            )
-            .synthetic()
-            .with_native_session(session.native_session_id.clone());
-            session.record_conversions(vec![ended]);
+                session.mark_ended(
+                    exit_code,
+                    message.to_string(),
+                    reason.clone(),
+                    terminated_by.clone(),
+                );
+                let (error_message, error_exit_code, error_stderr) =
+                    if reason == SessionEndReason::Error {
+                        (Some(message.to_string()), exit_code, stderr)
+                    } else {
+                        (None, None, None)
+                    };
+                let ended = EventConversion::new(
+                    UniversalEventType::SessionEnded,
+                    UniversalEventData::SessionEnded(SessionEndedData {
+                        reason,
+                        terminated_by,
+                        message: error_message,
+                        exit_code: error_exit_code,
+                        stderr: error_stderr,
+                    }),
+                )
+                .synthetic()
+                .with_native_session(session.native_session_id.clone());
+                session.record_conversions(vec![ended]);
+            } else {
+                hooks_to_run = None;
+            }
         }
+
+        // Execute on_session_end hooks (outside the lock)
+        if let Some((hooks, agent_mode, working_dir)) = hooks_to_run {
+            let context = HookContext {
+                session_id: session_id.to_string(),
+                agent: self
+                    .get_session_agent(session_id)
+                    .await
+                    .map(|a| a.as_str().to_string())
+                    .unwrap_or_else(|| "unknown".to_string()),
+                agent_mode,
+                hook_type: HookType::SessionEnd,
+                message: None,
+                working_dir,
+            };
+            let hooks_result = execute_hooks(&hooks.on_session_end, &context).await;
+            tracing::debug!(
+                session_id = %session_id,
+                all_succeeded = %hooks_result.all_succeeded,
+                results = ?hooks_result.results.len(),
+                "Executed on_session_end hooks"
+            );
+        }
+    }
+
+    /// Get the agent type for a session.
+    async fn get_session_agent(&self, session_id: &str) -> Option<AgentId> {
+        let sessions = self.sessions.lock().await;
+        Self::session_ref(&sessions, session_id).map(|s| s.agent)
     }
 
     async fn ensure_opencode_stream(
@@ -3405,6 +3618,12 @@ pub struct CreateSessionRequest {
     pub variant: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_version: Option<String>,
+    /// Hooks configuration for lifecycle events.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hooks: Option<HooksConfig>,
+    /// Working directory for hook execution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_dir: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]

@@ -1,0 +1,6 @@
+---
+source: server/packages/sandbox-agent/tests/sessions/hooks.rs
+expression: value
+---
+first_executed: true
+third_executed: true

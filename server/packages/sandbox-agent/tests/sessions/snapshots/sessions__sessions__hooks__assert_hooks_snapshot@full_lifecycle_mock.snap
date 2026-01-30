@@ -1,0 +1,8 @@
+---
+source: server/packages/sandbox-agent/tests/sessions/hooks.rs
+expression: value
+---
+message_end_executed: true
+message_start_executed: true
+session_end_executed: true
+session_start_executed: true

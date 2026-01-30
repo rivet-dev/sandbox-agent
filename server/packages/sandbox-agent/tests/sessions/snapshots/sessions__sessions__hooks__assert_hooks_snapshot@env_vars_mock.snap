@@ -1,0 +1,8 @@
+---
+source: server/packages/sandbox-agent/tests/sessions/hooks.rs
+expression: value
+---
+file_exists: true
+has_agent: true
+has_hook_type: true
+has_session_id: true
