@@ -49,6 +49,7 @@
 					"deploy/index",
 					"deploy/local",
 					"deploy/e2b",
+					"deploy/vercel",
 					"deploy/daytona",
 					"deploy/docker"
 				]
