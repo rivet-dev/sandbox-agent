@@ -61,11 +61,12 @@
 			},
 			{
 				"group": "Reference",
-				"pages": [
-					"cli",
-					"inspector",
-					"session-transcript-schema",
-					"cors",
+					"pages": [
+						"cli",
+						"opencode-compatibility",
+						"inspector",
+						"session-transcript-schema",
+						"cors",
 					{
 						"group": "AI",
 						"pages": ["ai/skill", "ai/llms-txt"]

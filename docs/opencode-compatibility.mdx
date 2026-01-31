@@ -1,0 +1,108 @@
+---
+title: "OpenCode Compatibility"
+description: "OpenCode endpoint coverage for /opencode."
+---
+
+Sandbox Agent exposes OpenCode-compatible endpoints under `/opencode`.
+Authentication matches `/v1`: if a token is configured, requests must include `Authorization: Bearer <token>`.
+
+| Method | Path | Status | Notes | Tests |
+|---|---|---|---|---|
+| GET | /agent | Stubbed | Single stub agent entry. | E2E: openapi-coverage |
+| DELETE | /auth/{providerID} | Stubbed |  | E2E: openapi-coverage |
+| PUT | /auth/{providerID} | Stubbed |  | E2E: openapi-coverage |
+| GET | /command | Stubbed |  | E2E: openapi-coverage |
+| GET | /config | Stubbed | Returns/echoes config payloads. | E2E: openapi-coverage |
+| PATCH | /config | Stubbed | Returns/echoes config payloads. | E2E: openapi-coverage |
+| GET | /config/providers | Stubbed | Returns/echoes config payloads. | E2E: openapi-coverage |
+| GET | /event | SSE stub | Emits compat events for session/message/pty updates only. | E2E: openapi-coverage, events |
+| GET | /experimental/resource | Stubbed | Experimental endpoints return empty stubs. | E2E: openapi-coverage |
+| GET | /experimental/tool | Stubbed | Experimental endpoints return empty stubs. | E2E: openapi-coverage |
+| GET | /experimental/tool/ids | Stubbed | Experimental endpoints return empty stubs. | E2E: openapi-coverage |
+| DELETE | /experimental/worktree | Stubbed | Experimental endpoints return empty stubs. | E2E: openapi-coverage |
+| GET | /experimental/worktree | Stubbed | Experimental endpoints return empty stubs. | E2E: openapi-coverage |
+| POST | /experimental/worktree | Stubbed | Experimental endpoints return empty stubs. | E2E: openapi-coverage |
+| POST | /experimental/worktree/reset | Stubbed | Experimental endpoints return empty stubs. | E2E: openapi-coverage |
+| GET | /file | Stubbed | Returns empty lists/content; no filesystem access. | E2E: openapi-coverage |
+| GET | /file/content | Stubbed | Returns empty lists/content; no filesystem access. | E2E: openapi-coverage |
+| GET | /file/status | Stubbed | Returns empty lists/content; no filesystem access. | E2E: openapi-coverage |
+| GET | /find | Stubbed | Returns empty results. | E2E: openapi-coverage |
+| GET | /find/file | Stubbed | Returns empty results. | E2E: openapi-coverage |
+| GET | /find/symbol | Stubbed | Returns empty results. | E2E: openapi-coverage |
+| GET | /formatter | Stubbed |  | E2E: openapi-coverage |
+| GET | /global/config | Stubbed |  | E2E: openapi-coverage |
+| PATCH | /global/config | Stubbed |  | E2E: openapi-coverage |
+| POST | /global/dispose | Stubbed |  | E2E: openapi-coverage |
+| GET | /global/event | SSE stub | Wraps compat events in GlobalEvent; no external sources. | E2E: openapi-coverage, events |
+| GET | /global/health | Stubbed |  | E2E: openapi-coverage |
+| POST | /instance/dispose | Stubbed |  | E2E: openapi-coverage |
+| POST | /log | Stubbed |  | E2E: openapi-coverage |
+| GET | /lsp | Stubbed |  | E2E: openapi-coverage |
+| GET | /mcp | Stubbed | Returns disabled/needs_auth stubs. | E2E: openapi-coverage |
+| POST | /mcp | Stubbed | Returns disabled/needs_auth stubs. | E2E: openapi-coverage |
+| DELETE | /mcp/{name}/auth | Stubbed | Returns disabled/needs_auth stubs. | E2E: openapi-coverage |
+| POST | /mcp/{name}/auth | Stubbed | Returns disabled/needs_auth stubs. | E2E: openapi-coverage |
+| POST | /mcp/{name}/auth/authenticate | Stubbed | Returns disabled/needs_auth stubs. | E2E: openapi-coverage |
+| POST | /mcp/{name}/auth/callback | Stubbed | Returns disabled/needs_auth stubs. | E2E: openapi-coverage |
+| POST | /mcp/{name}/connect | Stubbed | Returns disabled/needs_auth stubs. | E2E: openapi-coverage |
+| POST | /mcp/{name}/disconnect | Stubbed | Returns disabled/needs_auth stubs. | E2E: openapi-coverage |
+| GET | /path | Derived stub |  | E2E: openapi-coverage |
+| GET | /permission | Stubbed |  | E2E: openapi-coverage, permissions |
+| POST | /permission/{requestID}/reply | Stubbed |  | E2E: openapi-coverage, permissions |
+| GET | /project | Derived stub |  | E2E: openapi-coverage |
+| PATCH | /project/{projectID} | Derived stub |  | E2E: openapi-coverage |
+| GET | /project/current | Derived stub |  | E2E: openapi-coverage |
+| GET | /provider | Stubbed | Returns empty provider metadata. | E2E: openapi-coverage |
+| POST | /provider/{providerID}/oauth/authorize | Stubbed | Returns empty provider metadata. | E2E: openapi-coverage |
+| POST | /provider/{providerID}/oauth/callback | Stubbed | Returns empty provider metadata. | E2E: openapi-coverage |
+| GET | /provider/auth | Stubbed | Returns empty provider metadata. | E2E: openapi-coverage |
+| GET | /pty | Stateful stub | In-memory PTY records; no real PTY process. | E2E: openapi-coverage |
+| POST | /pty | Stateful stub | In-memory PTY records; no real PTY process. | E2E: openapi-coverage |
+| DELETE | /pty/{ptyID} | Stateful stub | In-memory PTY records; no real PTY process. | E2E: openapi-coverage |
+| GET | /pty/{ptyID} | Stateful stub | In-memory PTY records; no real PTY process. | E2E: openapi-coverage |
+| PUT | /pty/{ptyID} | Stateful stub | In-memory PTY records; no real PTY process. | E2E: openapi-coverage |
+| GET | /pty/{ptyID}/connect | Stateful stub | In-memory PTY records; no real PTY process. | E2E: openapi-coverage |
+| GET | /question | Stubbed |  | E2E: openapi-coverage, permissions |
+| POST | /question/{requestID}/reject | Stubbed |  | E2E: openapi-coverage, permissions |
+| POST | /question/{requestID}/reply | Stubbed |  | E2E: openapi-coverage, permissions |
+| GET | /session | Stateful stub | In-memory session store; not persisted or mapped to /v1. | E2E: openapi-coverage, session |
+| POST | /session | Stateful stub | In-memory session store; not persisted or mapped to /v1. | E2E: openapi-coverage, session |
+| DELETE | /session/{sessionID} | Stateful stub | In-memory session store; not persisted or mapped to /v1. | E2E: openapi-coverage, session |
+| GET | /session/{sessionID} | Stateful stub | In-memory session store; not persisted or mapped to /v1. | E2E: openapi-coverage, session |
+| PATCH | /session/{sessionID} | Stateful stub | In-memory session store; not persisted or mapped to /v1. | E2E: openapi-coverage, session |
+| POST | /session/{sessionID}/abort | Stateful stub | In-memory session store; not persisted or mapped to /v1. | E2E: openapi-coverage, messaging |
+| GET | /session/{sessionID}/children | Stateful stub | In-memory session store; not persisted or mapped to /v1. | E2E: openapi-coverage |
+| POST | /session/{sessionID}/command | Stateful stub | In-memory session store; not persisted or mapped to /v1. | E2E: openapi-coverage |
+| GET | /session/{sessionID}/diff | Stateful stub | In-memory session store; not persisted or mapped to /v1. | E2E: openapi-coverage |
+| POST | /session/{sessionID}/fork | Stateful stub | In-memory session store; not persisted or mapped to /v1. | E2E: openapi-coverage |
+| POST | /session/{sessionID}/init | Stateful stub | In-memory session store; not persisted or mapped to /v1. | E2E: openapi-coverage |
+| GET | /session/{sessionID}/message | Stateful stub | In-memory messages; assistant replies are stubbed. | E2E: openapi-coverage, messaging, events |
+| POST | /session/{sessionID}/message | Stateful stub | In-memory messages; assistant replies are stubbed. | E2E: openapi-coverage, messaging, events |
+| GET | /session/{sessionID}/message/{messageID} | Stateful stub | In-memory messages; assistant replies are stubbed. | E2E: openapi-coverage, messaging |
+| DELETE | /session/{sessionID}/message/{messageID}/part/{partID} | Stateful stub | In-memory messages; assistant replies are stubbed. | E2E: openapi-coverage, messaging |
+| PATCH | /session/{sessionID}/message/{messageID}/part/{partID} | Stateful stub | In-memory messages; assistant replies are stubbed. | E2E: openapi-coverage, messaging |
+| POST | /session/{sessionID}/permissions/{permissionID} | Stateful stub | In-memory session store; not persisted or mapped to /v1. | E2E: openapi-coverage |
+| POST | /session/{sessionID}/prompt_async | Stateful stub | In-memory session store; not persisted or mapped to /v1. | E2E: openapi-coverage, messaging |
+| POST | /session/{sessionID}/revert | Stateful stub | In-memory session store; not persisted or mapped to /v1. | E2E: openapi-coverage |
+| DELETE | /session/{sessionID}/share | Stateful stub | In-memory session store; not persisted or mapped to /v1. | E2E: openapi-coverage |
+| POST | /session/{sessionID}/share | Stateful stub | In-memory session store; not persisted or mapped to /v1. | E2E: openapi-coverage |
+| POST | /session/{sessionID}/shell | Stateful stub | In-memory session store; not persisted or mapped to /v1. | E2E: openapi-coverage |
+| POST | /session/{sessionID}/summarize | Stateful stub | In-memory session store; not persisted or mapped to /v1. | E2E: openapi-coverage |
+| GET | /session/{sessionID}/todo | Stateful stub | In-memory session store; not persisted or mapped to /v1. | E2E: openapi-coverage |
+| POST | /session/{sessionID}/unrevert | Stateful stub | In-memory session store; not persisted or mapped to /v1. | E2E: openapi-coverage |
+| GET | /session/status | Stateful stub | In-memory session store; not persisted or mapped to /v1. | E2E: openapi-coverage, events |
+| GET | /skill | Stubbed | Returns empty skills list. | E2E: openapi-coverage |
+| POST | /tui/append-prompt | Stubbed | Returns true/empty control payloads. | E2E: openapi-coverage |
+| POST | /tui/clear-prompt | Stubbed | Returns true/empty control payloads. | E2E: openapi-coverage |
+| GET | /tui/control/next | Stubbed | Returns true/empty control payloads. | E2E: openapi-coverage |
+| POST | /tui/control/response | Stubbed | Returns true/empty control payloads. | E2E: openapi-coverage |
+| POST | /tui/execute-command | Stubbed | Returns true/empty control payloads. | E2E: openapi-coverage |
+| POST | /tui/open-help | Stubbed | Returns true/empty control payloads. | E2E: openapi-coverage |
+| POST | /tui/open-models | Stubbed | Returns true/empty control payloads. | E2E: openapi-coverage |
+| POST | /tui/open-sessions | Stubbed | Returns true/empty control payloads. | E2E: openapi-coverage |
+| POST | /tui/open-themes | Stubbed | Returns true/empty control payloads. | E2E: openapi-coverage |
+| POST | /tui/publish | Stubbed | Returns true/empty control payloads. | E2E: openapi-coverage |
+| POST | /tui/select-session | Stubbed | Returns true/empty control payloads. | E2E: openapi-coverage |
+| POST | /tui/show-toast | Stubbed | Returns true/empty control payloads. | E2E: openapi-coverage |
+| POST | /tui/submit-prompt | Stubbed | Returns true/empty control payloads. | E2E: openapi-coverage |
+| GET | /vcs | Derived stub |  | E2E: openapi-coverage |

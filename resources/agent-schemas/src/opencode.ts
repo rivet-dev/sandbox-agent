@@ -1,9 +1,13 @@
+import { existsSync, mkdirSync, writeFileSync } from "fs";
+import { join } from "path";
 import { fetchWithCache } from "./cache.js";
 import { createNormalizedSchema, openApiToJsonSchema, type NormalizedSchema } from "./normalize.js";
 import type { JSONSchema7 } from "json-schema";
 
-const OPENAPI_URL =
-  "https://raw.githubusercontent.com/sst/opencode/dev/packages/sdk/openapi.json";
+const OPENAPI_URLS = [
+  "https://raw.githubusercontent.com/anomalyco/opencode/dev/packages/sdk/openapi.json",
+  "https://raw.githubusercontent.com/sst/opencode/dev/packages/sdk/openapi.json",
+];
 
 // Key schemas we want to extract
 const TARGET_SCHEMAS = [
@@ -19,16 +23,40 @@ const TARGET_SCHEMAS = [
   "ErrorPart",
 ];
 
+const OPENAPI_ARTIFACT_DIR = join(import.meta.dirname, "..", "artifacts", "openapi");
+const OPENAPI_ARTIFACT_PATH = join(OPENAPI_ARTIFACT_DIR, "opencode.json");
+
 interface OpenAPISpec {
   components?: {
     schemas?: Record<string, unknown>;
   };
 }
 
+function writeOpenApiArtifact(specText: string): void {
+  if (!existsSync(OPENAPI_ARTIFACT_DIR)) {
+    mkdirSync(OPENAPI_ARTIFACT_DIR, { recursive: true });
+  }
+  writeFileSync(OPENAPI_ARTIFACT_PATH, specText);
+  console.log(`  [wrote] ${OPENAPI_ARTIFACT_PATH}`);
+}
+
 export async function extractOpenCodeSchema(): Promise<NormalizedSchema> {
   console.log("Extracting OpenCode schema from OpenAPI spec...");
 
-  const specText = await fetchWithCache(OPENAPI_URL);
+  let specText: string | null = null;
+  let lastError: Error | null = null;
+  for (const url of OPENAPI_URLS) {
+    try {
+      specText = await fetchWithCache(url);
+      break;
+    } catch (error) {
+      lastError = error as Error;
+    }
+  }
+  if (!specText) {
+    throw lastError ?? new Error("Failed to fetch OpenCode OpenAPI spec");
+  }
+  writeOpenApiArtifact(specText);
   const spec: OpenAPISpec = JSON.parse(specText);
 
   if (!spec.components?.schemas) {

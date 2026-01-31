@@ -64,9 +64,21 @@ Universal schema guidance:
 - `sandbox-agent api sessions reject-question` ↔ `POST /v1/sessions/{sessionId}/questions/{questionId}/reject`
 - `sandbox-agent api sessions reply-permission` ↔ `POST /v1/sessions/{sessionId}/permissions/{permissionId}/reply`
 
+## OpenCode CLI (Experimental)
+
+`sandbox-agent opencode` starts a sandbox-agent server and attaches an OpenCode session (uses `/opencode`).
+
 ## Post-Release Testing
 
 After cutting a release, verify the release works correctly. Run `/project:post-release-testing` to execute the testing agent.
+
+## OpenCode Compatibility Tests
+
+The OpenCode compatibility suite lives at `server/packages/sandbox-agent/tests/opencode-compat` and validates the `@opencode-ai/sdk` against the `/opencode` API. Run it with:
+
+```bash
+SANDBOX_AGENT_SKIP_INSPECTOR=1 pnpm --filter @sandbox-agent/opencode-compat-tests test
+```
 
 ## Git Commits
 

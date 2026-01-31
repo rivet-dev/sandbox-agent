@@ -282,6 +282,14 @@
         },
         "deletions": {
           "type": "number"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "added",
+            "deleted",
+            "modified"
+          ]
         }
       },
       "required": [
@@ -775,6 +783,60 @@
         "messageID",
         "type",
         "text"
+      ]
+    },
+    "SubtaskPart": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "sessionID": {
+          "type": "string"
+        },
+        "messageID": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "const": "subtask"
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "agent": {
+          "type": "string"
+        },
+        "model": {
+          "type": "object",
+          "properties": {
+            "providerID": {
+              "type": "string"
+            },
+            "modelID": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "providerID",
+            "modelID"
+          ]
+        },
+        "command": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "sessionID",
+        "messageID",
+        "type",
+        "prompt",
+        "description",
+        "agent"
       ]
     },
     "ReasoningPart": {
@@ -1541,58 +1603,7 @@
           "$ref": "#/definitions/TextPart"
         },
         {
-          "type": "object",
-          "properties": {
-            "id": {
-              "type": "string"
-            },
-            "sessionID": {
-              "type": "string"
-            },
-            "messageID": {
-              "type": "string"
-            },
-            "type": {
-              "type": "string",
-              "const": "subtask"
-            },
-            "prompt": {
-              "type": "string"
-            },
-            "description": {
-              "type": "string"
-            },
-            "agent": {
-              "type": "string"
-            },
-            "model": {
-              "type": "object",
-              "properties": {
-                "providerID": {
-                  "type": "string"
-                },
-                "modelID": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "providerID",
-                "modelID"
-              ]
-            },
-            "command": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "id",
-            "sessionID",
-            "messageID",
-            "type",
-            "prompt",
-            "description",
-            "agent"
-          ]
+          "$ref": "#/definitions/SubtaskPart"
         },
         {
           "$ref": "#/definitions/ReasoningPart"
@@ -3085,55 +3096,6 @@
         "payload"
       ]
     },
-    "BadRequestError": {
-      "type": "object",
-      "properties": {
-        "data": {},
-        "errors": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "propertyNames": {
-              "type": "string"
-            },
-            "additionalProperties": {}
-          }
-        },
-        "success": {
-          "type": "boolean",
-          "const": false
-        }
-      },
-      "required": [
-        "data",
-        "errors",
-        "success"
-      ]
-    },
-    "NotFoundError": {
-      "type": "object",
-      "properties": {
-        "name": {
-          "type": "string",
-          "const": "NotFoundError"
-        },
-        "data": {
-          "type": "object",
-          "properties": {
-            "message": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "message"
-          ]
-        }
-      },
-      "required": [
-        "name",
-        "data"
-      ]
-    },
     "KeybindsConfig": {
       "description": "Custom keybind configurations",
       "type": "object",
@@ -3634,6 +3596,10 @@
           "description": "Enable mDNS service discovery",
           "type": "boolean"
         },
+        "mdnsDomain": {
+          "description": "Custom domain name for mDNS service (default: opencode.local)",
+          "type": "string"
+        },
         "cors": {
           "description": "Additional domains to allow for CORS",
           "type": "array",
@@ -3729,6 +3695,9 @@
             },
             "doom_loop": {
               "$ref": "#/definitions/PermissionActionConfig"
+            },
+            "skill": {
+              "$ref": "#/definitions/PermissionRuleConfig"
             }
           },
           "additionalProperties": {
@@ -3744,6 +3713,10 @@
       "type": "object",
       "properties": {
         "model": {
+          "type": "string"
+        },
+        "variant": {
+          "description": "Default model variant for this agent (applies only when using the agent's configured model).",
           "type": "string"
         },
         "temperature": {
@@ -3792,9 +3765,25 @@
           "additionalProperties": {}
         },
         "color": {
-          "description": "Hex color code for the agent (e.g., #FF5733)",
-          "type": "string",
-          "pattern": "^#[0-9a-fA-F]{6}$"
+          "description": "Hex color code (e.g., #FF5733) or theme color (e.g., primary)",
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^#[0-9a-fA-F]{6}$"
+            },
+            {
+              "type": "string",
+              "enum": [
+                "primary",
+                "secondary",
+                "accent",
+                "success",
+                "warning",
+                "error",
+                "info"
+              ]
+            }
+          ]
         },
         "steps": {
           "description": "Maximum number of agentic iterations before forcing text-only response",
@@ -4296,6 +4285,19 @@
             ]
           }
         },
+        "skills": {
+          "description": "Additional skill folder paths",
+          "type": "object",
+          "properties": {
+            "paths": {
+              "description": "Additional paths to skill folders",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
         "watcher": {
           "type": "object",
           "properties": {
@@ -4618,73 +4620,6 @@
         "experimental": {
           "type": "object",
           "properties": {
-            "hook": {
-              "type": "object",
-              "properties": {
-                "file_edited": {
-                  "type": "object",
-                  "propertyNames": {
-                    "type": "string"
-                  },
-                  "additionalProperties": {
-                    "type": "array",
-                    "items": {
-                      "type": "object",
-                      "properties": {
-                        "command": {
-                          "type": "array",
-                          "items": {
-                            "type": "string"
-                          }
-                        },
-                        "environment": {
-                          "type": "object",
-                          "propertyNames": {
-                            "type": "string"
-                          },
-                          "additionalProperties": {
-                            "type": "string"
-                          }
-                        }
-                      },
-                      "required": [
-                        "command"
-                      ]
-                    }
-                  }
-                },
-                "session_completed": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "command": {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        }
-                      },
-                      "environment": {
-                        "type": "object",
-                        "propertyNames": {
-                          "type": "string"
-                        },
-                        "additionalProperties": {
-                          "type": "string"
-                        }
-                      }
-                    },
-                    "required": [
-                      "command"
-                    ]
-                  }
-                }
-              }
-            },
-            "chatMaxRetries": {
-              "description": "Number of retries for chat completions on failure",
-              "type": "number"
-            },
             "disable_paste_summary": {
               "type": "boolean"
             },
@@ -4717,6 +4652,134 @@
         }
       },
       "additionalProperties": false
+    },
+    "BadRequestError": {
+      "type": "object",
+      "properties": {
+        "data": {},
+        "errors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "success": {
+          "type": "boolean",
+          "const": false
+        }
+      },
+      "required": [
+        "data",
+        "errors",
+        "success"
+      ]
+    },
+    "OAuth": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "oauth"
+        },
+        "refresh": {
+          "type": "string"
+        },
+        "access": {
+          "type": "string"
+        },
+        "expires": {
+          "type": "number"
+        },
+        "accountId": {
+          "type": "string"
+        },
+        "enterpriseUrl": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "refresh",
+        "access",
+        "expires"
+      ]
+    },
+    "ApiAuth": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "api"
+        },
+        "key": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "key"
+      ]
+    },
+    "WellKnownAuth": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "wellknown"
+        },
+        "key": {
+          "type": "string"
+        },
+        "token": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "key",
+        "token"
+      ]
+    },
+    "Auth": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/OAuth"
+        },
+        {
+          "$ref": "#/definitions/ApiAuth"
+        },
+        {
+          "$ref": "#/definitions/WellKnownAuth"
+        }
+      ]
+    },
+    "NotFoundError": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "const": "NotFoundError"
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "message"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "data"
+      ]
     },
     "Model": {
       "type": "object",
@@ -5431,7 +5494,10 @@
       "properties": {
         "type": {
           "type": "string",
-          "const": "text"
+          "enum": [
+            "text",
+            "binary"
+          ]
         },
         "content": {
           "type": "string"
@@ -5682,8 +5748,13 @@
         "model": {
           "type": "string"
         },
-        "mcp": {
-          "type": "boolean"
+        "source": {
+          "type": "string",
+          "enum": [
+            "command",
+            "mcp",
+            "skill"
+          ]
         },
         "template": {
           "anyOf": [
@@ -5761,6 +5832,9 @@
             "providerID"
           ]
         },
+        "variant": {
+          "type": "string"
+        },
         "prompt": {
           "type": "string"
         },
@@ -5836,85 +5910,6 @@
         "name",
         "extensions",
         "enabled"
-      ]
-    },
-    "OAuth": {
-      "type": "object",
-      "properties": {
-        "type": {
-          "type": "string",
-          "const": "oauth"
-        },
-        "refresh": {
-          "type": "string"
-        },
-        "access": {
-          "type": "string"
-        },
-        "expires": {
-          "type": "number"
-        },
-        "accountId": {
-          "type": "string"
-        },
-        "enterpriseUrl": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "type",
-        "refresh",
-        "access",
-        "expires"
-      ]
-    },
-    "ApiAuth": {
-      "type": "object",
-      "properties": {
-        "type": {
-          "type": "string",
-          "const": "api"
-        },
-        "key": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "type",
-        "key"
-      ]
-    },
-    "WellKnownAuth": {
-      "type": "object",
-      "properties": {
-        "type": {
-          "type": "string",
-          "const": "wellknown"
-        },
-        "key": {
-          "type": "string"
-        },
-        "token": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "type",
-        "key",
-        "token"
-      ]
-    },
-    "Auth": {
-      "anyOf": [
-        {
-          "$ref": "#/definitions/OAuth"
-        },
-        {
-          "$ref": "#/definitions/ApiAuth"
-        },
-        {
-          "$ref": "#/definitions/WellKnownAuth"
-        }
       ]
     }
   }

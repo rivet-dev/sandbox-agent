@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::PathBuf;
+use std::process::{Child, Command as ProcessCommand, Stdio};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use clap::{Args, Parser, Subcommand};
 
@@ -20,6 +22,7 @@ use sandbox_agent::router::{
     AgentListResponse, AgentModesResponse, CreateSessionResponse, EventsResponse,
     SessionListResponse,
 };
+use sandbox_agent::server_logs::ServerLogs;
 use sandbox_agent::telemetry;
 use sandbox_agent::ui;
 use sandbox_agent_agent_management::agents::{AgentId, AgentManager, InstallOptions};
@@ -28,7 +31,7 @@ use sandbox_agent_agent_management::credentials::{
     ProviderCredentials,
 };
 use serde::Serialize;
-use serde_json::Value;
+use serde_json::{json, Value};
 use thiserror::Error;
 use tower_http::cors::{Any, CorsLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
@@ -36,6 +39,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilte
 const API_PREFIX: &str = "/v1";
 const DEFAULT_HOST: &str = "127.0.0.1";
 const DEFAULT_PORT: u16 = 2468;
+const LOGS_RETENTION: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
 #[derive(Parser, Debug)]
 #[command(name = "sandbox-agent", bin_name = "sandbox-agent")]
@@ -58,6 +62,8 @@ enum Command {
     Server(ServerArgs),
     /// Call the HTTP API without writing client code.
     Api(ApiArgs),
+    /// EXPERIMENTAL: Start a sandbox-agent server and attach an OpenCode session.
+    Opencode(OpencodeArgs),
     /// Install or reinstall an agent without running the server.
     InstallAgent(InstallAgentArgs),
     /// Inspect locally discovered credentials.
@@ -92,6 +98,21 @@ struct ServerArgs {
 struct ApiArgs {
     #[command(subcommand)]
     command: ApiCommand,
+}
+
+#[derive(Args, Debug)]
+struct OpencodeArgs {
+    #[arg(long, short = 'H', default_value = DEFAULT_HOST)]
+    host: String,
+
+    #[arg(long, short = 'p', default_value_t = DEFAULT_PORT)]
+    port: u16,
+
+    #[arg(long)]
+    session_title: Option<String>,
+
+    #[arg(long)]
+    opencode_bin: Option<PathBuf>,
 }
 
 #[derive(Args, Debug)]
@@ -349,8 +370,11 @@ enum CliError {
 }
 
 fn main() {
-    init_logging();
     let cli = Cli::parse();
+    if let Err(err) = init_logging(&cli) {
+        eprintln!("failed to init logging: {err}");
+        std::process::exit(1);
+    }
 
     let result = match &cli.command {
         Command::Server(args) => run_server(&cli, args),
@@ -363,7 +387,11 @@ fn main() {
     }
 }
 
-fn init_logging() {
+fn init_logging(cli: &Cli) -> Result<(), CliError> {
+    if matches!(cli.command, Command::Server(_)) {
+        maybe_redirect_server_logs();
+    }
+
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     tracing_subscriber::registry()
         .with(filter)
@@ -373,6 +401,7 @@ fn init_logging() {
                 .with_writer(std::io::stderr),
         )
         .init();
+    Ok(())
 }
 
 fn run_server(cli: &Cli, server: &ServerArgs) -> Result<(), CliError> {
@@ -434,12 +463,33 @@ fn default_install_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(".").join(".sandbox-agent").join("bin"))
 }
 
+fn default_server_log_dir() -> PathBuf {
+    if let Ok(dir) = std::env::var("SANDBOX_AGENT_LOG_DIR") {
+        return PathBuf::from(dir);
+    }
+    dirs::data_dir()
+        .map(|dir| dir.join("sandbox-agent").join("logs"))
+        .unwrap_or_else(|| PathBuf::from(".").join(".sandbox-agent").join("logs"))
+}
+
+fn maybe_redirect_server_logs() {
+    if std::env::var("SANDBOX_AGENT_LOG_STDOUT").is_ok() {
+        return;
+    }
+
+    let log_dir = default_server_log_dir();
+    if let Err(err) = ServerLogs::new(log_dir, LOGS_RETENTION).start_sync() {
+        eprintln!("failed to redirect logs: {err}");
+    }
+}
+
 fn run_client(command: &Command, cli: &Cli) -> Result<(), CliError> {
     match command {
         Command::Server(_) => Err(CliError::Server(
             "server subcommand must be invoked as `sandbox-agent server`".to_string(),
         )),
         Command::Api(subcommand) => run_api(&subcommand.command, cli),
+        Command::Opencode(args) => run_opencode(cli, args),
         Command::InstallAgent(args) => install_agent_local(args),
         Command::Credentials(subcommand) => run_credentials(&subcommand.command),
     }
@@ -450,6 +500,53 @@ fn run_api(command: &ApiCommand, cli: &Cli) -> Result<(), CliError> {
         ApiCommand::Agents(subcommand) => run_agents(&subcommand.command, cli),
         ApiCommand::Sessions(subcommand) => run_sessions(&subcommand.command, cli),
     }
+}
+
+fn run_opencode(cli: &Cli, args: &OpencodeArgs) -> Result<(), CliError> {
+    write_stderr_line("experimental: opencode subcommand may change without notice")?;
+
+    let token = if cli.no_token {
+        None
+    } else {
+        Some(cli.token.clone().ok_or(CliError::MissingToken)?)
+    };
+
+    let mut server_child = spawn_sandbox_agent_server(cli, args, token.as_deref())?;
+    let base_url = format!("http://{}:{}", args.host, args.port);
+    wait_for_health(&mut server_child, &base_url, token.as_deref())?;
+
+    let session_id = create_opencode_session(&base_url, token.as_deref(), args.session_title.as_deref())?;
+    write_stdout_line(&format!("OpenCode session: {session_id}"))?;
+
+    let attach_url = format!("{base_url}/opencode");
+    let opencode_bin = resolve_opencode_bin(args.opencode_bin.as_ref());
+    let mut opencode_cmd = ProcessCommand::new(opencode_bin);
+    opencode_cmd
+        .arg("attach")
+        .arg(&attach_url)
+        .arg("--session")
+        .arg(&session_id)
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit());
+    if let Some(token) = token.as_deref() {
+        opencode_cmd.arg("--password").arg(token);
+    }
+
+    let status = opencode_cmd.status().map_err(|err| {
+        terminate_child(&mut server_child);
+        CliError::Server(format!("failed to start opencode: {err}"))
+    })?;
+
+    terminate_child(&mut server_child);
+
+    if !status.success() {
+        return Err(CliError::Server(format!(
+            "opencode exited with status {status}"
+        )));
+    }
+
+    Ok(())
 }
 
 fn run_agents(command: &AgentsCommand, cli: &Cli) -> Result<(), CliError> {
@@ -605,6 +702,113 @@ fn run_sessions(command: &SessionsCommand, cli: &Cli) -> Result<(), CliError> {
             print_empty_response(response)
         }
     }
+}
+
+fn spawn_sandbox_agent_server(
+    cli: &Cli,
+    args: &OpencodeArgs,
+    token: Option<&str>,
+) -> Result<Child, CliError> {
+    let exe = std::env::current_exe()?;
+    let mut cmd = ProcessCommand::new(exe);
+    cmd.arg("server")
+        .arg("--host")
+        .arg(&args.host)
+        .arg("--port")
+        .arg(args.port.to_string())
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit());
+
+    if cli.no_token {
+        cmd.arg("--no-token");
+    } else if let Some(token) = token {
+        cmd.arg("--token").arg(token);
+    }
+
+    cmd.spawn().map_err(CliError::from)
+}
+
+fn wait_for_health(
+    server_child: &mut Child,
+    base_url: &str,
+    token: Option<&str>,
+) -> Result<(), CliError> {
+    let client = HttpClient::builder().build()?;
+    let deadline = Instant::now() + Duration::from_secs(30);
+
+    while Instant::now() < deadline {
+        if let Some(status) = server_child.try_wait()? {
+            return Err(CliError::Server(format!(
+                "sandbox-agent exited before becoming healthy ({status})"
+            )));
+        }
+
+        let url = format!("{base_url}/v1/health");
+        let mut request = client.get(&url);
+        if let Some(token) = token {
+            request = request.bearer_auth(token);
+        }
+        match request.send() {
+            Ok(response) if response.status().is_success() => return Ok(()),
+            _ => {
+                std::thread::sleep(Duration::from_millis(200));
+            }
+        }
+    }
+
+    Err(CliError::Server(
+        "timed out waiting for sandbox-agent health".to_string(),
+    ))
+}
+
+fn create_opencode_session(
+    base_url: &str,
+    token: Option<&str>,
+    title: Option<&str>,
+) -> Result<String, CliError> {
+    let client = HttpClient::builder().build()?;
+    let url = format!("{base_url}/opencode/session");
+    let body = if let Some(title) = title {
+        json!({ "title": title })
+    } else {
+        json!({})
+    };
+    let mut request = client.post(&url).json(&body);
+    if let Ok(directory) = std::env::current_dir() {
+        request = request.header("x-opencode-directory", directory.to_string_lossy().to_string());
+    }
+    if let Some(token) = token {
+        request = request.bearer_auth(token);
+    }
+    let response = request.send()?;
+    let status = response.status();
+    let text = response.text()?;
+    if !status.is_success() {
+        print_error_body(&text)?;
+        return Err(CliError::HttpStatus(status));
+    }
+    let body: Value = serde_json::from_str(&text)?;
+    let session_id = body
+        .get("id")
+        .and_then(|value| value.as_str())
+        .ok_or_else(|| CliError::Server("opencode session missing id".to_string()))?;
+    Ok(session_id.to_string())
+}
+
+fn resolve_opencode_bin(explicit: Option<&PathBuf>) -> PathBuf {
+    if let Some(path) = explicit {
+        return path.clone();
+    }
+    if let Ok(path) = std::env::var("OPENCODE_BIN") {
+        return PathBuf::from(path);
+    }
+    PathBuf::from("opencode")
+}
+
+fn terminate_child(child: &mut Child) {
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 fn run_credentials(command: &CredentialsCommand) -> Result<(), CliError> {

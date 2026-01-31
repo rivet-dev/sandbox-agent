@@ -25,6 +25,7 @@ futures.workspace = true
 reqwest.workspace = true
 dirs.workspace = true
 time.workspace = true
+chrono.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true
 tower-http.workspace = true
@@ -34,10 +35,14 @@ tracing.workspace = true
 tracing-logfmt.workspace = true
 tracing-subscriber.workspace = true
 include_dir.workspace = true
+base64.workspace = true
 tempfile = { workspace = true, optional = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.52", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Console"] }
 
 [dev-dependencies]
 http-body-util.workspace = true

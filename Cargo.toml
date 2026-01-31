@@ -68,6 +68,7 @@ zip = { version = "0.6", default-features = false, features = ["deflate"] }
 url = "2.5"
 regress = "0.10"
 include_dir = "0.7"
+base64 = "0.22"
 
 # Code generation (build deps)
 typify = "0.4"

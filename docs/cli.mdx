@@ -29,6 +29,12 @@ sandbox-agent server [OPTIONS]
 sandbox-agent server --token "$TOKEN" --port 3000
 ```
 
+Server logs are redirected to a daily log file under the sandbox-agent data directory (for example, `~/.local/share/sandbox-agent/logs`). Override with `SANDBOX_AGENT_LOG_DIR`, or set `SANDBOX_AGENT_LOG_STDOUT=1` to keep logs on stdout/stderr.
+
+HTTP request logging is enabled by default. Control it with:
+- `SANDBOX_AGENT_LOG_HTTP=0` to disable request logs
+- `SANDBOX_AGENT_LOG_HTTP_HEADERS=1` to include request headers (Authorization is redacted)
+
 ---
 
 ## Install Agent (Local)
@@ -46,6 +52,31 @@ sandbox-agent install-agent <AGENT> [OPTIONS]
 ```bash
 sandbox-agent install-agent claude --reinstall
 ```
+
+---
+
+## OpenCode (Experimental)
+
+Start a sandbox-agent server and attach an OpenCode session (uses `opencode attach`):
+
+```bash
+sandbox-agent opencode [OPTIONS]
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `-t, --token <TOKEN>` | - | Authentication token for all requests |
+| `-n, --no-token` | - | Disable authentication (local dev only) |
+| `-H, --host <HOST>` | `127.0.0.1` | Host to bind to |
+| `-p, --port <PORT>` | `2468` | Port to bind to |
+| `--session-title <TITLE>` | - | Title for the OpenCode session |
+| `--opencode-bin <PATH>` | - | Override `opencode` binary path |
+
+```bash
+sandbox-agent opencode --token "$TOKEN"
+```
+
+Requires the `opencode` binary to be installed (or set `OPENCODE_BIN` / `--opencode-bin`).
 
 ---
 

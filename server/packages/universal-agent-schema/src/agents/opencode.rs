@@ -43,7 +43,7 @@ pub fn event_to_universal(event: &schema::Event) -> Result<Vec<EventConversion>,
             let (session_id, message_id) = part_session_message(part);
 
             match part {
-                schema::Part::Variant0(text_part) => {
+                schema::Part::TextPart(text_part) => {
                     let schema::TextPart { text, .. } = text_part;
                     let delta_text = delta.as_ref().unwrap_or(&text).clone();
                     let stub = stub_message_item(&message_id, ItemRole::Assistant);
@@ -68,7 +68,7 @@ pub fn event_to_universal(event: &schema::Event) -> Result<Vec<EventConversion>,
                         .with_raw(raw.clone()),
                     );
                 }
-                schema::Part::Variant2(reasoning_part) => {
+                schema::Part::ReasoningPart(reasoning_part) => {
                     let delta_text = delta
                         .as_ref()
                         .cloned()
@@ -95,7 +95,7 @@ pub fn event_to_universal(event: &schema::Event) -> Result<Vec<EventConversion>,
                         .with_raw(raw.clone()),
                     );
                 }
-                schema::Part::Variant3(file_part) => {
+                schema::Part::FilePart(file_part) => {
                     let file_content = file_part_to_content(file_part);
                     let item = UniversalItem {
                         item_id: String::new(),
@@ -115,7 +115,7 @@ pub fn event_to_universal(event: &schema::Event) -> Result<Vec<EventConversion>,
                         .with_raw(raw.clone()),
                     );
                 }
-                schema::Part::Variant4(tool_part) => {
+                schema::Part::ToolPart(tool_part) => {
                     let tool_events = tool_part_to_events(&tool_part, &message_id);
                     for event in tool_events {
                         events.push(
@@ -125,9 +125,9 @@ pub fn event_to_universal(event: &schema::Event) -> Result<Vec<EventConversion>,
                         );
                     }
                 }
-                schema::Part::Variant1 { .. } => {
-                    let detail =
-                        serde_json::to_string(part).unwrap_or_else(|_| "subtask".to_string());
+                schema::Part::SubtaskPart(subtask_part) => {
+                    let detail = serde_json::to_string(subtask_part)
+                        .unwrap_or_else(|_| "subtask".to_string());
                     let item = status_item("subtask", Some(detail));
                     events.push(
                         EventConversion::new(
@@ -138,13 +138,13 @@ pub fn event_to_universal(event: &schema::Event) -> Result<Vec<EventConversion>,
                         .with_raw(raw.clone()),
                     );
                 }
-                schema::Part::Variant5(_)
-                | schema::Part::Variant6(_)
-                | schema::Part::Variant7(_)
-                | schema::Part::Variant8(_)
-                | schema::Part::Variant9(_)
-                | schema::Part::Variant10(_)
-                | schema::Part::Variant11(_) => {
+                schema::Part::StepStartPart(_)
+                | schema::Part::StepFinishPart(_)
+                | schema::Part::SnapshotPart(_)
+                | schema::Part::PatchPart(_)
+                | schema::Part::AgentPart(_)
+                | schema::Part::RetryPart(_)
+                | schema::Part::CompactionPart(_) => {
                     let detail = serde_json::to_string(part).unwrap_or_else(|_| "part".to_string());
                     let item = status_item("part.updated", Some(detail));
                     events.push(
@@ -306,52 +306,51 @@ fn message_to_item(message: &schema::Message) -> (UniversalItem, bool, Option<St
 
 fn part_session_message(part: &schema::Part) -> (Option<String>, String) {
     match part {
-        schema::Part::Variant0(text_part) => (
+        schema::Part::TextPart(text_part) => (
             Some(text_part.session_id.clone()),
             text_part.message_id.clone(),
         ),
-        schema::Part::Variant1 {
-            session_id,
-            message_id,
-            ..
-        } => (Some(session_id.clone()), message_id.clone()),
-        schema::Part::Variant2(reasoning_part) => (
+        schema::Part::SubtaskPart(subtask_part) => (
+            Some(subtask_part.session_id.clone()),
+            subtask_part.message_id.clone(),
+        ),
+        schema::Part::ReasoningPart(reasoning_part) => (
             Some(reasoning_part.session_id.clone()),
             reasoning_part.message_id.clone(),
         ),
-        schema::Part::Variant3(file_part) => (
+        schema::Part::FilePart(file_part) => (
             Some(file_part.session_id.clone()),
             file_part.message_id.clone(),
         ),
-        schema::Part::Variant4(tool_part) => (
+        schema::Part::ToolPart(tool_part) => (
             Some(tool_part.session_id.clone()),
             tool_part.message_id.clone(),
         ),
-        schema::Part::Variant5(step_part) => (
+        schema::Part::StepStartPart(step_part) => (
             Some(step_part.session_id.clone()),
             step_part.message_id.clone(),
         ),
-        schema::Part::Variant6(step_part) => (
+        schema::Part::StepFinishPart(step_part) => (
             Some(step_part.session_id.clone()),
             step_part.message_id.clone(),
         ),
-        schema::Part::Variant7(snapshot_part) => (
+        schema::Part::SnapshotPart(snapshot_part) => (
             Some(snapshot_part.session_id.clone()),
             snapshot_part.message_id.clone(),
         ),
-        schema::Part::Variant8(patch_part) => (
+        schema::Part::PatchPart(patch_part) => (
             Some(patch_part.session_id.clone()),
             patch_part.message_id.clone(),
         ),
-        schema::Part::Variant9(agent_part) => (
+        schema::Part::AgentPart(agent_part) => (
             Some(agent_part.session_id.clone()),
             agent_part.message_id.clone(),
         ),
-        schema::Part::Variant10(retry_part) => (
+        schema::Part::RetryPart(retry_part) => (
             Some(retry_part.session_id.clone()),
             retry_part.message_id.clone(),
         ),
-        schema::Part::Variant11(compaction_part) => (
+        schema::Part::CompactionPart(compaction_part) => (
             Some(compaction_part.session_id.clone()),
             compaction_part.message_id.clone(),
         ),
