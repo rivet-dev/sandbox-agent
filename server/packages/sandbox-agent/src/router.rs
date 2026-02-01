@@ -21,6 +21,7 @@ use reqwest::Client;
 use sandbox_agent_error::{AgentError, ErrorType, ProblemDetails, SandboxError};
 use sandbox_agent_universal_agent_schema::{
     codex as codex_schema, convert_amp, convert_claude, convert_codex, convert_opencode,
+    opencode as opencode_schema,
     AgentUnparsedData, ContentPart, ErrorData, EventConversion, EventSource, FileAction,
     ItemDeltaData, ItemEventData, ItemKind, ItemRole, ItemStatus, PermissionEventData,
     PermissionStatus, QuestionEventData, QuestionStatus, ReasoningVisibility, SessionEndReason,
@@ -2661,7 +2662,7 @@ impl SessionManager {
             }
         };
 
-        let url = format!("{base_url}/event/subscribe");
+        let url = format!("{base_url}/event");
         let response = match self.http_client.get(url).send().await {
             Ok(response) => response,
             Err(err) => {
@@ -2752,12 +2753,91 @@ impl SessionManager {
                 if !opencode_event_matches_session(&value, &native_session_id) {
                     continue;
                 }
-                let conversions = match serde_json::from_value(value.clone()) {
-                    Ok(event) => match convert_opencode::event_to_universal(&event) {
-                        Ok(conversions) => conversions,
-                        Err(err) => vec![agent_unparsed("opencode", &err, value.clone())],
-                    },
-                    Err(err) => vec![agent_unparsed("opencode", &err.to_string(), value.clone())],
+                // Manual type-based dispatch to bypass broken #[serde(untagged)]
+                // enum ordering where ServerConnected (variant #5, empty properties)
+                // matches all events before MessageUpdated (variant #10) gets tried.
+                let event_type = value.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                let conversions = match event_type {
+                    "message.updated" => {
+                        match serde_json::from_value::<opencode_schema::EventMessageUpdated>(value.clone()) {
+                            Ok(e) => match convert_opencode::event_to_universal(&opencode_schema::Event::MessageUpdated(e)) {
+                                Ok(c) => c,
+                                Err(err) => vec![agent_unparsed("opencode", &err, value.clone())],
+                            },
+                            Err(err) => vec![agent_unparsed("opencode", &format!("message.updated: {}", err), value.clone())],
+                        }
+                    }
+                    "message.part.updated" => {
+                        match serde_json::from_value::<opencode_schema::EventMessagePartUpdated>(value.clone()) {
+                            Ok(e) => match convert_opencode::event_to_universal(&opencode_schema::Event::MessagePartUpdated(e)) {
+                                Ok(c) => c,
+                                Err(err) => vec![agent_unparsed("opencode", &err, value.clone())],
+                            },
+                            Err(err) => vec![agent_unparsed("opencode", &format!("message.part.updated: {}", err), value.clone())],
+                        }
+                    }
+                    "question.asked" => {
+                        match serde_json::from_value::<opencode_schema::EventQuestionAsked>(value.clone()) {
+                            Ok(e) => match convert_opencode::event_to_universal(&opencode_schema::Event::QuestionAsked(e)) {
+                                Ok(c) => c,
+                                Err(err) => vec![agent_unparsed("opencode", &err, value.clone())],
+                            },
+                            Err(err) => vec![agent_unparsed("opencode", &format!("question.asked: {}", err), value.clone())],
+                        }
+                    }
+                    "permission.asked" => {
+                        match serde_json::from_value::<opencode_schema::EventPermissionAsked>(value.clone()) {
+                            Ok(e) => match convert_opencode::event_to_universal(&opencode_schema::Event::PermissionAsked(e)) {
+                                Ok(c) => c,
+                                Err(err) => vec![agent_unparsed("opencode", &err, value.clone())],
+                            },
+                            Err(err) => vec![agent_unparsed("opencode", &format!("permission.asked: {}", err), value.clone())],
+                        }
+                    }
+                    "session.created" => {
+                        match serde_json::from_value::<opencode_schema::EventSessionCreated>(value.clone()) {
+                            Ok(e) => match convert_opencode::event_to_universal(&opencode_schema::Event::SessionCreated(e)) {
+                                Ok(c) => c,
+                                Err(err) => vec![agent_unparsed("opencode", &err, value.clone())],
+                            },
+                            Err(err) => vec![agent_unparsed("opencode", &format!("session.created: {}", err), value.clone())],
+                        }
+                    }
+                    "session.status" => {
+                        match serde_json::from_value::<opencode_schema::EventSessionStatus>(value.clone()) {
+                            Ok(e) => match convert_opencode::event_to_universal(&opencode_schema::Event::SessionStatus(e)) {
+                                Ok(c) => c,
+                                Err(err) => vec![agent_unparsed("opencode", &err, value.clone())],
+                            },
+                            Err(err) => vec![agent_unparsed("opencode", &format!("session.status: {}", err), value.clone())],
+                        }
+                    }
+                    "session.idle" => {
+                        match serde_json::from_value::<opencode_schema::EventSessionIdle>(value.clone()) {
+                            Ok(e) => match convert_opencode::event_to_universal(&opencode_schema::Event::SessionIdle(e)) {
+                                Ok(c) => c,
+                                Err(err) => vec![agent_unparsed("opencode", &err, value.clone())],
+                            },
+                            Err(err) => vec![agent_unparsed("opencode", &format!("session.idle: {}", err), value.clone())],
+                        }
+                    }
+                    "session.error" => {
+                        match serde_json::from_value::<opencode_schema::EventSessionError>(value.clone()) {
+                            Ok(e) => match convert_opencode::event_to_universal(&opencode_schema::Event::SessionError(e)) {
+                                Ok(c) => c,
+                                Err(err) => vec![agent_unparsed("opencode", &err, value.clone())],
+                            },
+                            Err(err) => vec![agent_unparsed("opencode", &format!("session.error: {}", err), value.clone())],
+                        }
+                    }
+                    // Informational events we can safely skip
+                    "server.connected" | "server.heartbeat" | "session.updated"
+                    | "session.diff" | "file.watcher.updated" => {
+                        continue;
+                    }
+                    _ => {
+                        vec![agent_unparsed("opencode", &format!("unknown event type: {}", event_type), value.clone())]
+                    }
                 };
                 let _ = self.record_conversions(&session_id, conversions).await;
             }
@@ -3106,7 +3186,7 @@ impl SessionManager {
                 .ok_or_else(|| SandboxError::InvalidRequest {
                     message: "missing OpenCode session id".to_string(),
                 })?;
-        let url = format!("{base_url}/session/{session_id}/prompt");
+        let url = format!("{base_url}/session/{session_id}/message");
         let mut body = json!({
             "agent": session.agent_mode.clone(),
             "parts": [{ "type": "text", "text": prompt }]
@@ -4163,7 +4243,7 @@ fn normalize_permission_mode(
         AgentId::Claude => false,
         AgentId::Codex => matches!(mode, "default" | "plan" | "bypass"),
         AgentId::Amp => matches!(mode, "default" | "bypass"),
-        AgentId::Opencode => matches!(mode, "default"),
+        AgentId::Opencode => matches!(mode, "default" | "bypass"),
         AgentId::Mock => matches!(mode, "default" | "plan" | "bypass"),
     };
     if !supported {

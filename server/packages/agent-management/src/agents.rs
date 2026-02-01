@@ -269,6 +269,9 @@ impl AgentManager {
                 if let Some(variant) = options.variant.as_deref() {
                     command.arg("--variant").arg(variant);
                 }
+                if options.permission_mode.as_deref() == Some("bypass") {
+                    command.arg("--dangerously-skip-permissions");
+                }
                 if let Some(session_id) = options.session_id.as_deref() {
                     command.arg("-s").arg(session_id);
                 }
@@ -601,6 +604,9 @@ impl AgentManager {
                 }
                 if let Some(variant) = options.variant.as_deref() {
                     command.arg("--variant").arg(variant);
+                }
+                if options.permission_mode.as_deref() == Some("bypass") {
+                    command.arg("--dangerously-skip-permissions");
                 }
                 if let Some(session_id) = options.session_id.as_deref() {
                     command.arg("-s").arg(session_id);
