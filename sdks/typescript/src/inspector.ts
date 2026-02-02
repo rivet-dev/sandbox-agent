@@ -1,5 +1,3 @@
-const INSPECTOR_URL = "https://inspect.sandboxagent.dev";
-
 export interface InspectorUrlOptions {
   /**
    * Base URL of the sandbox-agent server.
@@ -18,15 +16,17 @@ export interface InspectorUrlOptions {
 
 /**
  * Builds a URL to the sandbox-agent inspector UI with the given connection parameters.
+ * The inspector UI is served at /ui/ on the sandbox-agent server.
  */
 export function buildInspectorUrl(options: InspectorUrlOptions): string {
   const normalized = options.baseUrl.replace(/\/+$/, "");
-  const params = new URLSearchParams({ url: normalized });
+  const params = new URLSearchParams();
   if (options.token) {
     params.set("token", options.token);
   }
   if (options.headers && Object.keys(options.headers).length > 0) {
     params.set("headers", JSON.stringify(options.headers));
   }
-  return `${INSPECTOR_URL}?${params.toString()}`;
+  const queryString = params.toString();
+  return `${normalized}/ui/${queryString ? `?${queryString}` : ""}`;
 }

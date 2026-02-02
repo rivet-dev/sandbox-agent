@@ -19,11 +19,10 @@ sandbox-agent server [OPTIONS]
 | `-n, --no-token` | - | Disable authentication (local dev only) |
 | `-H, --host <HOST>` | `127.0.0.1` | Host to bind to |
 | `-p, --port <PORT>` | `2468` | Port to bind to |
-| `-O, --cors-allow-origin <ORIGIN>` | - | Additional CORS origin (repeatable, cumulative with Inspector) |
+| `-O, --cors-allow-origin <ORIGIN>` | - | CORS origin to allow (repeatable) |
 | `-M, --cors-allow-method <METHOD>` | all | CORS allowed method (repeatable) |
 | `-A, --cors-allow-header <HEADER>` | all | CORS allowed header (repeatable) |
 | `-C, --cors-allow-credentials` | - | Enable CORS credentials |
-| `--no-inspector-cors` | - | Disable default Inspector CORS |
 | `--no-telemetry` | - | Disable anonymous telemetry |
 
 ```bash

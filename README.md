@@ -52,7 +52,7 @@ The Sandbox Agent acts as a universal adapter between your client application an
 |-----------|-------------|
 | **Server** | Rust daemon (`sandbox-agent server`) exposing the HTTP + SSE API |
 | **SDK** | TypeScript client with embedded and server modes |
-| **Inspector** | [inspect.sandboxagent.dev](https://inspect.sandboxagent.dev) for browsing sessions and events |
+| **Inspector** | Built-in UI at inspecting sessions and events |
 | **CLI** | `sandbox-agent` (same binary, plus npm wrapper) mirrors the HTTP endpoints |
 
 ## Get Started
@@ -172,7 +172,7 @@ npx sandbox-agent --help
 
 ### Inspector
 
-Debug sessions and events with the [Inspector UI](https://inspect.sandboxagent.dev).
+Debug sessions and events with the built-in Inspector UI (e.g., `http://localhost:2468/ui/`).
 
 ![Sandbox Agent Inspector](./.github/media/inspector.png)
 

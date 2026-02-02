@@ -12,9 +12,9 @@ The Inspector is a web-based GUI for debugging and inspecting Sandbox Agent sess
 
 ## Open the Inspector
 
-Visit [inspect.sandboxagent.dev](https://inspect.sandboxagent.dev) and enter your server URL and token to connect.
+The Inspector UI is served at `/ui/` on your sandbox-agent server. For example, if your server is running at `http://localhost:2468`, open `http://localhost:2468/ui/` in your browser.
 
-You can also generate a pre-filled Inspector URL from the TypeScript SDK:
+You can also generate a pre-filled Inspector URL with authentication from the TypeScript SDK:
 
 ```typescript
 import { buildInspectorUrl } from "sandbox-agent";
@@ -24,7 +24,7 @@ const url = buildInspectorUrl({
   token: process.env.SANDBOX_TOKEN,
 });
 console.log(url);
-// https://inspect.sandboxagent.dev?url=http%3A%2F%2F127.0.0.1%3A2468&token=...
+// http://127.0.0.1:2468/ui/?token=...
 ```
 
 ## Features

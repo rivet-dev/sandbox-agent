@@ -9,47 +9,26 @@ When calling the Sandbox Agent server from a browser, CORS (Cross-Origin Resourc
 
 ## Default Behavior
 
-By default, the server allows CORS requests from the [Inspector](https://inspect.sandboxagent.dev):
+By default, no CORS origins are allowed. You must explicitly specify origins for browser-based applications:
 
 ```bash
-# Inspector CORS is enabled by default
-sandbox-agent server --token "$SANDBOX_TOKEN"
-```
-
-This allows you to use the hosted Inspector to connect to any running Sandbox Agent server without additional configuration.
-
-## Adding Origins
-
-Use `--cors-allow-origin` to allow additional origins. These are **cumulative** with the default Inspector origin:
-
-```bash
-# Allows both Inspector AND localhost:5173
 sandbox-agent server \
   --token "$SANDBOX_TOKEN" \
   --cors-allow-origin "http://localhost:5173"
 ```
+
+<Note>
+The built-in Inspector UI at `/ui/` is served from the same origin as the server, so it does not require CORS configuration.
+</Note>
 
 ## Options
 
 | Flag | Description |
 |------|-------------|
-| `--cors-allow-origin` | Additional origins to allow (cumulative with Inspector) |
+| `--cors-allow-origin` | Origins to allow |
 | `--cors-allow-method` | HTTP methods to allow (defaults to all if not specified) |
 | `--cors-allow-header` | Headers to allow (defaults to all if not specified) |
 | `--cors-allow-credentials` | Allow credentials (cookies, authorization headers) |
-| `--no-inspector-cors` | Disable the default Inspector origin |
-
-## Disabling Inspector CORS
-
-To disable the default Inspector origin and only allow explicitly specified origins:
-
-```bash
-# Only allows localhost:5173, not Inspector
-sandbox-agent server \
-  --token "$SANDBOX_TOKEN" \
-  --no-inspector-cors \
-  --cors-allow-origin "http://localhost:5173"
-```
 
 ## Multiple Origins
 

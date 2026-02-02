@@ -79,10 +79,6 @@ struct ServerArgs {
     #[arg(long = "cors-allow-credentials", short = 'C')]
     cors_allow_credentials: bool,
 
-    /// Disable default CORS for the inspector (https://inspect.sandboxagent.dev)
-    #[arg(long = "no-inspector-cors")]
-    no_inspector_cors: bool,
-
     #[arg(long = "no-telemetry")]
     no_telemetry: bool,
 }
@@ -848,19 +844,11 @@ fn available_providers(credentials: &ExtractedCredentials) -> Vec<String> {
     providers
 }
 
-const INSPECTOR_ORIGIN: &str = "https://inspect.sandboxagent.dev";
-
 fn build_cors_layer(server: &ServerArgs) -> Result<CorsLayer, CliError> {
     let mut cors = CorsLayer::new();
 
-    // Build origins list: inspector by default + any additional origins
+    // Build origins list from provided origins
     let mut origins = Vec::new();
-    if !server.no_inspector_cors {
-        let inspector_origin = INSPECTOR_ORIGIN
-            .parse()
-            .map_err(|_| CliError::InvalidCorsOrigin(INSPECTOR_ORIGIN.to_string()))?;
-        origins.push(inspector_origin);
-    }
     for origin in &server.cors_allow_origin {
         let value = origin
             .parse()

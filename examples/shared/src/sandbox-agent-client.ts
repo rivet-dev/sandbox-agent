@@ -18,8 +18,6 @@ export function ensureUrl(rawUrl: string): string {
   return `https://${rawUrl}`;
 }
 
-const INSPECTOR_URL = "https://inspect.sandboxagent.dev";
-
 export function buildInspectorUrl({
   baseUrl,
   token,
@@ -30,14 +28,15 @@ export function buildInspectorUrl({
   headers?: Record<string, string>;
 }): string {
   const normalized = normalizeBaseUrl(ensureUrl(baseUrl));
-  const params = new URLSearchParams({ url: normalized });
+  const params = new URLSearchParams();
   if (token) {
     params.set("token", token);
   }
   if (headers && Object.keys(headers).length > 0) {
     params.set("headers", JSON.stringify(headers));
   }
-  return `${INSPECTOR_URL}?${params.toString()}`;
+  const queryString = params.toString();
+  return `${normalized}/ui/${queryString ? `?${queryString}` : ""}`;
 }
 
 export function logInspectorUrl({
@@ -432,11 +431,11 @@ export async function runPrompt(options: RunPromptOptions): Promise<void> {
         }
       }
 
-      // Print text deltas
-      if (event.type === "item.delta") {
+      // Print text deltas (only during assistant turn)
+      if (event.type === "item.delta" && isThinking) {
         const delta = (event.data as any)?.delta;
         if (delta) {
-          if (isThinking && !hasStartedOutput) {
+          if (!hasStartedOutput) {
             process.stdout.write("\r\x1b[K"); // Clear line
             hasStartedOutput = true;
           }
