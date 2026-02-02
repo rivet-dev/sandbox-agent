@@ -1,0 +1,189 @@
+---
+title: "Cloudflare"
+description: "Deploy the daemon inside a Cloudflare Sandbox."
+---
+
+## Prerequisites
+
+- Cloudflare account with Workers Paid plan
+- Docker running locally for `wrangler dev`
+- `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` for the coding agents
+
+<Note>
+Cloudflare Sandbox SDK is in beta. See [Sandbox SDK docs](https://developers.cloudflare.com/sandbox/) for details.
+</Note>
+
+## Quick Start
+
+Create a new Sandbox SDK project:
+
+```bash
+npm create cloudflare@latest -- my-sandbox --template=cloudflare/sandbox-sdk/examples/minimal
+cd my-sandbox
+```
+
+## TypeScript Example
+
+```typescript
+import { getSandbox, proxyToSandbox } from "@cloudflare/sandbox";
+export { Sandbox } from "@cloudflare/sandbox";
+
+type Env = {
+  Sandbox: DurableObjectNamespace<Sandbox>;
+  ANTHROPIC_API_KEY?: string;
+  OPENAI_API_KEY?: string;
+};
+
+export default {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    // Proxy requests to exposed ports first
+    const proxyResponse = await proxyToSandbox(request, env);
+    if (proxyResponse) return proxyResponse;
+
+    const { hostname } = new URL(request.url);
+    const sandbox = getSandbox(env.Sandbox, "sandbox-agent");
+
+    // Install sandbox-agent
+    await sandbox.exec(
+      "curl -fsSL https://releases.rivet.dev/sandbox-agent/latest/install.sh | sh"
+    );
+
+    // Install agents
+    await sandbox.exec("sandbox-agent install-agent claude");
+    await sandbox.exec("sandbox-agent install-agent codex");
+
+    // Set environment variables for agents
+    const envVars: Record<string, string> = {};
+    if (env.ANTHROPIC_API_KEY) envVars.ANTHROPIC_API_KEY = env.ANTHROPIC_API_KEY;
+    if (env.OPENAI_API_KEY) envVars.OPENAI_API_KEY = env.OPENAI_API_KEY;
+    await sandbox.setEnvVars(envVars);
+
+    // Start sandbox-agent server as background process
+    await sandbox.startProcess(
+      "sandbox-agent server --no-token --host 0.0.0.0 --port 8000"
+    );
+
+    // Wait for server to start
+    await new Promise((r) => setTimeout(r, 2000));
+
+    // Expose the port with a preview URL
+    const exposed = await sandbox.exposePort(8000, { hostname });
+
+    return Response.json({
+      endpoint: exposed.url,
+      message: "sandbox-agent server is running",
+    });
+  },
+};
+```
+
+## Connect from Client
+
+```typescript
+import { SandboxAgent } from "sandbox-agent";
+
+// Get the endpoint from the Worker
+const { endpoint } = await fetch("http://localhost:8787").then((r) => r.json());
+
+// Connect to sandbox-agent
+const client = await SandboxAgent.connect({ baseUrl: endpoint });
+
+// Wait for server to be ready
+for (let i = 0; i < 30; i++) {
+  try {
+    await client.getHealth();
+    break;
+  } catch {
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+}
+
+// Create a session and start coding
+await client.createSession("my-session", {
+  agent: "claude",
+  permissionMode: "default",
+});
+
+await client.postMessage("my-session", {
+  message: "Summarize this repository",
+});
+
+for await (const event of client.streamEvents("my-session")) {
+  console.log(event.type, event.data);
+}
+```
+
+## Configuration
+
+Update `wrangler.jsonc` to add environment variables:
+
+```jsonc
+{
+  "vars": {
+    "ANTHROPIC_API_KEY": "your-api-key"
+  }
+}
+```
+
+Or use `.dev.vars` for local development:
+
+```bash
+echo "ANTHROPIC_API_KEY=your-api-key" > .dev.vars
+```
+
+<Note>
+The `.dev.vars` file is automatically gitignored and only used during local development with `npm run dev`.
+</Note>
+
+## Local Development
+
+Start the development server:
+
+```bash
+npm run dev
+```
+
+<Note>
+First run builds the Docker container (2-3 minutes). Subsequent runs are much faster.
+</Note>
+
+Test with curl:
+
+```bash
+curl http://localhost:8787
+```
+
+## Production Deployment
+
+For production, preview URLs require a custom domain with wildcard DNS routing.
+
+See [Cloudflare Production Deployment](https://developers.cloudflare.com/sandbox/guides/production-deployment/) for setup instructions.
+
+## Faster Cold Starts
+
+To speed up cold starts, you can:
+
+1. Create a custom Dockerfile with sandbox-agent pre-installed
+2. Pre-install agents in the Docker image
+
+Example `Dockerfile`:
+
+```dockerfile
+FROM docker.io/cloudflare/sandbox:latest
+
+RUN curl -fsSL https://releases.rivet.dev/sandbox-agent/latest/install.sh | sh && \
+    sandbox-agent install-agent claude && \
+    sandbox-agent install-agent codex
+```
+
+Then update `wrangler.jsonc`:
+
+```jsonc
+{
+  "containers": {
+    "sandbox": {
+      "image": "./Dockerfile"
+    }
+  }
+}
+```

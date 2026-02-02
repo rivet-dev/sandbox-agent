@@ -50,6 +50,7 @@
 					"deploy/local",
 					"deploy/e2b",
 					"deploy/vercel",
+					"deploy/cloudflare",
 					"deploy/daytona",
 					"deploy/docker"
 				]
