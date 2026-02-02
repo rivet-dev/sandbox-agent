@@ -118,6 +118,8 @@ function detectAgent(): string {
 }
 
 export async function runPrompt(baseUrl: string): Promise<void> {
+  console.log(`UI: ${buildInspectorUrl({ baseUrl })}`);
+
   const client = await SandboxAgent.connect({ baseUrl });
 
   const agent = detectAgent();

@@ -1,5 +1,5 @@
 import { Daytona, Image } from "@daytonaio/sdk";
-import { logInspectorUrl, runPrompt } from "@sandbox-agent/example-shared";
+import { runPrompt } from "@sandbox-agent/example-shared";
 
 const daytona = new Daytona();
 
@@ -23,7 +23,6 @@ await sandbox.process.executeCommand(
 );
 
 const baseUrl = (await sandbox.getSignedPreviewUrl(3000, 4 * 60 * 60)).url;
-logInspectorUrl({ baseUrl });
 
 const cleanup = async () => {
 	await sandbox.delete(60);
