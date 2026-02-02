@@ -13,7 +13,7 @@ COPY frontend/packages/inspector/package.json ./frontend/packages/inspector/
 COPY sdks/typescript/package.json ./sdks/typescript/
 
 # Install dependencies
-RUN pnpm install --filter @anthropic-ai/sdk-inspector...
+RUN pnpm install --filter @sandbox-agent/inspector...
 
 # Copy SDK source (with pre-generated types from docs/openapi.json)
 COPY docs/openapi.json ./docs/

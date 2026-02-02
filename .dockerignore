@@ -1,0 +1,26 @@
+# Build outputs
+target/
+dist/
+build/
+
+# Dependencies
+node_modules/
+
+# Cache
+.cache/
+.turbo/
+*.tsbuildinfo
+
+# Environment
+.env
+.env.*
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+
+# Git
+.git/
