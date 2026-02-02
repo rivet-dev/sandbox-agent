@@ -1,6 +1,6 @@
 import type { AgentCapabilities } from "sandbox-agent";
 
-export type AgentCapabilitiesView = AgentCapabilities & {
+export type FeatureCoverageView = AgentCapabilities & {
   toolResults?: boolean;
   textMessages?: boolean;
   images?: boolean;
@@ -16,7 +16,7 @@ export type AgentCapabilitiesView = AgentCapabilities & {
   itemStarted?: boolean;
 };
 
-export const emptyCapabilities: AgentCapabilitiesView = {
+export const emptyFeatureCoverage: FeatureCoverageView = {
   planMode: false,
   permissions: false,
   questions: false,

@@ -567,7 +567,7 @@ console.log(`Running on: ${provider.provider} (${provider.confidence} confidence
 Several open-source projects implement cloud detection patterns:
 
 - **cloud-detect** (Python, `pip install cloud-detect`): Detects AWS, GCP, Azure, Alibaba, DigitalOcean, Oracle via filesystem + metadata
-- **cloud-detect-js** (Node, `npm install cloud-detect-js`): JavaScript port with similar capabilities
+- **cloud-detect-js** (Node, `npm install cloud-detect-js`): JavaScript port with similar feature coverage
 - **banzaicloud/satellite** (Go): Uses two-tier detection with sysfs first, then metadata fallback
 - **OpenTelemetry Resource Detectors**: Production-grade detectors across Node.js, Python, Go — use `@opentelemetry/resource-detector-aws`, `@opentelemetry/resource-detector-gcp`, etc.
 
