@@ -126,7 +126,8 @@ pub fn build_router_with_state(shared: Arc<AppState>) -> (Router, Arc<AppState>)
 
     let mut router = Router::new()
         .route("/", get(get_root))
-        .nest("/v1", v1_router);
+        .nest("/v1", v1_router)
+        .fallback(not_found);
 
     if ui::is_enabled() {
         router = router.merge(ui::router());
@@ -3541,10 +3542,19 @@ async fn get_agent_modes(
     Ok(Json(AgentModesResponse { modes }))
 }
 
+const SERVER_INFO: &str = "\
+This is a Sandbox Agent server. Available endpoints:\n\
+  - GET  /           - Server info\n\
+  - GET  /v1/health  - Health check\n\
+  - GET  /ui/        - Inspector UI\n\n\
+See https://sandboxagent.dev for API documentation.";
+
 async fn get_root() -> &'static str {
-    "This is a Sandbox Agent server for orchestrating coding agents.\n\
-     See https://sandboxagent.dev for more information.\n\
-     Visit /ui/ for the inspector UI."
+    SERVER_INFO
+}
+
+async fn not_found() -> (StatusCode, String) {
+    (StatusCode::NOT_FOUND, format!("404 Not Found\n\n{SERVER_INFO}"))
 }
 
 #[utoipa::path(
