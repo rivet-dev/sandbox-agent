@@ -7,7 +7,7 @@
   "containers": [
     {
       "class_name": "Sandbox",
-      "image": "docker.io/cloudflare/sandbox:latest",
+      "image": "docker.io/cloudflare/sandbox:0.7.0",
       "instance_type": "lite",
       "max_instances": 1
     }

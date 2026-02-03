@@ -186,7 +186,7 @@ To speed up cold starts, you can:
 Example `Dockerfile`:
 
 ```dockerfile
-FROM docker.io/cloudflare/sandbox:latest
+FROM docker.io/cloudflare/sandbox:0.7.0
 
 RUN curl -fsSL https://releases.rivet.dev/sandbox-agent/latest/install.sh | sh && \
     sandbox-agent install-agent claude && \
