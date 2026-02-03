@@ -18,6 +18,11 @@ export async function updateVersion(opts: ReleaseOpts) {
 			replace: `[workspace.package]\nversion = "${opts.version}"`,
 		},
 		{
+			path: "sdks/cli-shared/package.json",
+			find: /"version": ".*"/,
+			replace: `"version": "${opts.version}"`,
+		},
+		{
 			path: "sdks/typescript/package.json",
 			find: /"version": ".*"/,
 			replace: `"version": "${opts.version}"`,
