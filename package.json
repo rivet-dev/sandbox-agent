@@ -12,5 +12,16 @@
   "devDependencies": {
     "turbo": "^2.4.0",
     "vitest": "^3.0.0"
-  }
+  },
+  "workspaces": [
+    "frontend/packages/*",
+    "sdks/*",
+    "sdks/cli",
+    "sdks/cli/platforms/*",
+    "resources/agent-schemas",
+    "resources/vercel-ai-sdk-schemas",
+    "scripts/release",
+    "scripts/sandbox-testing",
+    "examples/*"
+  ]
 }

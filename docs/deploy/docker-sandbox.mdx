@@ -1,0 +1,222 @@
+---
+title: "Docker Sandbox"
+description: "Run agents inside Docker Sandbox microVMs for enhanced isolation."
+---
+
+<Warning>
+As of February 2026, Docker Sandbox microVMs are only available on macOS and Windows with Docker Desktop 4.58+. Linux users should use [regular Docker containers](/deploy/docker) or other sandbox providers. See [Docker Sandboxes Architecture](https://docs.docker.com/ai/sandboxes/architecture/) for details.
+</Warning>
+
+## Overview
+
+[Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) provide hypervisor-level isolation using lightweight microVMs. Each sandbox gets its own kernel, private Docker daemon, and isolated network for much stronger isolation than standard containers.
+
+| | Docker Container | Docker Sandbox |
+|--|------------------|----------------|
+| **Security** | Shared kernel (namespaces) | Separate kernel (microVM) |
+| **Untrusted code** | Not safe | Safe |
+| **Port exposure** | Supported (`-p 3000:3000`) | Not supported |
+| **Network access** | Direct HTTP | Via `docker sandbox exec` only |
+| **Volumes** | Direct mount | Bidirectional file sync |
+| **Platform** | Linux, macOS, Windows | macOS, Windows only |
+
+### Why sandbox-agent inside Docker Sandbox?
+
+Running sandbox-agent inside a Docker Sandbox provides:
+
+- **Multiple sessions**: Manage multiple concurrent agent sessions within a single sandbox
+- **Any coding agent**: Run any supported agent (Claude, Codex, OpenCode, Amp) through a unified API
+- **Session persistence**: Sessions persist across interactions without recreating the sandbox
+
+## Prerequisites
+
+- Docker Desktop 4.58 or later
+- macOS or Windows (experimental on Windows)
+- `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` for the coding agents
+
+## Setup
+
+<Steps>
+  <Step title="Create Dockerfile">
+    Create a custom template with sandbox-agent as the main process:
+
+    ```dockerfile
+    # Base template includes Ubuntu, Git, Docker CLI, Node.js, Python, Go
+    FROM docker/sandbox-templates:claude-code
+
+    USER root
+
+    # Install sandbox-agent
+    RUN curl -fsSL https://releases.rivet.dev/sandbox-agent/latest/install.sh | sh
+
+    # Pre-install agents
+    RUN sandbox-agent install-agent claude
+    RUN sandbox-agent install-agent codex
+
+    # Create wrapper: Docker Sandbox runs `claude` but we redirect to sandbox-agent
+    RUN mv /home/agent/.local/bin/claude /home/agent/.local/bin/claude-real \
+      && printf '#!/bin/bash\nexec sandbox-agent server --no-token --host 0.0.0.0\n' \
+         > /home/agent/.local/bin/claude \
+      && chmod +x /home/agent/.local/bin/claude
+
+    USER agent
+    ```
+
+    <Note>
+    Docker Sandbox requires an agent argument (`claude`, `codex`, etc.) and runs that agent as the main process. The wrapper script intercepts the `claude` command and runs sandbox-agent server instead.
+    </Note>
+  </Step>
+
+  <Step title="Build the template">
+    ```bash
+    docker build -t sandbox-agent-template:latest .
+    ```
+  </Step>
+
+  <Step title="Run sandbox">
+    ```bash
+    docker sandbox run \
+      --load-local-template \
+      -t sandbox-agent-template:latest \
+      --name my-sandbox \
+      claude ~/my-project
+    ```
+
+    The sandbox-agent server starts automatically as the main process.
+  </Step>
+
+  <Step title="Interact with the server">
+    In another terminal, use `docker sandbox exec` to interact:
+
+    ```bash
+    # Create a session
+    docker sandbox exec my-sandbox \
+      sandbox-agent api sessions create my-session --agent claude
+
+    # Send a message (pass API key via -e)
+    docker sandbox exec -e ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" my-sandbox \
+      sandbox-agent api sessions send-message my-session \
+      --message "Summarize this repository"
+
+    # Stream events
+    docker sandbox exec my-sandbox \
+      sandbox-agent api sessions events my-session
+    ```
+  </Step>
+
+  <Step title="Clean up">
+    ```bash
+    docker sandbox stop my-sandbox
+    docker sandbox rm my-sandbox
+    ```
+  </Step>
+</Steps>
+
+## TypeScript Example
+
+```typescript
+import { execSync, spawn, spawnSync } from "node:child_process";
+
+const SANDBOX_NAME = "my-agent-sandbox";
+const TEMPLATE = "sandbox-agent-template:latest";
+
+function exec(cmd: string): string {
+  return execSync(cmd, { encoding: "utf-8" }).trim();
+}
+
+function sandboxExec(cmd: string, env?: Record<string, string>): string {
+  const envFlags = env
+    ? Object.entries(env).flatMap(([k, v]) => ["-e", `${k}=${v}`])
+    : [];
+  const args = ["sandbox", "exec", ...envFlags, SANDBOX_NAME, "sh", "-c", cmd];
+  const result = spawnSync("docker", args, { encoding: "utf-8" });
+  return result.stdout?.trim() ?? "";
+}
+
+// Run sandbox with custom template (sandbox-agent starts as main process)
+spawn("docker", [
+  "sandbox", "run",
+  "--load-local-template", "-t", TEMPLATE,
+  "--name", SANDBOX_NAME,
+  "claude", process.cwd()
+], { detached: true, stdio: "ignore" }).unref();
+
+// Wait for server to start
+await new Promise((r) => setTimeout(r, 5000));
+
+// Create a session
+sandboxExec("sandbox-agent api sessions create my-session --agent claude");
+
+// Send a message (pass API key via exec -e flag)
+sandboxExec(
+  "sandbox-agent api sessions send-message my-session --message 'Hello'",
+  { ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY! }
+);
+
+// Get events
+const output = sandboxExec("sandbox-agent api sessions events my-session");
+console.log(output);
+
+// Cleanup
+exec(`docker sandbox stop ${SANDBOX_NAME}`);
+exec(`docker sandbox rm ${SANDBOX_NAME}`);
+```
+
+## Sandbox Commands Reference
+
+```bash
+# List all sandboxes
+docker sandbox ls
+
+# Create a sandbox with custom template
+docker sandbox create --load-local-template -t <image> --name <name> AGENT WORKSPACE
+
+# Run agent interactively (creates sandbox if needed)
+docker sandbox run claude ~/my-project
+
+# Execute command in sandbox
+docker sandbox exec <name> <command>
+
+# Execute with environment variables
+docker sandbox exec -e VAR=value <name> <command>
+
+# Run command in background
+docker sandbox exec -d <name> <command>
+
+# Interactive shell
+docker sandbox exec -it <name> bash
+
+# Save sandbox as template
+docker sandbox save <name> my-template:v1
+
+# Stop sandbox (without removing)
+docker sandbox stop <name>
+
+# Remove sandbox
+docker sandbox rm <name>
+```
+
+### Create Options
+
+| Flag | Description |
+|------|-------------|
+| `--name` | Custom name for the sandbox |
+| `-t, --template <image>` | Use custom Docker image as base |
+| `--load-local-template` | Use image from local Docker daemon |
+| `-q, --quiet` | Suppress verbose output |
+
+### Exec Options
+
+| Flag | Description |
+|------|-------------|
+| `-e VAR=value` | Set environment variable for this command |
+| `-d, --detach` | Run command in background |
+| `-i, --interactive` | Keep STDIN open |
+| `-t, --tty` | Allocate a pseudo-TTY |
+
+## Further Reading
+
+- [Docker Sandboxes Documentation](https://docs.docker.com/ai/sandboxes/)
+- [Docker Sandboxes Templates](https://docs.docker.com/ai/sandboxes/templates/)
+- [Docker Sandboxes Architecture](https://docs.docker.com/ai/sandboxes/architecture/)
+- [Regular Docker Deployment](/deploy/docker) (for HTTP server access)

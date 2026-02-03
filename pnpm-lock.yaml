@@ -102,6 +102,28 @@ importers:
         specifier: ^3.0.0
         version: 3.2.4(@types/debug@4.1.12)(@types/node@25.2.0)(jiti@1.21.7)(tsx@4.21.0)(yaml@2.8.2)
 
+  examples/docker-sandbox:
+    dependencies:
+      '@sandbox-agent/example-shared':
+        specifier: workspace:*
+        version: link:../shared
+      sandbox-agent:
+        specifier: workspace:*
+        version: link:../../sdks/typescript
+    devDependencies:
+      '@types/node':
+        specifier: latest
+        version: 25.2.0
+      tsx:
+        specifier: latest
+        version: 4.21.0
+      typescript:
+        specifier: latest
+        version: 5.9.3
+      vitest:
+        specifier: ^3.0.0
+        version: 3.2.4(@types/debug@4.1.12)(@types/node@25.2.0)(jiti@1.21.7)(tsx@4.21.0)(yaml@2.8.2)
+
   examples/e2b:
     dependencies:
       '@e2b/code-interpreter':
