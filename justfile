@@ -17,6 +17,7 @@ release-build target="x86_64-unknown-linux-musl":
 [group('release')]
 release-build-all:
 	./docker/release/build.sh x86_64-unknown-linux-musl
+	./docker/release/build.sh aarch64-unknown-linux-musl
 	./docker/release/build.sh x86_64-pc-windows-gnu
 	./docker/release/build.sh x86_64-apple-darwin
 	./docker/release/build.sh aarch64-apple-darwin

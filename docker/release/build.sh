@@ -18,6 +18,12 @@ case $TARGET in
     TARGET_STAGE="x86_64-builder"
     BINARY="sandbox-agent-$TARGET"
     ;;
+  aarch64-unknown-linux-musl)
+    echo "Building for Linux aarch64 musl"
+    DOCKERFILE="linux-aarch64.Dockerfile"
+    TARGET_STAGE="aarch64-builder"
+    BINARY="sandbox-agent-$TARGET"
+    ;;
   x86_64-pc-windows-gnu)
     echo "Building for Windows x86_64"
     DOCKERFILE="windows.Dockerfile"

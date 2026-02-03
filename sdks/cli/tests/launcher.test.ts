@@ -38,6 +38,7 @@ describe("CLI Launcher", () => {
         "darwin-arm64": "@sandbox-agent/cli-darwin-arm64",
         "darwin-x64": "@sandbox-agent/cli-darwin-x64",
         "linux-x64": "@sandbox-agent/cli-linux-x64",
+        "linux-arm64": "@sandbox-agent/cli-linux-arm64",
         "win32-x64": "@sandbox-agent/cli-win32-x64",
       };
 
@@ -45,6 +46,7 @@ describe("CLI Launcher", () => {
       expect(PLATFORMS["darwin-arm64"]).toBe("@sandbox-agent/cli-darwin-arm64");
       expect(PLATFORMS["darwin-x64"]).toBe("@sandbox-agent/cli-darwin-x64");
       expect(PLATFORMS["linux-x64"]).toBe("@sandbox-agent/cli-linux-x64");
+      expect(PLATFORMS["linux-arm64"]).toBe("@sandbox-agent/cli-linux-arm64");
       expect(PLATFORMS["win32-x64"]).toBe("@sandbox-agent/cli-win32-x64");
     });
 

@@ -8,7 +8,7 @@ const fs = require("fs");
 const path = require("path");
 
 const TRUST_PACKAGES =
-  "@sandbox-agent/cli-linux-x64 @sandbox-agent/cli-darwin-arm64 @sandbox-agent/cli-darwin-x64 @sandbox-agent/cli-win32-x64";
+  "@sandbox-agent/cli-linux-x64 @sandbox-agent/cli-linux-arm64 @sandbox-agent/cli-darwin-arm64 @sandbox-agent/cli-darwin-x64 @sandbox-agent/cli-win32-x64";
 
 function formatHint(binPath) {
   return formatNonExecutableBinaryMessage({
@@ -37,6 +37,7 @@ const PLATFORMS = {
   "darwin-arm64": "@sandbox-agent/cli-darwin-arm64",
   "darwin-x64": "@sandbox-agent/cli-darwin-x64",
   "linux-x64": "@sandbox-agent/cli-linux-x64",
+  "linux-arm64": "@sandbox-agent/cli-linux-arm64",
   "win32-x64": "@sandbox-agent/cli-win32-x64",
 };
 

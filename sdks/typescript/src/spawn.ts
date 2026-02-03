@@ -29,11 +29,12 @@ const PLATFORM_PACKAGES: Record<string, string> = {
   "darwin-arm64": "@sandbox-agent/cli-darwin-arm64",
   "darwin-x64": "@sandbox-agent/cli-darwin-x64",
   "linux-x64": "@sandbox-agent/cli-linux-x64",
+  "linux-arm64": "@sandbox-agent/cli-linux-arm64",
   "win32-x64": "@sandbox-agent/cli-win32-x64",
 };
 
 const TRUST_PACKAGES =
-  "@sandbox-agent/cli-linux-x64 @sandbox-agent/cli-darwin-arm64 @sandbox-agent/cli-darwin-x64 @sandbox-agent/cli-win32-x64";
+  "@sandbox-agent/cli-linux-x64 @sandbox-agent/cli-linux-arm64 @sandbox-agent/cli-darwin-arm64 @sandbox-agent/cli-darwin-x64 @sandbox-agent/cli-win32-x64";
 
 export function isNodeRuntime(): boolean {
   return typeof process !== "undefined" && !!process.versions?.node;

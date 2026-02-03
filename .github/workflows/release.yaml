@@ -96,6 +96,11 @@ jobs:
             target: x86_64-unknown-linux-musl
             binary_ext: ""
             arch: x86_64
+          - platform: linux
+            runner: depot-ubuntu-24.04-arm-8
+            target: aarch64-unknown-linux-musl
+            binary_ext: ""
+            arch: aarch64
           - platform: windows
             runner: depot-ubuntu-24.04-8
             target: x86_64-pc-windows-gnu

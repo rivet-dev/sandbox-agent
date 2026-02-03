@@ -18,6 +18,7 @@ const CRATES = [
 const CLI_PACKAGES = [
 	"@sandbox-agent/cli",
 	"@sandbox-agent/cli-linux-x64",
+	"@sandbox-agent/cli-linux-arm64",
 	"@sandbox-agent/cli-win32-x64",
 	"@sandbox-agent/cli-darwin-x64",
 	"@sandbox-agent/cli-darwin-arm64",
@@ -26,6 +27,7 @@ const CLI_PACKAGES = [
 // Mapping from npm package name to Rust target and binary extension
 const CLI_PLATFORM_MAP: Record<string, { target: string; binaryExt: string }> = {
 	"@sandbox-agent/cli-linux-x64": { target: "x86_64-unknown-linux-musl", binaryExt: "" },
+	"@sandbox-agent/cli-linux-arm64": { target: "aarch64-unknown-linux-musl", binaryExt: "" },
 	"@sandbox-agent/cli-win32-x64": { target: "x86_64-pc-windows-gnu", binaryExt: ".exe" },
 	"@sandbox-agent/cli-darwin-x64": { target: "x86_64-apple-darwin", binaryExt: "" },
 	"@sandbox-agent/cli-darwin-arm64": { target: "aarch64-apple-darwin", binaryExt: "" },
