@@ -62,7 +62,7 @@ await client.createSession("demo-session", {
 await client.postMessage("demo-session", { message: "Hello" });
 ```
 
-List agents and pick a compatible one:
+List agents and inspect feature coverage (available on `capabilities`):
 
 ```ts
 const agents = await client.listAgents();
@@ -153,7 +153,7 @@ Parameters:
 
 ## Types
 
-The SDK exports OpenAPI-derived types for events, items, and capabilities:
+The SDK exports OpenAPI-derived types for events, items, and feature coverage:
 
 ```ts
 import type { UniversalEvent, UniversalItem, AgentCapabilities } from "sandbox-agent";

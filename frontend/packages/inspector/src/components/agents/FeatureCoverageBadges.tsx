@@ -18,7 +18,7 @@ import {
   Terminal,
   Wrench
 } from "lucide-react";
-import type { AgentCapabilitiesView } from "../../types/agents";
+import type { FeatureCoverageView } from "../../types/agents";
 
 const badges = [
   { key: "planMode", label: "Plan", icon: GitBranch },
@@ -42,14 +42,14 @@ const badges = [
 
 type BadgeItem = (typeof badges)[number];
 
-const getEnabled = (capabilities: AgentCapabilitiesView, key: BadgeItem["key"]) =>
-  Boolean((capabilities as Record<string, boolean | undefined>)[key]);
+const getEnabled = (featureCoverage: FeatureCoverageView, key: BadgeItem["key"]) =>
+  Boolean((featureCoverage as Record<string, boolean | undefined>)[key]);
 
-const CapabilityBadges = ({ capabilities }: { capabilities: AgentCapabilitiesView }) => {
+const FeatureCoverageBadges = ({ featureCoverage }: { featureCoverage: FeatureCoverageView }) => {
   return (
-    <div className="capability-badges">
+    <div className="feature-coverage-badges">
       {badges.map(({ key, label, icon: Icon }) => (
-        <span key={key} className={`capability-badge ${getEnabled(capabilities, key) ? "enabled" : "disabled"}`}>
+        <span key={key} className={`feature-coverage-badge ${getEnabled(featureCoverage, key) ? "enabled" : "disabled"}`}>
           <Icon size={12} />
           <span>{label}</span>
         </span>
@@ -58,4 +58,4 @@ const CapabilityBadges = ({ capabilities }: { capabilities: AgentCapabilitiesVie
   );
 };
 
-export default CapabilityBadges;
+export default FeatureCoverageBadges;

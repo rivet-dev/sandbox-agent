@@ -216,18 +216,6 @@ sandbox-agent credentials extract-env --export
 
 This prints environment variables for your OpenAI/Anthropic/etc API keys to test with Sandbox Agent SDK.
 
-## Integrations
-
-Works with your stack:
-
-| Sandbox Providers | AI Platforms | Infrastructure | Storage |
-|---|---|---|---|
-| [Daytona](https://sandboxagent.dev/docs/deploy/daytona) | Anthropic | Docker | Postgres |
-| [E2B](https://sandboxagent.dev/docs/deploy/e2b) | OpenAI | Fly.io | ClickHouse |
-| [Vercel Sandboxes](https://sandboxagent.dev/docs/deploy) | [AI SDK](https://ai-sdk.dev) | AWS Nitro | [Rivet](https://rivet.dev) |
-
-Want support for another agent or sandbox provider? [Open an issue](https://github.com/rivet-dev/sandbox-agent/issues/new) to request it.
-
 ## FAQ
 
 <details>

@@ -140,7 +140,7 @@ const permissions: PermissionRule[] = [
 
 No documented agent mode concept. Behavior controlled via:
 - `--toolbox` flag for different tool configurations
-- Permission rules for capability restrictions
+- Permission rules for feature coverage restrictions
 
 ### Bypass All Permissions
 

@@ -15,7 +15,7 @@ Place all new tests under `server/packages/**/tests/` (or a package-specific `te
   - Agent management coverage in `agent-management/`
   - Shared server manager coverage in `server-manager/`
   - HTTP endpoint snapshots in `http/` (snapshots in `http/snapshots/`)
-  - Session capability snapshots in `sessions/` (one file per capability, e.g. `session_lifecycle.rs`, `permissions.rs`, `questions.rs`, `reasoning.rs`, `status.rs`; snapshots in `sessions/snapshots/`)
+- Session feature coverage snapshots in `sessions/` (one file per feature, e.g. `session_lifecycle.rs`, `permissions.rs`, `questions.rs`, `reasoning.rs`, `status.rs`; snapshots in `sessions/snapshots/`)
   - UI coverage in `ui/`
   - Shared helpers in `common/`
 - Extracted agent schema roundtrip tests live under `server/packages/extracted-agent-schemas/tests/`
@@ -30,7 +30,7 @@ Session snapshot entrypoint:
 
 Snapshots are written to:
 - `server/packages/sandbox-agent/tests/http/snapshots/` (HTTP endpoint snapshots)
-- `server/packages/sandbox-agent/tests/sessions/snapshots/` (session/capability snapshots)
+- `server/packages/sandbox-agent/tests/sessions/snapshots/` (session/feature coverage snapshots)
 
 ## Agent selection
 
@@ -80,7 +80,7 @@ To keep snapshots deterministic:
   - IDs, timestamps, native IDs
   - text content, tool inputs/outputs, provider-specific metadata
   - `source` and `synthetic` flags (these are implementation details)
-- Scrub `reasoning` and `status` content from session-baseline snapshots to keep the core event skeleton consistent across agents; validate those content types separately in their capability-specific tests.
+- Scrub `reasoning` and `status` content from session-baseline snapshots to keep the core event skeleton consistent across agents; validate those content types separately in their feature-coverage-specific tests.
 - The sandbox-agent is responsible for emitting **synthetic events** so that real agents match the mock sequence exactly.
 - Event streams are truncated after the first assistant or error event.
 - Permission flow snapshots are truncated after the permission request (or first assistant) event.
@@ -110,9 +110,9 @@ cargo test -p sandbox-agent --test http_endpoints
 
 When modifying agent conversion code in `server/packages/universal-agent-schema/src/agents/` or adding/changing properties on the universal schema, update the feature matrix in `README.md` to reflect which agents support which features.
 
-## Capabilities sync
+## Feature coverage sync
 
-When updating agent capabilities (flags or values), keep them in sync across:
+When updating agent feature coverage (flags or values), keep them in sync across:
 - `README.md` (feature matrix / documented support)
 - server Rust implementation (`AgentCapabilities` + `agent_capabilities_for`)
-- frontend capability views/badges (Inspector UI)
+- frontend feature coverage views/badges (Inspector UI)

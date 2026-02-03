@@ -1,7 +1,7 @@
 import { Download, RefreshCw } from "lucide-react";
 import type { AgentInfo, AgentModeInfo } from "sandbox-agent";
-import CapabilityBadges from "../agents/CapabilityBadges";
-import { emptyCapabilities } from "../../types/agents";
+import FeatureCoverageBadges from "../agents/FeatureCoverageBadges";
+import { emptyFeatureCoverage } from "../../types/agents";
 
 const AgentsTab = ({
   agents,
@@ -41,7 +41,7 @@ const AgentsTab = ({
             installed: false,
             version: undefined,
             path: undefined,
-            capabilities: emptyCapabilities
+            capabilities: emptyFeatureCoverage
           }))).map((agent) => (
         <div key={agent.id} className="card">
           <div className="card-header">
@@ -54,8 +54,11 @@ const AgentsTab = ({
             {agent.version ? `v${agent.version}` : "Version unknown"}
             {agent.path && <span className="mono muted" style={{ marginLeft: 8 }}>{agent.path}</span>}
           </div>
+          <div className="card-meta" style={{ marginTop: 8 }}>
+            Feature coverage
+          </div>
           <div style={{ marginTop: 8 }}>
-            <CapabilityBadges capabilities={agent.capabilities ?? emptyCapabilities} />
+            <FeatureCoverageBadges featureCoverage={agent.capabilities ?? emptyFeatureCoverage} />
           </div>
           {modesByAgent[agent.id] && modesByAgent[agent.id].length > 0 && (
             <div className="card-meta" style={{ marginTop: 8 }}>
