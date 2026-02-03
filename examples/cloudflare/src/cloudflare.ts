@@ -7,6 +7,16 @@ type Env = {
   OPENAI_API_KEY?: string;
 };
 
+/** Check if sandbox-agent is already running by probing its health endpoint */
+async function isServerRunning(sandbox: Sandbox): Promise<boolean> {
+  try {
+    const result = await sandbox.exec("curl -sf http://localhost:8000/v1/health");
+    return result.success;
+  } catch {
+    return false;
+  }
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     // Proxy requests to exposed ports first
@@ -16,28 +26,33 @@ export default {
     const { hostname } = new URL(request.url);
     const sandbox = getSandbox(env.Sandbox, "sandbox-agent");
 
-    console.log("Installing sandbox-agent...");
-    await sandbox.exec(
-      "curl -fsSL https://releases.rivet.dev/sandbox-agent/latest/install.sh | sh"
-    );
+    // Check if server is already running to avoid port conflicts
+    const alreadyRunning = await isServerRunning(sandbox);
 
-    console.log("Installing agents...");
-    await sandbox.exec("sandbox-agent install-agent claude");
-    await sandbox.exec("sandbox-agent install-agent codex");
+    if (!alreadyRunning) {
+      console.log("Installing sandbox-agent...");
+      await sandbox.exec(
+        "curl -fsSL https://releases.rivet.dev/sandbox-agent/latest/install.sh | sh"
+      );
 
-    // Set environment variables for agents
-    const envVars: Record<string, string> = {};
-    if (env.ANTHROPIC_API_KEY) envVars.ANTHROPIC_API_KEY = env.ANTHROPIC_API_KEY;
-    if (env.OPENAI_API_KEY) envVars.OPENAI_API_KEY = env.OPENAI_API_KEY;
-    await sandbox.setEnvVars(envVars);
+      console.log("Installing agents...");
+      await sandbox.exec("sandbox-agent install-agent claude");
+      await sandbox.exec("sandbox-agent install-agent codex");
 
-    console.log("Starting sandbox-agent server...");
-    await sandbox.startProcess(
-      "sandbox-agent server --no-token --host 0.0.0.0 --port 8000"
-    );
+      // Set environment variables for agents
+      const envVars: Record<string, string> = {};
+      if (env.ANTHROPIC_API_KEY) envVars.ANTHROPIC_API_KEY = env.ANTHROPIC_API_KEY;
+      if (env.OPENAI_API_KEY) envVars.OPENAI_API_KEY = env.OPENAI_API_KEY;
+      await sandbox.setEnvVars(envVars);
 
-    // Wait for server to start
-    await new Promise((r) => setTimeout(r, 2000));
+      console.log("Starting sandbox-agent server...");
+      await sandbox.startProcess(
+        "sandbox-agent server --no-token --host 0.0.0.0 --port 8000"
+      );
+
+      // Wait for server to start
+      await new Promise((r) => setTimeout(r, 2000));
+    }
 
     // Expose the port with a preview URL
     const exposed = await sandbox.exposePort(8000, { hostname });
@@ -46,7 +61,9 @@ export default {
 
     return Response.json({
       endpoint: exposed.url,
-      message: "sandbox-agent server is running",
+      message: alreadyRunning
+        ? "sandbox-agent server was already running"
+        : "sandbox-agent server started",
     });
   },
 };
