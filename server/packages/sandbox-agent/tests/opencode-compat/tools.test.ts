@@ -37,6 +37,7 @@ describe("OpenCode-compatible Tool + File Actions", () => {
       tool: false,
       file: false,
       edited: false,
+      toolStatuses: [] as string[],
     };
 
     const waiter = new Promise<void>((resolve, reject) => {
@@ -48,6 +49,10 @@ describe("OpenCode-compatible Tool + File Actions", () => {
               const part = event.properties?.part;
               if (part?.type === "tool") {
                 tracker.tool = true;
+                const status = part?.state?.status;
+                if (status && tracker.toolStatuses[tracker.toolStatuses.length - 1] !== status) {
+                  tracker.toolStatuses.push(status);
+                }
               }
               if (part?.type === "file") {
                 tracker.file = true;
@@ -56,7 +61,7 @@ describe("OpenCode-compatible Tool + File Actions", () => {
             if (event.type === "file.edited") {
               tracker.edited = true;
             }
-            if (tracker.tool && tracker.file && tracker.edited) {
+            if (tracker.tool && tracker.file && tracker.edited && tracker.toolStatuses.includes("error")) {
               clearTimeout(timeout);
               resolve();
               break;
@@ -81,5 +86,8 @@ describe("OpenCode-compatible Tool + File Actions", () => {
     expect(tracker.tool).toBe(true);
     expect(tracker.file).toBe(true);
     expect(tracker.edited).toBe(true);
+    expect(tracker.toolStatuses).toContain("pending");
+    expect(tracker.toolStatuses).toContain("running");
+    expect(tracker.toolStatuses).toContain("error");
   });
 });

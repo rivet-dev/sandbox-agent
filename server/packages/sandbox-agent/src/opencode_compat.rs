@@ -23,7 +23,10 @@ use tokio::sync::{broadcast, Mutex};
 use tokio::time::interval;
 use utoipa::{IntoParams, OpenApi, ToSchema};
 
-use crate::router::{AppState, CreateSessionRequest, PermissionReply};
+use crate::router::{
+    AppState, CreateSessionRequest, PermissionReply, SessionFileAction, SessionFileActionKind,
+    ToolCallSnapshot, ToolCallStatus,
+};
 use sandbox_agent_error::SandboxError;
 use sandbox_agent_agent_management::agents::AgentId;
 use sandbox_agent_universal_agent_schema::{
@@ -1275,6 +1278,103 @@ fn tool_input_from_arguments(arguments: Option<&str>) -> Value {
     json!({ "arguments": arguments })
 }
 
+fn file_action_path(action: &SessionFileAction) -> &str {
+    action
+        .destination
+        .as_deref()
+        .unwrap_or_else(|| action.path.as_str())
+}
+
+fn file_action_mime(action: &SessionFileAction) -> &'static str {
+    if matches!(action.action, SessionFileActionKind::Patch) || action.diff.is_some() {
+        "text/x-diff"
+    } else {
+        "text/plain"
+    }
+}
+
+fn file_actions_to_parts(
+    session_id: &str,
+    message_id: &str,
+    actions: &[SessionFileAction],
+) -> Vec<Value> {
+    actions
+        .iter()
+        .map(|action| {
+            let path = file_action_path(action);
+            build_file_part_from_path(
+                session_id,
+                message_id,
+                path,
+                file_action_mime(action),
+                action.diff.as_deref(),
+            )
+        })
+        .collect()
+}
+
+fn file_actions_from_refs(
+    file_refs: &[(String, FileAction, Option<String>)],
+) -> Vec<SessionFileAction> {
+    file_refs
+        .iter()
+        .filter_map(|(path, action, diff)| match action {
+            FileAction::Write => Some(SessionFileAction {
+                path: path.clone(),
+                action: SessionFileActionKind::Write,
+                diff: diff.clone(),
+                destination: None,
+            }),
+            FileAction::Patch => Some(SessionFileAction {
+                path: path.clone(),
+                action: SessionFileActionKind::Patch,
+                diff: diff.clone(),
+                destination: None,
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
+fn tool_state_from_snapshot(
+    snapshot: &ToolCallSnapshot,
+    now: i64,
+    attachments: Vec<Value>,
+) -> Value {
+    let input_value = tool_input_from_arguments(Some(snapshot.arguments.as_str()));
+    let raw_args = snapshot.arguments.clone();
+    let started_at = snapshot.started_at_ms.unwrap_or(now);
+    let completed_at = snapshot.completed_at_ms.unwrap_or(now);
+    match snapshot.status {
+        ToolCallStatus::Pending => json!({
+            "status": "pending",
+            "input": input_value,
+            "raw": raw_args,
+        }),
+        ToolCallStatus::Running => json!({
+            "status": "running",
+            "input": input_value,
+            "time": {"start": started_at},
+        }),
+        ToolCallStatus::Completed => json!({
+            "status": "completed",
+            "input": input_value,
+            "output": snapshot.output.clone().unwrap_or_default(),
+            "title": "Tool result",
+            "metadata": {},
+            "time": {"start": started_at, "end": completed_at},
+            "attachments": attachments,
+        }),
+        ToolCallStatus::Error => json!({
+            "status": "error",
+            "input": input_value,
+            "error": snapshot.output.clone().unwrap_or_else(|| "Tool failed".to_string()),
+            "metadata": {},
+            "time": {"start": started_at, "end": completed_at},
+        }),
+    }
+}
+
 fn patterns_from_metadata(metadata: &Option<Value>) -> Vec<String> {
     let mut patterns = Vec::new();
     let Some(metadata) = metadata else {
@@ -1747,10 +1847,27 @@ async fn apply_tool_item_event(
     item: UniversalItem,
 ) {
     let session_id = event.session_id.clone();
-    let tool_info = extract_tool_content(&item.content);
-    let call_id = match tool_info.call_id.clone() {
-        Some(call_id) => call_id,
-        None => return,
+    let tool_snapshot = state
+        .inner
+        .session_manager()
+        .tool_call_snapshot_for_item(
+            &session_id,
+            &item.item_id,
+            item.native_item_id.as_deref(),
+        )
+        .await;
+    let fallback_info = if tool_snapshot.is_none() {
+        extract_tool_content(&item.content)
+    } else {
+        ToolContentInfo::default()
+    };
+    let call_id = tool_snapshot
+        .as_ref()
+        .map(|snapshot| snapshot.call_id.clone())
+        .or_else(|| fallback_info.call_id.clone())
+        .or_else(|| item.native_item_id.clone());
+    let Some(call_id) = call_id else {
+        return;
     };
 
     let item_id_key = if item.item_id.is_empty() {
@@ -1845,22 +1962,26 @@ async fn apply_tool_item_event(
         .opencode
         .emit_event(message_event("message.updated", &info));
 
+    let file_actions = tool_snapshot
+        .as_ref()
+        .map(|snapshot| snapshot.file_actions.clone())
+        .unwrap_or_else(|| file_actions_from_refs(&fallback_info.file_refs));
     let mut attachments = Vec::new();
     if item.kind == ItemKind::ToolResult && event.event_type == UniversalEventType::ItemCompleted {
-        for (path, action, diff) in tool_info.file_refs.iter() {
-            let mime = match action {
-                FileAction::Patch => "text/x-diff",
-                _ => "text/plain",
-            };
-            let part =
-                build_file_part_from_path(&session_id, &message_id, path, mime, diff.as_deref());
+        let parts = file_actions_to_parts(&session_id, &message_id, &file_actions);
+        for part in parts {
+            let path = part
+                .get("filename")
+                .and_then(|value| value.as_str())
+                .unwrap_or("")
+                .to_string();
             upsert_message_part(&state.opencode, &session_id, &message_id, part.clone()).await;
             state
                 .opencode
                 .emit_event(part_event("message.part.updated", &part));
             attachments.push(part.clone());
-            if matches!(action, FileAction::Write | FileAction::Patch) {
-                emit_file_edited(&state.opencode, path);
+            if !path.is_empty() {
+                emit_file_edited(&state.opencode, &path);
             }
         }
     }
@@ -1870,67 +1991,78 @@ async fn apply_tool_item_event(
         .get(&call_id)
         .cloned()
         .unwrap_or_else(|| next_id("part_", &PART_COUNTER));
-    let tool_name = tool_info
-        .tool_name
-        .clone()
+    let tool_name = tool_snapshot
+        .as_ref()
+        .and_then(|snapshot| snapshot.name.clone())
+        .or_else(|| fallback_info.tool_name.clone())
         .unwrap_or_else(|| "tool".to_string());
-    let input_value = tool_input_from_arguments(tool_info.arguments.as_deref());
-    let raw_args = tool_info.arguments.clone().unwrap_or_default();
-    let output_value = tool_info
-        .output
-        .clone()
+    let arguments = tool_snapshot
+        .as_ref()
+        .map(|snapshot| snapshot.arguments.clone())
+        .or_else(|| fallback_info.arguments.clone())
+        .unwrap_or_default();
+    let input_value = tool_input_from_arguments(Some(arguments.as_str()));
+    let raw_args = arguments.clone();
+    let output_value = tool_snapshot
+        .as_ref()
+        .and_then(|snapshot| snapshot.output.clone())
+        .or_else(|| fallback_info.output.clone())
         .or_else(|| extract_text_from_content(&item.content));
 
-    let state_value = match event.event_type {
-        UniversalEventType::ItemStarted => {
-            if item.kind == ItemKind::ToolResult {
-                json!({
-                    "status": "running",
-                    "input": input_value,
-                    "time": {"start": now}
-                })
-            } else {
-                json!({
-                    "status": "pending",
-                    "input": input_value,
-                    "raw": raw_args,
-                })
-            }
-        }
-        UniversalEventType::ItemCompleted => {
-            if item.kind == ItemKind::ToolResult {
-                if matches!(item.status, ItemStatus::Failed) {
+    let state_value = if let Some(snapshot) = tool_snapshot.as_ref() {
+        tool_state_from_snapshot(snapshot, now, attachments.clone())
+    } else {
+        match event.event_type {
+            UniversalEventType::ItemStarted => {
+                if item.kind == ItemKind::ToolResult {
                     json!({
-                        "status": "error",
+                        "status": "running",
                         "input": input_value,
-                        "error": output_value.unwrap_or_else(|| "Tool failed".to_string()),
-                        "metadata": {},
-                        "time": {"start": now, "end": now},
+                        "time": {"start": now}
                     })
                 } else {
                     json!({
-                        "status": "completed",
+                        "status": "pending",
                         "input": input_value,
-                        "output": output_value.unwrap_or_default(),
-                        "title": "Tool result",
-                        "metadata": {},
-                        "time": {"start": now, "end": now},
-                        "attachments": attachments,
+                        "raw": raw_args,
                     })
                 }
-            } else {
-                json!({
-                    "status": "running",
-                    "input": input_value,
-                    "time": {"start": now},
-                })
             }
+            UniversalEventType::ItemCompleted => {
+                if item.kind == ItemKind::ToolResult {
+                    if matches!(item.status, ItemStatus::Failed) {
+                        json!({
+                            "status": "error",
+                            "input": input_value,
+                            "error": output_value.unwrap_or_else(|| "Tool failed".to_string()),
+                            "metadata": {},
+                            "time": {"start": now, "end": now},
+                        })
+                    } else {
+                        json!({
+                            "status": "completed",
+                            "input": input_value,
+                            "output": output_value.unwrap_or_default(),
+                            "title": "Tool result",
+                            "metadata": {},
+                            "time": {"start": now, "end": now},
+                            "attachments": attachments,
+                        })
+                    }
+                } else {
+                    json!({
+                        "status": "running",
+                        "input": input_value,
+                        "time": {"start": now},
+                    })
+                }
+            }
+            _ => json!({
+                "status": "pending",
+                "input": input_value,
+                "raw": raw_args,
+            }),
         }
-        _ => json!({
-            "status": "pending",
-            "input": input_value,
-            "raw": raw_args,
-        }),
     };
 
     let tool_part = build_tool_part(
@@ -1978,6 +2110,73 @@ async fn apply_item_delta(
             .map(|value| value.starts_with("user_"))
             .unwrap_or(false);
     if is_user_delta {
+        return;
+    }
+    let tool_snapshot = state
+        .inner
+        .session_manager()
+        .tool_call_snapshot_for_item(
+            &session_id,
+            item_id_key.as_deref().unwrap_or(""),
+            native_id_key.as_deref(),
+        )
+        .await;
+    if let Some(snapshot) = tool_snapshot {
+        let runtime = state
+            .opencode
+            .update_runtime(&session_id, |_| {})
+            .await;
+        let message_id = runtime
+            .tool_message_by_call
+            .get(&snapshot.call_id)
+            .cloned()
+            .or_else(|| {
+                item_id_key
+                    .as_ref()
+                    .and_then(|key| runtime.message_id_for_item.get(key).cloned())
+            })
+            .or_else(|| {
+                native_id_key
+                    .as_ref()
+                    .and_then(|key| runtime.message_id_for_item.get(key).cloned())
+            });
+        let Some(message_id) = message_id else {
+            return;
+        };
+        let now = state.opencode.now_ms();
+        let part_id = runtime
+            .tool_part_by_call
+            .get(&snapshot.call_id)
+            .cloned()
+            .unwrap_or_else(|| next_id("part_", &PART_COUNTER));
+        let tool_name = snapshot
+            .name
+            .clone()
+            .unwrap_or_else(|| "tool".to_string());
+        let state_value = tool_state_from_snapshot(&snapshot, now, Vec::new());
+        let tool_part = build_tool_part(
+            &session_id,
+            &message_id,
+            &part_id,
+            &snapshot.call_id,
+            &tool_name,
+            state_value,
+        );
+        upsert_message_part(&state.opencode, &session_id, &message_id, tool_part.clone()).await;
+        state
+            .opencode
+            .emit_event(part_event("message.part.updated", &tool_part));
+        let _ = state
+            .opencode
+            .update_runtime(&session_id, |runtime| {
+                runtime
+                    .tool_part_by_call
+                    .insert(snapshot.call_id.clone(), part_id);
+                runtime
+                    .tool_message_by_call
+                    .insert(snapshot.call_id.clone(), message_id.clone());
+            })
+            .await;
         return;
     }
     let mut message_id: Option<String> = None;

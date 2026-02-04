@@ -336,6 +336,9 @@ struct SessionState {
     item_started: HashSet<String>,
     item_delta_seen: HashSet<String>,
     item_map: HashMap<String, String>,
+    tool_calls: HashMap<String, ToolCallRecord>,
+    tool_call_by_item: HashMap<String, String>,
+    tool_item_kind: HashMap<String, ItemKind>,
     mock_sequence: u64,
     broadcaster: broadcast::Sender<UniversalEvent>,
     opencode_stream_started: bool,
@@ -358,6 +361,141 @@ struct PendingPermission {
 struct PendingQuestion {
     prompt: String,
     options: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ToolCallStatus {
+    Pending,
+    Running,
+    Completed,
+    Error,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SessionFileActionKind {
+    Write,
+    Patch,
+    Rename,
+    Delete,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct SessionFileAction {
+    pub path: String,
+    pub action: SessionFileActionKind,
+    pub diff: Option<String>,
+    pub destination: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ToolCallSnapshot {
+    pub call_id: String,
+    pub name: Option<String>,
+    pub arguments: String,
+    pub output: Option<String>,
+    pub status: ToolCallStatus,
+    pub started_at_ms: Option<i64>,
+    pub completed_at_ms: Option<i64>,
+    pub file_actions: Vec<SessionFileAction>,
+}
+
+#[derive(Debug, Clone)]
+struct ToolCallRecord {
+    call_id: String,
+    name: Option<String>,
+    arguments: Option<String>,
+    arguments_delta: String,
+    output: Option<String>,
+    output_delta: String,
+    status: ToolCallStatus,
+    started_at_ms: Option<i64>,
+    completed_at_ms: Option<i64>,
+    file_actions: Vec<SessionFileAction>,
+}
+
+impl ToolCallRecord {
+    fn new(call_id: String) -> Self {
+        Self {
+            call_id,
+            name: None,
+            arguments: None,
+            arguments_delta: String::new(),
+            output: None,
+            output_delta: String::new(),
+            status: ToolCallStatus::Pending,
+            started_at_ms: None,
+            completed_at_ms: None,
+            file_actions: Vec::new(),
+        }
+    }
+
+    fn arguments_value(&self) -> String {
+        self.arguments
+            .clone()
+            .unwrap_or_else(|| self.arguments_delta.clone())
+    }
+
+    fn output_value(&self) -> Option<String> {
+        if let Some(output) = self.output.clone() {
+            Some(output)
+        } else if self.output_delta.is_empty() {
+            None
+        } else {
+            Some(self.output_delta.clone())
+        }
+    }
+
+    fn snapshot(&self) -> ToolCallSnapshot {
+        ToolCallSnapshot {
+            call_id: self.call_id.clone(),
+            name: self.name.clone(),
+            arguments: self.arguments_value(),
+            output: self.output_value(),
+            status: self.status,
+            started_at_ms: self.started_at_ms,
+            completed_at_ms: self.completed_at_ms,
+            file_actions: self.file_actions.clone(),
+        }
+    }
+
+    fn mark_status(&mut self, status: ToolCallStatus, now_ms: i64) {
+        if matches!(status, ToolCallStatus::Pending | ToolCallStatus::Running) {
+            if self.started_at_ms.is_none() {
+                self.started_at_ms = Some(now_ms);
+            }
+        }
+        if matches!(status, ToolCallStatus::Completed | ToolCallStatus::Error) {
+            if self.completed_at_ms.is_none() {
+                self.completed_at_ms = Some(now_ms);
+            }
+        }
+        self.status = status;
+    }
+
+    fn apply_delta(&mut self, kind: Option<ItemKind>, delta: &str) {
+        match kind {
+            Some(ItemKind::ToolCall) => {
+                self.arguments_delta.push_str(delta);
+            }
+            Some(ItemKind::ToolResult) => {
+                self.output_delta.push_str(delta);
+            }
+            _ => {}
+        }
+    }
+
+    fn add_file_actions(&mut self, actions: Vec<SessionFileAction>) {
+        for action in actions {
+            if !self.file_actions.iter().any(|existing| {
+                existing.path == action.path
+                    && existing.action == action.action
+                    && existing.destination == action.destination
+                    && existing.diff == action.diff
+            }) {
+                self.file_actions.push(action);
+            }
+        }
+    }
 }
 
 impl SessionState {
@@ -394,6 +532,9 @@ impl SessionState {
             item_started: HashSet::new(),
             item_delta_seen: HashSet::new(),
             item_map: HashMap::new(),
+            tool_calls: HashMap::new(),
+            tool_call_by_item: HashMap::new(),
+            tool_item_kind: HashMap::new(),
             mock_sequence: 0,
             broadcaster,
             opencode_stream_started: false,
@@ -620,6 +761,7 @@ impl SessionState {
 
         self.update_pending(&event);
         self.update_item_tracking(&event);
+        self.update_tool_tracking(&event);
         self.events.push(event.clone());
         let _ = self.broadcaster.send(event.clone());
         if self.native_session_id.is_none() {
@@ -687,6 +829,132 @@ impl SessionState {
             }
             _ => {}
         }
+    }
+
+    fn update_tool_tracking(&mut self, event: &UniversalEvent) {
+        match event.event_type {
+            UniversalEventType::ItemStarted | UniversalEventType::ItemCompleted => {
+                let UniversalEventData::Item(data) = &event.data else {
+                    return;
+                };
+                let item = &data.item;
+                if !matches!(item.kind, ItemKind::ToolCall | ItemKind::ToolResult) {
+                    return;
+                }
+                let tool_info = tool_tracking_info_from_parts(&item.content);
+                let call_id = tool_info
+                    .call_id
+                    .clone()
+                    .or_else(|| item.native_item_id.clone())
+                    .or_else(|| {
+                        if item.item_id.is_empty() {
+                            None
+                        } else {
+                            Some(item.item_id.clone())
+                        }
+                    });
+                let Some(call_id) = call_id else {
+                    return;
+                };
+
+                let record = self
+                    .tool_calls
+                    .entry(call_id.clone())
+                    .or_insert_with(|| ToolCallRecord::new(call_id.clone()));
+                if let Some(name) = tool_info.tool_name {
+                    record.name = Some(name);
+                }
+                if let Some(arguments) = tool_info.arguments {
+                    if !arguments.is_empty() {
+                        record.arguments = Some(arguments);
+                    }
+                }
+                if let Some(output) = tool_info.output {
+                    if !output.is_empty() {
+                        record.output = Some(output);
+                    }
+                }
+                if event.event_type == UniversalEventType::ItemCompleted
+                    && item.kind == ItemKind::ToolResult
+                {
+                    record.add_file_actions(tool_info.file_actions);
+                }
+
+                let now_ms = now_epoch_ms();
+                match item.kind {
+                    ItemKind::ToolCall => {
+                        if event.event_type == UniversalEventType::ItemStarted {
+                            record.mark_status(ToolCallStatus::Pending, now_ms);
+                        } else {
+                            record.mark_status(ToolCallStatus::Running, now_ms);
+                        }
+                    }
+                    ItemKind::ToolResult => {
+                        if event.event_type == UniversalEventType::ItemStarted {
+                            record.mark_status(ToolCallStatus::Running, now_ms);
+                        } else if matches!(item.status, ItemStatus::Failed) {
+                            record.mark_status(ToolCallStatus::Error, now_ms);
+                        } else {
+                            record.mark_status(ToolCallStatus::Completed, now_ms);
+                        }
+                    }
+                    _ => {}
+                }
+
+                if !item.item_id.is_empty() {
+                    self.tool_call_by_item
+                        .insert(item.item_id.clone(), call_id.clone());
+                    self.tool_item_kind
+                        .insert(item.item_id.clone(), item.kind.clone());
+                }
+                if let Some(native) = &item.native_item_id {
+                    self.tool_call_by_item
+                        .insert(native.clone(), call_id.clone());
+                    self.tool_item_kind
+                        .insert(native.clone(), item.kind.clone());
+                }
+            }
+            UniversalEventType::ItemDelta => {
+                let UniversalEventData::ItemDelta(data) = &event.data else {
+                    return;
+                };
+                let item_key = if !data.item_id.is_empty() {
+                    Some(data.item_id.clone())
+                } else {
+                    data.native_item_id.clone()
+                };
+                let Some(item_key) = item_key else {
+                    return;
+                };
+                let Some(call_id) = self.tool_call_by_item.get(&item_key).cloned() else {
+                    return;
+                };
+                let kind = self.tool_item_kind.get(&item_key).cloned();
+                let record = self
+                    .tool_calls
+                    .entry(call_id.clone())
+                    .or_insert_with(|| ToolCallRecord::new(call_id.clone()));
+                record.apply_delta(kind, &data.delta);
+            }
+            _ => {}
+        }
+    }
+
+    fn tool_call_snapshot_for_item(
+        &self,
+        item_id: &str,
+        native_item_id: Option<&str>,
+    ) -> Option<ToolCallSnapshot> {
+        let call_id = if !item_id.is_empty() {
+            self.tool_call_by_item.get(item_id).cloned()
+        } else {
+            None
+        }
+        .or_else(|| native_item_id.and_then(|id| self.tool_call_by_item.get(id).cloned()));
+        let Some(call_id) = call_id else {
+            return None;
+        };
+        self.tool_calls.get(&call_id).map(|record| record.snapshot())
     }
 
     fn take_question(&mut self, question_id: &str) -> Option<PendingQuestion> {
@@ -2593,6 +2861,17 @@ impl SessionManager {
             }
         })?;
         Ok(session.record_conversions(conversions))
+    }
+
+    pub(crate) async fn tool_call_snapshot_for_item(
+        &self,
+        session_id: &str,
+        item_id: &str,
+        native_item_id: Option<&str>,
+    ) -> Option<ToolCallSnapshot> {
+        let sessions = self.sessions.lock().await;
+        let session = Self::session_ref(&sessions, session_id)?;
+        session.tool_call_snapshot_for_item(item_id, native_item_id)
     }
 
     async fn parse_claude_line(&self, line: &str, session_id: &str) -> Vec<EventConversion> {
@@ -6353,10 +6632,118 @@ fn agent_unparsed(location: &str, error: &str, raw: Value) -> EventConversion {
     .with_raw(Some(raw))
 }
 
+#[derive(Default)]
+struct ToolTrackingInfo {
+    call_id: Option<String>,
+    tool_name: Option<String>,
+    arguments: Option<String>,
+    output: Option<String>,
+    file_actions: Vec<SessionFileAction>,
+}
+
+fn tool_tracking_info_from_parts(parts: &[ContentPart]) -> ToolTrackingInfo {
+    let mut info = ToolTrackingInfo::default();
+    for part in parts {
+        match part {
+            ContentPart::ToolCall {
+                name,
+                arguments,
+                call_id,
+            } => {
+                info.call_id = Some(call_id.clone());
+                info.tool_name = Some(name.clone());
+                info.arguments = Some(arguments.clone());
+            }
+            ContentPart::ToolResult { call_id, output } => {
+                info.call_id = Some(call_id.clone());
+                info.output = Some(output.clone());
+            }
+            ContentPart::FileRef { path, action, diff } => {
+                let action = match action {
+                    FileAction::Write => Some(SessionFileActionKind::Write),
+                    FileAction::Patch => Some(SessionFileActionKind::Patch),
+                    _ => None,
+                };
+                if let Some(action) = action {
+                    info.file_actions.push(SessionFileAction {
+                        path: path.clone(),
+                        action,
+                        diff: diff.clone(),
+                        destination: None,
+                    });
+                }
+            }
+            ContentPart::Json { json } => {
+                info.file_actions.extend(file_actions_from_json(json));
+            }
+            _ => {}
+        }
+    }
+    info
+}
+
+fn file_actions_from_json(value: &Value) -> Vec<SessionFileAction> {
+    let mut actions = Vec::new();
+    let Some(changes) = value.get("changes").and_then(Value::as_array) else {
+        return actions;
+    };
+    for change in changes {
+        let Some(path) = change.get("path").and_then(Value::as_str) else {
+            continue;
+        };
+        let diff = change
+            .get("diff")
+            .and_then(Value::as_str)
+            .map(|value| value.to_string());
+        let kind_value = change.get("kind");
+        let kind_type = kind_value
+            .and_then(|value| value.get("type"))
+            .and_then(Value::as_str)
+            .or_else(|| kind_value.and_then(Value::as_str));
+        let Some(kind_type) = kind_type else {
+            continue;
+        };
+        let destination = kind_value
+            .and_then(|value| value.get("move_path"))
+            .and_then(Value::as_str)
+            .map(|value| value.to_string());
+        let action = match kind_type {
+            "add" => Some(SessionFileActionKind::Write),
+            "delete" => Some(SessionFileActionKind::Delete),
+            "update" => {
+                if destination.is_some() {
+                    Some(SessionFileActionKind::Rename)
+                } else {
+                    Some(SessionFileActionKind::Patch)
+                }
+            }
+            _ => None,
+        };
+        if let Some(action) = action {
+            actions.push(SessionFileAction {
+                path: path.to_string(),
+                action,
+                diff: diff.clone(),
+                destination,
+            });
+        }
+    }
+    actions
+}
+
 fn now_rfc3339() -> String {
     time::OffsetDateTime::now_utc()
         .format(&time::format_description::well_known::Rfc3339)
         .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
+}
+
+fn now_epoch_ms() -> i64 {
+    let now = time::OffsetDateTime::now_utc();
+    let timestamp = now.unix_timestamp();
+    let nanos = now.nanosecond();
+    timestamp
+        .saturating_mul(1000)
+        .saturating_add(i64::from(nanos / 1_000_000))
 }
 
 struct TurnStreamState {
