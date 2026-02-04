@@ -40,6 +40,7 @@ use utoipa::{Modify, OpenApi, ToSchema};
 
 use crate::agent_server_logs::AgentServerLogs;
 use crate::opencode_compat::{build_opencode_router, OpenCodeAppState};
+use crate::provider_auth::{ProviderAuth, ProviderAuthStore};
 use crate::ui;
 use sandbox_agent_agent_management::agents::{
     AgentError as ManagerError, AgentId, AgentManager, InstallOptions, SpawnOptions, StreamingSpawn,
@@ -818,6 +819,7 @@ pub(crate) struct SessionManager {
     sessions: Mutex<Vec<SessionState>>,
     server_manager: Arc<AgentServerManager>,
     http_client: Client,
+    provider_auth: Arc<ProviderAuthStore>,
 }
 
 /// Shared Codex app-server process that handles multiple sessions via JSON-RPC.
@@ -1538,6 +1540,7 @@ impl SessionManager {
             sessions: Mutex::new(Vec::new()),
             server_manager,
             http_client: Client::new(),
+            provider_auth: Arc::new(ProviderAuthStore::new()),
         }
     }
 
@@ -1560,6 +1563,27 @@ impl SessionManager {
     fn read_agent_stderr(&self, agent: AgentId) -> Option<StderrOutput> {
         let logs = AgentServerLogs::new(self.server_manager.log_base_dir.clone(), agent.as_str());
         logs.read_stderr()
+    }
+
+    pub(crate) async fn set_provider_auth(&self, provider_id: &str, auth: ProviderAuth) {
+        self.provider_auth.set(provider_id, auth).await;
+    }
+
+    pub(crate) async fn remove_provider_auth(&self, provider_id: &str) {
+        self.provider_auth.remove(provider_id).await;
+    }
+
+    pub(crate) async fn resolve_credentials(&self) -> Result<ExtractedCredentials, SandboxError> {
+        let overrides = self.provider_auth.snapshot().await;
+        let credentials = tokio::task::spawn_blocking(move || {
+            let options = CredentialExtractionOptions::new();
+            extract_all_credentials(&options)
+        })
+        .await
+        .map_err(|err| SandboxError::StreamError {
+            message: err.to_string(),
+        })?;
+        Ok(ProviderAuthStore::apply_overrides(credentials, overrides))
     }
 
     pub(crate) async fn create_session(
@@ -1737,15 +1761,7 @@ impl SessionManager {
         } else {
             None
         };
-        let credentials = tokio::task::spawn_blocking(move || {
-            let options = CredentialExtractionOptions::new();
-            extract_all_credentials(&options)
-        })
-        .await
-        .map_err(|err| SandboxError::StreamError {
-            message: err.to_string(),
-        })?;
-
+        let credentials = self.resolve_credentials().await?;
         let spawn_options = build_spawn_options(&session_snapshot, prompt.clone(), credentials);
         let agent_id = session_snapshot.agent;
         let spawn_result =

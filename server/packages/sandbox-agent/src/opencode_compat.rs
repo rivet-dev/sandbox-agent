@@ -24,6 +24,7 @@ use tokio::time::interval;
 use utoipa::{IntoParams, OpenApi, ToSchema};
 
 use crate::router::{AppState, CreateSessionRequest, PermissionReply};
+use crate::provider_auth::{ProviderAuth, ProviderAuthStore};
 use sandbox_agent_error::SandboxError;
 use sandbox_agent_agent_management::agents::AgentId;
 use sandbox_agent_universal_agent_schema::{
@@ -41,6 +42,23 @@ const OPENCODE_PROVIDER_ID: &str = "sandbox-agent";
 const OPENCODE_PROVIDER_NAME: &str = "Sandbox Agent";
 const OPENCODE_DEFAULT_MODEL_ID: &str = "mock";
 const OPENCODE_DEFAULT_AGENT_MODE: &str = "build";
+const PROVIDER_ANTHROPIC: &str = "anthropic";
+const PROVIDER_OPENAI: &str = "openai";
+
+#[derive(Clone, Debug)]
+struct ProviderAuthMethod {
+    kind: &'static str,
+    label: &'static str,
+}
+
+#[derive(Clone, Debug)]
+struct ProviderDefinition {
+    id: &'static str,
+    name: &'static str,
+    env: &'static [&'static str],
+    models: Vec<AgentId>,
+    auth_methods: Vec<ProviderAuthMethod>,
+}
 
 #[derive(Clone, Debug)]
 struct OpenCodeCompatConfig {
@@ -557,6 +575,19 @@ struct PermissionGlobalReplyRequest {
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
+struct ProviderOauthRequest {
+    method: Option<u32>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct ProviderOauthCallbackRequest {
+    method: Option<u32>,
+    code: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
 struct QuestionReplyBody {
     answers: Option<Vec<Vec<String>>>,
 }
@@ -585,6 +616,75 @@ fn available_agent_ids() -> Vec<AgentId> {
     ]
 }
 
+fn provider_registry() -> Vec<ProviderDefinition> {
+    vec![
+        ProviderDefinition {
+            id: OPENCODE_PROVIDER_ID,
+            name: OPENCODE_PROVIDER_NAME,
+            env: &[],
+            models: available_agent_ids(),
+            auth_methods: Vec::new(),
+        },
+        ProviderDefinition {
+            id: PROVIDER_ANTHROPIC,
+            name: "Anthropic",
+            env: &["ANTHROPIC_API_KEY"],
+            models: vec![AgentId::Claude, AgentId::Amp],
+            auth_methods: vec![
+                ProviderAuthMethod {
+                    kind: "api",
+                    label: "API Key",
+                },
+                ProviderAuthMethod {
+                    kind: "oauth",
+                    label: "OAuth",
+                },
+            ],
+        },
+        ProviderDefinition {
+            id: PROVIDER_OPENAI,
+            name: "OpenAI",
+            env: &["OPENAI_API_KEY"],
+            models: vec![AgentId::Codex],
+            auth_methods: vec![ProviderAuthMethod {
+                kind: "api",
+                label: "API Key",
+            }],
+        },
+    ]
+}
+
+fn provider_models_map(models: &[AgentId]) -> Value {
+    let mut map = serde_json::Map::new();
+    for agent in models {
+        map.insert(agent.as_str().to_string(), model_summary_entry(*agent));
+    }
+    Value::Object(map)
+}
+
+fn provider_auth_method_values(methods: &[ProviderAuthMethod]) -> Vec<Value> {
+    methods
+        .iter()
+        .map(|method| {
+            json!({
+                "type": method.kind,
+                "label": method.label,
+            })
+        })
+        .collect()
+}
+
+fn provider_definition(provider_id: &str) -> Option<ProviderDefinition> {
+    provider_registry()
+        .into_iter()
+        .find(|provider| provider.id == provider_id)
+}
+
+fn provider_auth_method(provider_id: &str, method_index: u32) -> Option<ProviderAuthMethod> {
+    provider_definition(provider_id)
+        .and_then(|provider| provider.auth_methods.get(method_index as usize).cloned())
+}
+
 fn default_agent_id() -> AgentId {
     AgentId::Mock
 }
@@ -595,10 +695,37 @@ fn default_agent_mode() -> &'static str {
 
 fn resolve_agent_from_model(provider_id: &str, model_id: &str) -> Option<AgentId> {
     if provider_id == OPENCODE_PROVIDER_ID {
-        AgentId::parse(model_id)
-    } else {
-        None
+        return AgentId::parse(model_id);
     }
+    if provider_id == PROVIDER_ANTHROPIC {
+        if model_id == AgentId::Amp.as_str() {
+            return Some(AgentId::Amp);
+        }
+        return Some(AgentId::Claude);
+    }
+    if provider_id == PROVIDER_OPENAI {
+        return Some(AgentId::Codex);
+    }
+    if provider_id == AgentId::Opencode.as_str() {
+        return Some(AgentId::Opencode);
+    }
+    None
+}
+
+fn default_model_for_provider(provider_id: &str) -> Option<&'static str> {
+    if provider_id == OPENCODE_PROVIDER_ID {
+        return Some(OPENCODE_DEFAULT_MODEL_ID);
+    }
+    if provider_id == PROVIDER_ANTHROPIC {
+        return Some(AgentId::Claude.as_str());
+    }
+    if provider_id == PROVIDER_OPENAI {
+        return Some(AgentId::Codex.as_str());
+    }
+    if provider_id == AgentId::Opencode.as_str() {
+        return Some(AgentId::Opencode.as_str());
+    }
+    None
 }
 
 fn normalize_agent_mode(agent: Option<String>) -> String {
@@ -621,6 +748,12 @@ async fn resolve_session_agent(
         .unwrap_or(OPENCODE_DEFAULT_MODEL_ID)
         .to_string();
     let mut resolved_agent = resolve_agent_from_model(&provider_id, &model_id);
+    if resolved_agent.is_none() {
+        if let Some(default_model) = default_model_for_provider(&provider_id) {
+            model_id = default_model.to_string();
+            resolved_agent = resolve_agent_from_model(&provider_id, &model_id);
+        }
+    }
     if resolved_agent.is_none() {
         provider_id = OPENCODE_PROVIDER_ID.to_string();
         model_id = OPENCODE_DEFAULT_MODEL_ID.to_string();
@@ -3526,24 +3659,47 @@ async fn oc_question_reject(
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_provider_list() -> impl IntoResponse {
-    let mut models = serde_json::Map::new();
-    for agent in available_agent_ids() {
-        models.insert(agent.as_str().to_string(), model_summary_entry(agent));
+async fn oc_provider_list(State(state): State<Arc<OpenCodeAppState>>) -> impl IntoResponse {
+    let credentials = match state.inner.session_manager().resolve_credentials().await {
+        Ok(credentials) => credentials,
+        Err(err) => return sandbox_error_response(err).into_response(),
+    };
+    let mut connected = ProviderAuthStore::connected_providers(&credentials);
+    if !connected.is_empty() && !connected.iter().any(|id| id == OPENCODE_PROVIDER_ID) {
+        connected.push(OPENCODE_PROVIDER_ID.to_string());
     }
+
+    let registry = provider_registry();
+    let mut providers = Vec::new();
+    let mut registry_ids = Vec::new();
+    for provider in &registry {
+        registry_ids.push(provider.id);
+        providers.push(json!({
+            "id": provider.id,
+            "name": provider.name,
+            "env": provider.env,
+            "models": provider_models_map(&provider.models),
+        }));
+    }
+
+    for provider_id in connected.iter() {
+        if registry_ids.iter().any(|id| id == &provider_id.as_str()) {
+            continue;
+        }
+        providers.push(json!({
+            "id": provider_id,
+            "name": provider_id,
+            "env": [],
+            "models": Value::Object(serde_json::Map::new()),
+        }));
+    }
+
     let providers = json!({
-        "all": [
-            {
-                "id": OPENCODE_PROVIDER_ID,
-                "name": OPENCODE_PROVIDER_NAME,
-                "env": [],
-                "models": Value::Object(models),
-            }
-        ],
+        "all": providers,
         "default": {
             OPENCODE_PROVIDER_ID: OPENCODE_DEFAULT_MODEL_ID
         },
-        "connected": [OPENCODE_PROVIDER_ID]
+        "connected": connected,
     });
     (StatusCode::OK, Json(providers))
 }
@@ -3555,10 +3711,14 @@ async fn oc_provider_list() -> impl IntoResponse {
     tag = "opencode"
 )]
 async fn oc_provider_auth() -> impl IntoResponse {
-    let auth = json!({
-        OPENCODE_PROVIDER_ID: []
-    });
-    (StatusCode::OK, Json(auth))
+    let mut map = serde_json::Map::new();
+    for provider in provider_registry() {
+        map.insert(
+            provider.id.to_string(),
+            json!(provider_auth_method_values(&provider.auth_methods)),
+        );
+    }
+    (StatusCode::OK, Json(Value::Object(map)))
 }
 
 
@@ -3566,16 +3726,32 @@ async fn oc_provider_auth() -> impl IntoResponse {
     post,
     path = "/provider/{providerID}/oauth/authorize",
     params(("providerID" = String, Path, description = "Provider ID")),
+    request_body = ProviderOauthRequest,
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_provider_oauth_authorize(Path(provider_id): Path<String>) -> impl IntoResponse {
+async fn oc_provider_oauth_authorize(
+    Path(provider_id): Path<String>,
+    Json(body): Json<ProviderOauthRequest>,
+) -> impl IntoResponse {
+    let provider_id = provider_id.to_ascii_lowercase();
+    let method_index = match body.method {
+        Some(method) => method,
+        None => return bad_request("method is required").into_response(),
+    };
+    let method = match provider_auth_method(&provider_id, method_index) {
+        Some(method) => method,
+        None => return bad_request("invalid auth method").into_response(),
+    };
+    if method.kind != "oauth" {
+        return bad_request("auth method is not oauth").into_response();
+    }
     (
         StatusCode::OK,
         Json(json!({
             "url": format!("https://auth.local/{}/authorize", provider_id),
             "method": "auto",
-            "instructions": "stub",
+            "instructions": "Open the URL to authorize.",
         })),
     )
 }
@@ -3584,10 +3760,35 @@ async fn oc_provider_oauth_authorize(Path(provider_id): Path<String>) -> impl In
     post,
     path = "/provider/{providerID}/oauth/callback",
     params(("providerID" = String, Path, description = "Provider ID")),
+    request_body = ProviderOauthCallbackRequest,
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_provider_oauth_callback(Path(_provider_id): Path<String>) -> impl IntoResponse {
+async fn oc_provider_oauth_callback(
+    State(state): State<Arc<OpenCodeAppState>>,
+    Path(provider_id): Path<String>,
+    Json(body): Json<ProviderOauthCallbackRequest>,
+) -> impl IntoResponse {
+    let provider_id = provider_id.to_ascii_lowercase();
+    let method_index = match body.method {
+        Some(method) => method,
+        None => return bad_request("method is required").into_response(),
+    };
+    let method = match provider_auth_method(&provider_id, method_index) {
+        Some(method) => method,
+        None => return bad_request("invalid auth method").into_response(),
+    };
+    if method.kind != "oauth" {
+        return bad_request("auth method is not oauth").into_response();
+    }
+    let Some(code) = body.code else {
+        return bad_request("code is required").into_response();
+    };
+    state
+        .inner
+        .session_manager()
+        .set_provider_auth(&provider_id, ProviderAuth::OAuth { access: code })
+        .await;
     bool_ok(true)
 }
 
@@ -3599,7 +3800,54 @@ async fn oc_provider_oauth_callback(Path(_provider_id): Path<String>) -> impl In
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_auth_set(Path(_provider_id): Path<String>, Json(_body): Json<Value>) -> impl IntoResponse {
+async fn oc_auth_set(
+    State(state): State<Arc<OpenCodeAppState>>,
+    Path(provider_id): Path<String>,
+    Json(body): Json<Value>,
+) -> impl IntoResponse {
+    let provider_id = provider_id.to_ascii_lowercase();
+    if provider_id.is_empty() {
+        return bad_request("providerID is required").into_response();
+    }
+    let auth_type = body.get("type").and_then(Value::as_str);
+    let auth = match auth_type {
+        Some("api") => body
+            .get("key")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .map(|key| ProviderAuth::Api {
+                key: key.to_string(),
+            }),
+        Some("oauth") => body
+            .get("access")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .map(|access| ProviderAuth::OAuth {
+                access: access.to_string(),
+            }),
+        Some("wellknown") => {
+            let key = body.get("key").and_then(Value::as_str).unwrap_or("");
+            let token = body.get("token").and_then(Value::as_str).unwrap_or("");
+            if key.is_empty() || token.is_empty() {
+                None
+            } else {
+                Some(ProviderAuth::WellKnown {
+                    key: key.to_string(),
+                    token: token.to_string(),
+                })
+            }
+        }
+        _ => None,
+    };
+
+    let Some(auth) = auth else {
+        return bad_request("invalid auth payload").into_response();
+    };
+    state
+        .inner
+        .session_manager()
+        .set_provider_auth(&provider_id, auth)
+        .await;
     bool_ok(true)
 }
 
@@ -3610,7 +3858,15 @@ async fn oc_auth_set(Path(_provider_id): Path<String>, Json(_body): Json<Value>)
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_auth_remove(Path(_provider_id): Path<String>) -> impl IntoResponse {
+async fn oc_auth_remove(
+    State(state): State<Arc<OpenCodeAppState>>,
+    Path(provider_id): Path<String>,
+) -> impl IntoResponse {
+    state
+        .inner
+        .session_manager()
+        .remove_provider_auth(&provider_id)
+        .await;
     bool_ok(true)
 }
 

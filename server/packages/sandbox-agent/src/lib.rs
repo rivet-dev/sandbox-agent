@@ -3,6 +3,7 @@
 mod agent_server_logs;
 pub mod credentials;
 pub mod opencode_compat;
+pub mod provider_auth;
 pub mod router;
 pub mod server_logs;
 pub mod telemetry;
