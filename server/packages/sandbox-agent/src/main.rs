@@ -13,8 +13,9 @@ use reqwest::blocking::Client as HttpClient;
 use reqwest::Method;
 use sandbox_agent::router::{build_router_with_state, shutdown_servers};
 use sandbox_agent::router::{
-    AgentInstallRequest, AppState, AuthConfig, CreateSessionRequest, MessageRequest,
-    PermissionReply, PermissionReplyRequest, QuestionReplyRequest,
+    AgentInstallRequest, AppState, AuthConfig, CreateSessionRequest, McpTunnelConfig,
+    McpTunnelTool, McpTunnelToolResponseRequest, MessageRequest, PermissionReply,
+    PermissionReplyRequest, QuestionReplyRequest,
 };
 use sandbox_agent::router::{
     AgentListResponse, AgentModesResponse, CreateSessionResponse, EventsResponse,
@@ -172,6 +173,9 @@ enum SessionsCommand {
     #[command(name = "reply-permission")]
     /// Reply to a permission request.
     ReplyPermission(PermissionReplyArgs),
+    #[command(name = "reply-mcp-tunnel")]
+    /// Reply to an MCP tunnel tool call.
+    ReplyMcpTunnel(McpTunnelReplyArgs),
 }
 
 #[derive(Args, Debug, Clone)]
@@ -218,6 +222,8 @@ struct CreateSessionArgs {
     variant: Option<String>,
     #[arg(long, short = 'A')]
     agent_version: Option<String>,
+    #[arg(long)]
+    mcp_tunnel_tools: Option<String>,
     #[command(flatten)]
     client: ClientArgs,
 }
@@ -297,6 +303,20 @@ struct PermissionReplyArgs {
     permission_id: String,
     #[arg(long, short = 'r')]
     reply: PermissionReply,
+    #[command(flatten)]
+    client: ClientArgs,
+}
+
+#[derive(Args, Debug)]
+struct McpTunnelReplyArgs {
+    session_id: String,
+    call_id: String,
+    #[arg(long, short = 'o')]
+    output: String,
+    #[arg(long)]
+    is_error: bool,
+    #[arg(long)]
+    content: Option<String>,
     #[command(flatten)]
     client: ClientArgs,
 }
@@ -486,6 +506,12 @@ fn run_sessions(command: &SessionsCommand, cli: &Cli) -> Result<(), CliError> {
         }
         SessionsCommand::Create(args) => {
             let ctx = ClientContext::new(cli, &args.client)?;
+            let mcp_tunnel = if let Some(raw) = args.mcp_tunnel_tools.as_deref() {
+                let tools: Vec<McpTunnelTool> = serde_json::from_str(raw)?;
+                Some(McpTunnelConfig { tools })
+            } else {
+                None
+            };
             let body = CreateSessionRequest {
                 agent: args.agent.clone(),
                 agent_mode: args.agent_mode.clone(),
@@ -493,6 +519,7 @@ fn run_sessions(command: &SessionsCommand, cli: &Cli) -> Result<(), CliError> {
                 model: args.model.clone(),
                 variant: args.variant.clone(),
                 agent_version: args.agent_version.clone(),
+                mcp_tunnel,
             };
             let path = format!("{API_PREFIX}/sessions/{}", args.session_id);
             let response = ctx.post(&path, &body)?;
@@ -600,6 +627,24 @@ fn run_sessions(command: &SessionsCommand, cli: &Cli) -> Result<(), CliError> {
             let path = format!(
                 "{API_PREFIX}/sessions/{}/permissions/{}/reply",
                 args.session_id, args.permission_id
+            );
+            let response = ctx.post(&path, &body)?;
+            print_empty_response(response)
+        }
+        SessionsCommand::ReplyMcpTunnel(args) => {
+            let ctx = ClientContext::new(cli, &args.client)?;
+            let content = match args.content.as_deref() {
+                Some(value) => Some(serde_json::from_str(value)?),
+                None => None,
+            };
+            let body = McpTunnelToolResponseRequest {
+                output: args.output.clone(),
+                is_error: if args.is_error { Some(true) } else { None },
+                content,
+            };
+            let path = format!(
+                "{API_PREFIX}/sessions/{}/mcp-tunnel/calls/{}/response",
+                args.session_id, args.call_id
             );
             let response = ctx.post(&path, &body)?;
             print_empty_response(response)

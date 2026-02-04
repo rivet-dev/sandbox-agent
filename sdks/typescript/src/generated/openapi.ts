@@ -3,644 +3,1029 @@
  * Do not make direct changes to the file.
  */
 
-
 export interface paths {
-  "/v1/agents": {
-    get: operations["list_agents"];
-  };
-  "/v1/agents/{agent}/install": {
-    post: operations["install_agent"];
-  };
-  "/v1/agents/{agent}/modes": {
-    get: operations["get_agent_modes"];
-  };
-  "/v1/health": {
-    get: operations["get_health"];
-  };
-  "/v1/sessions": {
-    get: operations["list_sessions"];
-  };
-  "/v1/sessions/{session_id}": {
-    post: operations["create_session"];
-  };
-  "/v1/sessions/{session_id}/events": {
-    get: operations["get_events"];
-  };
-  "/v1/sessions/{session_id}/events/sse": {
-    get: operations["get_events_sse"];
-  };
-  "/v1/sessions/{session_id}/messages": {
-    post: operations["post_message"];
-  };
-  "/v1/sessions/{session_id}/messages/stream": {
-    post: operations["post_message_stream"];
-  };
-  "/v1/sessions/{session_id}/permissions/{permission_id}/reply": {
-    post: operations["reply_permission"];
-  };
-  "/v1/sessions/{session_id}/questions/{question_id}/reject": {
-    post: operations["reject_question"];
-  };
-  "/v1/sessions/{session_id}/questions/{question_id}/reply": {
-    post: operations["reply_question"];
-  };
-  "/v1/sessions/{session_id}/terminate": {
-    post: operations["terminate_session"];
-  };
+    "/v1/agents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_agents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/agents/{agent}/install": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["install_agent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/agents/{agent}/modes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_agent_modes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_health"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_sessions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/sessions/{session_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["create_session"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/sessions/{session_id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_events"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/sessions/{session_id}/events/sse": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_events_sse"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/sessions/{session_id}/mcp-tunnel/calls/{call_id}/response": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["reply_mcp_tunnel_call"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/sessions/{session_id}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["post_message"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/sessions/{session_id}/messages/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["post_message_stream"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/sessions/{session_id}/permissions/{permission_id}/reply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["reply_permission"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/sessions/{session_id}/questions/{question_id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["reject_question"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/sessions/{session_id}/questions/{question_id}/reply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["reply_question"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/sessions/{session_id}/terminate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["terminate_session"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
-
 export type webhooks = Record<string, never>;
-
 export interface components {
-  schemas: {
-    AgentCapabilities: {
-      commandExecution: boolean;
-      errorEvents: boolean;
-      fileAttachments: boolean;
-      fileChanges: boolean;
-      images: boolean;
-      itemStarted: boolean;
-      mcpTools: boolean;
-      permissions: boolean;
-      planMode: boolean;
-      questions: boolean;
-      reasoning: boolean;
-      sessionLifecycle: boolean;
-      /** @description Whether this agent uses a shared long-running server process (vs per-turn subprocess) */
-      sharedProcess: boolean;
-      status: boolean;
-      streamingDeltas: boolean;
-      textMessages: boolean;
-      toolCalls: boolean;
-      toolResults: boolean;
+    schemas: {
+        AgentCapabilities: {
+            commandExecution: boolean;
+            errorEvents: boolean;
+            fileAttachments: boolean;
+            fileChanges: boolean;
+            images: boolean;
+            itemStarted: boolean;
+            mcpTools: boolean;
+            permissions: boolean;
+            planMode: boolean;
+            questions: boolean;
+            reasoning: boolean;
+            sessionLifecycle: boolean;
+            /** @description Whether this agent uses a shared long-running server process (vs per-turn subprocess) */
+            sharedProcess: boolean;
+            status: boolean;
+            streamingDeltas: boolean;
+            textMessages: boolean;
+            toolCalls: boolean;
+            toolResults: boolean;
+        };
+        AgentError: {
+            agent?: string | null;
+            details?: unknown;
+            message: string;
+            session_id?: string | null;
+            type: components["schemas"]["ErrorType"];
+        };
+        AgentInfo: {
+            capabilities: components["schemas"]["AgentCapabilities"];
+            id: string;
+            installed: boolean;
+            path?: string | null;
+            serverStatus?: components["schemas"]["ServerStatusInfo"] | null;
+            version?: string | null;
+        };
+        AgentInstallRequest: {
+            reinstall?: boolean | null;
+        };
+        AgentListResponse: {
+            agents: components["schemas"]["AgentInfo"][];
+        };
+        AgentModeInfo: {
+            description: string;
+            id: string;
+            name: string;
+        };
+        AgentModesResponse: {
+            modes: components["schemas"]["AgentModeInfo"][];
+        };
+        AgentUnparsedData: {
+            error: string;
+            location: string;
+            raw_hash?: string | null;
+        };
+        ContentPart: {
+            text: string;
+            /** @enum {string} */
+            type: "text";
+        } | {
+            json: unknown;
+            /** @enum {string} */
+            type: "json";
+        } | {
+            arguments: string;
+            call_id: string;
+            name: string;
+            /** @enum {string} */
+            type: "tool_call";
+        } | {
+            call_id: string;
+            output: string;
+            /** @enum {string} */
+            type: "tool_result";
+        } | {
+            action: components["schemas"]["FileAction"];
+            diff?: string | null;
+            path: string;
+            /** @enum {string} */
+            type: "file_ref";
+        } | {
+            text: string;
+            /** @enum {string} */
+            type: "reasoning";
+            visibility: components["schemas"]["ReasoningVisibility"];
+        } | {
+            mime?: string | null;
+            path: string;
+            /** @enum {string} */
+            type: "image";
+        } | {
+            detail?: string | null;
+            label: string;
+            /** @enum {string} */
+            type: "status";
+        };
+        CreateSessionRequest: {
+            agent: string;
+            agentMode?: string | null;
+            agentVersion?: string | null;
+            mcpTunnel?: components["schemas"]["McpTunnelConfig"] | null;
+            model?: string | null;
+            permissionMode?: string | null;
+            variant?: string | null;
+        };
+        CreateSessionResponse: {
+            error?: components["schemas"]["AgentError"] | null;
+            healthy: boolean;
+            nativeSessionId?: string | null;
+        };
+        ErrorData: {
+            code?: string | null;
+            details?: unknown;
+            message: string;
+        };
+        /** @enum {string} */
+        ErrorType: "invalid_request" | "unsupported_agent" | "agent_not_installed" | "install_failed" | "agent_process_exited" | "token_invalid" | "permission_denied" | "session_not_found" | "session_already_exists" | "mode_not_supported" | "stream_error" | "timeout";
+        /** @enum {string} */
+        EventSource: "agent" | "daemon";
+        EventsQuery: {
+            includeRaw?: boolean | null;
+            /** Format: int64 */
+            limit?: number | null;
+            /** Format: int64 */
+            offset?: number | null;
+        };
+        EventsResponse: {
+            events: components["schemas"]["UniversalEvent"][];
+            hasMore: boolean;
+        };
+        /** @enum {string} */
+        FileAction: "read" | "write" | "patch";
+        HealthResponse: {
+            status: string;
+        };
+        ItemDeltaData: {
+            delta: string;
+            item_id: string;
+            native_item_id?: string | null;
+        };
+        ItemEventData: {
+            item: components["schemas"]["UniversalItem"];
+        };
+        /** @enum {string} */
+        ItemKind: "message" | "tool_call" | "tool_result" | "system" | "status" | "unknown";
+        /** @enum {string} */
+        ItemRole: "user" | "assistant" | "system" | "tool";
+        /** @enum {string} */
+        ItemStatus: "in_progress" | "completed" | "failed";
+        McpTunnelConfig: {
+            tools: components["schemas"]["McpTunnelTool"][];
+        };
+        McpTunnelTool: {
+            description?: string | null;
+            inputSchema?: unknown;
+            name: string;
+        };
+        McpTunnelToolResponseRequest: {
+            content?: unknown;
+            isError?: boolean | null;
+            output: string;
+        };
+        MessageRequest: {
+            message: string;
+        };
+        PermissionEventData: {
+            action: string;
+            metadata?: unknown;
+            permission_id: string;
+            status: components["schemas"]["PermissionStatus"];
+        };
+        /** @enum {string} */
+        PermissionReply: "once" | "always" | "reject";
+        PermissionReplyRequest: {
+            reply: components["schemas"]["PermissionReply"];
+        };
+        /** @enum {string} */
+        PermissionStatus: "requested" | "approved" | "denied";
+        ProblemDetails: {
+            detail?: string | null;
+            instance?: string | null;
+            /** Format: int32 */
+            status: number;
+            title: string;
+            type: string;
+        } & {
+            [key: string]: unknown;
+        };
+        QuestionEventData: {
+            options: string[];
+            prompt: string;
+            question_id: string;
+            response?: string | null;
+            status: components["schemas"]["QuestionStatus"];
+        };
+        QuestionReplyRequest: {
+            answers: string[][];
+        };
+        /** @enum {string} */
+        QuestionStatus: "requested" | "answered" | "rejected";
+        /** @enum {string} */
+        ReasoningVisibility: "public" | "private";
+        /**
+         * @description Status of a shared server process for an agent
+         * @enum {string}
+         */
+        ServerStatus: "running" | "stopped" | "error";
+        ServerStatusInfo: {
+            baseUrl?: string | null;
+            lastError?: string | null;
+            /** Format: int64 */
+            restartCount: number;
+            status: components["schemas"]["ServerStatus"];
+            /** Format: int64 */
+            uptimeMs?: number | null;
+        };
+        /** @enum {string} */
+        SessionEndReason: "completed" | "error" | "terminated";
+        SessionEndedData: {
+            /**
+             * Format: int32
+             * @description Process exit code when reason is Error
+             */
+            exit_code?: number | null;
+            /** @description Error message when reason is Error */
+            message?: string | null;
+            reason: components["schemas"]["SessionEndReason"];
+            stderr?: components["schemas"]["StderrOutput"] | null;
+            terminated_by: components["schemas"]["TerminatedBy"];
+        };
+        SessionInfo: {
+            agent: string;
+            agentMode: string;
+            ended: boolean;
+            /** Format: int64 */
+            eventCount: number;
+            model?: string | null;
+            nativeSessionId?: string | null;
+            permissionMode: string;
+            sessionId: string;
+            variant?: string | null;
+        };
+        SessionListResponse: {
+            sessions: components["schemas"]["SessionInfo"][];
+        };
+        SessionStartedData: {
+            metadata?: unknown;
+        };
+        StderrOutput: {
+            /** @description First N lines of stderr (if truncated) or full stderr (if not truncated) */
+            head?: string | null;
+            /** @description Last N lines of stderr (only present if truncated) */
+            tail?: string | null;
+            /** @description Total number of lines in stderr */
+            total_lines?: number | null;
+            /** @description Whether the output was truncated */
+            truncated: boolean;
+        };
+        /** @enum {string} */
+        TerminatedBy: "agent" | "daemon";
+        TurnStreamQuery: {
+            includeRaw?: boolean | null;
+        };
+        UniversalEvent: {
+            data: components["schemas"]["UniversalEventData"];
+            event_id: string;
+            native_session_id?: string | null;
+            raw?: unknown;
+            /** Format: int64 */
+            sequence: number;
+            session_id: string;
+            source: components["schemas"]["EventSource"];
+            synthetic: boolean;
+            time: string;
+            type: components["schemas"]["UniversalEventType"];
+        };
+        UniversalEventData: components["schemas"]["SessionStartedData"] | components["schemas"]["SessionEndedData"] | components["schemas"]["ItemEventData"] | components["schemas"]["ItemDeltaData"] | components["schemas"]["ErrorData"] | components["schemas"]["PermissionEventData"] | components["schemas"]["QuestionEventData"] | components["schemas"]["AgentUnparsedData"];
+        /** @enum {string} */
+        UniversalEventType: "session.started" | "session.ended" | "item.started" | "item.delta" | "item.completed" | "error" | "permission.requested" | "permission.resolved" | "question.requested" | "question.resolved" | "agent.unparsed";
+        UniversalItem: {
+            content: components["schemas"]["ContentPart"][];
+            item_id: string;
+            kind: components["schemas"]["ItemKind"];
+            native_item_id?: string | null;
+            parent_id?: string | null;
+            role?: components["schemas"]["ItemRole"] | null;
+            status: components["schemas"]["ItemStatus"];
+        };
     };
-    AgentError: {
-      agent?: string | null;
-      details?: unknown;
-      message: string;
-      session_id?: string | null;
-      type: components["schemas"]["ErrorType"];
-    };
-    AgentInfo: {
-      capabilities: components["schemas"]["AgentCapabilities"];
-      id: string;
-      installed: boolean;
-      path?: string | null;
-      serverStatus?: components["schemas"]["ServerStatusInfo"] | null;
-      version?: string | null;
-    };
-    AgentInstallRequest: {
-      reinstall?: boolean | null;
-    };
-    AgentListResponse: {
-      agents: components["schemas"]["AgentInfo"][];
-    };
-    AgentModeInfo: {
-      description: string;
-      id: string;
-      name: string;
-    };
-    AgentModesResponse: {
-      modes: components["schemas"]["AgentModeInfo"][];
-    };
-    AgentUnparsedData: {
-      error: string;
-      location: string;
-      raw_hash?: string | null;
-    };
-    ContentPart: {
-      text: string;
-      /** @enum {string} */
-      type: "text";
-    } | {
-      json: unknown;
-      /** @enum {string} */
-      type: "json";
-    } | {
-      arguments: string;
-      call_id: string;
-      name: string;
-      /** @enum {string} */
-      type: "tool_call";
-    } | {
-      call_id: string;
-      output: string;
-      /** @enum {string} */
-      type: "tool_result";
-    } | ({
-      action: components["schemas"]["FileAction"];
-      diff?: string | null;
-      path: string;
-      /** @enum {string} */
-      type: "file_ref";
-    }) | {
-      text: string;
-      /** @enum {string} */
-      type: "reasoning";
-      visibility: components["schemas"]["ReasoningVisibility"];
-    } | ({
-      mime?: string | null;
-      path: string;
-      /** @enum {string} */
-      type: "image";
-    }) | ({
-      detail?: string | null;
-      label: string;
-      /** @enum {string} */
-      type: "status";
-    });
-    CreateSessionRequest: {
-      agent: string;
-      agentMode?: string | null;
-      agentVersion?: string | null;
-      model?: string | null;
-      permissionMode?: string | null;
-      variant?: string | null;
-    };
-    CreateSessionResponse: {
-      error?: components["schemas"]["AgentError"] | null;
-      healthy: boolean;
-      nativeSessionId?: string | null;
-    };
-    ErrorData: {
-      code?: string | null;
-      details?: unknown;
-      message: string;
-    };
-    /** @enum {string} */
-    ErrorType: "invalid_request" | "unsupported_agent" | "agent_not_installed" | "install_failed" | "agent_process_exited" | "token_invalid" | "permission_denied" | "session_not_found" | "session_already_exists" | "mode_not_supported" | "stream_error" | "timeout";
-    /** @enum {string} */
-    EventSource: "agent" | "daemon";
-    EventsQuery: {
-      includeRaw?: boolean | null;
-      /** Format: int64 */
-      limit?: number | null;
-      /** Format: int64 */
-      offset?: number | null;
-    };
-    EventsResponse: {
-      events: components["schemas"]["UniversalEvent"][];
-      hasMore: boolean;
-    };
-    /** @enum {string} */
-    FileAction: "read" | "write" | "patch";
-    HealthResponse: {
-      status: string;
-    };
-    ItemDeltaData: {
-      delta: string;
-      item_id: string;
-      native_item_id?: string | null;
-    };
-    ItemEventData: {
-      item: components["schemas"]["UniversalItem"];
-    };
-    /** @enum {string} */
-    ItemKind: "message" | "tool_call" | "tool_result" | "system" | "status" | "unknown";
-    /** @enum {string} */
-    ItemRole: "user" | "assistant" | "system" | "tool";
-    /** @enum {string} */
-    ItemStatus: "in_progress" | "completed" | "failed";
-    MessageRequest: {
-      message: string;
-    };
-    PermissionEventData: {
-      action: string;
-      metadata?: unknown;
-      permission_id: string;
-      status: components["schemas"]["PermissionStatus"];
-    };
-    /** @enum {string} */
-    PermissionReply: "once" | "always" | "reject";
-    PermissionReplyRequest: {
-      reply: components["schemas"]["PermissionReply"];
-    };
-    /** @enum {string} */
-    PermissionStatus: "requested" | "approved" | "denied";
-    ProblemDetails: {
-      detail?: string | null;
-      instance?: string | null;
-      /** Format: int32 */
-      status: number;
-      title: string;
-      type: string;
-      [key: string]: unknown;
-    };
-    QuestionEventData: {
-      options: string[];
-      prompt: string;
-      question_id: string;
-      response?: string | null;
-      status: components["schemas"]["QuestionStatus"];
-    };
-    QuestionReplyRequest: {
-      answers: string[][];
-    };
-    /** @enum {string} */
-    QuestionStatus: "requested" | "answered" | "rejected";
-    /** @enum {string} */
-    ReasoningVisibility: "public" | "private";
-    /**
-     * @description Status of a shared server process for an agent
-     * @enum {string}
-     */
-    ServerStatus: "running" | "stopped" | "error";
-    ServerStatusInfo: {
-      baseUrl?: string | null;
-      lastError?: string | null;
-      /** Format: int64 */
-      restartCount: number;
-      status: components["schemas"]["ServerStatus"];
-      /** Format: int64 */
-      uptimeMs?: number | null;
-    };
-    /** @enum {string} */
-    SessionEndReason: "completed" | "error" | "terminated";
-    SessionEndedData: {
-      /**
-       * Format: int32
-       * @description Process exit code when reason is Error
-       */
-      exit_code?: number | null;
-      /** @description Error message when reason is Error */
-      message?: string | null;
-      reason: components["schemas"]["SessionEndReason"];
-      stderr?: components["schemas"]["StderrOutput"] | null;
-      terminated_by: components["schemas"]["TerminatedBy"];
-    };
-    SessionInfo: {
-      agent: string;
-      agentMode: string;
-      ended: boolean;
-      /** Format: int64 */
-      eventCount: number;
-      model?: string | null;
-      nativeSessionId?: string | null;
-      permissionMode: string;
-      sessionId: string;
-      variant?: string | null;
-    };
-    SessionListResponse: {
-      sessions: components["schemas"]["SessionInfo"][];
-    };
-    SessionStartedData: {
-      metadata?: unknown;
-    };
-    StderrOutput: {
-      /** @description First N lines of stderr (if truncated) or full stderr (if not truncated) */
-      head?: string | null;
-      /** @description Last N lines of stderr (only present if truncated) */
-      tail?: string | null;
-      /** @description Total number of lines in stderr */
-      total_lines?: number | null;
-      /** @description Whether the output was truncated */
-      truncated: boolean;
-    };
-    /** @enum {string} */
-    TerminatedBy: "agent" | "daemon";
-    TurnStreamQuery: {
-      includeRaw?: boolean | null;
-    };
-    UniversalEvent: {
-      data: components["schemas"]["UniversalEventData"];
-      event_id: string;
-      native_session_id?: string | null;
-      raw?: unknown;
-      /** Format: int64 */
-      sequence: number;
-      session_id: string;
-      source: components["schemas"]["EventSource"];
-      synthetic: boolean;
-      time: string;
-      type: components["schemas"]["UniversalEventType"];
-    };
-    UniversalEventData: components["schemas"]["SessionStartedData"] | components["schemas"]["SessionEndedData"] | components["schemas"]["ItemEventData"] | components["schemas"]["ItemDeltaData"] | components["schemas"]["ErrorData"] | components["schemas"]["PermissionEventData"] | components["schemas"]["QuestionEventData"] | components["schemas"]["AgentUnparsedData"];
-    /** @enum {string} */
-    UniversalEventType: "session.started" | "session.ended" | "item.started" | "item.delta" | "item.completed" | "error" | "permission.requested" | "permission.resolved" | "question.requested" | "question.resolved" | "agent.unparsed";
-    UniversalItem: {
-      content: components["schemas"]["ContentPart"][];
-      item_id: string;
-      kind: components["schemas"]["ItemKind"];
-      native_item_id?: string | null;
-      parent_id?: string | null;
-      role?: components["schemas"]["ItemRole"] | null;
-      status: components["schemas"]["ItemStatus"];
-    };
-  };
-  responses: never;
-  parameters: never;
-  requestBodies: never;
-  headers: never;
-  pathItems: never;
+    responses: never;
+    parameters: never;
+    requestBodies: never;
+    headers: never;
+    pathItems: never;
 }
-
 export type $defs = Record<string, never>;
-
-export type external = Record<string, never>;
-
 export interface operations {
-
-  list_agents: {
-    responses: {
-      200: {
-        content: {
-          "application/json": components["schemas"]["AgentListResponse"];
+    list_agents: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
         };
-      };
-    };
-  };
-  install_agent: {
-    parameters: {
-      path: {
-        /** @description Agent id */
-        agent: string;
-      };
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["AgentInstallRequest"];
-      };
-    };
-    responses: {
-      /** @description Agent installed */
-      204: {
-        content: never;
-      };
-      400: {
-        content: {
-          "application/json": components["schemas"]["ProblemDetails"];
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentListResponse"];
+                };
+            };
         };
-      };
-      404: {
-        content: {
-          "application/json": components["schemas"]["ProblemDetails"];
+    };
+    install_agent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Agent id */
+                agent: string;
+            };
+            cookie?: never;
         };
-      };
-      500: {
-        content: {
-          "application/json": components["schemas"]["ProblemDetails"];
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentInstallRequest"];
+            };
         };
-      };
-    };
-  };
-  get_agent_modes: {
-    parameters: {
-      path: {
-        /** @description Agent id */
-        agent: string;
-      };
-    };
-    responses: {
-      200: {
-        content: {
-          "application/json": components["schemas"]["AgentModesResponse"];
+        responses: {
+            /** @description Agent installed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
         };
-      };
-      400: {
-        content: {
-          "application/json": components["schemas"]["ProblemDetails"];
+    };
+    get_agent_modes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Agent id */
+                agent: string;
+            };
+            cookie?: never;
         };
-      };
-    };
-  };
-  get_health: {
-    responses: {
-      200: {
-        content: {
-          "application/json": components["schemas"]["HealthResponse"];
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentModesResponse"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
         };
-      };
     };
-  };
-  list_sessions: {
-    responses: {
-      200: {
-        content: {
-          "application/json": components["schemas"]["SessionListResponse"];
+    get_health: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
         };
-      };
-    };
-  };
-  create_session: {
-    parameters: {
-      path: {
-        /** @description Client session id */
-        session_id: string;
-      };
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["CreateSessionRequest"];
-      };
-    };
-    responses: {
-      200: {
-        content: {
-          "application/json": components["schemas"]["CreateSessionResponse"];
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HealthResponse"];
+                };
+            };
         };
-      };
-      400: {
-        content: {
-          "application/json": components["schemas"]["ProblemDetails"];
+    };
+    list_sessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
         };
-      };
-      409: {
-        content: {
-          "application/json": components["schemas"]["ProblemDetails"];
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionListResponse"];
+                };
+            };
         };
-      };
     };
-  };
-  get_events: {
-    parameters: {
-      query?: {
-        /** @description Last seen event sequence (exclusive) */
-        offset?: number | null;
-        /** @description Max events to return */
-        limit?: number | null;
-        /** @description Include raw provider payloads */
-        include_raw?: boolean | null;
-      };
-      path: {
-        /** @description Session id */
-        session_id: string;
-      };
-    };
-    responses: {
-      200: {
-        content: {
-          "application/json": components["schemas"]["EventsResponse"];
+    create_session: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Client session id */
+                session_id: string;
+            };
+            cookie?: never;
         };
-      };
-      404: {
-        content: {
-          "application/json": components["schemas"]["ProblemDetails"];
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateSessionRequest"];
+            };
         };
-      };
-    };
-  };
-  get_events_sse: {
-    parameters: {
-      query?: {
-        /** @description Last seen event sequence (exclusive) */
-        offset?: number | null;
-        /** @description Include raw provider payloads */
-        include_raw?: boolean | null;
-      };
-      path: {
-        /** @description Session id */
-        session_id: string;
-      };
-    };
-    responses: {
-      /** @description SSE event stream */
-      200: {
-        content: never;
-      };
-    };
-  };
-  post_message: {
-    parameters: {
-      path: {
-        /** @description Session id */
-        session_id: string;
-      };
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["MessageRequest"];
-      };
-    };
-    responses: {
-      /** @description Message accepted */
-      204: {
-        content: never;
-      };
-      404: {
-        content: {
-          "application/json": components["schemas"]["ProblemDetails"];
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateSessionResponse"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
         };
-      };
     };
-  };
-  post_message_stream: {
-    parameters: {
-      query?: {
-        /** @description Include raw provider payloads */
-        include_raw?: boolean | null;
-      };
-      path: {
-        /** @description Session id */
-        session_id: string;
-      };
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["MessageRequest"];
-      };
-    };
-    responses: {
-      /** @description SSE event stream */
-      200: {
-        content: never;
-      };
-      404: {
-        content: {
-          "application/json": components["schemas"]["ProblemDetails"];
+    get_events: {
+        parameters: {
+            query?: {
+                /** @description Last seen event sequence (exclusive) */
+                offset?: number | null;
+                /** @description Max events to return */
+                limit?: number | null;
+                /** @description Include raw provider payloads */
+                include_raw?: boolean | null;
+            };
+            header?: never;
+            path: {
+                /** @description Session id */
+                session_id: string;
+            };
+            cookie?: never;
         };
-      };
-    };
-  };
-  reply_permission: {
-    parameters: {
-      path: {
-        /** @description Session id */
-        session_id: string;
-        /** @description Permission id */
-        permission_id: string;
-      };
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["PermissionReplyRequest"];
-      };
-    };
-    responses: {
-      /** @description Permission reply accepted */
-      204: {
-        content: never;
-      };
-      404: {
-        content: {
-          "application/json": components["schemas"]["ProblemDetails"];
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EventsResponse"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
         };
-      };
     };
-  };
-  reject_question: {
-    parameters: {
-      path: {
-        /** @description Session id */
-        session_id: string;
-        /** @description Question id */
-        question_id: string;
-      };
-    };
-    responses: {
-      /** @description Question rejected */
-      204: {
-        content: never;
-      };
-      404: {
-        content: {
-          "application/json": components["schemas"]["ProblemDetails"];
+    get_events_sse: {
+        parameters: {
+            query?: {
+                /** @description Last seen event sequence (exclusive) */
+                offset?: number | null;
+                /** @description Include raw provider payloads */
+                include_raw?: boolean | null;
+            };
+            header?: never;
+            path: {
+                /** @description Session id */
+                session_id: string;
+            };
+            cookie?: never;
         };
-      };
-    };
-  };
-  reply_question: {
-    parameters: {
-      path: {
-        /** @description Session id */
-        session_id: string;
-        /** @description Question id */
-        question_id: string;
-      };
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["QuestionReplyRequest"];
-      };
-    };
-    responses: {
-      /** @description Question answered */
-      204: {
-        content: never;
-      };
-      404: {
-        content: {
-          "application/json": components["schemas"]["ProblemDetails"];
+        requestBody?: never;
+        responses: {
+            /** @description SSE event stream */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
-      };
     };
-  };
-  terminate_session: {
-    parameters: {
-      path: {
-        /** @description Session id */
-        session_id: string;
-      };
-    };
-    responses: {
-      /** @description Session terminated */
-      204: {
-        content: never;
-      };
-      404: {
-        content: {
-          "application/json": components["schemas"]["ProblemDetails"];
+    reply_mcp_tunnel_call: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session id */
+                session_id: string;
+                /** @description MCP call id */
+                call_id: string;
+            };
+            cookie?: never;
         };
-      };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpTunnelToolResponseRequest"];
+            };
+        };
+        responses: {
+            /** @description MCP tool call responded */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
     };
-  };
+    post_message: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session id */
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MessageRequest"];
+            };
+        };
+        responses: {
+            /** @description Message accepted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    post_message_stream: {
+        parameters: {
+            query?: {
+                /** @description Include raw provider payloads */
+                include_raw?: boolean | null;
+            };
+            header?: never;
+            path: {
+                /** @description Session id */
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MessageRequest"];
+            };
+        };
+        responses: {
+            /** @description SSE event stream */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    reply_permission: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session id */
+                session_id: string;
+                /** @description Permission id */
+                permission_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PermissionReplyRequest"];
+            };
+        };
+        responses: {
+            /** @description Permission reply accepted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    reject_question: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session id */
+                session_id: string;
+                /** @description Question id */
+                question_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Question rejected */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    reply_question: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session id */
+                session_id: string;
+                /** @description Question id */
+                question_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuestionReplyRequest"];
+            };
+        };
+        responses: {
+            /** @description Question answered */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    terminate_session: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session id */
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Session terminated */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
 }

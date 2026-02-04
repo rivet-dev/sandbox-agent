@@ -1,0 +1,40 @@
+---
+source: server/packages/sandbox-agent/tests/sessions/mcp_tunnel.rs
+expression: value
+---
+- metadata: true
+  seq: 1
+  session: started
+  type: session.started
+- item:
+    content_types:
+      - tool_call
+    kind: tool_call
+    role: assistant
+    status: in_progress
+  seq: 2
+  type: item.started
+- item:
+    content_types:
+      - tool_call
+    kind: tool_call
+    role: assistant
+    status: completed
+  seq: 3
+  type: item.completed
+- item:
+    content_types:
+      - tool_result
+    kind: tool_result
+    role: tool
+    status: in_progress
+  seq: 4
+  type: item.started
+- item:
+    content_types:
+      - tool_result
+    kind: tool_result
+    role: tool
+    status: completed
+  seq: 5
+  type: item.completed

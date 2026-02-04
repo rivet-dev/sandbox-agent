@@ -9,6 +9,7 @@ import type {
   EventsResponse,
   HealthResponse,
   MessageRequest,
+  McpTunnelToolResponseRequest,
   PermissionReplyRequest,
   ProblemDetails,
   QuestionReplyRequest,
@@ -203,6 +204,18 @@ export class SandboxAgent {
     await this.requestJson(
       "POST",
       `${API_PREFIX}/sessions/${encodeURIComponent(sessionId)}/permissions/${encodeURIComponent(permissionId)}/reply`,
+      { body: request },
+    );
+  }
+
+  async replyMcpTunnelCall(
+    sessionId: string,
+    callId: string,
+    request: McpTunnelToolResponseRequest,
+  ): Promise<void> {
+    await this.requestJson(
+      "POST",
+      `${API_PREFIX}/sessions/${encodeURIComponent(sessionId)}/mcp-tunnel/calls/${encodeURIComponent(callId)}/response`,
       { body: request },
     );
   }

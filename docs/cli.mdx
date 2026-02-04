@@ -162,6 +162,7 @@ sandbox-agent api sessions create <SESSION_ID> [OPTIONS]
 | `-m, --model <MODEL>` | Model override |
 | `-v, --variant <VARIANT>` | Model variant |
 | `-A, --agent-version <VERSION>` | Agent version |
+| `--mcp-tunnel-tools <JSON>` | JSON array of MCP tool definitions |
 
 ```bash
 sandbox-agent api sessions create my-session \
@@ -289,6 +290,22 @@ sandbox-agent api sessions reply-permission <SESSION_ID> <PERMISSION_ID> [OPTION
 sandbox-agent api sessions reply-permission my-session perm1 --reply once
 ```
 
+#### Reply to MCP Tunnel Tool Call
+
+```bash
+sandbox-agent api sessions reply-mcp-tunnel <SESSION_ID> <CALL_ID> [OPTIONS]
+```
+
+| Option | Description |
+|--------|-------------|
+| `-o, --output <TEXT>` | Tool output (required) |
+| `--is-error` | Mark tool result as error |
+| `--content <JSON>` | Optional MCP content payload |
+
+```bash
+sandbox-agent api sessions reply-mcp-tunnel my-session call-1 --output "ok"
+```
+
 ---
 
 ## CLI to HTTP Mapping
@@ -308,3 +325,4 @@ sandbox-agent api sessions reply-permission my-session perm1 --reply once
 | `api sessions reply-question` | `POST /v1/sessions/{sessionId}/questions/{questionId}/reply` |
 | `api sessions reject-question` | `POST /v1/sessions/{sessionId}/questions/{questionId}/reject` |
 | `api sessions reply-permission` | `POST /v1/sessions/{sessionId}/permissions/{permissionId}/reply` |
+| `api sessions reply-mcp-tunnel` | `POST /v1/sessions/{sessionId}/mcp-tunnel/calls/{callId}/response` |

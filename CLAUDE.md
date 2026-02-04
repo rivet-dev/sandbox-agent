@@ -63,6 +63,7 @@ Universal schema guidance:
 - `sandbox-agent api sessions reply-question` ↔ `POST /v1/sessions/{sessionId}/questions/{questionId}/reply`
 - `sandbox-agent api sessions reject-question` ↔ `POST /v1/sessions/{sessionId}/questions/{questionId}/reject`
 - `sandbox-agent api sessions reply-permission` ↔ `POST /v1/sessions/{sessionId}/permissions/{permissionId}/reply`
+- `sandbox-agent api sessions reply-mcp-tunnel` ↔ `POST /v1/sessions/{sessionId}/mcp-tunnel/calls/{callId}/response`
 
 ## Post-Release Testing
 

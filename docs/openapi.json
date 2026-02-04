@@ -365,6 +365,69 @@
         }
       }
     },
+    "/v1/sessions/{session_id}/mcp-tunnel/calls/{call_id}/response": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "operationId": "reply_mcp_tunnel_call",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "description": "Session id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "call_id",
+            "in": "path",
+            "description": "MCP call id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpTunnelToolResponseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "MCP tool call responded"
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/sessions/{session_id}/messages": {
       "post": {
         "tags": [
@@ -1063,6 +1126,14 @@
             "type": "string",
             "nullable": true
           },
+          "mcpTunnel": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/McpTunnelConfig"
+              }
+            ],
+            "nullable": true
+          },
           "model": {
             "type": "string",
             "nullable": true
@@ -1257,6 +1328,56 @@
           "completed",
           "failed"
         ]
+      },
+      "McpTunnelConfig": {
+        "type": "object",
+        "required": [
+          "tools"
+        ],
+        "properties": {
+          "tools": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/McpTunnelTool"
+            }
+          }
+        }
+      },
+      "McpTunnelTool": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "inputSchema": {
+            "nullable": true
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "McpTunnelToolResponseRequest": {
+        "type": "object",
+        "required": [
+          "output"
+        ],
+        "properties": {
+          "content": {
+            "nullable": true
+          },
+          "isError": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "output": {
+            "type": "string"
+          }
+        }
       },
       "MessageRequest": {
         "type": "object",
