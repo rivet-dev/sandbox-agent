@@ -69,6 +69,8 @@ url = "2.5"
 regress = "0.10"
 include_dir = "0.7"
 base64 = "0.22"
+globset = "0.4"
+mime_guess = "2.0"
 
 # Code generation (build deps)
 typify = "0.4"

@@ -13,7 +13,7 @@ use std::str::FromStr;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event, KeepAlive};
-use axum::response::{IntoResponse, Sse};
+use axum::response::{IntoResponse, Response, Sse};
 use axum::routing::{get, patch, post, put};
 use axum::{Json, Router};
 use futures::stream;
@@ -23,6 +23,7 @@ use tokio::sync::{broadcast, Mutex};
 use tokio::time::interval;
 use utoipa::{IntoParams, OpenApi, ToSchema};
 
+use crate::filesystem::{FileListOptions, FileReadOptions, FileReadRange, WorkspaceFileStatus};
 use crate::router::{AppState, CreateSessionRequest, PermissionReply};
 use sandbox_agent_error::SandboxError;
 use sandbox_agent_agent_management::agents::AgentId;
@@ -492,9 +493,21 @@ struct FindSymbolsQuery {
 }
 
 #[derive(Debug, Deserialize, IntoParams)]
+struct FileListQuery {
+    directory: Option<String>,
+    path: Option<String>,
+    glob: Option<String>,
+    depth: Option<usize>,
+    hidden: Option<bool>,
+    directories: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, IntoParams)]
 struct FileContentQuery {
     directory: Option<String>,
     path: Option<String>,
+    start: Option<u64>,
+    end: Option<u64>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -767,6 +780,37 @@ fn sandbox_error_response(err: SandboxError) -> (StatusCode, Json<Value>) {
         SandboxError::InvalidRequest { message } => bad_request(&message),
         other => internal_error(&other.to_string()),
     }
+}
+
+fn filesystem_error_response(err: SandboxError) -> Response {
+    match err {
+        SandboxError::InvalidRequest { message } => bad_request(&message).into_response(),
+        SandboxError::StreamError { message } => internal_error(&message).into_response(),
+        other => internal_error(&other.to_string()).into_response(),
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct OpenCodeFileStatusEntry {
+    path: String,
+    added: i64,
+    removed: i64,
+    status: String,
+}
+
+fn opencode_status_entries(entries: Vec<WorkspaceFileStatus>) -> Vec<OpenCodeFileStatusEntry> {
+    entries
+        .into_iter()
+        .filter_map(|entry| {
+            let vcs = entry.vcs?;
+            Some(OpenCodeFileStatusEntry {
+                path: entry.path,
+                added: vcs.added,
+                removed: vcs.removed,
+                status: vcs.status,
+            })
+        })
+        .collect()
 }
 
 fn parse_permission_reply_value(value: Option<&str>) -> Result<PermissionReply, String> {
@@ -3754,8 +3798,35 @@ async fn oc_pty_connect(Path(_pty_id): Path<String>) -> impl IntoResponse {
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_file_list() -> impl IntoResponse {
-    (StatusCode::OK, Json(json!([])))
+async fn oc_file_list(
+    State(state): State<Arc<OpenCodeAppState>>,
+    headers: HeaderMap,
+    Query(query): Query<FileListQuery>,
+) -> impl IntoResponse {
+    let Some(path) = query.path else {
+        return bad_request("path is required").into_response();
+    };
+    let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
+    let filesystem = match state
+        .inner
+        .session_manager()
+        .workspace_filesystem()
+        .scoped(directory)
+    {
+        Ok(filesystem) => filesystem,
+        Err(err) => return filesystem_error_response(err),
+    };
+    let options = FileListOptions {
+        path,
+        glob: query.glob,
+        depth: query.depth,
+        include_hidden: query.hidden.unwrap_or(false),
+        directories_only: query.directories.unwrap_or(false),
+    };
+    match filesystem.list(options) {
+        Ok(entries) => (StatusCode::OK, Json(entries)).into_response(),
+        Err(err) => filesystem_error_response(err),
+    }
 }
 
 #[utoipa::path(
@@ -3764,18 +3835,37 @@ async fn oc_file_list() -> impl IntoResponse {
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_file_content(Query(query): Query<FileContentQuery>) -> impl IntoResponse {
-    if query.path.is_none() {
+async fn oc_file_content(
+    State(state): State<Arc<OpenCodeAppState>>,
+    headers: HeaderMap,
+    Query(query): Query<FileContentQuery>,
+) -> impl IntoResponse {
+    let Some(path) = query.path else {
         return bad_request("path is required").into_response();
+    };
+    let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
+    let filesystem = match state
+        .inner
+        .session_manager()
+        .workspace_filesystem()
+        .scoped(directory)
+    {
+        Ok(filesystem) => filesystem,
+        Err(err) => return filesystem_error_response(err),
+    };
+    let range = if query.start.is_some() || query.end.is_some() {
+        Some(FileReadRange {
+            start: query.start,
+            end: query.end,
+        })
+    } else {
+        None
+    };
+    let options = FileReadOptions { path, range };
+    match filesystem.read(options) {
+        Ok(content) => (StatusCode::OK, Json(content)).into_response(),
+        Err(err) => filesystem_error_response(err),
     }
-    (
-        StatusCode::OK,
-        Json(json!({
-            "type": "text",
-            "content": "",
-        })),
-    )
-        .into_response()
 }
 
 #[utoipa::path(
@@ -3784,8 +3874,28 @@ async fn oc_file_content(Query(query): Query<FileContentQuery>) -> impl IntoResp
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_file_status() -> impl IntoResponse {
-    (StatusCode::OK, Json(json!([]))).into_response()
+async fn oc_file_status(
+    State(state): State<Arc<OpenCodeAppState>>,
+    headers: HeaderMap,
+    Query(query): Query<DirectoryQuery>,
+) -> impl IntoResponse {
+    let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
+    let filesystem = match state
+        .inner
+        .session_manager()
+        .workspace_filesystem()
+        .scoped(directory)
+    {
+        Ok(filesystem) => filesystem,
+        Err(err) => return filesystem_error_response(err),
+    };
+    match filesystem.status() {
+        Ok(entries) => {
+            let files = opencode_status_entries(entries);
+            (StatusCode::OK, Json(json!(files))).into_response()
+        }
+        Err(err) => filesystem_error_response(err),
+    }
 }
 
 #[utoipa::path(
