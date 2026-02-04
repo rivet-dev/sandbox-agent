@@ -1,0 +1,19 @@
+{
+  "name": "@sandbox-agent/example-computesdk",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/computesdk.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@sandbox-agent/example-shared": "workspace:*",
+    "computesdk": "latest"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "tsx": "latest",
+    "typescript": "latest",
+    "vitest": "^3.0.0"
+  }
+}
