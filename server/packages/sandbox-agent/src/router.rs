@@ -331,6 +331,10 @@ struct SessionState {
     next_event_sequence: u64,
     next_item_id: u64,
     events: Vec<UniversalEvent>,
+    summary_artifacts: Vec<SessionSummaryArtifact>,
+    todo_artifacts: Vec<SessionTodoArtifact>,
+    next_summary_version: u64,
+    next_todo_version: u64,
     pending_questions: HashMap<String, PendingQuestion>,
     pending_permissions: HashMap<String, PendingPermission>,
     item_started: HashSet<String>,
@@ -346,6 +350,38 @@ struct SessionState {
     claude_message_counter: u64,
     pending_assistant_native_ids: VecDeque<String>,
     pending_assistant_counter: u64,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct SessionSummaryArtifact {
+    pub version: u64,
+    pub created_at: i64,
+    pub provider_id: String,
+    pub model_id: String,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct SessionTodoItem {
+    pub content: String,
+    pub status: String,
+    pub priority: String,
+    pub id: String,
+}
+
+impl SessionTodoItem {
+    fn to_value(&self) -> Value {
+        serde_json::to_value(self).unwrap_or_else(|_| json!({}))
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct SessionTodoArtifact {
+    pub version: u64,
+    pub created_at: i64,
+    pub provider_id: String,
+    pub model_id: String,
+    pub items: Vec<SessionTodoItem>,
 }
 
 #[derive(Debug, Clone)]
@@ -389,6 +425,10 @@ impl SessionState {
             next_event_sequence: 0,
             next_item_id: 0,
             events: Vec::new(),
+            summary_artifacts: Vec::new(),
+            todo_artifacts: Vec::new(),
+            next_summary_version: 1,
+            next_todo_version: 1,
             pending_questions: HashMap::new(),
             pending_permissions: HashMap::new(),
             item_started: HashSet::new(),
@@ -818,6 +858,22 @@ pub(crate) struct SessionManager {
     sessions: Mutex<Vec<SessionState>>,
     server_manager: Arc<AgentServerManager>,
     http_client: Client,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct SummaryGenerationRequest {
+    pub agent: AgentId,
+    pub provider_id: String,
+    pub model_id: String,
+    pub model: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct TodoGenerationRequest {
+    pub agent: AgentId,
+    pub provider_id: String,
+    pub model_id: String,
+    pub model: Option<String>,
 }
 
 /// Shared Codex app-server process that handles multiple sessions via JSON-RPC.
@@ -1770,6 +1826,171 @@ impl SessionManager {
         });
 
         Ok(())
+    }
+
+    pub(crate) async fn summarize_session(
+        self: &Arc<Self>,
+        session_id: &str,
+        request: SummaryGenerationRequest,
+    ) -> Result<SessionSummaryArtifact, SandboxError> {
+        let (snapshot, transcript) = {
+            let sessions = self.sessions.lock().await;
+            let session = Self::session_ref(&sessions, session_id).ok_or_else(|| {
+                SandboxError::SessionNotFound {
+                    session_id: session_id.to_string(),
+                }
+            })?;
+            let transcript = session_transcript(&session.events);
+            (
+                SessionSnapshot {
+                    session_id: session.session_id.clone(),
+                    agent: request.agent,
+                    agent_mode: session.agent_mode.clone(),
+                    permission_mode: session.permission_mode.clone(),
+                    model: request.model.clone(),
+                    variant: session.variant.clone(),
+                    native_session_id: None,
+                },
+                transcript,
+            )
+        };
+
+        let prompt = summary_prompt(&transcript);
+        let mut summary = if request.agent == AgentId::Mock {
+            mock_summary(&transcript)
+        } else {
+            self.run_prompt(snapshot, request.agent, prompt)
+                .await?
+                .unwrap_or_default()
+        };
+        summary = summary.trim().to_string();
+        if summary.is_empty() {
+            summary = mock_summary(&transcript);
+        }
+
+        let artifact = {
+            let mut sessions = self.sessions.lock().await;
+            let session = Self::session_mut(&mut sessions, session_id).ok_or_else(|| {
+                SandboxError::SessionNotFound {
+                    session_id: session_id.to_string(),
+                }
+            })?;
+            let version = session.next_summary_version;
+            session.next_summary_version += 1;
+            let artifact = SessionSummaryArtifact {
+                version,
+                created_at: now_ms(),
+                provider_id: request.provider_id,
+                model_id: request.model_id,
+                summary,
+            };
+            session.summary_artifacts.push(artifact.clone());
+            artifact
+        };
+
+        Ok(artifact)
+    }
+
+    pub(crate) async fn session_todo(
+        self: &Arc<Self>,
+        session_id: &str,
+        request: TodoGenerationRequest,
+    ) -> Result<(SessionTodoArtifact, bool), SandboxError> {
+        let existing = {
+            let sessions = self.sessions.lock().await;
+            let session = Self::session_ref(&sessions, session_id).ok_or_else(|| {
+                SandboxError::SessionNotFound {
+                    session_id: session_id.to_string(),
+                }
+            })?;
+            session.todo_artifacts.last().cloned()
+        };
+        if let Some(artifact) = existing {
+            return Ok((artifact, false));
+        }
+
+        let (snapshot, transcript) = {
+            let sessions = self.sessions.lock().await;
+            let session = Self::session_ref(&sessions, session_id).ok_or_else(|| {
+                SandboxError::SessionNotFound {
+                    session_id: session_id.to_string(),
+                }
+            })?;
+            let transcript = session_transcript(&session.events);
+            (
+                SessionSnapshot {
+                    session_id: session.session_id.clone(),
+                    agent: request.agent,
+                    agent_mode: session.agent_mode.clone(),
+                    permission_mode: session.permission_mode.clone(),
+                    model: request.model.clone(),
+                    variant: session.variant.clone(),
+                    native_session_id: None,
+                },
+                transcript,
+            )
+        };
+
+        let prompt = todo_prompt(&transcript);
+        let mut items = if request.agent == AgentId::Mock {
+            mock_todos(&transcript)
+        } else {
+            let output = self
+                .run_prompt(snapshot, request.agent, prompt)
+                .await?
+                .unwrap_or_default();
+            todo_items_from_output(&output)
+        };
+        if items.is_empty() {
+            items = mock_todos(&transcript);
+        }
+
+        let artifact = {
+            let mut sessions = self.sessions.lock().await;
+            let session = Self::session_mut(&mut sessions, session_id).ok_or_else(|| {
+                SandboxError::SessionNotFound {
+                    session_id: session_id.to_string(),
+                }
+            })?;
+            let version = session.next_todo_version;
+            session.next_todo_version += 1;
+            let artifact = SessionTodoArtifact {
+                version,
+                created_at: now_ms(),
+                provider_id: request.provider_id,
+                model_id: request.model_id,
+                items,
+            };
+            session.todo_artifacts.push(artifact.clone());
+            artifact
+        };
+
+        Ok((artifact, true))
+    }
+
+    async fn run_prompt(
+        &self,
+        session: SessionSnapshot,
+        agent: AgentId,
+        prompt: String,
+    ) -> Result<Option<String>, SandboxError> {
+        let manager = self.agent_manager.clone();
+        let credentials = tokio::task::spawn_blocking(move || {
+            let options = CredentialExtractionOptions::new();
+            extract_all_credentials(&options)
+        })
+        .await
+        .map_err(|err| SandboxError::StreamError {
+            message: err.to_string(),
+        })?;
+        let spawn_options = build_spawn_options(&session, prompt, credentials);
+        let spawn_result = tokio::task::spawn_blocking(move || manager.spawn(agent, spawn_options))
+            .await
+            .map_err(|err| SandboxError::StreamError {
+                message: err.to_string(),
+            })?;
+        let spawn_result = spawn_result.map_err(|err| map_spawn_error(agent, err))?;
+        Ok(spawn_result.result)
     }
 
     async fn emit_synthetic_assistant_start(&self, session_id: &str) -> Result<(), SandboxError> {
