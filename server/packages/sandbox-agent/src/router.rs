@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::convert::Infallible;
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
@@ -812,12 +812,270 @@ struct AgentServerManager {
     restart_notifier: Mutex<Option<mpsc::UnboundedSender<AgentId>>>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct FormatterStatus {
+    name: String,
+    extensions: Vec<String>,
+    enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct LspStatus {
+    id: String,
+    name: String,
+    root: String,
+    status: String,
+}
+
+#[derive(Debug, Clone)]
+struct FormatterDefinition {
+    name: &'static str,
+    extensions: &'static [&'static str],
+}
+
+#[derive(Debug, Clone)]
+struct LspDefinition {
+    id: &'static str,
+    name: &'static str,
+    extensions: &'static [&'static str],
+    binaries: &'static [&'static str],
+}
+
+const FORMATTER_DEFINITIONS: &[FormatterDefinition] = &[
+    FormatterDefinition {
+        name: "prettier",
+        extensions: &[
+            "js", "jsx", "ts", "tsx", "json", "css", "scss", "html", "md", "mdx", "yaml", "yml",
+        ],
+    },
+    FormatterDefinition {
+        name: "rustfmt",
+        extensions: &["rs"],
+    },
+    FormatterDefinition {
+        name: "gofmt",
+        extensions: &["go"],
+    },
+    FormatterDefinition {
+        name: "black",
+        extensions: &["py"],
+    },
+    FormatterDefinition {
+        name: "stylua",
+        extensions: &["lua"],
+    },
+    FormatterDefinition {
+        name: "clang-format",
+        extensions: &["c", "h", "cc", "cpp", "cxx", "hpp"],
+    },
+];
+
+const LSP_DEFINITIONS: &[LspDefinition] = &[
+    LspDefinition {
+        id: "typescript-language-server",
+        name: "TypeScript Language Server",
+        extensions: &["js", "jsx", "ts", "tsx"],
+        binaries: &["typescript-language-server"],
+    },
+    LspDefinition {
+        id: "rust-analyzer",
+        name: "Rust Analyzer",
+        extensions: &["rs"],
+        binaries: &["rust-analyzer"],
+    },
+    LspDefinition {
+        id: "gopls",
+        name: "gopls",
+        extensions: &["go"],
+        binaries: &["gopls"],
+    },
+    LspDefinition {
+        id: "pyright",
+        name: "Pyright",
+        extensions: &["py"],
+        binaries: &["pyright-langserver", "pylsp"],
+    },
+    LspDefinition {
+        id: "lua-language-server",
+        name: "Lua Language Server",
+        extensions: &["lua"],
+        binaries: &["lua-language-server"],
+    },
+    LspDefinition {
+        id: "clangd",
+        name: "clangd",
+        extensions: &["c", "h", "cc", "cpp", "cxx", "hpp"],
+        binaries: &["clangd"],
+    },
+];
+
+#[derive(Debug, Clone)]
+struct FormatterService {
+    max_files: usize,
+    max_depth: usize,
+}
+
+impl FormatterService {
+    fn new() -> Self {
+        Self {
+            max_files: 5000,
+            max_depth: 25,
+        }
+    }
+
+    fn status_for_directory(&self, directory: &Path) -> Vec<FormatterStatus> {
+        let extensions = collect_workspace_extensions(directory, self.max_files, self.max_depth);
+        FORMATTER_DEFINITIONS
+            .iter()
+            .filter(|definition| {
+                definition
+                    .extensions
+                    .iter()
+                    .any(|ext| extensions.contains(*ext))
+            })
+            .map(|definition| FormatterStatus {
+                name: definition.name.to_string(),
+                extensions: definition
+                    .extensions
+                    .iter()
+                    .map(|ext| ext.to_string())
+                    .collect(),
+                enabled: true,
+            })
+            .collect()
+    }
+}
+
+#[derive(Debug)]
+struct LspStatusRegistry {
+    entries: Mutex<HashMap<String, Vec<LspStatus>>>,
+}
+
+impl LspStatusRegistry {
+    fn new() -> Self {
+        Self {
+            entries: Mutex::new(HashMap::new()),
+        }
+    }
+
+    async fn update(&self, root: &str, statuses: Vec<LspStatus>) -> Vec<LspStatus> {
+        let mut entries = self.entries.lock().await;
+        entries.insert(root.to_string(), statuses.clone());
+        statuses
+    }
+}
+
+fn collect_workspace_extensions(
+    root: &Path,
+    max_files: usize,
+    max_depth: usize,
+) -> HashSet<String> {
+    let mut extensions = HashSet::new();
+    if !root.exists() {
+        return extensions;
+    }
+    let mut queue: VecDeque<(PathBuf, usize)> = VecDeque::new();
+    queue.push_back((root.to_path_buf(), 0));
+    let mut files_scanned = 0usize;
+    while let Some((directory, depth)) = queue.pop_front() {
+        if depth > max_depth {
+            continue;
+        }
+        let entries = match std::fs::read_dir(&directory) {
+            Ok(entries) => entries,
+            Err(_) => continue,
+        };
+        for entry in entries.flatten() {
+            if files_scanned >= max_files {
+                return extensions;
+            }
+            let file_type = match entry.file_type() {
+                Ok(file_type) => file_type,
+                Err(_) => continue,
+            };
+            if file_type.is_symlink() {
+                continue;
+            }
+            let path = entry.path();
+            if file_type.is_dir() {
+                if let Some(name) = path.file_name().and_then(|value| value.to_str()) {
+                    if should_skip_dir(name) {
+                        continue;
+                    }
+                }
+                queue.push_back((path, depth + 1));
+            } else if file_type.is_file() {
+                files_scanned += 1;
+                if let Some(ext) = path.extension().and_then(|value| value.to_str()) {
+                    extensions.insert(ext.to_ascii_lowercase());
+                }
+            }
+        }
+    }
+    extensions
+}
+
+fn should_skip_dir(name: &str) -> bool {
+    matches!(
+        name,
+        ".git"
+            | "node_modules"
+            | "target"
+            | "dist"
+            | "build"
+            | ".venv"
+            | ".idea"
+            | ".vscode"
+            | ".cargo"
+            | ".turbo"
+            | ".next"
+            | "out"
+    )
+}
+
+fn lsp_binary_available(definition: &LspDefinition) -> bool {
+    definition
+        .binaries
+        .iter()
+        .any(|binary| command_on_path(binary))
+}
+
+#[cfg(windows)]
+fn command_candidates(command: &str) -> Vec<String> {
+    if command.ends_with(".exe") {
+        vec![command.to_string()]
+    } else {
+        vec![format!("{command}.exe"), command.to_string()]
+    }
+}
+
+#[cfg(not(windows))]
+fn command_candidates(command: &str) -> Vec<String> {
+    vec![command.to_string()]
+}
+
+fn command_on_path(command: &str) -> bool {
+    let Some(paths) = std::env::var_os("PATH") else {
+        return false;
+    };
+    for dir in std::env::split_paths(&paths) {
+        for candidate in command_candidates(command) {
+            if dir.join(&candidate).is_file() {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 #[derive(Debug)]
 pub(crate) struct SessionManager {
     agent_manager: Arc<AgentManager>,
     sessions: Mutex<Vec<SessionState>>,
     server_manager: Arc<AgentServerManager>,
     http_client: Client,
+    formatter_service: FormatterService,
+    lsp_registry: LspStatusRegistry,
 }
 
 /// Shared Codex app-server process that handles multiple sessions via JSON-RPC.
@@ -1538,7 +1796,43 @@ impl SessionManager {
             sessions: Mutex::new(Vec::new()),
             server_manager,
             http_client: Client::new(),
+            formatter_service: FormatterService::new(),
+            lsp_registry: LspStatusRegistry::new(),
         }
+    }
+
+    pub(crate) async fn formatter_status_for_directory(
+        &self,
+        directory: &str,
+    ) -> Vec<FormatterStatus> {
+        let root = Path::new(directory);
+        self.formatter_service.status_for_directory(root)
+    }
+
+    pub(crate) async fn lsp_status_for_directory(&self, directory: &str) -> Vec<LspStatus> {
+        let root = Path::new(directory);
+        let extensions = collect_workspace_extensions(root, 5000, 25);
+        let root_string = root.to_string_lossy().to_string();
+        let statuses = LSP_DEFINITIONS
+            .iter()
+            .filter(|definition| {
+                definition
+                    .extensions
+                    .iter()
+                    .any(|ext| extensions.contains(*ext))
+            })
+            .map(|definition| LspStatus {
+                id: definition.id.to_string(),
+                name: definition.name.to_string(),
+                root: root_string.clone(),
+                status: if lsp_binary_available(definition) {
+                    "connected".to_string()
+                } else {
+                    "error".to_string()
+                },
+            })
+            .collect();
+        self.lsp_registry.update(&root_string, statuses).await
     }
 
     fn session_ref<'a>(sessions: &'a [SessionState], session_id: &str) -> Option<&'a SessionState> {

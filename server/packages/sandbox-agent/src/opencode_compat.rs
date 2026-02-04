@@ -2487,8 +2487,18 @@ async fn oc_log() -> impl IntoResponse {
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_lsp_status() -> impl IntoResponse {
-    (StatusCode::OK, Json(json!([])))
+async fn oc_lsp_status(
+    State(state): State<Arc<OpenCodeAppState>>,
+    headers: HeaderMap,
+    Query(query): Query<DirectoryQuery>,
+) -> impl IntoResponse {
+    let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
+    let statuses = state
+        .inner
+        .session_manager()
+        .lsp_status_for_directory(&directory)
+        .await;
+    (StatusCode::OK, Json(statuses))
 }
 
 #[utoipa::path(
@@ -2497,8 +2507,18 @@ async fn oc_lsp_status() -> impl IntoResponse {
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_formatter_status() -> impl IntoResponse {
-    (StatusCode::OK, Json(json!([])))
+async fn oc_formatter_status(
+    State(state): State<Arc<OpenCodeAppState>>,
+    headers: HeaderMap,
+    Query(query): Query<DirectoryQuery>,
+) -> impl IntoResponse {
+    let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
+    let statuses = state
+        .inner
+        .session_manager()
+        .formatter_status_for_directory(&directory)
+        .await;
+    (StatusCode::OK, Json(statuses))
 }
 
 #[utoipa::path(
