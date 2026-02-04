@@ -27,34 +27,33 @@ RUN cd sdks/typescript && SKIP_OPENAPI_GEN=1 pnpm exec tsup
 COPY frontend/packages/inspector ./frontend/packages/inspector
 RUN cd frontend/packages/inspector && pnpm exec vite build
 
-FROM rust:1.88.0 AS base
+# Use Alpine-based Rust image which has native musl support
+FROM rust:1.88.0-alpine AS base
 
-# Install dependencies for native ARM64 build with musl
-# Note: This Dockerfile runs on ARM64 runners, so we use native compilation
-RUN apt-get update && apt-get install -y \
-    musl-tools \
+# Install dependencies for native ARM64 musl build
+RUN apk add --no-cache \
     musl-dev \
-    llvm-14-dev \
-    libclang-14-dev \
-    clang-14 \
-    libssl-dev \
-    pkg-config \
+    clang \
+    llvm \
+    openssl-dev \
+    openssl-libs-static \
+    pkgconfig \
     ca-certificates \
-    g++ \
     git \
-    curl && \
-    rm -rf /var/lib/apt/lists/*
+    curl \
+    build-base \
+    linux-headers \
+    perl \
+    make
 
-# Install musl target for Rust
+# Install musl target for Rust (should be native on Alpine)
 RUN rustup target add aarch64-unknown-linux-musl
 
 # Set environment variables for native musl build
-ENV LIBCLANG_PATH=/usr/lib/llvm-14/lib \
-    CLANG_PATH=/usr/bin/clang-14 \
-    CC_aarch64_unknown_linux_musl=musl-gcc \
-    CXX_aarch64_unknown_linux_musl=g++ \
-    AR_aarch64_unknown_linux_musl=ar \
-    CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc \
+ENV LIBCLANG_PATH=/usr/lib \
+    CC=gcc \
+    CXX=g++ \
+    AR=ar \
     CARGO_INCREMENTAL=0 \
     RUSTFLAGS="-C target-feature=+crt-static" \
     CARGO_NET_GIT_FETCH_WITH_CLI=true
@@ -69,12 +68,12 @@ FROM base AS aarch64-builder
 ARG SANDBOX_AGENT_VERSION
 ENV SANDBOX_AGENT_VERSION=${SANDBOX_AGENT_VERSION}
 
-# Set up OpenSSL for aarch64 musl target (native build on ARM64)
+# Build OpenSSL with musl (native on Alpine ARM64)
 ENV SSL_VER=1.1.1w
 RUN wget https://www.openssl.org/source/openssl-$SSL_VER.tar.gz \
     && tar -xzf openssl-$SSL_VER.tar.gz \
     && cd openssl-$SSL_VER \
-    && CC=musl-gcc ./Configure no-shared no-async --prefix=/musl --openssldir=/musl/ssl linux-aarch64 \
+    && ./Configure no-shared no-async --prefix=/musl --openssldir=/musl/ssl linux-aarch64 \
     && make -j$(nproc) \
     && make install_sw \
     && cd .. \
