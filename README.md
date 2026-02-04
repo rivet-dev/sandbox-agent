@@ -84,7 +84,7 @@ npm install sandbox-agent
 ```bash
 bun add sandbox-agent
 # Optional: allow Bun to run postinstall scripts for native binaries (required for SandboxAgent.start()).
-bun pm trust @sandbox-agent/cli-linux-x64 @sandbox-agent/cli-darwin-arm64 @sandbox-agent/cli-darwin-x64 @sandbox-agent/cli-win32-x64
+bun pm trust @sandbox-agent/cli-linux-x64 @sandbox-agent/cli-linux-arm64 @sandbox-agent/cli-darwin-arm64 @sandbox-agent/cli-darwin-x64 @sandbox-agent/cli-win32-x64
 ```
 
 **Setup**
@@ -167,7 +167,7 @@ npm install -g @sandbox-agent/cli
 ```bash
 # Allow Bun to run postinstall scripts for native binaries.
 bun add -g @sandbox-agent/cli
-bun pm -g trust @sandbox-agent/cli-linux-x64 @sandbox-agent/cli-darwin-arm64 @sandbox-agent/cli-darwin-x64 @sandbox-agent/cli-win32-x64
+bun pm -g trust @sandbox-agent/cli-linux-x64 @sandbox-agent/cli-linux-arm64 @sandbox-agent/cli-darwin-arm64 @sandbox-agent/cli-darwin-x64 @sandbox-agent/cli-win32-x64
 ```
 
 Create a session and send a message:

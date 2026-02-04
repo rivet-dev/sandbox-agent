@@ -73,12 +73,12 @@ FROM base AS aarch64-builder
 ARG SANDBOX_AGENT_VERSION
 ENV SANDBOX_AGENT_VERSION=${SANDBOX_AGENT_VERSION}
 
-# Set up OpenSSL for aarch64 musl target
+# Set up OpenSSL for aarch64 musl target (cross-compile from x86_64)
 ENV SSL_VER=1.1.1w
 RUN wget https://www.openssl.org/source/openssl-$SSL_VER.tar.gz \
     && tar -xzf openssl-$SSL_VER.tar.gz \
     && cd openssl-$SSL_VER \
-    && ./Configure no-shared no-async --prefix=/musl --openssldir=/musl/ssl linux-aarch64 \
+    && ./Configure no-shared no-async --prefix=/musl --openssldir=/musl/ssl --cross-compile-prefix=aarch64-unknown-linux-musl- linux-aarch64 \
     && make -j$(nproc) \
     && make install_sw \
     && cd .. \
