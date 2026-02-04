@@ -460,6 +460,51 @@ struct DirectoryQuery {
     directory: Option<String>,
 }
 
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct TuiAppendPromptRequest {
+    text: String,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct TuiExecuteCommandRequest {
+    command: String,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct TuiShowToastRequest {
+    title: Option<String>,
+    message: String,
+    variant: String,
+    duration: Option<f64>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct TuiSelectSessionRequest {
+    #[serde(rename = "sessionID")]
+    session_id: String,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct TuiPublishRequest {
+    #[serde(rename = "type")]
+    event_type: String,
+    properties: Value,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct TuiControlResponseRequest {
+    #[serde(rename = "requestID")]
+    request_id: String,
+    body: Option<Value>,
+    error: Option<Value>,
+}
+
 #[derive(Debug, Deserialize, IntoParams)]
 struct ToolQuery {
     directory: Option<String>,
@@ -4088,29 +4133,79 @@ async fn oc_skill_list() -> impl IntoResponse {
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_tui_next() -> impl IntoResponse {
+async fn oc_tui_next(
+    State(state): State<Arc<OpenCodeAppState>>,
+    Query(query): Query<DirectoryQuery>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
+    let next = state
+        .inner
+        .session_manager()
+        .next_tui_control(directory)
+        .await;
+    if let Some(request) = next {
+        return (
+            StatusCode::OK,
+            Json(json!({
+                "path": request.path,
+                "body": request.body,
+                "requestID": request.id,
+            })),
+        );
+    }
     (StatusCode::OK, Json(json!({"path": "", "body": {}})))
 }
 
 #[utoipa::path(
     post,
     path = "/tui/control/response",
-    request_body = String,
+    request_body = TuiControlResponseRequest,
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_tui_response() -> impl IntoResponse {
-    bool_ok(true)
+async fn oc_tui_response(
+    State(state): State<Arc<OpenCodeAppState>>,
+    Query(query): Query<DirectoryQuery>,
+    headers: HeaderMap,
+    Json(body): Json<TuiControlResponseRequest>,
+) -> impl IntoResponse {
+    let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
+    let response = json!({
+        "body": body.body,
+        "error": body.error,
+    });
+    let accepted = state
+        .inner
+        .session_manager()
+        .respond_tui_control(directory, &body.request_id, response)
+        .await;
+    bool_ok(accepted)
 }
 
 #[utoipa::path(
     post,
     path = "/tui/append-prompt",
-    request_body = String,
+    request_body = TuiAppendPromptRequest,
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_tui_append_prompt() -> impl IntoResponse {
+async fn oc_tui_append_prompt(
+    State(state): State<Arc<OpenCodeAppState>>,
+    Query(query): Query<DirectoryQuery>,
+    headers: HeaderMap,
+    Json(body): Json<TuiAppendPromptRequest>,
+) -> impl IntoResponse {
+    let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
+    state
+        .inner
+        .session_manager()
+        .enqueue_tui_control(
+            directory,
+            "/tui/append-prompt".to_string(),
+            json!({"text": body.text}),
+        )
+        .await;
     bool_ok(true)
 }
 
@@ -4120,7 +4215,17 @@ async fn oc_tui_append_prompt() -> impl IntoResponse {
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_tui_open_help() -> impl IntoResponse {
+async fn oc_tui_open_help(
+    State(state): State<Arc<OpenCodeAppState>>,
+    Query(query): Query<DirectoryQuery>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
+    state
+        .inner
+        .session_manager()
+        .enqueue_tui_control(directory, "/tui/open-help".to_string(), json!({}))
+        .await;
     bool_ok(true)
 }
 
@@ -4130,7 +4235,17 @@ async fn oc_tui_open_help() -> impl IntoResponse {
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_tui_open_sessions() -> impl IntoResponse {
+async fn oc_tui_open_sessions(
+    State(state): State<Arc<OpenCodeAppState>>,
+    Query(query): Query<DirectoryQuery>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
+    state
+        .inner
+        .session_manager()
+        .enqueue_tui_control(directory, "/tui/open-sessions".to_string(), json!({}))
+        .await;
     bool_ok(true)
 }
 
@@ -4140,7 +4255,17 @@ async fn oc_tui_open_sessions() -> impl IntoResponse {
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_tui_open_themes() -> impl IntoResponse {
+async fn oc_tui_open_themes(
+    State(state): State<Arc<OpenCodeAppState>>,
+    Query(query): Query<DirectoryQuery>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
+    state
+        .inner
+        .session_manager()
+        .enqueue_tui_control(directory, "/tui/open-themes".to_string(), json!({}))
+        .await;
     bool_ok(true)
 }
 
@@ -4150,18 +4275,37 @@ async fn oc_tui_open_themes() -> impl IntoResponse {
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_tui_open_models() -> impl IntoResponse {
+async fn oc_tui_open_models(
+    State(state): State<Arc<OpenCodeAppState>>,
+    Query(query): Query<DirectoryQuery>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
+    state
+        .inner
+        .session_manager()
+        .enqueue_tui_control(directory, "/tui/open-models".to_string(), json!({}))
+        .await;
     bool_ok(true)
 }
 
 #[utoipa::path(
     post,
     path = "/tui/submit-prompt",
-    request_body = String,
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_tui_submit_prompt() -> impl IntoResponse {
+async fn oc_tui_submit_prompt(
+    State(state): State<Arc<OpenCodeAppState>>,
+    Query(query): Query<DirectoryQuery>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
+    state
+        .inner
+        .session_manager()
+        .enqueue_tui_control(directory, "/tui/submit-prompt".to_string(), json!({}))
+        .await;
     bool_ok(true)
 }
 
@@ -4171,51 +4315,179 @@ async fn oc_tui_submit_prompt() -> impl IntoResponse {
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_tui_clear_prompt() -> impl IntoResponse {
+async fn oc_tui_clear_prompt(
+    State(state): State<Arc<OpenCodeAppState>>,
+    Query(query): Query<DirectoryQuery>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
+    state
+        .inner
+        .session_manager()
+        .enqueue_tui_control(directory, "/tui/clear-prompt".to_string(), json!({}))
+        .await;
     bool_ok(true)
 }
 
 #[utoipa::path(
     post,
     path = "/tui/execute-command",
-    request_body = String,
+    request_body = TuiExecuteCommandRequest,
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_tui_execute_command() -> impl IntoResponse {
+async fn oc_tui_execute_command(
+    State(state): State<Arc<OpenCodeAppState>>,
+    Query(query): Query<DirectoryQuery>,
+    headers: HeaderMap,
+    Json(body): Json<TuiExecuteCommandRequest>,
+) -> impl IntoResponse {
+    let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
+    state
+        .inner
+        .session_manager()
+        .enqueue_tui_control(
+            directory,
+            "/tui/execute-command".to_string(),
+            json!({"command": body.command}),
+        )
+        .await;
     bool_ok(true)
 }
 
 #[utoipa::path(
     post,
     path = "/tui/show-toast",
-    request_body = String,
+    request_body = TuiShowToastRequest,
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_tui_show_toast() -> impl IntoResponse {
+async fn oc_tui_show_toast(
+    State(state): State<Arc<OpenCodeAppState>>,
+    Query(query): Query<DirectoryQuery>,
+    headers: HeaderMap,
+    Json(body): Json<TuiShowToastRequest>,
+) -> impl IntoResponse {
+    let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
+    state
+        .inner
+        .session_manager()
+        .enqueue_tui_control(
+            directory,
+            "/tui/show-toast".to_string(),
+            json!({
+                "title": body.title,
+                "message": body.message,
+                "variant": body.variant,
+                "duration": body.duration,
+            }),
+        )
+        .await;
     bool_ok(true)
 }
 
 #[utoipa::path(
     post,
     path = "/tui/publish",
-    request_body = String,
+    request_body = TuiPublishRequest,
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_tui_publish() -> impl IntoResponse {
+async fn oc_tui_publish(
+    State(state): State<Arc<OpenCodeAppState>>,
+    Query(query): Query<DirectoryQuery>,
+    headers: HeaderMap,
+    Json(body): Json<TuiPublishRequest>,
+) -> impl IntoResponse {
+    let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
+    let (path, payload) = match body.event_type.as_str() {
+        "tui.prompt.append" => {
+            let Some(text) = body.properties.get("text").and_then(|v| v.as_str()) else {
+                return bad_request("text is required").into_response();
+            };
+            ("/tui/append-prompt", json!({"text": text}))
+        }
+        "tui.command.execute" => {
+            let Some(command) = body
+                .properties
+                .get("command")
+                .and_then(|v| v.as_str())
+            else {
+                return bad_request("command is required").into_response();
+            };
+            ("/tui/execute-command", json!({"command": command}))
+        }
+        "tui.toast.show" => {
+            let Some(message) = body.properties.get("message").and_then(|v| v.as_str()) else {
+                return bad_request("message is required").into_response();
+            };
+            let Some(variant) = body.properties.get("variant").and_then(|v| v.as_str()) else {
+                return bad_request("variant is required").into_response();
+            };
+            let title = body.properties.get("title").cloned();
+            let duration = body.properties.get("duration").cloned();
+            (
+                "/tui/show-toast",
+                json!({
+                    "title": title,
+                    "message": message,
+                    "variant": variant,
+                    "duration": duration,
+                }),
+            )
+        }
+        "tui.session.select" => {
+            let Some(session_id) = body
+                .properties
+                .get("sessionID")
+                .and_then(|v| v.as_str())
+            else {
+                return bad_request("sessionID is required").into_response();
+            };
+            let sessions = state.opencode.sessions.lock().await;
+            if !sessions.contains_key(session_id) {
+                return not_found("session not found").into_response();
+            }
+            ("/tui/select-session", json!({"sessionID": session_id}))
+        }
+        _ => return bad_request("unsupported TUI event").into_response(),
+    };
+
+    state
+        .inner
+        .session_manager()
+        .enqueue_tui_control(directory, path.to_string(), payload)
+        .await;
     bool_ok(true)
 }
 
 #[utoipa::path(
     post,
     path = "/tui/select-session",
-    request_body = String,
+    request_body = TuiSelectSessionRequest,
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_tui_select_session() -> impl IntoResponse {
+async fn oc_tui_select_session(
+    State(state): State<Arc<OpenCodeAppState>>,
+    Query(query): Query<DirectoryQuery>,
+    headers: HeaderMap,
+    Json(body): Json<TuiSelectSessionRequest>,
+) -> impl IntoResponse {
+    let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
+    let sessions = state.opencode.sessions.lock().await;
+    if !sessions.contains_key(&body.session_id) {
+        return not_found("session not found").into_response();
+    }
+    state
+        .inner
+        .session_manager()
+        .enqueue_tui_control(
+            directory,
+            "/tui/select-session".to_string(),
+            json!({"sessionID": body.session_id}),
+        )
+        .await;
     bool_ok(true)
 }
 
