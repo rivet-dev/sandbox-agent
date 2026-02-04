@@ -24,6 +24,7 @@ use tokio::time::interval;
 use utoipa::{IntoParams, OpenApi, ToSchema};
 
 use crate::router::{AppState, CreateSessionRequest, PermissionReply};
+use crate::project_manager::{ProjectCommands, ProjectIcon, ProjectInfo, ProjectUpdate, WorktreeInfo};
 use sandbox_agent_error::SandboxError;
 use sandbox_agent_agent_management::agents::AgentId;
 use sandbox_agent_universal_agent_schema::{
@@ -303,7 +304,7 @@ impl OpenCodeState {
             .unwrap_or_else(|| format!("{}/.local/state/opencode", self.home_dir()))
     }
 
-    async fn ensure_session(&self, session_id: &str, directory: String) -> Value {
+    async fn ensure_session(&self, session_id: &str, directory: String, project_id: Option<String>) -> Value {
         let mut sessions = self.sessions.lock().await;
         if let Some(existing) = sessions.get(session_id) {
             return existing.to_value();
@@ -313,7 +314,7 @@ impl OpenCodeState {
         let record = OpenCodeSessionRecord {
             id: session_id.to_string(),
             slug: format!("session-{}", session_id),
-            project_id: self.default_project_id.clone(),
+            project_id: project_id.unwrap_or_else(|| self.default_project_id.clone()),
             directory,
             parent_id: None,
             title: format!("Session {}", session_id),
@@ -545,6 +546,27 @@ struct SessionSummarizeRequest {
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct ProjectUpdateInput {
+    name: Option<String>,
+    icon: Option<ProjectIconInput>,
+    commands: Option<ProjectCommandsInput>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+struct ProjectIconInput {
+    url: Option<String>,
+    #[serde(rename = "override")]
+    override_name: Option<String>,
+    color: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+struct ProjectCommandsInput {
+    start: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 struct PermissionReplyRequest {
     response: Option<String>,
 }
@@ -559,6 +581,24 @@ struct PermissionGlobalReplyRequest {
 #[serde(rename_all = "camelCase")]
 struct QuestionReplyBody {
     answers: Option<Vec<Vec<String>>>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct WorktreeCreateInput {
+    name: Option<String>,
+    #[serde(rename = "startCommand")]
+    start_command: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+struct WorktreeRemoveInput {
+    directory: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+struct WorktreeResetInput {
+    directory: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -781,6 +821,67 @@ fn parse_permission_reply_value(value: Option<&str>) -> Result<PermissionReply, 
 
 fn bool_ok(value: bool) -> (StatusCode, Json<Value>) {
     (StatusCode::OK, Json(json!(value)))
+}
+
+fn project_info_to_value(info: &ProjectInfo) -> Value {
+    let mut map = serde_json::Map::new();
+    map.insert("id".to_string(), json!(info.id));
+    map.insert("worktree".to_string(), json!(info.worktree));
+    map.insert("vcs".to_string(), json!("git"));
+    map.insert("name".to_string(), json!(info.name));
+    map.insert(
+        "time".to_string(),
+        json!({
+            "created": info.created_at,
+            "updated": info.updated_at,
+        }),
+    );
+    map.insert("sandboxes".to_string(), json!([]));
+    map.insert("directory".to_string(), json!(info.directory));
+    map.insert("branch".to_string(), json!(info.branch));
+    if let Some(icon) = &info.icon {
+        let mut icon_map = serde_json::Map::new();
+        if let Some(url) = &icon.url {
+            icon_map.insert("url".to_string(), json!(url));
+        }
+        if let Some(override_name) = &icon.override_name {
+            icon_map.insert("override".to_string(), json!(override_name));
+        }
+        if let Some(color) = &icon.color {
+            icon_map.insert("color".to_string(), json!(color));
+        }
+        map.insert("icon".to_string(), Value::Object(icon_map));
+    }
+    if let Some(commands) = &info.commands {
+        let mut commands_map = serde_json::Map::new();
+        if let Some(start) = &commands.start {
+            commands_map.insert("start".to_string(), json!(start));
+        }
+        map.insert("commands".to_string(), Value::Object(commands_map));
+    }
+    Value::Object(map)
+}
+
+fn project_update_from_input(input: ProjectUpdateInput) -> ProjectUpdate {
+    ProjectUpdate {
+        name: input.name,
+        icon: input.icon.map(|icon| ProjectIcon {
+            url: icon.url,
+            override_name: icon.override_name,
+            color: icon.color,
+        }),
+        commands: input.commands.map(|commands| ProjectCommands {
+            start: commands.start,
+        }),
+    }
+}
+
+fn worktree_info_to_value(worktree: &WorktreeInfo) -> Value {
+    json!({
+        "name": worktree.name,
+        "branch": worktree.branch,
+        "directory": worktree.directory,
+    })
 }
 
 fn build_user_message(
@@ -2528,13 +2629,23 @@ async fn oc_path(State(state): State<Arc<OpenCodeAppState>>, headers: HeaderMap)
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_vcs(State(state): State<Arc<OpenCodeAppState>>) -> impl IntoResponse {
-    (
-        StatusCode::OK,
-        Json(json!({
-            "branch": state.opencode.branch_name(),
-        })),
-    )
+async fn oc_vcs(
+    State(state): State<Arc<OpenCodeAppState>>,
+    headers: HeaderMap,
+    Query(query): Query<DirectoryQuery>,
+) -> impl IntoResponse {
+    let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
+    let manager = state.inner.session_manager().project_manager();
+    match manager.resolve_project(&directory).await {
+        Ok(project) => (
+            StatusCode::OK,
+            Json(json!({
+                "branch": project.branch,
+            })),
+        )
+            .into_response(),
+        Err(err) => sandbox_error_response(err).into_response(),
+    }
 }
 
 #[utoipa::path(
@@ -2543,19 +2654,20 @@ async fn oc_vcs(State(state): State<Arc<OpenCodeAppState>>) -> impl IntoResponse
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_project_list(State(state): State<Arc<OpenCodeAppState>>, headers: HeaderMap) -> impl IntoResponse {
-    let directory = state.opencode.directory_for(&headers, None);
-    let worktree = state.opencode.worktree_for(&directory);
-    let now = state.opencode.now_ms();
-    let project = json!({
-        "id": state.opencode.default_project_id.clone(),
-        "worktree": worktree,
-        "vcs": "git",
-        "name": "sandbox-agent",
-        "time": {"created": now, "updated": now},
-        "sandboxes": [],
-    });
-    (StatusCode::OK, Json(json!([project])))
+async fn oc_project_list(
+    State(state): State<Arc<OpenCodeAppState>>,
+    headers: HeaderMap,
+    Query(query): Query<DirectoryQuery>,
+) -> impl IntoResponse {
+    let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
+    let manager = state.inner.session_manager().project_manager();
+    match manager.list_projects(&directory).await {
+        Ok(projects) => {
+            let values: Vec<Value> = projects.iter().map(project_info_to_value).collect();
+            (StatusCode::OK, Json(json!(values))).into_response()
+        }
+        Err(err) => sandbox_error_response(err).into_response(),
+    }
 }
 
 #[utoipa::path(
@@ -2564,28 +2676,24 @@ async fn oc_project_list(State(state): State<Arc<OpenCodeAppState>>, headers: He
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_project_current(State(state): State<Arc<OpenCodeAppState>>, headers: HeaderMap) -> impl IntoResponse {
-    let directory = state.opencode.directory_for(&headers, None);
-    let worktree = state.opencode.worktree_for(&directory);
-    let now = state.opencode.now_ms();
-    (
-        StatusCode::OK,
-        Json(json!({
-        "id": state.opencode.default_project_id.clone(),
-        "worktree": worktree,
-        "vcs": "git",
-        "name": "sandbox-agent",
-        "time": {"created": now, "updated": now},
-        "sandboxes": [],
-    })),
-    )
+async fn oc_project_current(
+    State(state): State<Arc<OpenCodeAppState>>,
+    headers: HeaderMap,
+    Query(query): Query<DirectoryQuery>,
+) -> impl IntoResponse {
+    let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
+    let manager = state.inner.session_manager().project_manager();
+    match manager.resolve_project(&directory).await {
+        Ok(project) => (StatusCode::OK, Json(project_info_to_value(&project))).into_response(),
+        Err(err) => sandbox_error_response(err).into_response(),
+    }
 }
 
 #[utoipa::path(
     patch,
     path = "/project/{projectID}",
     params(("projectID" = String, Path, description = "Project ID")),
-    request_body = String,
+    request_body = ProjectUpdateInput,
     responses((status = 200)),
     tag = "opencode"
 )]
@@ -2593,8 +2701,27 @@ async fn oc_project_update(
     State(state): State<Arc<OpenCodeAppState>>,
     Path(_project_id): Path<String>,
     headers: HeaderMap,
+    Query(query): Query<DirectoryQuery>,
+    body: Option<Json<ProjectUpdateInput>>,
 ) -> impl IntoResponse {
-    oc_project_current(State(state), headers).await
+    let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
+    let manager = state.inner.session_manager().project_manager();
+    let project_id = _project_id.clone();
+    if body.is_none() {
+        return bad_request("project update body required").into_response();
+    }
+    let update = project_update_from_input(body.unwrap().0);
+    match manager.update_project(&project_id, update).await {
+        Ok(project) => {
+            let value = project_info_to_value(&project);
+            state
+                .opencode
+                .emit_event(json!({"type": "project.updated", "properties": value}));
+            (StatusCode::OK, Json(value)).into_response()
+        }
+        Err(SandboxError::SessionNotFound { .. }) => not_found("Project not found").into_response(),
+        Err(err) => sandbox_error_response(err).into_response(),
+    }
 }
 
 #[utoipa::path(
@@ -2616,6 +2743,15 @@ async fn oc_session_create(
         permission: None,
     });
     let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
+    let project_id = state
+        .inner
+        .session_manager()
+        .project_manager()
+        .resolve_project(&directory)
+        .await
+        .ok()
+        .map(|project| project.id)
+        .unwrap_or_else(|| state.opencode.default_project_id.clone());
     let now = state.opencode.now_ms();
     let id = next_id("ses_", &SESSION_COUNTER);
     let slug = format!("session-{}", id);
@@ -2623,7 +2759,7 @@ async fn oc_session_create(
     let record = OpenCodeSessionRecord {
         id: id.clone(),
         slug,
-        project_id: state.opencode.default_project_id.clone(),
+        project_id,
         directory,
         parent_id: body.parent_id,
         title,
@@ -2793,6 +2929,15 @@ async fn oc_session_fork(
     Query(query): Query<DirectoryQuery>,
 ) -> impl IntoResponse {
     let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
+    let project_id = state
+        .inner
+        .session_manager()
+        .project_manager()
+        .resolve_project(&directory)
+        .await
+        .ok()
+        .map(|project| project.id)
+        .unwrap_or_else(|| state.opencode.default_project_id.clone());
     let now = state.opencode.now_ms();
     let id = next_id("ses_", &SESSION_COUNTER);
     let slug = format!("session-{}", id);
@@ -2800,7 +2945,7 @@ async fn oc_session_fork(
     let record = OpenCodeSessionRecord {
         id: id.clone(),
         slug,
-        project_id: state.opencode.default_project_id.clone(),
+        project_id,
         directory,
         parent_id: Some(session_id),
         title,
@@ -2889,9 +3034,17 @@ async fn oc_session_message_create(
         tracing::info!(target = "sandbox_agent::opencode", ?body, "opencode prompt body");
     }
     let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
+    let project_id = state
+        .inner
+        .session_manager()
+        .project_manager()
+        .resolve_project(&directory)
+        .await
+        .ok()
+        .map(|project| project.id);
     let _ = state
         .opencode
-        .ensure_session(&session_id, directory.clone())
+        .ensure_session(&session_id, directory.clone(), project_id)
         .await;
     let worktree = state.opencode.worktree_for(&directory);
     let agent_mode = normalize_agent_mode(body.agent.clone());
@@ -3962,30 +4115,39 @@ async fn oc_resource_list() -> impl IntoResponse {
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_worktree_list(State(state): State<Arc<OpenCodeAppState>>, headers: HeaderMap) -> impl IntoResponse {
-    let directory = state.opencode.directory_for(&headers, None);
-    let worktree = state.opencode.worktree_for(&directory);
-    (StatusCode::OK, Json(json!([worktree])))
+async fn oc_worktree_list(
+    State(state): State<Arc<OpenCodeAppState>>,
+    headers: HeaderMap,
+    Query(query): Query<DirectoryQuery>,
+) -> impl IntoResponse {
+    let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
+    let manager = state.inner.session_manager().project_manager();
+    match manager.list_worktrees(&directory).await {
+        Ok(worktrees) => (StatusCode::OK, Json(json!(worktrees))).into_response(),
+        Err(err) => sandbox_error_response(err).into_response(),
+    }
 }
 
 #[utoipa::path(
     post,
     path = "/experimental/worktree",
-    request_body = String,
+    request_body = WorktreeCreateInput,
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_worktree_create(State(state): State<Arc<OpenCodeAppState>>, headers: HeaderMap) -> impl IntoResponse {
-    let directory = state.opencode.directory_for(&headers, None);
-    let worktree = state.opencode.worktree_for(&directory);
-    (
-        StatusCode::OK,
-        Json(json!({
-            "name": "worktree",
-            "branch": state.opencode.branch_name(),
-            "directory": worktree,
-        })),
-    )
+async fn oc_worktree_create(
+    State(state): State<Arc<OpenCodeAppState>>,
+    headers: HeaderMap,
+    Query(query): Query<DirectoryQuery>,
+    body: Option<Json<WorktreeCreateInput>>,
+) -> impl IntoResponse {
+    let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
+    let manager = state.inner.session_manager().project_manager();
+    let name = body.as_ref().and_then(|value| value.name.clone());
+    match manager.create_worktree(&directory, name).await {
+        Ok(worktree) => (StatusCode::OK, Json(worktree_info_to_value(&worktree))).into_response(),
+        Err(err) => sandbox_error_response(err).into_response(),
+    }
 }
 
 #[utoipa::path(
@@ -3994,8 +4156,18 @@ async fn oc_worktree_create(State(state): State<Arc<OpenCodeAppState>>, headers:
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_worktree_delete() -> impl IntoResponse {
-    bool_ok(true)
+async fn oc_worktree_delete(
+    State(state): State<Arc<OpenCodeAppState>>,
+    body: Option<Json<WorktreeRemoveInput>>,
+) -> impl IntoResponse {
+    let Some(body) = body else {
+        return bad_request("worktree directory required").into_response();
+    };
+    let manager = state.inner.session_manager().project_manager();
+    match manager.remove_worktree(&body.directory).await {
+        Ok(()) => bool_ok(true).into_response(),
+        Err(err) => sandbox_error_response(err).into_response(),
+    }
 }
 
 #[utoipa::path(
@@ -4004,8 +4176,18 @@ async fn oc_worktree_delete() -> impl IntoResponse {
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_worktree_reset() -> impl IntoResponse {
-    bool_ok(true)
+async fn oc_worktree_reset(
+    State(state): State<Arc<OpenCodeAppState>>,
+    body: Option<Json<WorktreeResetInput>>,
+) -> impl IntoResponse {
+    let Some(body) = body else {
+        return bad_request("worktree directory required").into_response();
+    };
+    let manager = state.inner.session_manager().project_manager();
+    match manager.reset_worktree(&body.directory).await {
+        Ok(()) => bool_ok(true).into_response(),
+        Err(err) => sandbox_error_response(err).into_response(),
+    }
 }
 
 #[utoipa::path(
@@ -4264,9 +4446,15 @@ async fn oc_tui_select_session() -> impl IntoResponse {
         SessionCommandRequest,
         SessionShellRequest,
         SessionSummarizeRequest,
+        ProjectUpdateInput,
+        ProjectIconInput,
+        ProjectCommandsInput,
         PermissionReplyRequest,
         PermissionGlobalReplyRequest,
         QuestionReplyBody,
+        WorktreeCreateInput,
+        WorktreeRemoveInput,
+        WorktreeResetInput,
         PtyCreateRequest
     )),
     tags((name = "opencode", description = "OpenCode compatibility API"))
