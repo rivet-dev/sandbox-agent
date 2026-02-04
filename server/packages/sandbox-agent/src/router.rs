@@ -331,6 +331,10 @@ struct SessionState {
     next_event_sequence: u64,
     next_item_id: u64,
     events: Vec<UniversalEvent>,
+    summary_artifacts: Vec<SessionSummaryArtifact>,
+    todo_artifacts: Vec<SessionTodoArtifact>,
+    next_summary_version: u64,
+    next_todo_version: u64,
     pending_questions: HashMap<String, PendingQuestion>,
     pending_permissions: HashMap<String, PendingPermission>,
     item_started: HashSet<String>,
@@ -346,6 +350,38 @@ struct SessionState {
     claude_message_counter: u64,
     pending_assistant_native_ids: VecDeque<String>,
     pending_assistant_counter: u64,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct SessionSummaryArtifact {
+    pub version: u64,
+    pub created_at: i64,
+    pub provider_id: String,
+    pub model_id: String,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct SessionTodoItem {
+    pub content: String,
+    pub status: String,
+    pub priority: String,
+    pub id: String,
+}
+
+impl SessionTodoItem {
+    pub(crate) fn to_value(&self) -> Value {
+        serde_json::to_value(self).unwrap_or_else(|_| json!({}))
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct SessionTodoArtifact {
+    pub version: u64,
+    pub created_at: i64,
+    pub provider_id: String,
+    pub model_id: String,
+    pub items: Vec<SessionTodoItem>,
 }
 
 #[derive(Debug, Clone)]
@@ -389,6 +425,10 @@ impl SessionState {
             next_event_sequence: 0,
             next_item_id: 0,
             events: Vec::new(),
+            summary_artifacts: Vec::new(),
+            todo_artifacts: Vec::new(),
+            next_summary_version: 1,
+            next_todo_version: 1,
             pending_questions: HashMap::new(),
             pending_permissions: HashMap::new(),
             item_started: HashSet::new(),
@@ -818,6 +858,22 @@ pub(crate) struct SessionManager {
     sessions: Mutex<Vec<SessionState>>,
     server_manager: Arc<AgentServerManager>,
     http_client: Client,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct SummaryGenerationRequest {
+    pub agent: AgentId,
+    pub provider_id: String,
+    pub model_id: String,
+    pub model: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct TodoGenerationRequest {
+    pub agent: AgentId,
+    pub provider_id: String,
+    pub model_id: String,
+    pub model: Option<String>,
 }
 
 /// Shared Codex app-server process that handles multiple sessions via JSON-RPC.
@@ -1770,6 +1826,171 @@ impl SessionManager {
         });
 
         Ok(())
+    }
+
+    pub(crate) async fn summarize_session(
+        self: &Arc<Self>,
+        session_id: &str,
+        request: SummaryGenerationRequest,
+    ) -> Result<SessionSummaryArtifact, SandboxError> {
+        let (snapshot, transcript) = {
+            let sessions = self.sessions.lock().await;
+            let session = Self::session_ref(&sessions, session_id).ok_or_else(|| {
+                SandboxError::SessionNotFound {
+                    session_id: session_id.to_string(),
+                }
+            })?;
+            let transcript = session_transcript(&session.events);
+            (
+                SessionSnapshot {
+                    session_id: session.session_id.clone(),
+                    agent: request.agent,
+                    agent_mode: session.agent_mode.clone(),
+                    permission_mode: session.permission_mode.clone(),
+                    model: request.model.clone(),
+                    variant: session.variant.clone(),
+                    native_session_id: None,
+                },
+                transcript,
+            )
+        };
+
+        let prompt = summary_prompt(&transcript);
+        let mut summary = if request.agent == AgentId::Mock {
+            mock_summary(&transcript)
+        } else {
+            self.run_prompt(snapshot, request.agent, prompt)
+                .await?
+                .unwrap_or_default()
+        };
+        summary = summary.trim().to_string();
+        if summary.is_empty() {
+            summary = mock_summary(&transcript);
+        }
+
+        let artifact = {
+            let mut sessions = self.sessions.lock().await;
+            let session = Self::session_mut(&mut sessions, session_id).ok_or_else(|| {
+                SandboxError::SessionNotFound {
+                    session_id: session_id.to_string(),
+                }
+            })?;
+            let version = session.next_summary_version;
+            session.next_summary_version += 1;
+            let artifact = SessionSummaryArtifact {
+                version,
+                created_at: now_ms(),
+                provider_id: request.provider_id,
+                model_id: request.model_id,
+                summary,
+            };
+            session.summary_artifacts.push(artifact.clone());
+            artifact
+        };
+
+        Ok(artifact)
+    }
+
+    pub(crate) async fn session_todo(
+        self: &Arc<Self>,
+        session_id: &str,
+        request: TodoGenerationRequest,
+    ) -> Result<(SessionTodoArtifact, bool), SandboxError> {
+        let existing = {
+            let sessions = self.sessions.lock().await;
+            let session = Self::session_ref(&sessions, session_id).ok_or_else(|| {
+                SandboxError::SessionNotFound {
+                    session_id: session_id.to_string(),
+                }
+            })?;
+            session.todo_artifacts.last().cloned()
+        };
+        if let Some(artifact) = existing {
+            return Ok((artifact, false));
+        }
+
+        let (snapshot, transcript) = {
+            let sessions = self.sessions.lock().await;
+            let session = Self::session_ref(&sessions, session_id).ok_or_else(|| {
+                SandboxError::SessionNotFound {
+                    session_id: session_id.to_string(),
+                }
+            })?;
+            let transcript = session_transcript(&session.events);
+            (
+                SessionSnapshot {
+                    session_id: session.session_id.clone(),
+                    agent: request.agent,
+                    agent_mode: session.agent_mode.clone(),
+                    permission_mode: session.permission_mode.clone(),
+                    model: request.model.clone(),
+                    variant: session.variant.clone(),
+                    native_session_id: None,
+                },
+                transcript,
+            )
+        };
+
+        let prompt = todo_prompt(&transcript);
+        let mut items = if request.agent == AgentId::Mock {
+            mock_todos(&transcript)
+        } else {
+            let output = self
+                .run_prompt(snapshot, request.agent, prompt)
+                .await?
+                .unwrap_or_default();
+            todo_items_from_output(&output)
+        };
+        if items.is_empty() {
+            items = mock_todos(&transcript);
+        }
+
+        let artifact = {
+            let mut sessions = self.sessions.lock().await;
+            let session = Self::session_mut(&mut sessions, session_id).ok_or_else(|| {
+                SandboxError::SessionNotFound {
+                    session_id: session_id.to_string(),
+                }
+            })?;
+            let version = session.next_todo_version;
+            session.next_todo_version += 1;
+            let artifact = SessionTodoArtifact {
+                version,
+                created_at: now_ms(),
+                provider_id: request.provider_id,
+                model_id: request.model_id,
+                items,
+            };
+            session.todo_artifacts.push(artifact.clone());
+            artifact
+        };
+
+        Ok((artifact, true))
+    }
+
+    async fn run_prompt(
+        &self,
+        session: SessionSnapshot,
+        agent: AgentId,
+        prompt: String,
+    ) -> Result<Option<String>, SandboxError> {
+        let manager = self.agent_manager.clone();
+        let credentials = tokio::task::spawn_blocking(move || {
+            let options = CredentialExtractionOptions::new();
+            extract_all_credentials(&options)
+        })
+        .await
+        .map_err(|err| SandboxError::StreamError {
+            message: err.to_string(),
+        })?;
+        let spawn_options = build_spawn_options(&session, prompt, credentials);
+        let spawn_result = tokio::task::spawn_blocking(move || manager.spawn(agent, spawn_options))
+            .await
+            .map_err(|err| SandboxError::StreamError {
+                message: err.to_string(),
+            })?;
+        let spawn_result = spawn_result.map_err(|err| map_spawn_error(agent, err))?;
+        Ok(spawn_result.result)
     }
 
     async fn emit_synthetic_assistant_start(&self, session_id: &str) -> Result<(), SandboxError> {
@@ -4091,6 +4312,284 @@ fn agent_supports_resume(agent: AgentId) -> bool {
         agent,
         AgentId::Claude | AgentId::Amp | AgentId::Opencode | AgentId::Codex
     )
+}
+
+#[derive(Clone, Debug)]
+struct TranscriptEntry {
+    role: ItemRole,
+    text: String,
+}
+
+fn session_transcript(events: &[UniversalEvent]) -> Vec<TranscriptEntry> {
+    let mut entries = Vec::new();
+    for event in events {
+        if event.event_type != UniversalEventType::ItemCompleted {
+            continue;
+        }
+        let UniversalEventData::Item(data) = &event.data else {
+            continue;
+        };
+        let item = &data.item;
+        if item.kind != ItemKind::Message && item.kind != ItemKind::System {
+            continue;
+        }
+        let role = if let Some(role) = &item.role {
+            role.clone()
+        } else if item.kind == ItemKind::System {
+            ItemRole::System
+        } else {
+            continue;
+        };
+        let text = content_parts_to_text(&item.content);
+        let text = text.trim();
+        if text.is_empty() {
+            continue;
+        }
+        entries.push(TranscriptEntry {
+            role,
+            text: text.to_string(),
+        });
+    }
+    entries
+}
+
+fn content_parts_to_text(parts: &[ContentPart]) -> String {
+    let mut segments = Vec::new();
+    for part in parts {
+        match part {
+            ContentPart::Text { text } => segments.push(text.clone()),
+            ContentPart::Json { json } => segments.push(json.to_string()),
+            ContentPart::ToolCall {
+                name, arguments, ..
+            } => segments.push(format!("Tool call {name}({arguments})")),
+            ContentPart::ToolResult { output, .. } => {
+                segments.push(format!("Tool result: {output}"))
+            }
+            ContentPart::FileRef { path, action, .. } => {
+                segments.push(format!("File {action:?}: {path}"))
+            }
+            ContentPart::Status { label, detail } => match detail {
+                Some(detail) => segments.push(format!("Status: {label} ({detail})")),
+                None => segments.push(format!("Status: {label}")),
+            },
+            ContentPart::Reasoning { .. } | ContentPart::Image { .. } => {}
+        }
+    }
+    segments.join("\n")
+}
+
+fn role_label(role: &ItemRole) -> &'static str {
+    match role {
+        ItemRole::User => "User",
+        ItemRole::Assistant => "Assistant",
+        ItemRole::System => "System",
+        ItemRole::Tool => "Tool",
+    }
+}
+
+fn render_transcript(entries: &[TranscriptEntry]) -> String {
+    entries
+        .iter()
+        .map(|entry| format!("{}: {}", role_label(&entry.role), entry.text))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn summary_prompt(entries: &[TranscriptEntry]) -> String {
+    let transcript = render_transcript(entries);
+    format!(
+        "Summarize the session in 3-6 concise sentences. Focus on goals, decisions, and outcomes.\n\nSession transcript:\n{transcript}\n"
+    )
+}
+
+fn todo_prompt(entries: &[TranscriptEntry]) -> String {
+    let transcript = render_transcript(entries);
+    format!(
+        "Create a JSON array of todo items from the session. Each item must include: content, status (pending|in_progress|completed|cancelled), priority (high|medium|low), and id. Return only JSON.\n\nSession transcript:\n{transcript}\n"
+    )
+}
+
+fn mock_summary(entries: &[TranscriptEntry]) -> String {
+    if entries.is_empty() {
+        return "No session activity to summarize.".to_string();
+    }
+    let last_user = entries
+        .iter()
+        .rev()
+        .find(|entry| matches!(&entry.role, ItemRole::User));
+    let last_assistant = entries
+        .iter()
+        .rev()
+        .find(|entry| matches!(&entry.role, ItemRole::Assistant));
+    let mut summary = String::new();
+    summary.push_str(&format!("Session contained {} messages.", entries.len()));
+    if let Some(entry) = last_user {
+        summary.push_str(" Latest user request: ");
+        summary.push_str(&truncate_text(&entry.text, 140));
+        summary.push('.');
+    }
+    if let Some(entry) = last_assistant {
+        summary.push_str(" Latest assistant response: ");
+        summary.push_str(&truncate_text(&entry.text, 140));
+        summary.push('.');
+    }
+    summary
+}
+
+fn mock_todos(entries: &[TranscriptEntry]) -> Vec<SessionTodoItem> {
+    let mut items = Vec::new();
+    for entry in entries {
+        for line in entry.text.lines() {
+            let trimmed = line.trim();
+            let candidate = if let Some(rest) = trimmed.strip_prefix("TODO:") {
+                Some(rest)
+            } else if let Some(rest) = trimmed.strip_prefix("Todo:") {
+                Some(rest)
+            } else if let Some(rest) = trimmed.strip_prefix("todo:") {
+                Some(rest)
+            } else if let Some(rest) = trimmed.strip_prefix("- [ ]") {
+                Some(rest)
+            } else if let Some(rest) = trimmed.strip_prefix("* [ ]") {
+                Some(rest)
+            } else {
+                None
+            };
+            if let Some(rest) = candidate {
+                let content = rest.trim();
+                if !content.is_empty() {
+                    items.push(SessionTodoItem {
+                        content: content.to_string(),
+                        status: "pending".to_string(),
+                        priority: "medium".to_string(),
+                        id: String::new(),
+                    });
+                }
+            }
+        }
+    }
+
+    if items.is_empty() {
+        if let Some(entry) = entries
+            .iter()
+            .rev()
+            .find(|entry| matches!(&entry.role, ItemRole::User))
+        {
+            let content = format!("Follow up on: {}", truncate_text(&entry.text, 140));
+            items.push(SessionTodoItem {
+                content,
+                status: "pending".to_string(),
+                priority: "medium".to_string(),
+                id: String::new(),
+            });
+        }
+    }
+
+    for (index, item) in items.iter_mut().enumerate() {
+        if item.id.is_empty() {
+            item.id = format!("todo_{}", index + 1);
+        }
+    }
+    items
+}
+
+fn todo_items_from_output(output: &str) -> Vec<SessionTodoItem> {
+    let trimmed = output.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+    let mut value = serde_json::from_str::<Value>(trimmed).ok();
+    if value.is_none() {
+        if let (Some(start), Some(end)) = (trimmed.find('['), trimmed.rfind(']')) {
+            if start < end {
+                value = serde_json::from_str::<Value>(&trimmed[start..=end]).ok();
+            }
+        }
+    }
+    let value = match value {
+        Some(value) => value,
+        None => return Vec::new(),
+    };
+    let items = if let Some(array) = value.as_array() {
+        array.clone()
+    } else if let Some(array) = value.get("todos").and_then(Value::as_array) {
+        array.clone()
+    } else {
+        return Vec::new();
+    };
+    normalize_todo_items(&items)
+}
+
+fn normalize_todo_items(items: &[Value]) -> Vec<SessionTodoItem> {
+    let mut todos = Vec::new();
+    for (index, item) in items.iter().enumerate() {
+        let Some(obj) = item.as_object() else {
+            continue;
+        };
+        let content = obj
+            .get("content")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if content.is_empty() {
+            continue;
+        }
+        let status = obj
+            .get("status")
+            .and_then(Value::as_str)
+            .unwrap_or("pending");
+        let priority = obj
+            .get("priority")
+            .and_then(Value::as_str)
+            .unwrap_or("medium");
+        let id = obj.get("id").and_then(Value::as_str).unwrap_or("");
+
+        todos.push(SessionTodoItem {
+            content,
+            status: normalize_todo_status(status).to_string(),
+            priority: normalize_todo_priority(priority).to_string(),
+            id: if id.is_empty() {
+                format!("todo_{}", index + 1)
+            } else {
+                id.to_string()
+            },
+        });
+    }
+    todos
+}
+
+fn normalize_todo_status(status: &str) -> &'static str {
+    match status.trim().to_ascii_lowercase().as_str() {
+        "pending" => "pending",
+        "in_progress" => "in_progress",
+        "completed" => "completed",
+        "cancelled" | "canceled" => "cancelled",
+        _ => "pending",
+    }
+}
+
+fn normalize_todo_priority(priority: &str) -> &'static str {
+    match priority.trim().to_ascii_lowercase().as_str() {
+        "high" => "high",
+        "medium" => "medium",
+        "low" => "low",
+        _ => "medium",
+    }
+}
+
+fn truncate_text(text: &str, max_len: usize) -> String {
+    if text.len() <= max_len {
+        return text.to_string();
+    }
+    let truncated: String = text.chars().take(max_len).collect();
+    format!("{}...", truncated.trim_end())
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as i64)
+        .unwrap_or(0)
 }
 
 fn agent_supports_item_started(agent: AgentId) -> bool {

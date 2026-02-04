@@ -23,7 +23,10 @@ use tokio::sync::{broadcast, Mutex};
 use tokio::time::interval;
 use utoipa::{IntoParams, OpenApi, ToSchema};
 
-use crate::router::{AppState, CreateSessionRequest, PermissionReply};
+use crate::router::{
+    AppState, CreateSessionRequest, PermissionReply, SummaryGenerationRequest,
+    TodoGenerationRequest, SessionTodoItem,
+};
 use sandbox_agent_error::SandboxError;
 use sandbox_agent_agent_management::agents::AgentId;
 use sandbox_agent_universal_agent_schema::{
@@ -651,6 +654,21 @@ async fn resolve_session_agent(
         resolved_provider.unwrap_or(provider_id),
         resolved_model.unwrap_or(model_id),
     )
+}
+
+fn model_override_for_agent(
+    provider_id: &str,
+    model_id: &str,
+    agent: AgentId,
+) -> Option<String> {
+    if agent == AgentId::Mock {
+        return None;
+    }
+    if provider_id == OPENCODE_PROVIDER_ID && model_id == agent.as_str() {
+        None
+    } else {
+        Some(model_id.to_string())
+    }
 }
 
 fn agent_display_name(agent: AgentId) -> &'static str {
@@ -2842,12 +2860,44 @@ async fn oc_session_diff() -> impl IntoResponse {
     tag = "opencode"
 )]
 async fn oc_session_summarize(
+    State(state): State<Arc<OpenCodeAppState>>,
+    Path(session_id): Path<String>,
     Json(body): Json<SessionSummarizeRequest>,
 ) -> impl IntoResponse {
     if body.provider_id.is_none() || body.model_id.is_none() {
         return bad_request("providerID and modelID are required");
     }
-    bool_ok(true)
+    let provider_id = body.provider_id.unwrap_or_default();
+    let model_id = body.model_id.unwrap_or_default();
+
+    let sessions = state.opencode.sessions.lock().await;
+    if !sessions.contains_key(&session_id) {
+        return not_found("Session not found");
+    }
+    drop(sessions);
+
+    let (agent_id, resolved_provider, resolved_model) =
+        resolve_session_agent(&state, &session_id, Some(&provider_id), Some(&model_id)).await;
+    if let Err(err) = ensure_backing_session(&state, &session_id, &agent_id).await {
+        return sandbox_error_response(err);
+    }
+    let agent = AgentId::parse(&agent_id).unwrap_or_else(default_agent_id);
+    let request = SummaryGenerationRequest {
+        agent,
+        provider_id: resolved_provider.clone(),
+        model_id: resolved_model.clone(),
+        model: model_override_for_agent(&resolved_provider, &resolved_model, agent),
+    };
+
+    match state
+        .inner
+        .session_manager()
+        .summarize_session(&session_id, request)
+        .await
+    {
+        Ok(_) => bool_ok(true),
+        Err(err) => sandbox_error_response(err),
+    }
 }
 
 #[utoipa::path(
@@ -3344,8 +3394,48 @@ async fn oc_session_unshare(
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_session_todo() -> impl IntoResponse {
-    (StatusCode::OK, Json(json!([])))
+async fn oc_session_todo(
+    State(state): State<Arc<OpenCodeAppState>>,
+    Path(session_id): Path<String>,
+) -> impl IntoResponse {
+    let sessions = state.opencode.sessions.lock().await;
+    if !sessions.contains_key(&session_id) {
+        return not_found("Session not found").into_response();
+    }
+    drop(sessions);
+
+    let (agent_id, resolved_provider, resolved_model) =
+        resolve_session_agent(&state, &session_id, None, None).await;
+    if let Err(err) = ensure_backing_session(&state, &session_id, &agent_id).await {
+        return sandbox_error_response(err).into_response();
+    }
+    let agent = AgentId::parse(&agent_id).unwrap_or_else(default_agent_id);
+    let request = TodoGenerationRequest {
+        agent,
+        provider_id: resolved_provider.clone(),
+        model_id: resolved_model.clone(),
+        model: model_override_for_agent(&resolved_provider, &resolved_model, agent),
+    };
+
+    match state
+        .inner
+        .session_manager()
+        .session_todo(&session_id, request)
+        .await
+    {
+        Ok((artifact, created)) => {
+            let todos: Vec<Value> =
+                artifact.items.iter().map(SessionTodoItem::to_value).collect();
+            if created {
+                state.opencode.emit_event(json!({
+                    "type": "todo.updated",
+                    "properties": {"sessionID": session_id, "todos": todos.clone()}
+                }));
+            }
+            (StatusCode::OK, Json(json!(todos))).into_response()
+        }
+        Err(err) => sandbox_error_response(err).into_response(),
+    }
 }
 
 #[utoipa::path(

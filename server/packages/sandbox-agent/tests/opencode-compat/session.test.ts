@@ -145,4 +145,43 @@ describe("OpenCode-compatible Session API", () => {
       expect(response.data?.title).toBe("Keep");
     });
   });
+
+  describe("session.summarize + session.todo", () => {
+    it("should generate a summary and todo items", async () => {
+      const created = await client.session.create();
+      const sessionId = created.data?.id!;
+
+      await client.session.prompt({
+        path: { id: sessionId },
+        body: {
+          model: { providerID: "sandbox-agent", modelID: "mock" },
+          parts: [
+            {
+              type: "text",
+              text: "TODO: update summarize endpoint\nTODO: add todo list tests",
+            },
+          ],
+        },
+      });
+
+      const summarize = await client.session.summarize({
+        path: { id: sessionId },
+        body: { providerID: "sandbox-agent", modelID: "mock" },
+      });
+      expect(summarize.data).toBe(true);
+
+      const todos = await client.session.todo({ path: { id: sessionId } });
+      expect(Array.isArray(todos.data)).toBe(true);
+      expect(todos.data?.length).toBeGreaterThan(0);
+
+      const first = todos.data?.[0];
+      expect(first?.id).toBeDefined();
+      expect(first?.content).toBeDefined();
+      expect(first?.status).toBeDefined();
+      expect(first?.priority).toBeDefined();
+
+      const contents = (todos.data ?? []).map((item) => item.content).join(" ");
+      expect(contents).toContain("summarize endpoint");
+    });
+  });
 });
