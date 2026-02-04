@@ -23,6 +23,7 @@ use tokio::sync::{broadcast, Mutex};
 use tokio::time::interval;
 use utoipa::{IntoParams, OpenApi, ToSchema};
 
+use crate::mcp::{McpConfig, McpError};
 use crate::router::{AppState, CreateSessionRequest, PermissionReply};
 use sandbox_agent_error::SandboxError;
 use sandbox_agent_agent_management::agents::AgentId;
@@ -557,6 +558,18 @@ struct PermissionGlobalReplyRequest {
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
+struct McpRegisterRequest {
+    name: String,
+    config: Value,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+struct McpAuthCallbackRequest {
+    code: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
 struct QuestionReplyBody {
     answers: Option<Vec<Vec<String>>>,
 }
@@ -766,6 +779,15 @@ fn sandbox_error_response(err: SandboxError) -> (StatusCode, Json<Value>) {
         SandboxError::SessionNotFound { .. } => not_found("Session not found"),
         SandboxError::InvalidRequest { message } => bad_request(&message),
         other => internal_error(&other.to_string()),
+    }
+}
+
+fn mcp_error_response(err: McpError) -> (StatusCode, Json<Value>) {
+    match err {
+        McpError::NotFound => not_found("MCP server not found"),
+        McpError::Invalid(message) => bad_request(&message),
+        McpError::AuthRequired => bad_request("MCP auth required"),
+        McpError::Failed(message) => internal_error(&message),
     }
 }
 
@@ -3833,18 +3855,35 @@ async fn oc_find_symbols(Query(query): Query<FindSymbolsQuery>) -> impl IntoResp
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_mcp_list() -> impl IntoResponse {
-    (StatusCode::OK, Json(json!({})))
+async fn oc_mcp_list(State(state): State<Arc<OpenCodeAppState>>) -> impl IntoResponse {
+    let status = state.inner.session_manager().mcp_status_map().await;
+    (StatusCode::OK, Json(status))
 }
 
 #[utoipa::path(
     post,
     path = "/mcp",
+    request_body = McpRegisterRequest,
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_mcp_register() -> impl IntoResponse {
-    (StatusCode::OK, Json(json!({})))
+async fn oc_mcp_register(
+    State(state): State<Arc<OpenCodeAppState>>,
+    Json(body): Json<McpRegisterRequest>,
+) -> impl IntoResponse {
+    let config = match McpConfig::from_value(&body.config) {
+        Ok(config) => config,
+        Err(message) => return bad_request(&message).into_response(),
+    };
+    match state
+        .inner
+        .session_manager()
+        .mcp_register(body.name, config)
+        .await
+    {
+        Ok(status) => (StatusCode::OK, Json(status)).into_response(),
+        Err(err) => mcp_error_response(err).into_response(),
+    }
 }
 
 #[utoipa::path(
@@ -3855,10 +3894,13 @@ async fn oc_mcp_register() -> impl IntoResponse {
     tag = "opencode"
 )]
 async fn oc_mcp_auth(
-    Path(_name): Path<String>,
-    _body: Option<Json<Value>>,
+    State(state): State<Arc<OpenCodeAppState>>,
+    Path(name): Path<String>,
 ) -> impl IntoResponse {
-    (StatusCode::OK, Json(json!({"status": "needs_auth"})))
+    match state.inner.session_manager().mcp_auth_start(&name).await {
+        Ok(url) => (StatusCode::OK, Json(json!({"authorizationUrl": url}))).into_response(),
+        Err(err) => mcp_error_response(err).into_response(),
+    }
 }
 
 #[utoipa::path(
@@ -3868,22 +3910,41 @@ async fn oc_mcp_auth(
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_mcp_auth_remove(Path(_name): Path<String>) -> impl IntoResponse {
-    (StatusCode::OK, Json(json!({"status": "disabled"})))
+async fn oc_mcp_auth_remove(
+    State(state): State<Arc<OpenCodeAppState>>,
+    Path(name): Path<String>,
+) -> impl IntoResponse {
+    match state.inner.session_manager().mcp_auth_remove(&name).await {
+        Ok(status) => (StatusCode::OK, Json(status.as_json())).into_response(),
+        Err(err) => mcp_error_response(err).into_response(),
+    }
 }
 
 #[utoipa::path(
     post,
     path = "/mcp/{name}/auth/callback",
     params(("name" = String, Path, description = "MCP server name")),
+    request_body = McpAuthCallbackRequest,
     responses((status = 200)),
     tag = "opencode"
 )]
 async fn oc_mcp_auth_callback(
-    Path(_name): Path<String>,
-    _body: Option<Json<Value>>,
+    State(state): State<Arc<OpenCodeAppState>>,
+    Path(name): Path<String>,
+    Json(body): Json<McpAuthCallbackRequest>,
 ) -> impl IntoResponse {
-    (StatusCode::OK, Json(json!({"status": "needs_auth"})))
+    let Some(code) = body.code else {
+        return bad_request("code is required").into_response();
+    };
+    match state
+        .inner
+        .session_manager()
+        .mcp_auth_callback(&name, code)
+        .await
+    {
+        Ok(status) => (StatusCode::OK, Json(status.as_json())).into_response(),
+        Err(err) => mcp_error_response(err).into_response(),
+    }
 }
 
 #[utoipa::path(
@@ -3895,10 +3956,14 @@ async fn oc_mcp_auth_callback(
     tag = "opencode"
 )]
 async fn oc_mcp_authenticate(
-    Path(_name): Path<String>,
+    State(state): State<Arc<OpenCodeAppState>>,
+    Path(name): Path<String>,
     _body: Option<Json<Value>>,
 ) -> impl IntoResponse {
-    (StatusCode::OK, Json(json!({"status": "needs_auth"})))
+    match state.inner.session_manager().mcp_auth_authenticate(&name).await {
+        Ok(status) => (StatusCode::OK, Json(status.as_json())).into_response(),
+        Err(err) => mcp_error_response(err).into_response(),
+    }
 }
 
 #[utoipa::path(
@@ -3908,8 +3973,14 @@ async fn oc_mcp_authenticate(
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_mcp_connect(Path(_name): Path<String>) -> impl IntoResponse {
-    bool_ok(true)
+async fn oc_mcp_connect(
+    State(state): State<Arc<OpenCodeAppState>>,
+    Path(name): Path<String>,
+) -> impl IntoResponse {
+    match state.inner.session_manager().mcp_connect(&name).await {
+        Ok(result) => bool_ok(result).into_response(),
+        Err(err) => mcp_error_response(err).into_response(),
+    }
 }
 
 #[utoipa::path(
@@ -3919,8 +3990,14 @@ async fn oc_mcp_connect(Path(_name): Path<String>) -> impl IntoResponse {
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_mcp_disconnect(Path(_name): Path<String>) -> impl IntoResponse {
-    bool_ok(true)
+async fn oc_mcp_disconnect(
+    State(state): State<Arc<OpenCodeAppState>>,
+    Path(name): Path<String>,
+) -> impl IntoResponse {
+    match state.inner.session_manager().mcp_disconnect(&name).await {
+        Ok(result) => bool_ok(result).into_response(),
+        Err(err) => mcp_error_response(err).into_response(),
+    }
 }
 
 #[utoipa::path(
@@ -3929,8 +4006,9 @@ async fn oc_mcp_disconnect(Path(_name): Path<String>) -> impl IntoResponse {
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_tool_ids() -> impl IntoResponse {
-    (StatusCode::OK, Json(json!([])))
+async fn oc_tool_ids(State(state): State<Arc<OpenCodeAppState>>) -> impl IntoResponse {
+    let ids = state.inner.session_manager().mcp_tool_ids().await;
+    (StatusCode::OK, Json(ids))
 }
 
 #[utoipa::path(
@@ -3939,11 +4017,15 @@ async fn oc_tool_ids() -> impl IntoResponse {
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_tool_list(Query(query): Query<ToolQuery>) -> impl IntoResponse {
+async fn oc_tool_list(
+    State(state): State<Arc<OpenCodeAppState>>,
+    Query(query): Query<ToolQuery>,
+) -> impl IntoResponse {
     if query.provider.is_none() || query.model.is_none() {
         return bad_request("provider and model are required").into_response();
     }
-    (StatusCode::OK, Json(json!([]))).into_response()
+    let tools = state.inner.session_manager().mcp_tool_list().await;
+    (StatusCode::OK, Json(tools)).into_response()
 }
 
 #[utoipa::path(

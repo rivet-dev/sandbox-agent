@@ -818,6 +818,7 @@ pub(crate) struct SessionManager {
     sessions: Mutex<Vec<SessionState>>,
     server_manager: Arc<AgentServerManager>,
     http_client: Client,
+    mcp_registry: Mutex<crate::mcp::McpRegistry>,
 }
 
 /// Shared Codex app-server process that handles multiple sessions via JSON-RPC.
@@ -1538,6 +1539,7 @@ impl SessionManager {
             sessions: Mutex::new(Vec::new()),
             server_manager,
             http_client: Client::new(),
+            mcp_registry: Mutex::new(crate::mcp::McpRegistry::new()),
         }
     }
 
@@ -1687,6 +1689,71 @@ impl SessionManager {
             }
             Err(_) => Ok(agent_modes_for(agent)),
         }
+    }
+
+    pub(crate) async fn mcp_status_map(&self) -> Value {
+        let registry = self.mcp_registry.lock().await;
+        registry.status_map()
+    }
+
+    pub(crate) async fn mcp_register(
+        &self,
+        name: String,
+        config: crate::mcp::McpConfig,
+    ) -> Result<Value, crate::mcp::McpError> {
+        let mut registry = self.mcp_registry.lock().await;
+        registry.register(name, config).await?;
+        Ok(registry.status_map())
+    }
+
+    pub(crate) async fn mcp_auth_start(&self, name: &str) -> Result<String, crate::mcp::McpError> {
+        let mut registry = self.mcp_registry.lock().await;
+        registry.start_auth(name)
+    }
+
+    pub(crate) async fn mcp_auth_callback(
+        &self,
+        name: &str,
+        code: String,
+    ) -> Result<crate::mcp::McpStatus, crate::mcp::McpError> {
+        let mut registry = self.mcp_registry.lock().await;
+        registry.auth_callback(name, code)
+    }
+
+    pub(crate) async fn mcp_auth_authenticate(
+        &self,
+        name: &str,
+    ) -> Result<crate::mcp::McpStatus, crate::mcp::McpError> {
+        let mut registry = self.mcp_registry.lock().await;
+        registry.auth_authenticate(name)
+    }
+
+    pub(crate) async fn mcp_auth_remove(
+        &self,
+        name: &str,
+    ) -> Result<crate::mcp::McpStatus, crate::mcp::McpError> {
+        let mut registry = self.mcp_registry.lock().await;
+        registry.auth_remove(name)
+    }
+
+    pub(crate) async fn mcp_connect(&self, name: &str) -> Result<bool, crate::mcp::McpError> {
+        let mut registry = self.mcp_registry.lock().await;
+        registry.connect(name).await
+    }
+
+    pub(crate) async fn mcp_disconnect(&self, name: &str) -> Result<bool, crate::mcp::McpError> {
+        let mut registry = self.mcp_registry.lock().await;
+        registry.disconnect(name).await
+    }
+
+    pub(crate) async fn mcp_tool_ids(&self) -> Vec<String> {
+        let registry = self.mcp_registry.lock().await;
+        registry.tool_ids()
+    }
+
+    pub(crate) async fn mcp_tool_list(&self) -> Vec<Value> {
+        let registry = self.mcp_registry.lock().await;
+        registry.tool_list()
     }
 
     pub(crate) async fn send_message(
