@@ -342,6 +342,9 @@ importers:
       '@sandbox-agent/cli-darwin-x64':
         specifier: workspace:*
         version: link:platforms/darwin-x64
+      '@sandbox-agent/cli-linux-arm64':
+        specifier: workspace:*
+        version: link:platforms/linux-arm64
       '@sandbox-agent/cli-linux-x64':
         specifier: workspace:*
         version: link:platforms/linux-x64
@@ -368,6 +371,8 @@ importers:
   sdks/cli/platforms/darwin-arm64: {}
 
   sdks/cli/platforms/darwin-x64: {}
+
+  sdks/cli/platforms/linux-arm64: {}
 
   sdks/cli/platforms/linux-x64: {}
 
