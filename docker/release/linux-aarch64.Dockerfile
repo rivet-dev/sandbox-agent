@@ -29,7 +29,7 @@ RUN cd frontend/packages/inspector && pnpm exec vite build
 
 FROM rust:1.88.0 AS base
 
-# Install dependencies
+# Install dependencies (no g++-multilib on ARM64 - it's only for x86)
 RUN apt-get update && apt-get install -y \
     musl-tools \
     musl-dev \
@@ -40,7 +40,6 @@ RUN apt-get update && apt-get install -y \
     pkg-config \
     ca-certificates \
     g++ \
-    g++-multilib \
     git \
     curl && \
     rm -rf /var/lib/apt/lists/* && \
