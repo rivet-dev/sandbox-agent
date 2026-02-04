@@ -40,6 +40,7 @@ use utoipa::{Modify, OpenApi, ToSchema};
 
 use crate::agent_server_logs::AgentServerLogs;
 use crate::opencode_compat::{build_opencode_router, OpenCodeAppState};
+use crate::pty::PtyManager;
 use crate::ui;
 use sandbox_agent_agent_management::agents::{
     AgentError as ManagerError, AgentId, AgentManager, InstallOptions, SpawnOptions, StreamingSpawn,
@@ -818,6 +819,7 @@ pub(crate) struct SessionManager {
     sessions: Mutex<Vec<SessionState>>,
     server_manager: Arc<AgentServerManager>,
     http_client: Client,
+    pty_manager: Arc<PtyManager>,
 }
 
 /// Shared Codex app-server process that handles multiple sessions via JSON-RPC.
@@ -1538,7 +1540,12 @@ impl SessionManager {
             sessions: Mutex::new(Vec::new()),
             server_manager,
             http_client: Client::new(),
+            pty_manager: Arc::new(PtyManager::new()),
         }
+    }
+
+    pub(crate) fn pty_manager(&self) -> Arc<PtyManager> {
+        self.pty_manager.clone()
     }
 
     fn session_ref<'a>(sessions: &'a [SessionState], session_id: &str) -> Option<&'a SessionState> {
@@ -1840,6 +1847,7 @@ impl SessionManager {
                 .unregister_session(agent, &session_id, native_session_id.as_deref())
                 .await;
         }
+        self.pty_manager.cleanup_for_session(&session_id).await;
         Ok(())
     }
 
