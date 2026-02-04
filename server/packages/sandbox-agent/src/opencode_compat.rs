@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 use std::convert::Infallible;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::str::FromStr;
@@ -23,7 +24,7 @@ use tokio::sync::{broadcast, Mutex};
 use tokio::time::interval;
 use utoipa::{IntoParams, OpenApi, ToSchema};
 
-use crate::router::{AppState, CreateSessionRequest, PermissionReply};
+use crate::router::{AppState, CommandExecutionRequest, CreateSessionRequest, PermissionReply};
 use sandbox_agent_error::SandboxError;
 use sandbox_agent_agent_management::agents::AgentId;
 use sandbox_agent_universal_agent_schema::{
@@ -940,6 +941,25 @@ fn normalize_part(session_id: &str, message_id: &str, input: &Value) -> Value {
                 .trim(),
         ),
     }
+}
+
+fn split_arguments(arguments: &str) -> Vec<String> {
+    arguments
+        .split_whitespace()
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string())
+        .collect()
+}
+
+fn combine_output(stdout: &str, stderr: &str) -> String {
+    let mut combined = stdout.to_string();
+    if !stderr.is_empty() {
+        if !combined.is_empty() {
+            combined.push('\n');
+        }
+        combined.push_str(stderr);
+    }
+    combined
 }
 
 fn message_id_for_sequence(sequence: u64) -> String {
@@ -2234,7 +2254,23 @@ async fn oc_agent_list(State(state): State<Arc<OpenCodeAppState>>) -> impl IntoR
     tag = "opencode"
 )]
 async fn oc_command_list() -> impl IntoResponse {
-    (StatusCode::OK, Json(json!([])))
+    let commands = vec![
+        json!({
+            "name": "command",
+            "description": "Run a command with arguments",
+            "source": "command",
+            "template": "{{command}} {{arguments}}",
+            "hints": ["command", "arguments"],
+        }),
+        json!({
+            "name": "shell",
+            "description": "Run a shell command",
+            "source": "command",
+            "template": "{{command}}",
+            "hints": ["command"],
+        }),
+    ];
+    (StatusCode::OK, Json(json!(commands)))
 }
 
 #[utoipa::path(
@@ -3162,27 +3198,111 @@ async fn oc_session_command(
         return bad_request("command and arguments are required").into_response();
     }
     let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
+    let _ = state
+        .opencode
+        .ensure_session(&session_id, directory.clone())
+        .await;
     let worktree = state.opencode.worktree_for(&directory);
     let now = state.opencode.now_ms();
-    let assistant_message_id = next_id("msg_", &MESSAGE_COUNTER);
-    let agent = normalize_agent_mode(body.agent.clone());
+    let agent_mode = normalize_agent_mode(body.agent.clone());
+    let requested_model = body.model.as_deref();
+    let (session_agent, provider_id, model_id) = resolve_session_agent(
+        &state,
+        &session_id,
+        Some(OPENCODE_PROVIDER_ID),
+        requested_model,
+    )
+    .await;
+
+    state.opencode.emit_event(json!({
+        "type": "session.status",
+        "properties": {
+            "sessionID": session_id,
+            "status": {"type": "busy"}
+        }
+    }));
+
+    let _ = state
+        .opencode
+        .update_runtime(&session_id, |runtime| {
+            runtime.last_agent = Some(agent_mode.clone());
+            runtime.last_model_provider = Some(provider_id.clone());
+            runtime.last_model_id = Some(model_id.clone());
+        })
+        .await;
+
+    if let Err(err) = ensure_backing_session(&state, &session_id, &session_agent).await {
+        return sandbox_error_response(err).into_response();
+    }
+    ensure_session_stream(state.clone(), session_id.clone()).await;
+
+    let command = body.command.unwrap_or_default();
+    let args = split_arguments(body.arguments.as_deref().unwrap_or(""));
+    let result = match state
+        .inner
+        .session_manager()
+        .execute_command(
+            session_id.clone(),
+            CommandExecutionRequest {
+                command,
+                args,
+                cwd: Some(PathBuf::from(directory.clone())),
+                env: None,
+                timeout_ms: None,
+                stream_output: true,
+                shell: false,
+            },
+        )
+        .await
+    {
+        Ok(result) => result,
+        Err(err) => return sandbox_error_response(err).into_response(),
+    };
+
+    let mut parent_id: Option<String> = None;
+    let runtime = state
+        .opencode
+        .update_runtime(&session_id, |runtime| {
+            parent_id = runtime.last_user_message_id.clone();
+        })
+        .await;
+    let message_id = runtime
+        .message_id_for_item
+        .get(&result.item_id)
+        .cloned()
+        .unwrap_or_else(|| unique_assistant_message_id(&runtime, parent_id.as_ref(), result.sequence));
+    let _ = state
+        .opencode
+        .update_runtime(&session_id, |runtime| {
+            runtime
+                .message_id_for_item
+                .insert(result.item_id.clone(), message_id.clone());
+        })
+        .await;
+
     let assistant_message = build_assistant_message(
         &session_id,
-        &assistant_message_id,
-        "msg_parent",
+        &message_id,
+        parent_id.as_deref().unwrap_or(""),
         now,
         &directory,
         &worktree,
-        &agent,
-        OPENCODE_PROVIDER_ID,
-        OPENCODE_DEFAULT_MODEL_ID,
+        &agent_mode,
+        &provider_id,
+        &model_id,
     );
+    let output_text = combine_output(&result.stdout, &result.stderr);
+    let parts = if output_text.is_empty() {
+        Vec::new()
+    } else {
+        vec![build_text_part(&session_id, &message_id, &output_text)]
+    };
 
     (
         StatusCode::OK,
         Json(json!({
             "info": assistant_message,
-            "parts": [],
+            "parts": parts,
         })),
     )
         .into_response()
@@ -3207,27 +3327,101 @@ async fn oc_session_shell(
         return bad_request("agent and command are required").into_response();
     }
     let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
+    let _ = state
+        .opencode
+        .ensure_session(&session_id, directory.clone())
+        .await;
     let worktree = state.opencode.worktree_for(&directory);
     let now = state.opencode.now_ms();
-    let assistant_message_id = next_id("msg_", &MESSAGE_COUNTER);
+    let agent_mode = normalize_agent_mode(body.agent.clone());
+    let requested_provider = body
+        .model
+        .as_ref()
+        .and_then(|v| v.get("providerID"))
+        .and_then(|v| v.as_str());
+    let requested_model = body
+        .model
+        .as_ref()
+        .and_then(|v| v.get("modelID"))
+        .and_then(|v| v.as_str());
+    let (session_agent, provider_id, model_id) =
+        resolve_session_agent(&state, &session_id, requested_provider, requested_model).await;
+
+    state.opencode.emit_event(json!({
+        "type": "session.status",
+        "properties": {
+            "sessionID": session_id,
+            "status": {"type": "busy"}
+        }
+    }));
+
+    let _ = state
+        .opencode
+        .update_runtime(&session_id, |runtime| {
+            runtime.last_agent = Some(agent_mode.clone());
+            runtime.last_model_provider = Some(provider_id.clone());
+            runtime.last_model_id = Some(model_id.clone());
+        })
+        .await;
+
+    if let Err(err) = ensure_backing_session(&state, &session_id, &session_agent).await {
+        return sandbox_error_response(err).into_response();
+    }
+    ensure_session_stream(state.clone(), session_id.clone()).await;
+
+    let command = body.command.unwrap_or_default();
+    let result = match state
+        .inner
+        .session_manager()
+        .execute_command(
+            session_id.clone(),
+            CommandExecutionRequest {
+                command,
+                args: Vec::new(),
+                cwd: Some(PathBuf::from(directory.clone())),
+                env: None,
+                timeout_ms: None,
+                stream_output: true,
+                shell: true,
+            },
+        )
+        .await
+    {
+        Ok(result) => result,
+        Err(err) => return sandbox_error_response(err).into_response(),
+    };
+
+    let mut parent_id: Option<String> = None;
+    let runtime = state
+        .opencode
+        .update_runtime(&session_id, |runtime| {
+            parent_id = runtime.last_user_message_id.clone();
+        })
+        .await;
+    let message_id = runtime
+        .message_id_for_item
+        .get(&result.item_id)
+        .cloned()
+        .unwrap_or_else(|| unique_assistant_message_id(&runtime, parent_id.as_ref(), result.sequence));
+    let _ = state
+        .opencode
+        .update_runtime(&session_id, |runtime| {
+            runtime
+                .message_id_for_item
+                .insert(result.item_id.clone(), message_id.clone());
+        })
+        .await;
+
     let assistant_message = build_assistant_message(
         &session_id,
-        &assistant_message_id,
-        "msg_parent",
+        &message_id,
+        parent_id.as_deref().unwrap_or(""),
         now,
         &directory,
         &worktree,
-        &normalize_agent_mode(body.agent.clone()),
-        body.model
-            .as_ref()
-            .and_then(|v| v.get("providerID"))
-            .and_then(|v| v.as_str())
-            .unwrap_or(OPENCODE_PROVIDER_ID),
-        body.model
-            .as_ref()
-            .and_then(|v| v.get("modelID"))
-            .and_then(|v| v.as_str())
-            .unwrap_or(OPENCODE_DEFAULT_MODEL_ID),
+        &agent_mode,
+        &provider_id,
+        &model_id,
     );
     (StatusCode::OK, Json(assistant_message)).into_response()
 }

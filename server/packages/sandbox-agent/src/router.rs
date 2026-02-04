@@ -30,6 +30,7 @@ use sandbox_agent_universal_agent_schema::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use tokio::io::{AsyncBufReadExt, BufReader as TokioBufReader};
 use tokio::sync::{broadcast, mpsc, oneshot, Mutex};
 use tokio::time::sleep;
 use tokio_stream::wrappers::BroadcastStream;
@@ -937,6 +938,29 @@ pub(crate) struct PendingQuestionInfo {
     pub options: Vec<String>,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct CommandExecutionRequest {
+    pub command: String,
+    pub args: Vec<String>,
+    pub cwd: Option<PathBuf>,
+    pub env: Option<HashMap<String, String>>,
+    pub timeout_ms: Option<u64>,
+    pub stream_output: bool,
+    pub shell: bool,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct CommandExecutionResult {
+    pub stdout: String,
+    pub stderr: String,
+    pub exit_code: Option<i32>,
+    pub duration_ms: u128,
+    pub timed_out: bool,
+    pub item_id: String,
+    pub sequence: u64,
+    pub status: ItemStatus,
+}
+
 impl ManagedServer {
     fn base_url(&self) -> Option<String> {
         match &self.kind {
@@ -1770,6 +1794,304 @@ impl SessionManager {
         });
 
         Ok(())
+    }
+
+    pub(crate) async fn execute_command(
+        self: &Arc<Self>,
+        session_id: String,
+        request: CommandExecutionRequest,
+    ) -> Result<CommandExecutionResult, SandboxError> {
+        let _ = self.session_snapshot_for_message(&session_id).await?;
+        let start_time = Instant::now();
+
+        let CommandExecutionRequest {
+            command,
+            args,
+            cwd,
+            env,
+            timeout_ms,
+            stream_output,
+            shell,
+        } = request;
+
+        let started_item = UniversalItem {
+            item_id: String::new(),
+            native_item_id: None,
+            parent_id: None,
+            kind: ItemKind::Message,
+            role: Some(ItemRole::Assistant),
+            content: Vec::new(),
+            status: ItemStatus::InProgress,
+        };
+        let started_conversion = EventConversion::new(
+            UniversalEventType::ItemStarted,
+            UniversalEventData::Item(ItemEventData {
+                item: started_item,
+            }),
+        )
+        .synthetic();
+
+        let started_events = self
+            .record_conversions(&session_id, vec![started_conversion])
+            .await?;
+        let (item_id, sequence) = started_events
+            .iter()
+            .find_map(|event| match &event.data {
+                UniversalEventData::Item(ItemEventData { item }) => {
+                    if event.event_type == UniversalEventType::ItemStarted {
+                        Some((item.item_id.clone(), event.sequence))
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            })
+            .ok_or_else(|| SandboxError::InvalidRequest {
+                message: "command execution could not allocate item id".to_string(),
+            })?;
+
+        let (command, args) = if shell {
+            if cfg!(windows) {
+                (
+                    "cmd".to_string(),
+                    vec!["/C".to_string(), command],
+                )
+            } else {
+                (
+                    "sh".to_string(),
+                    vec!["-c".to_string(), command],
+                )
+            }
+        } else {
+            (command, args)
+        };
+
+        let mut cmd = tokio::process::Command::new(command.clone());
+        cmd.args(args.clone())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        if let Some(cwd) = cwd.clone() {
+            cmd.current_dir(cwd);
+        }
+        if let Some(env) = env.clone() {
+            cmd.envs(env);
+        }
+
+        let mut child = match cmd.spawn() {
+            Ok(child) => child,
+            Err(err) => {
+                let duration_ms = start_time.elapsed().as_millis();
+                let error_message = format!("failed to spawn command: {err}");
+                let details = json!({
+                    "command": command.clone(),
+                    "args": args.clone(),
+                    "cwd": cwd,
+                    "error": error_message,
+                    "duration_ms": duration_ms,
+                    "timed_out": false,
+                    "timeout_ms": timeout_ms,
+                });
+                let completed_item = UniversalItem {
+                    item_id: item_id.clone(),
+                    native_item_id: None,
+                    parent_id: None,
+                    kind: ItemKind::Message,
+                    role: Some(ItemRole::Assistant),
+                    content: vec![ContentPart::Text {
+                        text: "Command spawn failed".to_string(),
+                    }],
+                    status: ItemStatus::Failed,
+                };
+                let completed = EventConversion::new(
+                    UniversalEventType::ItemCompleted,
+                    UniversalEventData::Item(ItemEventData { item: completed_item }),
+                )
+                .synthetic();
+                let _ = self.record_conversions(&session_id, vec![completed]).await;
+                self.record_error(
+                    &session_id,
+                    "command execution failed".to_string(),
+                    Some("command_failed".to_string()),
+                    Some(details),
+                )
+                .await;
+                return Err(SandboxError::InvalidRequest {
+                    message: error_message,
+                });
+            }
+        };
+
+        let mut stdout = String::new();
+        let mut stderr = String::new();
+        let mut timed_out = false;
+
+        let (tx, mut rx) = mpsc::unbounded_channel::<(bool, String)>();
+        if let Some(out) = child.stdout.take() {
+            let tx_out = tx.clone();
+            tokio::spawn(async move {
+                let mut reader = TokioBufReader::new(out);
+                let mut buffer = Vec::new();
+                loop {
+                    buffer.clear();
+                    match reader.read_until(b'\n', &mut buffer).await {
+                        Ok(0) | Err(_) => break,
+                        Ok(_) => {
+                            let chunk = String::from_utf8_lossy(&buffer).to_string();
+                            let _ = tx_out.send((true, chunk));
+                        }
+                    }
+                }
+            });
+        }
+        if let Some(err) = child.stderr.take() {
+            let tx_err = tx.clone();
+            tokio::spawn(async move {
+                let mut reader = TokioBufReader::new(err);
+                let mut buffer = Vec::new();
+                loop {
+                    buffer.clear();
+                    match reader.read_until(b'\n', &mut buffer).await {
+                        Ok(0) | Err(_) => break,
+                        Ok(_) => {
+                            let chunk = String::from_utf8_lossy(&buffer).to_string();
+                            let _ = tx_err.send((false, chunk));
+                        }
+                    }
+                }
+            });
+        }
+        drop(tx);
+
+        let mut status: Option<std::process::ExitStatus> = None;
+        let mut wait_fut = Box::pin(child.wait());
+        let mut timeout_sleep = timeout_ms
+            .map(|ms| tokio::time::sleep(Duration::from_millis(ms)));
+
+        loop {
+            tokio::select! {
+                result = &mut wait_fut, if status.is_none() => {
+                    status = Some(result.map_err(|err| SandboxError::InvalidRequest { message: err.to_string() })?);
+                    break;
+                }
+                chunk = rx.recv() => {
+                    if let Some((is_stdout, text)) = chunk {
+                        if is_stdout {
+                            stdout.push_str(&text);
+                        } else {
+                            stderr.push_str(&text);
+                        }
+                        if stream_output {
+                            let delta = EventConversion::new(
+                                UniversalEventType::ItemDelta,
+                                UniversalEventData::ItemDelta(ItemDeltaData {
+                                    item_id: item_id.clone(),
+                                    native_item_id: None,
+                                    delta: text,
+                                }),
+                            )
+                            .synthetic();
+                            let _ = self.record_conversions(&session_id, vec![delta]).await;
+                        }
+                    } else if status.is_some() {
+                        break;
+                    }
+                }
+                _ = timeout_sleep.as_mut().unwrap(), if timeout_sleep.is_some() && status.is_none() => {
+                    timed_out = true;
+                    let _ = child.kill().await;
+                    status = Some(wait_fut.await.map_err(|err| SandboxError::InvalidRequest { message: err.to_string() })?);
+                    break;
+                }
+            }
+        }
+
+        while let Some((is_stdout, text)) = rx.recv().await {
+            if is_stdout {
+                stdout.push_str(&text);
+            } else {
+                stderr.push_str(&text);
+            }
+            if stream_output {
+                let delta = EventConversion::new(
+                    UniversalEventType::ItemDelta,
+                    UniversalEventData::ItemDelta(ItemDeltaData {
+                        item_id: item_id.clone(),
+                        native_item_id: None,
+                        delta: text,
+                    }),
+                )
+                .synthetic();
+                let _ = self.record_conversions(&session_id, vec![delta]).await;
+            }
+        }
+
+        let duration_ms = start_time.elapsed().as_millis();
+        let exit_code = status.and_then(|value| value.code());
+        let mut combined = stdout.clone();
+        if !stderr.is_empty() {
+            if !combined.is_empty() {
+                combined.push('\n');
+            }
+            combined.push_str(&stderr);
+        }
+        let failed = timed_out || exit_code.unwrap_or(0) != 0;
+        let status_value = if failed {
+            ItemStatus::Failed
+        } else {
+            ItemStatus::Completed
+        };
+
+        let mut content = Vec::new();
+        if !combined.is_empty() {
+            content.push(ContentPart::Text { text: combined });
+        }
+        let completed_item = UniversalItem {
+            item_id: item_id.clone(),
+            native_item_id: None,
+            parent_id: None,
+            kind: ItemKind::Message,
+            role: Some(ItemRole::Assistant),
+            content,
+            status: status_value.clone(),
+        };
+        let completed = EventConversion::new(
+            UniversalEventType::ItemCompleted,
+            UniversalEventData::Item(ItemEventData { item: completed_item }),
+        )
+        .synthetic();
+        let _ = self.record_conversions(&session_id, vec![completed]).await;
+
+        if failed {
+            let details = json!({
+                "command": command,
+                "args": args,
+                "cwd": cwd,
+                "exit_code": exit_code,
+                "duration_ms": duration_ms,
+                "stdout": stdout,
+                "stderr": stderr,
+                "timed_out": timed_out,
+                "timeout_ms": timeout_ms,
+            });
+            self.record_error(
+                &session_id,
+                "command execution failed".to_string(),
+                Some("command_failed".to_string()),
+                Some(details),
+            )
+            .await;
+        }
+
+        Ok(CommandExecutionResult {
+            stdout,
+            stderr,
+            exit_code,
+            duration_ms,
+            timed_out,
+            item_id,
+            sequence,
+            status: status_value,
+        })
     }
 
     async fn emit_synthetic_assistant_start(&self, session_id: &str) -> Result<(), SandboxError> {
