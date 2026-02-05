@@ -31,6 +31,7 @@ use sandbox_agent_universal_agent_schema::{
     PermissionEventData, PermissionStatus, QuestionEventData, QuestionStatus, UniversalEvent,
     UniversalEventData, UniversalEventType, UniversalItem,
 };
+use crate::vcs::VcsFileStatus;
 
 static SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
 static MESSAGE_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -461,6 +462,13 @@ struct DirectoryQuery {
 }
 
 #[derive(Debug, Deserialize, IntoParams)]
+struct DiffQuery {
+    directory: Option<String>,
+    #[serde(rename = "messageID")]
+    message_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, IntoParams)]
 struct ToolQuery {
     directory: Option<String>,
     provider: Option<String>,
@@ -489,6 +497,15 @@ struct FindSymbolsQuery {
 struct FileContentQuery {
     directory: Option<String>,
     path: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct SessionRevertRequest {
+    #[serde(rename = "messageID")]
+    message_id: Option<String>,
+    #[serde(rename = "partID")]
+    part_id: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -776,6 +793,14 @@ fn parse_permission_reply_value(value: Option<&str>) -> Result<PermissionReply, 
 
 fn bool_ok(value: bool) -> (StatusCode, Json<Value>) {
     (StatusCode::OK, Json(json!(value)))
+}
+
+fn vcs_status_label(status: &VcsFileStatus) -> &'static str {
+    match status {
+        VcsFileStatus::Added => "added",
+        VcsFileStatus::Deleted => "deleted",
+        VcsFileStatus::Modified => "modified",
+    }
 }
 
 fn build_user_message(
@@ -2563,13 +2588,21 @@ async fn oc_path(
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_vcs(State(state): State<Arc<OpenCodeAppState>>) -> impl IntoResponse {
-    (
-        StatusCode::OK,
-        Json(json!({
-            "branch": state.opencode.branch_name(),
-        })),
-    )
+async fn oc_vcs(
+    State(state): State<Arc<OpenCodeAppState>>,
+    headers: HeaderMap,
+    Query(query): Query<DirectoryQuery>,
+) -> impl IntoResponse {
+    let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
+    let vcs = state.inner.session_manager().vcs();
+    let status = tokio::task::spawn_blocking(move || vcs.status(&directory))
+        .await
+        .ok()
+        .flatten();
+    let branch = status
+        .map(|status| status.branch)
+        .unwrap_or_else(|| state.opencode.branch_name());
+    (StatusCode::OK, Json(json!({ "branch": branch })))
 }
 
 #[utoipa::path(
@@ -2874,8 +2907,33 @@ async fn oc_session_fork(
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_session_diff() -> impl IntoResponse {
-    (StatusCode::OK, Json(json!([])))
+async fn oc_session_diff(
+    State(state): State<Arc<OpenCodeAppState>>,
+    Path(_session_id): Path<String>,
+    headers: HeaderMap,
+    Query(query): Query<DiffQuery>,
+) -> impl IntoResponse {
+    let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
+    let vcs = state.inner.session_manager().vcs();
+    let diffs = tokio::task::spawn_blocking(move || vcs.diff(&directory))
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    let response: Vec<Value> = diffs
+        .into_iter()
+        .map(|diff| {
+            json!({
+                "file": diff.file,
+                "before": diff.before,
+                "after": diff.after,
+                "additions": diff.additions,
+                "deletions": diff.deletions,
+                "status": vcs_status_label(&diff.status),
+            })
+        })
+        .collect();
+    (StatusCode::OK, Json(json!(response)))
 }
 
 #[utoipa::path(
@@ -3289,7 +3347,7 @@ async fn oc_session_shell(
     post,
     path = "/session/{sessionID}/revert",
     params(("sessionID" = String, Path, description = "Session ID")),
-    request_body = String,
+    request_body = SessionRevertRequest,
     responses((status = 200)),
     tag = "opencode"
 )]
@@ -3298,7 +3356,19 @@ async fn oc_session_revert(
     Path(session_id): Path<String>,
     headers: HeaderMap,
     Query(query): Query<DirectoryQuery>,
+    _body: Option<Json<SessionRevertRequest>>,
 ) -> impl IntoResponse {
+    let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
+    let vcs = state.inner.session_manager().vcs();
+    let session_id_clone = session_id.clone();
+    let revert_result = tokio::task::spawn_blocking(move || vcs.revert(&directory, &session_id_clone))
+        .await
+        .map_err(|err| SandboxError::InvalidRequest {
+            message: err.to_string(),
+        });
+    if let Ok(Err(err)) | Err(err) = revert_result {
+        return internal_error(&err.to_string()).into_response();
+    }
     oc_session_get(State(state), Path(session_id), headers, Query(query)).await
 }
 
@@ -3306,7 +3376,6 @@ async fn oc_session_revert(
     post,
     path = "/session/{sessionID}/unrevert",
     params(("sessionID" = String, Path, description = "Session ID")),
-    request_body = String,
     responses((status = 200)),
     tag = "opencode"
 )]
@@ -3316,6 +3385,18 @@ async fn oc_session_unrevert(
     headers: HeaderMap,
     Query(query): Query<DirectoryQuery>,
 ) -> impl IntoResponse {
+    let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
+    let vcs = state.inner.session_manager().vcs();
+    let session_id_clone = session_id.clone();
+    let unrevert_result =
+        tokio::task::spawn_blocking(move || vcs.unrevert(&directory, &session_id_clone))
+            .await
+            .map_err(|err| SandboxError::InvalidRequest {
+                message: err.to_string(),
+            });
+    if let Ok(Err(err)) | Err(err) = unrevert_result {
+        return internal_error(&err.to_string()).into_response();
+    }
     oc_session_get(State(state), Path(session_id), headers, Query(query)).await
 }
 
@@ -3845,8 +3926,30 @@ async fn oc_file_content(Query(query): Query<FileContentQuery>) -> impl IntoResp
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_file_status() -> impl IntoResponse {
-    (StatusCode::OK, Json(json!([]))).into_response()
+async fn oc_file_status(
+    State(state): State<Arc<OpenCodeAppState>>,
+    headers: HeaderMap,
+    Query(query): Query<DirectoryQuery>,
+) -> impl IntoResponse {
+    let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
+    let vcs = state.inner.session_manager().vcs();
+    let summaries = tokio::task::spawn_blocking(move || vcs.file_status(&directory))
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    let response: Vec<Value> = summaries
+        .into_iter()
+        .map(|summary| {
+            json!({
+                "path": summary.path,
+                "added": summary.added,
+                "removed": summary.removed,
+                "status": vcs_status_label(&summary.status),
+            })
+        })
+        .collect();
+    (StatusCode::OK, Json(json!(response))).into_response()
 }
 
 #[utoipa::path(
@@ -4328,6 +4431,7 @@ async fn oc_tui_select_session() -> impl IntoResponse {
         SessionCommandRequest,
         SessionShellRequest,
         SessionSummarizeRequest,
+        SessionRevertRequest,
         PermissionReplyRequest,
         PermissionGlobalReplyRequest,
         QuestionReplyBody,

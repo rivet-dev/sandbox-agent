@@ -7,3 +7,4 @@ pub mod router;
 pub mod server_logs;
 pub mod telemetry;
 pub mod ui;
+pub mod vcs;
