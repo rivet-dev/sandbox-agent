@@ -50,6 +50,7 @@ use sandbox_agent_agent_management::credentials::{
 
 const MOCK_EVENT_DELAY_MS: u64 = 200;
 static USER_MESSAGE_COUNTER: AtomicU64 = AtomicU64::new(1);
+static TUI_CONTROL_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug)]
 pub struct AppState {
@@ -358,6 +359,20 @@ struct PendingPermission {
 struct PendingQuestion {
     prompt: String,
     options: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct TuiControlRequest {
+    pub(crate) id: String,
+    pub(crate) path: String,
+    pub(crate) body: Value,
+}
+
+#[derive(Debug, Default)]
+struct TuiControlQueue {
+    pending: VecDeque<TuiControlRequest>,
+    inflight: HashMap<String, TuiControlRequest>,
+    responses: HashMap<String, Value>,
 }
 
 impl SessionState {
@@ -818,6 +833,7 @@ pub(crate) struct SessionManager {
     sessions: Mutex<Vec<SessionState>>,
     server_manager: Arc<AgentServerManager>,
     http_client: Client,
+    tui_controls: Mutex<HashMap<String, TuiControlQueue>>,
 }
 
 /// Shared Codex app-server process that handles multiple sessions via JSON-RPC.
@@ -1538,6 +1554,7 @@ impl SessionManager {
             sessions: Mutex::new(Vec::new()),
             server_manager,
             http_client: Client::new(),
+            tui_controls: Mutex::new(HashMap::new()),
         }
     }
 
@@ -1958,6 +1975,59 @@ impl SessionManager {
             }
         }
         items
+    }
+
+    pub(crate) async fn enqueue_tui_control(
+        &self,
+        directory: String,
+        path: String,
+        body: Value,
+    ) -> String {
+        let id = format!(
+            "tui_{}",
+            TUI_CONTROL_COUNTER.fetch_add(1, Ordering::Relaxed)
+        );
+        let request = TuiControlRequest {
+            id: id.clone(),
+            path,
+            body,
+        };
+        let mut controls = self.tui_controls.lock().await;
+        let queue = controls.entry(directory).or_default();
+        queue.pending.push_back(request);
+        id
+    }
+
+    pub(crate) async fn next_tui_control(
+        &self,
+        directory: String,
+    ) -> Option<TuiControlRequest> {
+        let mut controls = self.tui_controls.lock().await;
+        let queue = controls.entry(directory).or_default();
+        if let Some(request) = queue.pending.pop_front() {
+            queue
+                .inflight
+                .insert(request.id.clone(), request.clone());
+            return Some(request);
+        }
+        None
+    }
+
+    pub(crate) async fn respond_tui_control(
+        &self,
+        directory: String,
+        request_id: &str,
+        response: Value,
+    ) -> bool {
+        let mut controls = self.tui_controls.lock().await;
+        let Some(queue) = controls.get_mut(&directory) else {
+            return false;
+        };
+        if queue.inflight.remove(request_id).is_some() {
+            queue.responses.insert(request_id.to_string(), response);
+            return true;
+        }
+        false
     }
 
     async fn subscribe_for_turn(
