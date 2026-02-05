@@ -2,6 +2,7 @@
 
 mod agent_server_logs;
 pub mod credentials;
+mod mcp;
 pub mod opencode_compat;
 pub mod router;
 pub mod server_logs;
