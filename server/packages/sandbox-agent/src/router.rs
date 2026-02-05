@@ -39,6 +39,7 @@ use tracing::Span;
 use utoipa::{Modify, OpenApi, ToSchema};
 
 use crate::agent_server_logs::AgentServerLogs;
+use crate::filesystem::WorkspaceFilesystemService;
 use crate::opencode_compat::{build_opencode_router, OpenCodeAppState};
 use crate::ui;
 use sandbox_agent_agent_management::agents::{
@@ -818,6 +819,7 @@ pub(crate) struct SessionManager {
     sessions: Mutex<Vec<SessionState>>,
     server_manager: Arc<AgentServerManager>,
     http_client: Client,
+    filesystem: WorkspaceFilesystemService,
 }
 
 /// Shared Codex app-server process that handles multiple sessions via JSON-RPC.
@@ -1538,6 +1540,7 @@ impl SessionManager {
             sessions: Mutex::new(Vec::new()),
             server_manager,
             http_client: Client::new(),
+            filesystem: WorkspaceFilesystemService::new(),
         }
     }
 
@@ -1560,6 +1563,10 @@ impl SessionManager {
     fn read_agent_stderr(&self, agent: AgentId) -> Option<StderrOutput> {
         let logs = AgentServerLogs::new(self.server_manager.log_base_dir.clone(), agent.as_str());
         logs.read_stderr()
+    }
+
+    pub(crate) fn workspace_filesystem(&self) -> &WorkspaceFilesystemService {
+        &self.filesystem
     }
 
     pub(crate) async fn create_session(
