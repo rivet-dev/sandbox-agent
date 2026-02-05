@@ -24,37 +24,33 @@ const envs: Record<string, string> = {};
 if (process.env.ANTHROPIC_API_KEY) envs.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 if (process.env.OPENAI_API_KEY) envs.OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
-// Create sandbox (auto-detects provider from environment variables)
-const sandbox = await compute.sandbox.create();
-
-// Install sandbox-agent
-await sandbox.runCommand(
-  "curl -fsSL https://releases.rivet.dev/sandbox-agent/latest/install.sh | sh"
-);
-
-// Install agents before starting the server
-await sandbox.runCommand("sandbox-agent install-agent claude");
-await sandbox.runCommand("sandbox-agent install-agent codex");
-
-// Start the server in the background
-await sandbox.runCommand(
-  `ANTHROPIC_API_KEY=${envs.ANTHROPIC_API_KEY || ""} OPENAI_API_KEY=${envs.OPENAI_API_KEY || ""} sandbox-agent server --no-token --host 0.0.0.0 --port 3000`,
-  { background: true }
-);
+// Create sandbox with sandbox-agent server pre-configured
+const sandbox = await compute.sandbox.create({
+  envs,
+  servers: [
+    {
+      slug: "sandbox-agent",
+      install:
+        "curl -fsSL https://releases.rivet.dev/sandbox-agent/latest/install.sh | sh && " +
+        "sandbox-agent install-agent claude && " +
+        "sandbox-agent install-agent codex",
+      start: "sandbox-agent server --no-token --host 0.0.0.0 --port 3000",
+      port: 3000,
+      environment: envs,
+      health_check: {
+        path: "/v1/health",
+        interval_ms: 2000,
+      },
+    },
+  ],
+});
 
 // Connect to the server
 const baseUrl = await sandbox.getUrl({ port: 3000 });
 const client = await SandboxAgent.connect({ baseUrl });
 
 // Wait for server to be ready
-for (let i = 0; i < 30; i++) {
-  try {
-    await client.getHealth();
-    break;
-  } catch {
-    await new Promise((r) => setTimeout(r, 1000));
-  }
-}
+await client.waitForHealth();
 
 // Create a session and start coding
 await client.createSession("my-session", {
