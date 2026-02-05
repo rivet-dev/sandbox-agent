@@ -41,17 +41,54 @@ codex exec --dangerously-bypass-approvals-and-sandbox "prompt"
 codex exec resume --last  # Resume previous session
 ```
 
-### Key CLI Flags
-| Flag | Description |
-|------|-------------|
-| `--json` | Print events to stdout as JSONL |
-| `-m, --model MODEL` | Model to use |
-| `-s, --sandbox MODE` | `read-only`, `workspace-write`, `danger-full-access` |
-| `--full-auto` | Auto-approve with workspace-write sandbox |
-| `--dangerously-bypass-approvals-and-sandbox` | Skip all prompts (dangerous) |
-| `-C, --cd DIR` | Working directory |
-| `-o, --output-last-message FILE` | Write final response to file |
-| `--output-schema FILE` | JSON Schema for structured output |
+### Custom Args (CLI Flags)
+
+#### Core Flags
+
+| Flag | Type | Description |
+|------|------|-------------|
+| `-m, --model MODEL` | string | Model to use (e.g., `o3`, `gpt-4o`) |
+| `--json` | bool | Print events to stdout as JSONL |
+| `-C, --cd DIR` | path | Working directory for the agent |
+| `-o, --output-last-message FILE` | path | Write final response to file |
+
+#### Permission & Sandbox Flags
+
+| Flag | Type | Values | Description |
+|------|------|--------|-------------|
+| `-s, --sandbox MODE` | enum | `read-only`, `workspace-write`, `danger-full-access` | Sandbox policy for shell commands |
+| `-a, --ask-for-approval POLICY` | enum | `untrusted`, `on-failure`, `on-request`, `never` | When to require human approval |
+| `--full-auto` | bool | - | Convenience alias: `-a on-request --sandbox workspace-write` |
+| `--dangerously-bypass-approvals-and-sandbox` | bool | - | Skip all prompts and sandboxing (DANGEROUS) |
+
+#### Configuration Overrides
+
+| Flag | Type | Description |
+|------|------|-------------|
+| `-c, --config key=value` | string | Override config values (parsed as TOML) |
+| `-p, --profile NAME` | string | Use a configuration profile from config.toml |
+| `--enable FEATURE` | string | Enable a feature flag (repeatable) |
+| `--disable FEATURE` | string | Disable a feature flag (repeatable) |
+
+Config override examples:
+```bash
+codex -c model="o3"
+codex -c 'sandbox_permissions=["disk-full-read-access"]'
+codex -c shell_environment_policy.inherit=all
+```
+
+#### Additional Capabilities
+
+| Flag | Type | Description |
+|------|------|-------------|
+| `-i, --image FILE` | path[] | Attach image(s) to the initial prompt (repeatable) |
+| `--add-dir DIR` | path[] | Additional directories that should be writable (repeatable) |
+| `--search` | bool | Enable live web search via `web_search` tool |
+| `--output-schema FILE` | path | JSON Schema file for structured output |
+| `--skip-git-repo-check` | bool | Allow running outside a Git repository |
+| `--oss` | bool | Use local open source model provider (LM Studio/Ollama) |
+| `--local-provider PROVIDER` | enum | `lmstudio`, `ollama`, `ollama-chat` |
+| `--color COLOR` | enum | `always`, `never`, `auto` |
 
 ### Session Management
 ```bash
@@ -139,6 +176,41 @@ Codex App Server uses JSON-RPC 2.0 over JSONL/stdin/stdout (no port required).
 - `initialize` → returns server info
 - `thread/start` → starts a new thread
 - `turn/start` → sends user input for a thread
+
+### Custom Args (JSON-RPC Parameters)
+
+#### `thread/start` Parameters
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `approval_policy` | enum | `Never`, `Untrusted` - when to ask for approval |
+| `sandbox` | enum | `ReadOnly`, `DangerFullAccess` - sandbox mode |
+| `model` | string | Model to use for this thread |
+| `cwd` | string | Working directory |
+
+#### `turn/start` Parameters
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `thread_id` | string | Thread ID from `thread/start` response |
+| `input` | array | User input (e.g., `[{ "type": "text", "text": "..." }]`) |
+| `approval_policy` | enum | Override approval policy for this turn |
+| `sandbox_policy` | enum | Override sandbox policy for this turn |
+| `model` | string | Override model for this turn |
+| `cwd` | string | Override working directory |
+| `effort` | string | Reasoning effort level |
+| `output_schema` | object | JSON Schema for structured output |
+| `summary` | string | Summary context for the turn |
+| `collaboration_mode` | string | Collaboration mode (if supported) |
+
+#### App Server CLI Flags
+
+| Flag | Description |
+|------|-------------|
+| `-c, --config key=value` | Override config (same as interactive mode) |
+| `--enable FEATURE` | Enable feature flag |
+| `--disable FEATURE` | Disable feature flag |
+| `--analytics-default-enabled` | Enable analytics by default (for first-party use) |
 
 ### Event Notifications (examples)
 

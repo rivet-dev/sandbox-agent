@@ -237,6 +237,10 @@ impl AgentManager {
                     }
                     _ => {}
                 }
+                // Apply raw CLI args
+                for arg in &options.raw_args {
+                    command.arg(arg);
+                }
                 if options.streaming_input {
                     command
                         .arg("--input-format")
@@ -267,6 +271,10 @@ impl AgentManager {
                 }
                 if let Some(session_id) = options.session_id.as_deref() {
                     command.arg("-s").arg(session_id);
+                }
+                // Apply raw CLI args
+                for arg in &options.raw_args {
+                    command.arg(arg);
                 }
                 command.arg(&options.prompt);
             }
@@ -583,6 +591,10 @@ impl AgentManager {
                     }
                     _ => {}
                 }
+                // Apply raw CLI args
+                for arg in &options.raw_args {
+                    command.arg(arg);
+                }
                 if options.streaming_input {
                     command
                         .arg("--input-format")
@@ -613,6 +625,10 @@ impl AgentManager {
                 }
                 if let Some(session_id) = options.session_id.as_deref() {
                     command.arg("-s").arg(session_id);
+                }
+                // Apply raw CLI args
+                for arg in &options.raw_args {
+                    command.arg(arg);
                 }
                 command.arg(&options.prompt);
             }
@@ -682,6 +698,8 @@ pub struct SpawnOptions {
     pub env: HashMap<String, String>,
     /// Use stream-json input via stdin (Claude only).
     pub streaming_input: bool,
+    /// Raw CLI arguments to pass to the agent (for CLI-based agents).
+    pub raw_args: Vec<String>,
 }
 
 impl SpawnOptions {
@@ -696,6 +714,7 @@ impl SpawnOptions {
             working_dir: None,
             env: HashMap::new(),
             streaming_input: false,
+            raw_args: Vec::new(),
         }
     }
 }
@@ -1054,7 +1073,12 @@ fn spawn_amp(
     if let Some(session_id) = options.session_id.as_deref() {
         command.arg("--continue").arg(session_id);
     }
-    command.args(&args).arg(&options.prompt);
+    command.args(&args);
+    // Apply raw CLI args
+    for arg in &options.raw_args {
+        command.arg(arg);
+    }
+    command.arg(&options.prompt);
     for (key, value) in &options.env {
         command.env(key, value);
     }
@@ -1094,6 +1118,10 @@ fn build_amp_command(path: &Path, working_dir: &Path, options: &SpawnOptions) ->
     }
     if flags.dangerously_skip_permissions && options.permission_mode.as_deref() == Some("bypass") {
         command.arg("--dangerously-skip-permissions");
+    }
+    // Apply raw CLI args
+    for arg in &options.raw_args {
+        command.arg(arg);
     }
     command.arg(&options.prompt);
     for (key, value) in &options.env {
@@ -1157,6 +1185,10 @@ fn spawn_amp_fallback(
         if !args.is_empty() {
             command.args(&args);
         }
+        // Apply raw CLI args
+        for arg in &options.raw_args {
+            command.arg(arg);
+        }
         command.arg(&options.prompt);
         for (key, value) in &options.env {
             command.env(key, value);
@@ -1174,6 +1206,10 @@ fn spawn_amp_fallback(
     }
     if let Some(session_id) = options.session_id.as_deref() {
         command.arg("--continue").arg(session_id);
+    }
+    // Apply raw CLI args
+    for arg in &options.raw_args {
+        command.arg(arg);
     }
     command.arg(&options.prompt);
     for (key, value) in &options.env {

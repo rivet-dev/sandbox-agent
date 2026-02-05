@@ -323,6 +323,8 @@ struct SessionState {
     model: Option<String>,
     variant: Option<String>,
     native_session_id: Option<String>,
+    raw_session_args: Option<Vec<String>>,
+    raw_session_options: Option<serde_json::Value>,
     ended: bool,
     ended_exit_code: Option<i32>,
     ended_message: Option<String>,
@@ -381,6 +383,8 @@ impl SessionState {
             model: request.model.clone(),
             variant: request.variant.clone(),
             native_session_id: None,
+            raw_session_args: request.raw_session_args.clone(),
+            raw_session_options: request.raw_session_options.clone(),
             ended: false,
             ended_exit_code: None,
             ended_message: None,
@@ -1614,6 +1618,8 @@ impl SessionManager {
                 model: session.model.clone(),
                 variant: session.variant.clone(),
                 native_session_id: None,
+                raw_session_args: session.raw_session_args.clone(),
+                raw_session_options: session.raw_session_options.clone(),
             };
             let thread_id = self.create_codex_thread(&session_id, &snapshot).await?;
             session.native_session_id = Some(thread_id);
@@ -3079,6 +3085,15 @@ impl SessionManager {
         params.sandbox = codex_sandbox_mode(Some(&session.permission_mode));
         params.model = session.model.clone();
 
+        // Merge raw_session_options into the config field if provided
+        if let Some(serde_json::Value::Object(raw_options)) = &session.raw_session_options {
+            let mut config = params.config.take().unwrap_or_default();
+            for (key, value) in raw_options {
+                config.insert(key.clone(), value.clone());
+            }
+            params.config = Some(config);
+        }
+
         let request = codex_schema::ClientRequest::ThreadStart {
             id: codex_schema::RequestId::from(id),
             params,
@@ -3488,6 +3503,10 @@ pub struct AgentCapabilities {
     pub item_started: bool,
     /// Whether this agent uses a shared long-running server process (vs per-turn subprocess)
     pub shared_process: bool,
+    /// Whether this agent supports raw CLI arguments passed at session creation
+    pub raw_session_args: bool,
+    /// Whether this agent supports raw options passed at session creation (long-running server agents)
+    pub raw_session_options: bool,
 }
 
 /// Status of a shared server process for an agent
@@ -3575,6 +3594,12 @@ pub struct CreateSessionRequest {
     pub variant: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_version: Option<String>,
+    /// Raw CLI arguments to pass to the agent (for CLI-based agents like Claude, OpenCode, Amp)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw_session_args: Option<Vec<String>>,
+    /// Raw options to pass to the agent (for long-running server agents like Codex)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw_session_options: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
@@ -4120,6 +4145,8 @@ fn agent_capabilities_for(agent: AgentId) -> AgentCapabilities {
             streaming_deltas: true,
             item_started: false,
             shared_process: false, // per-turn subprocess with --resume
+            raw_session_args: true,
+            raw_session_options: false,
         },
         AgentId::Codex => AgentCapabilities {
             plan_mode: true,
@@ -4140,6 +4167,8 @@ fn agent_capabilities_for(agent: AgentId) -> AgentCapabilities {
             streaming_deltas: true,
             item_started: true,
             shared_process: true, // shared app-server via JSON-RPC
+            raw_session_args: false,
+            raw_session_options: true,
         },
         AgentId::Opencode => AgentCapabilities {
             plan_mode: false,
@@ -4160,6 +4189,8 @@ fn agent_capabilities_for(agent: AgentId) -> AgentCapabilities {
             streaming_deltas: true,
             item_started: true,
             shared_process: true, // shared HTTP server
+            raw_session_args: true,
+            raw_session_options: false,
         },
         AgentId::Amp => AgentCapabilities {
             plan_mode: false,
@@ -4180,6 +4211,8 @@ fn agent_capabilities_for(agent: AgentId) -> AgentCapabilities {
             streaming_deltas: false,
             item_started: false,
             shared_process: false, // per-turn subprocess with --continue
+            raw_session_args: true,
+            raw_session_options: false,
         },
         AgentId::Mock => AgentCapabilities {
             plan_mode: true,
@@ -4200,6 +4233,8 @@ fn agent_capabilities_for(agent: AgentId) -> AgentCapabilities {
             streaming_deltas: true,
             item_started: true,
             shared_process: false, // in-memory mock (no subprocess)
+            raw_session_args: false,
+            raw_session_options: false,
         },
     }
 }
@@ -4434,6 +4469,7 @@ fn build_spawn_options(
             None
         }
     });
+    options.raw_args = session.raw_session_args.clone().unwrap_or_default();
     if let Some(anthropic) = credentials.anthropic {
         options
             .env
@@ -6461,6 +6497,8 @@ struct SessionSnapshot {
     model: Option<String>,
     variant: Option<String>,
     native_session_id: Option<String>,
+    raw_session_args: Option<Vec<String>>,
+    raw_session_options: Option<serde_json::Value>,
 }
 
 impl From<&SessionState> for SessionSnapshot {
@@ -6473,6 +6511,8 @@ impl From<&SessionState> for SessionSnapshot {
             model: session.model.clone(),
             variant: session.variant.clone(),
             native_session_id: session.native_session_id.clone(),
+            raw_session_args: session.raw_session_args.clone(),
+            raw_session_options: session.raw_session_options.clone(),
         }
     }
 }

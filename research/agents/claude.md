@@ -71,17 +71,42 @@ claude \
   "PROMPT"
 ```
 
-### Arguments
+### Core Arguments
 
 | Flag | Description |
 |------|-------------|
-| `--print` | Output mode |
+| `--print` | Output mode (non-interactive) |
 | `--output-format stream-json` | Newline-delimited JSON streaming |
 | `--verbose` | Verbose output |
 | `--dangerously-skip-permissions` | Skip permission prompts |
 | `--resume SESSION_ID` | Resume existing session |
 | `--model MODEL_ID` | Specify model (e.g., `claude-sonnet-4-20250514`) |
-| `--permission-mode plan` | Plan mode (read-only exploration) |
+| `--permission-mode MODE` | Permission mode (`plan`, `acceptEdits`) |
+
+### Custom Args (Session Configuration)
+
+These flags can be passed to customize agent behavior at session start:
+
+| Flag | Type | Description |
+|------|------|-------------|
+| `--max-turns N` | int | Maximum number of agent turns before stopping |
+| `--system-prompt TEXT` | string | Custom system prompt (replaces default) |
+| `--append-system-prompt TEXT` | string | Text to append to the system prompt |
+| `--allowed-tools TOOLS` | string (comma-sep) | Comma-separated list of allowed tools |
+| `--disallowed-tools TOOLS` | string (comma-sep) | Comma-separated list of disallowed tools |
+| `--mcp-server NAME` | string | Add an MCP server by name |
+| `--timeout-secs N` | int | Timeout in seconds (overrides default 300s) |
+| `--profile NAME` | string | Use a specific configuration profile |
+
+### Streaming Input Mode Flags
+
+When using `--input-format stream-json` for streaming input:
+
+| Flag | Description |
+|------|-------------|
+| `--input-format stream-json` | Accept streaming JSON input via stdin |
+| `--permission-prompt-tool stdio` | Handle permission prompts via stdio |
+| `--include-partial-messages` | Include partial message events in output |
 
 ### Environment Variables
 

@@ -25,16 +25,32 @@ amp --print --output-format stream-json --dangerously-skip-permissions "prompt"
 amp --continue SESSION_ID "follow up"
 ```
 
-### Key CLI Flags
+### Custom Args (CLI Flags)
 
-| Flag | Description |
-|------|-------------|
-| `--print` | Output mode (non-interactive) |
-| `--output-format stream-json` | JSONL streaming output |
-| `--dangerously-skip-permissions` | Skip permission prompts |
-| `--continue SESSION_ID` | Resume existing session |
-| `--model MODEL` | Specify model |
-| `--toolbox TOOLBOX` | Toolbox configuration |
+#### Core Flags
+
+| Flag | Type | Description |
+|------|------|-------------|
+| `--print` | bool | Output mode (non-interactive) |
+| `--execute` | bool | Alternative output mode (some versions) |
+| `--output-format stream-json` | string | JSONL streaming output |
+| `--model MODEL` | string | Specify model to use |
+| `--continue SESSION_ID` | string | Resume existing session |
+
+#### Permission Flags
+
+| Flag | Type | Description |
+|------|------|-------------|
+| `--dangerously-skip-permissions` | bool | Skip all permission prompts |
+
+#### Configuration Flags
+
+| Flag | Type | Description |
+|------|------|-------------|
+| `--toolbox NAME` | string | Toolbox configuration to use |
+| `--mcp-config FILE` | path | Path to MCP configuration file |
+
+**Note:** Amp CLI flags vary by version. The daemon uses flag detection (`amp --help`) to determine which flags are supported before invocation.
 
 ## Credential Discovery
 
