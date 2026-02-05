@@ -74,7 +74,7 @@ Policy:
 Message normalization notes
 
 - user vs assistant: normalized via role in the universal item; provider role fields or item types determine role.
-- file artifacts: always represented as content parts (type=file_ref) inside message/tool_result items, not a separate item kind.
+- file artifacts: always represented as content parts (type=file_ref) inside message/tool_result items, not a separate item kind. Rename actions use `target_path`.
 - reasoning: represented as content parts (type=reasoning) inside message items, with visibility when available.
 - subagents: OpenCode subtask parts and Claude Task tool usage are currently normalized into standard message/tool flow (no dedicated subagent fields).
 - OpenCode unrolling: message.updated creates/updates the parent message item; tool-related parts emit separate tool item events (item.started/ item.completed) with parent_id pointing to the message item.

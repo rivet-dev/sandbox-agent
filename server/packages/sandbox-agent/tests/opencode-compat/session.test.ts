@@ -13,12 +13,16 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createOpencodeClient, type OpencodeClient } from "@opencode-ai/sdk";
 import { spawnSandboxAgent, buildSandboxAgent, type SandboxAgentHandle } from "./helpers/spawn";
 
 describe("OpenCode-compatible Session API", () => {
   let handle: SandboxAgentHandle;
   let client: OpencodeClient;
+  let stateDir: string;
 
   beforeAll(async () => {
     // Build the binary if needed
@@ -27,7 +31,11 @@ describe("OpenCode-compatible Session API", () => {
 
   beforeEach(async () => {
     // Spawn a fresh sandbox-agent instance for each test
-    handle = await spawnSandboxAgent({ opencodeCompat: true });
+    stateDir = await mkdtemp(join(tmpdir(), "opencode-state-"));
+    handle = await spawnSandboxAgent({
+      opencodeCompat: true,
+      env: { OPENCODE_COMPAT_STATE: stateDir },
+    });
     client = createOpencodeClient({
       baseUrl: `${handle.baseUrl}/opencode`,
       headers: { Authorization: `Bearer ${handle.token}` },
@@ -143,6 +151,43 @@ describe("OpenCode-compatible Session API", () => {
       const response = await client.session.get({ path: { id: session1.data?.id! } });
       expect(response.data).toBeDefined();
       expect(response.data?.title).toBe("Keep");
+    });
+  });
+
+  describe("session.persistence", () => {
+    it("should persist sessions across restarts", async () => {
+      const created = await client.session.create({ body: { title: "Persistent" } });
+      const sessionId = created.data?.id!;
+
+      await client.session.update({
+        path: { id: sessionId },
+        body: { title: "Updated" },
+      });
+
+      await fetch(`${handle.baseUrl}/opencode/session/${sessionId}/share`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${handle.token}` },
+      });
+
+      await handle.dispose();
+
+      handle = await spawnSandboxAgent({
+        opencodeCompat: true,
+        env: { OPENCODE_COMPAT_STATE: stateDir },
+      });
+      client = createOpencodeClient({
+        baseUrl: `${handle.baseUrl}/opencode`,
+        headers: { Authorization: `Bearer ${handle.token}` },
+      });
+
+      const list = await client.session.list();
+      const persisted = list.data?.find((session) => session.id === sessionId);
+      expect(persisted).toBeDefined();
+      expect(persisted?.title).toBe("Updated");
+      expect(persisted?.share?.url).toContain(sessionId);
+
+      const next = await client.session.create();
+      expect(next.data?.id).not.toBe(sessionId);
     });
   });
 });

@@ -44,11 +44,17 @@ const renderContentPart = (part: ContentPart, index: number) => {
       );
     }
     case "file_ref": {
-      const { path, action, diff } = part as { path: string; action: string; diff?: string | null };
+      const { path, action, diff, target_path } = part as {
+        path: string;
+        action: string;
+        diff?: string | null;
+        target_path?: string | null;
+      };
+      const displayPath = target_path && action === "rename" ? `${path} -> ${target_path}` : path;
       return (
         <div key={key} className="part">
           <div className="part-title">file - {action}</div>
-          <div className="part-body mono">{path}</div>
+          <div className="part-body mono">{displayPath}</div>
           {diff && <pre className="code-block">{diff}</pre>}
         </div>
       );

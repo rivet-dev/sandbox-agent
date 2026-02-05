@@ -131,6 +131,7 @@ export interface components {
       action: components["schemas"]["FileAction"];
       diff?: string | null;
       path: string;
+      target_path?: string | null;
       /** @enum {string} */
       type: "file_ref";
     }) | {
@@ -183,7 +184,7 @@ export interface components {
       hasMore: boolean;
     };
     /** @enum {string} */
-    FileAction: "read" | "write" | "patch";
+    FileAction: "read" | "write" | "patch" | "rename" | "delete";
     HealthResponse: {
       status: string;
     };

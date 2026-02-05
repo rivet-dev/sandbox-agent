@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::convert::Infallible;
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
@@ -18,6 +18,7 @@ use axum::Json;
 use axum::Router;
 use futures::{stream, StreamExt};
 use reqwest::Client;
+use reqwest::header::{HeaderMap as ReqwestHeaderMap, HeaderName as ReqwestHeaderName, HeaderValue as ReqwestHeaderValue};
 use sandbox_agent_error::{AgentError, ErrorType, ProblemDetails, SandboxError};
 use sandbox_agent_universal_agent_schema::{
     codex as codex_schema, convert_amp, convert_claude, convert_codex, convert_opencode,
@@ -39,7 +40,10 @@ use tracing::Span;
 use utoipa::{Modify, OpenApi, ToSchema};
 
 use crate::agent_server_logs::AgentServerLogs;
+use crate::formatter_lsp::{FormatterService, FormatterStatus, LspRegistry, LspStatus};
 use crate::opencode_compat::{build_opencode_router, OpenCodeAppState};
+use crate::search::{FindFileOptions, FindSymbolOptions, FindTextMatch, FindTextOptions, SearchService, SymbolResult};
+use crate::pty::PtyManager;
 use crate::ui;
 use sandbox_agent_agent_management::agents::{
     AgentError as ManagerError, AgentId, AgentManager, InstallOptions, SpawnOptions, StreamingSpawn,
@@ -346,6 +350,65 @@ struct SessionState {
     claude_message_counter: u64,
     pending_assistant_native_ids: VecDeque<String>,
     pending_assistant_counter: u64,
+    tool_calls: HashMap<String, ToolCallRecord>,
+    file_actions: Vec<FileActionRecord>,
+    base_dir: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum ToolCallStatus {
+    Started,
+    Delta,
+    Completed,
+    Running,
+    Result,
+    Failed,
+}
+
+#[derive(Debug, Clone)]
+struct ToolCallRecord {
+    call_id: String,
+    name: Option<String>,
+    arguments: Option<String>,
+    output: Option<String>,
+    status: ToolCallStatus,
+    started_at: Option<String>,
+    completed_at: Option<String>,
+    last_delta: Option<String>,
+    item_id: Option<String>,
+    native_item_id: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ToolCallSnapshot {
+    pub call_id: String,
+    pub name: Option<String>,
+    pub arguments: Option<String>,
+    pub output: Option<String>,
+    pub status: ToolCallStatus,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub last_delta: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct FileActionRecord {
+    event_sequence: u64,
+    call_id: Option<String>,
+    action: FileAction,
+    path: String,
+    target_path: Option<String>,
+    diff: Option<String>,
+    applied: bool,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct FileActionSnapshot {
+    pub action: FileAction,
+    pub path: String,
+    pub target_path: Option<String>,
+    pub diff: Option<String>,
+    pub applied: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -359,6 +422,7 @@ struct PendingQuestion {
     prompt: String,
     options: Vec<String>,
 }
+
 
 impl SessionState {
     fn new(
@@ -404,6 +468,9 @@ impl SessionState {
             claude_message_counter: 0,
             pending_assistant_native_ids: VecDeque::new(),
             pending_assistant_counter: 0,
+            tool_calls: HashMap::new(),
+            file_actions: Vec::new(),
+            base_dir: normalize_base_dir(),
         })
     }
 
@@ -620,6 +687,7 @@ impl SessionState {
 
         self.update_pending(&event);
         self.update_item_tracking(&event);
+        self.update_tool_tracking(&event);
         self.events.push(event.clone());
         let _ = self.broadcaster.send(event.clone());
         if self.native_session_id.is_none() {
@@ -687,6 +755,218 @@ impl SessionState {
             }
             _ => {}
         }
+    }
+
+    fn update_tool_tracking(&mut self, event: &UniversalEvent) {
+        match event.event_type {
+            UniversalEventType::ItemStarted | UniversalEventType::ItemCompleted => {
+                if let UniversalEventData::Item(data) = &event.data {
+                    self.update_tool_call_from_item(event, &data.item);
+                    if event.event_type == UniversalEventType::ItemCompleted {
+                        self.record_file_actions(event, &data.item);
+                    }
+                }
+            }
+            UniversalEventType::ItemDelta => {
+                if let UniversalEventData::ItemDelta(data) = &event.data {
+                    self.update_tool_call_delta(event, data);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn update_tool_call_from_item(&mut self, event: &UniversalEvent, item: &UniversalItem) {
+        let mut call_id = None;
+        let mut name = None;
+        let mut arguments = None;
+        let mut output = None;
+        for part in &item.content {
+            match part {
+                ContentPart::ToolCall {
+                    name: part_name,
+                    arguments: part_arguments,
+                    call_id: part_call_id,
+                } => {
+                    call_id = Some(part_call_id.clone());
+                    name = Some(part_name.clone());
+                    arguments = Some(part_arguments.clone());
+                }
+                ContentPart::ToolResult { call_id: part_call_id, output: part_output } => {
+                    call_id = Some(part_call_id.clone());
+                    output = Some(part_output.clone());
+                }
+                _ => {}
+            }
+        }
+
+        let Some(call_id) = call_id else {
+            return;
+        };
+
+        let record = self.tool_calls.entry(call_id.clone()).or_insert_with(|| ToolCallRecord {
+            call_id: call_id.clone(),
+            name: None,
+            arguments: None,
+            output: None,
+            status: ToolCallStatus::Started,
+            started_at: None,
+            completed_at: None,
+            last_delta: None,
+            item_id: None,
+            native_item_id: None,
+        });
+
+        if name.is_some() {
+            record.name = name;
+        }
+        if arguments.is_some() {
+            record.arguments = arguments;
+        }
+        if output.is_some() {
+            record.output = output;
+        }
+        if !item.item_id.is_empty() {
+            record.item_id = Some(item.item_id.clone());
+        }
+        if let Some(native) = &item.native_item_id {
+            record.native_item_id = Some(native.clone());
+        }
+
+        match item.kind {
+            ItemKind::ToolCall => {
+                match event.event_type {
+                    UniversalEventType::ItemStarted => {
+                        record.status = ToolCallStatus::Started;
+                        record.started_at = Some(event.time.clone());
+                    }
+                    UniversalEventType::ItemCompleted => {
+                        record.status = ToolCallStatus::Completed;
+                        record.completed_at = Some(event.time.clone());
+                    }
+                    _ => {}
+                }
+            }
+            ItemKind::ToolResult => {
+                match event.event_type {
+                    UniversalEventType::ItemStarted => {
+                        record.status = ToolCallStatus::Running;
+                        record.started_at.get_or_insert_with(|| event.time.clone());
+                    }
+                    UniversalEventType::ItemCompleted => {
+                        if matches!(item.status, ItemStatus::Failed) {
+                            record.status = ToolCallStatus::Failed;
+                        } else {
+                            record.status = ToolCallStatus::Result;
+                        }
+                        record.completed_at = Some(event.time.clone());
+                    }
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn update_tool_call_delta(&mut self, event: &UniversalEvent, data: &ItemDeltaData) {
+        let call_id = self
+            .tool_calls
+            .iter()
+            .find_map(|(call_id, record)| {
+                if record.item_id.as_deref() == Some(data.item_id.as_str())
+                    || record.native_item_id.as_deref() == data.native_item_id.as_deref()
+                {
+                    Some(call_id.clone())
+                } else {
+                    None
+                }
+            });
+        let Some(call_id) = call_id else {
+            return;
+        };
+        if let Some(record) = self.tool_calls.get_mut(&call_id) {
+            record.status = ToolCallStatus::Delta;
+            record.last_delta = Some(data.delta.clone());
+            record.started_at.get_or_insert_with(|| event.time.clone());
+        }
+    }
+
+    fn record_file_actions(&mut self, event: &UniversalEvent, item: &UniversalItem) {
+        let mut call_id: Option<String> = None;
+        for part in &item.content {
+            match part {
+                ContentPart::ToolResult { call_id: part_call_id, .. }
+                | ContentPart::ToolCall { call_id: part_call_id, .. } => {
+                    call_id = Some(part_call_id.clone());
+                }
+                _ => {}
+            }
+        }
+
+        for part in &item.content {
+            let ContentPart::FileRef {
+                path,
+                action,
+                diff,
+                target_path,
+            } = part
+            else {
+                continue;
+            };
+
+            let applied = match action {
+                FileAction::Write
+                | FileAction::Patch
+                | FileAction::Rename
+                | FileAction::Delete => {
+                    apply_file_action(
+                        &self.base_dir,
+                        action,
+                        path,
+                        target_path.as_deref(),
+                        diff.as_deref(),
+                    )
+                }
+                FileAction::Read => false,
+            };
+
+            self.file_actions.push(FileActionRecord {
+                event_sequence: event.sequence,
+                call_id: call_id.clone(),
+                action: action.clone(),
+                path: path.clone(),
+                target_path: target_path.clone(),
+                diff: diff.clone(),
+                applied,
+            });
+        }
+    }
+
+    fn tool_call_snapshot(&self, call_id: &str) -> Option<ToolCallSnapshot> {
+        self.tool_calls.get(call_id).map(|record| ToolCallSnapshot {
+            call_id: record.call_id.clone(),
+            name: record.name.clone(),
+            arguments: record.arguments.clone(),
+            output: record.output.clone(),
+            status: record.status.clone(),
+            started_at: record.started_at.clone(),
+            completed_at: record.completed_at.clone(),
+            last_delta: record.last_delta.clone(),
+        })
+    }
+
+    fn file_actions_for_event(&self, sequence: u64) -> Vec<FileActionSnapshot> {
+        self.file_actions
+            .iter()
+            .filter(|record| record.event_sequence == sequence)
+            .map(|record| FileActionSnapshot {
+                action: record.action.clone(),
+                path: record.path.clone(),
+                target_path: record.target_path.clone(),
+                diff: record.diff.clone(),
+                applied: record.applied,
+            })
+            .collect()
     }
 
     fn take_question(&mut self, question_id: &str) -> Option<PendingQuestion> {
@@ -780,6 +1060,188 @@ impl SessionState {
     }
 }
 
+fn normalize_base_dir() -> PathBuf {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    normalize_path(&cwd)
+}
+
+fn normalize_path(path: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+            Component::RootDir => normalized.push(component.as_os_str()),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            Component::Normal(part) => normalized.push(part),
+        }
+    }
+    if normalized.as_os_str().is_empty() {
+        PathBuf::from(".")
+    } else {
+        normalized
+    }
+}
+
+fn scoped_path(base_dir: &Path, path: &str) -> Option<PathBuf> {
+    let candidate = Path::new(path);
+    let joined = if candidate.is_absolute() {
+        candidate.to_path_buf()
+    } else {
+        base_dir.join(candidate)
+    };
+    let normalized = normalize_path(&joined);
+    if normalized.starts_with(base_dir) {
+        Some(normalized)
+    } else {
+        None
+    }
+}
+
+fn apply_file_action(
+    base_dir: &Path,
+    action: &FileAction,
+    path: &str,
+    target_path: Option<&str>,
+    diff: Option<&str>,
+) -> bool {
+    match action {
+        FileAction::Write => {
+            let Some(contents) = diff else {
+                return false;
+            };
+            let Some(scoped) = scoped_path(base_dir, path) else {
+                return false;
+            };
+            if let Some(parent) = scoped.parent() {
+                if std::fs::create_dir_all(parent).is_err() {
+                    return false;
+                }
+            }
+            std::fs::write(scoped, contents).is_ok()
+        }
+        FileAction::Patch => {
+            let Some(patch) = diff else {
+                return false;
+            };
+            let Some(scoped) = scoped_path(base_dir, path) else {
+                return false;
+            };
+            let Ok(original) = std::fs::read_to_string(&scoped) else {
+                return false;
+            };
+            let Some(patched) = apply_unified_diff(&original, patch) else {
+                return false;
+            };
+            std::fs::write(scoped, patched).is_ok()
+        }
+        FileAction::Delete => {
+            let Some(scoped) = scoped_path(base_dir, path) else {
+                return false;
+            };
+            if scoped.exists() {
+                std::fs::remove_file(scoped).is_ok()
+            } else {
+                false
+            }
+        }
+        FileAction::Rename => {
+            let Some(target) = target_path else {
+                return false;
+            };
+            let Some(source_scoped) = scoped_path(base_dir, path) else {
+                return false;
+            };
+            let Some(target_scoped) = scoped_path(base_dir, target) else {
+                return false;
+            };
+            if let Some(parent) = target_scoped.parent() {
+                if std::fs::create_dir_all(parent).is_err() {
+                    return false;
+                }
+            }
+            std::fs::rename(source_scoped, target_scoped).is_ok()
+        }
+        FileAction::Read => false,
+    }
+}
+
+fn apply_unified_diff(original: &str, diff: &str) -> Option<String> {
+    let mut output: Vec<String> = Vec::new();
+    let had_trailing_newline = original.ends_with('\n');
+    let mut source: Vec<&str> = original.lines().collect();
+    let mut index = 0usize;
+    let mut saw_hunk = false;
+    let mut lines = diff.lines().peekable();
+
+    while let Some(line) = lines.next() {
+        if !line.starts_with("@@") {
+            continue;
+        }
+        let old_start = parse_hunk_start(line)?;
+        saw_hunk = true;
+        let old_index = old_start.saturating_sub(1);
+        if old_index > source.len() {
+            return None;
+        }
+        for item in &source[index..old_index] {
+            output.push((*item).to_string());
+        }
+        index = old_index;
+        while let Some(next) = lines.peek() {
+            if next.starts_with("@@") {
+                break;
+            }
+            let hunk_line = lines.next().unwrap();
+            if hunk_line.starts_with(' ') {
+                if index >= source.len() {
+                    return None;
+                }
+                output.push(hunk_line[1..].to_string());
+                index += 1;
+            } else if hunk_line.starts_with('-') {
+                if index >= source.len() {
+                    return None;
+                }
+                index += 1;
+            } else if hunk_line.starts_with('+') {
+                output.push(hunk_line[1..].to_string());
+            } else if hunk_line.starts_with("\\") {
+                continue;
+            } else {
+                return None;
+            }
+        }
+    }
+
+    if !saw_hunk {
+        return None;
+    }
+
+    for item in &source[index..] {
+        output.push((*item).to_string());
+    }
+
+    let mut result = output.join("\n");
+    if had_trailing_newline {
+        result.push('\n');
+    }
+    Some(result)
+}
+
+fn parse_hunk_start(line: &str) -> Option<usize> {
+    let trimmed = line.trim();
+    let trimmed = trimmed.strip_prefix("@@")?.trim();
+    let mut parts = trimmed.split_whitespace();
+    let old = parts.next()?;
+    let old = old.trim_start_matches('-');
+    let start = old.split(',').next()?;
+    start.parse::<usize>().ok()
+}
+
 #[derive(Debug)]
 enum ManagedServerKind {
     Http { base_url: String },
@@ -812,12 +1274,18 @@ struct AgentServerManager {
     restart_notifier: Mutex<Option<mpsc::UnboundedSender<AgentId>>>,
 }
 
+
 #[derive(Debug)]
 pub(crate) struct SessionManager {
     agent_manager: Arc<AgentManager>,
     sessions: Mutex<Vec<SessionState>>,
     server_manager: Arc<AgentServerManager>,
     http_client: Client,
+    formatter_service: Arc<FormatterService>,
+    lsp_registry: Arc<LspRegistry>,
+    pty_manager: Arc<PtyManager>,
+    search: SearchService,
+    mcp_registry: Mutex<HashMap<String, McpServerEntry>>,
 }
 
 /// Shared Codex app-server process that handles multiple sessions via JSON-RPC.
@@ -935,6 +1403,160 @@ pub(crate) struct PendingQuestionInfo {
     pub question_id: String,
     pub prompt: String,
     pub options: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub(crate) enum McpServerConfig {
+    Local {
+        command: Vec<String>,
+        #[serde(default)]
+        environment: HashMap<String, String>,
+        #[serde(default)]
+        enabled: Option<bool>,
+        #[serde(default)]
+        timeout: Option<u64>,
+    },
+    Remote {
+        url: String,
+        #[serde(default)]
+        enabled: Option<bool>,
+        #[serde(default)]
+        headers: HashMap<String, String>,
+        #[serde(default)]
+        oauth: Option<McpOAuthConfigValue>,
+        #[serde(default)]
+        timeout: Option<u64>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct McpOAuthConfig {
+    #[serde(default)]
+    pub client_id: Option<String>,
+    #[serde(default)]
+    pub client_secret: Option<String>,
+    #[serde(default)]
+    pub scope: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
+#[serde(untagged)]
+pub(crate) enum McpOAuthConfigValue {
+    Config(McpOAuthConfig),
+    Disabled(bool),
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct McpTool {
+    pub server: String,
+    pub name: String,
+    pub description: String,
+    pub parameters: Value,
+}
+
+impl McpTool {
+    pub(crate) fn id(&self) -> String {
+        format!("mcp:{}:{}", self.server, self.name)
+    }
+
+    pub(crate) fn to_tool_list_item(&self) -> Value {
+        json!({
+            "id": self.id(),
+            "description": self.description,
+            "parameters": self.parameters,
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum McpStatus {
+    Connected,
+    Disabled,
+    Failed { error: String },
+    NeedsAuth,
+    NeedsClientRegistration { error: String },
+}
+
+impl McpStatus {
+    pub(crate) fn to_value(&self) -> Value {
+        match self {
+            McpStatus::Connected => json!({"status": "connected"}),
+            McpStatus::Disabled => json!({"status": "disabled"}),
+            McpStatus::Failed { error } => json!({"status": "failed", "error": error}),
+            McpStatus::NeedsAuth => json!({"status": "needs_auth"}),
+            McpStatus::NeedsClientRegistration { error } => {
+                json!({"status": "needs_client_registration", "error": error})
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct McpServerEntry {
+    pub name: String,
+    pub config: McpServerConfig,
+    pub status: McpStatus,
+    pub auth_token: Option<String>,
+    pub tools: Vec<McpTool>,
+}
+
+#[derive(Debug)]
+pub(crate) enum McpRegistryError {
+    NotFound,
+    Invalid(String),
+    Transport(String),
+}
+
+impl std::fmt::Display for McpRegistryError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            McpRegistryError::NotFound => write!(f, "MCP server not found"),
+            McpRegistryError::Invalid(message) => write!(f, "{message}"),
+            McpRegistryError::Transport(message) => write!(f, "{message}"),
+        }
+    }
+}
+
+impl McpServerConfig {
+    fn enabled(&self) -> bool {
+        match self {
+            McpServerConfig::Local { enabled, .. } => enabled.unwrap_or(true),
+            McpServerConfig::Remote { enabled, .. } => enabled.unwrap_or(true),
+        }
+    }
+
+    fn requires_auth(&self) -> bool {
+        match self {
+            McpServerConfig::Remote { oauth, .. } => match oauth {
+                Some(McpOAuthConfigValue::Config(_)) => true,
+                _ => false,
+            },
+            McpServerConfig::Local { .. } => false,
+        }
+    }
+
+    fn timeout_ms(&self) -> Option<u64> {
+        match self {
+            McpServerConfig::Local { timeout, .. } => *timeout,
+            McpServerConfig::Remote { timeout, .. } => *timeout,
+        }
+    }
+
+    fn remote_url(&self) -> Option<&str> {
+        match self {
+            McpServerConfig::Remote { url, .. } => Some(url.as_str()),
+            _ => None,
+        }
+    }
+
+    fn headers(&self) -> Option<&HashMap<String, String>> {
+        match self {
+            McpServerConfig::Remote { headers, .. } => Some(headers),
+            _ => None,
+        }
+    }
 }
 
 impl ManagedServer {
@@ -1538,7 +2160,337 @@ impl SessionManager {
             sessions: Mutex::new(Vec::new()),
             server_manager,
             http_client: Client::new(),
+            formatter_service: Arc::new(FormatterService::new()),
+            lsp_registry: Arc::new(LspRegistry::new()),
+            pty_manager: Arc::new(PtyManager::new()),
+            search: SearchService::new(),
+            mcp_registry: Mutex::new(HashMap::new()),
         }
+    }
+
+    pub(crate) fn pty_manager(&self) -> Arc<PtyManager> {
+        self.pty_manager.clone()
+    }
+
+    pub(crate) fn formatter_status(&self, directory: &str) -> Vec<FormatterStatus> {
+        self.formatter_service.status_for_directory(directory)
+    }
+
+    pub(crate) fn lsp_status(&self, directory: &str) -> Vec<LspStatus> {
+        self.lsp_registry.status_for_directory(directory)
+    }
+
+    pub(crate) async fn find_text(
+        &self,
+        directory: &str,
+        pattern: &str,
+        case_sensitive: Option<bool>,
+        limit: Option<usize>,
+    ) -> Result<Vec<FindTextMatch>, SandboxError> {
+        let root = SearchService::resolve_directory(directory)?;
+        let options = FindTextOptions {
+            case_sensitive,
+            limit,
+        };
+        self.search
+            .find_text(root, pattern.to_string(), Some(options))
+            .await
+    }
+
+    pub(crate) async fn find_files(
+        &self,
+        directory: &str,
+        query: &str,
+        options: FindFileOptions,
+    ) -> Result<Vec<String>, SandboxError> {
+        let root = SearchService::resolve_directory(directory)?;
+        self.search.find_files(root, query.to_string(), options).await
+    }
+
+    pub(crate) async fn find_symbols(
+        &self,
+        directory: &str,
+        query: &str,
+        limit: Option<usize>,
+    ) -> Result<Vec<SymbolResult>, SandboxError> {
+        let root = SearchService::resolve_directory(directory)?;
+        let options = FindSymbolOptions { limit };
+        self.search
+            .find_symbols(root, query.to_string(), Some(options))
+            .await
+    }
+
+    pub(crate) async fn mcp_statuses(&self) -> HashMap<String, McpStatus> {
+        let registry = self.mcp_registry.lock().await;
+        registry
+            .iter()
+            .map(|(name, entry)| (name.clone(), entry.status.clone()))
+            .collect()
+    }
+
+    pub(crate) async fn mcp_status(&self, name: &str) -> Result<McpStatus, McpRegistryError> {
+        let registry = self.mcp_registry.lock().await;
+        let entry = registry.get(name).ok_or(McpRegistryError::NotFound)?;
+        Ok(entry.status.clone())
+    }
+
+    pub(crate) async fn mcp_register(
+        &self,
+        name: String,
+        config: McpServerConfig,
+    ) -> Result<HashMap<String, McpStatus>, McpRegistryError> {
+        if name.trim().is_empty() {
+            return Err(McpRegistryError::Invalid("name is required".to_string()));
+        }
+        match &config {
+            McpServerConfig::Local { command, .. } if command.is_empty() => {
+                return Err(McpRegistryError::Invalid("command is required".to_string()));
+            }
+            McpServerConfig::Remote { url, .. } if url.trim().is_empty() => {
+                return Err(McpRegistryError::Invalid("url is required".to_string()));
+            }
+            _ => {}
+        }
+        let status = if !config.enabled() {
+            McpStatus::Disabled
+        } else if config.requires_auth() {
+            McpStatus::NeedsAuth
+        } else {
+            McpStatus::Disabled
+        };
+        let entry = McpServerEntry {
+            name: name.clone(),
+            config,
+            status,
+            auth_token: None,
+            tools: Vec::new(),
+        };
+        let mut registry = self.mcp_registry.lock().await;
+        registry.insert(name, entry);
+        Ok(registry
+            .iter()
+            .map(|(name, entry)| (name.clone(), entry.status.clone()))
+            .collect())
+    }
+
+    pub(crate) async fn mcp_auth_start(&self, name: &str) -> Result<String, McpRegistryError> {
+        let mut registry = self.mcp_registry.lock().await;
+        let entry = registry.get_mut(name).ok_or(McpRegistryError::NotFound)?;
+        if !entry.config.requires_auth() {
+            return Err(McpRegistryError::Invalid(
+                "MCP server does not require auth".to_string(),
+            ));
+        }
+        entry.status = McpStatus::NeedsAuth;
+        Ok(format!("https://auth.local/mcp/{name}/authorize"))
+    }
+
+    pub(crate) async fn mcp_auth_remove(&self, name: &str) -> Result<bool, McpRegistryError> {
+        let mut registry = self.mcp_registry.lock().await;
+        let entry = registry.get_mut(name).ok_or(McpRegistryError::NotFound)?;
+        entry.auth_token = None;
+        entry.tools.clear();
+        entry.status = if entry.config.requires_auth() {
+            McpStatus::NeedsAuth
+        } else {
+            McpStatus::Disabled
+        };
+        Ok(true)
+    }
+
+    pub(crate) async fn mcp_auth_callback(
+        &self,
+        name: &str,
+        code: String,
+    ) -> Result<McpStatus, McpRegistryError> {
+        if code.trim().is_empty() {
+            return Err(McpRegistryError::Invalid("code is required".to_string()));
+        }
+        {
+            let mut registry = self.mcp_registry.lock().await;
+            let entry = registry.get_mut(name).ok_or(McpRegistryError::NotFound)?;
+            if !entry.config.requires_auth() {
+                return Err(McpRegistryError::Invalid(
+                    "MCP server does not require auth".to_string(),
+                ));
+            }
+            entry.auth_token = Some(code);
+            entry.status = McpStatus::Disabled;
+        }
+        match self.mcp_connect(name).await {
+            Ok(_) => {}
+            Err(McpRegistryError::NotFound) => return Err(McpRegistryError::NotFound),
+            Err(_) => {}
+        }
+        self.mcp_status(name).await
+    }
+
+    pub(crate) async fn mcp_auth_authenticate(
+        &self,
+        name: &str,
+    ) -> Result<McpStatus, McpRegistryError> {
+        let mut registry = self.mcp_registry.lock().await;
+        let entry = registry.get_mut(name).ok_or(McpRegistryError::NotFound)?;
+        if entry.auth_token.is_some() {
+            return Ok(entry.status.clone());
+        }
+        if entry.config.requires_auth() {
+            entry.status = McpStatus::NeedsAuth;
+            return Ok(entry.status.clone());
+        }
+        Ok(entry.status.clone())
+    }
+
+    pub(crate) async fn mcp_connect(&self, name: &str) -> Result<bool, McpRegistryError> {
+        let (config, auth_token) = {
+            let registry = self.mcp_registry.lock().await;
+            let entry = registry.get(name).ok_or(McpRegistryError::NotFound)?;
+            if !entry.config.enabled() {
+                return Err(McpRegistryError::Invalid("MCP server is disabled".to_string()));
+            }
+            if entry.config.requires_auth() && entry.auth_token.is_none() {
+                return Err(McpRegistryError::Invalid(
+                    "MCP server requires auth".to_string(),
+                ));
+            }
+            (entry.config.clone(), entry.auth_token.clone())
+        };
+
+        let tools_result = self
+            .fetch_mcp_tools(name, &config, auth_token.as_deref())
+            .await;
+        let mut registry = self.mcp_registry.lock().await;
+        let entry = registry.get_mut(name).ok_or(McpRegistryError::NotFound)?;
+        match tools_result {
+            Ok(tools) => {
+                entry.tools = tools;
+                entry.status = McpStatus::Connected;
+                Ok(true)
+            }
+            Err(err) => {
+                entry.tools.clear();
+                entry.status = McpStatus::Failed {
+                    error: err.to_string(),
+                };
+                Err(err)
+            }
+        }
+    }
+
+    pub(crate) async fn mcp_disconnect(&self, name: &str) -> Result<bool, McpRegistryError> {
+        let mut registry = self.mcp_registry.lock().await;
+        let entry = registry.get_mut(name).ok_or(McpRegistryError::NotFound)?;
+        entry.tools.clear();
+        entry.status = McpStatus::Disabled;
+        Ok(true)
+    }
+
+    pub(crate) async fn mcp_tools(&self) -> Vec<McpTool> {
+        let registry = self.mcp_registry.lock().await;
+        registry
+            .values()
+            .filter(|entry| matches!(entry.status, McpStatus::Connected))
+            .flat_map(|entry| entry.tools.clone())
+            .collect()
+    }
+
+    pub(crate) async fn mcp_tool_ids(&self) -> Vec<String> {
+        self.mcp_tools()
+            .await
+            .into_iter()
+            .map(|tool| tool.id())
+            .collect()
+    }
+
+    fn build_mcp_headers(
+        headers: &HashMap<String, String>,
+    ) -> Result<ReqwestHeaderMap, McpRegistryError> {
+        let mut map = ReqwestHeaderMap::new();
+        for (key, value) in headers {
+            let name = ReqwestHeaderName::from_bytes(key.as_bytes()).map_err(|_| {
+                McpRegistryError::Invalid(format!("invalid header name: {key}"))
+            })?;
+            let value = ReqwestHeaderValue::from_str(value).map_err(|_| {
+                McpRegistryError::Invalid(format!("invalid header value for {key}"))
+            })?;
+            map.insert(name, value);
+        }
+        Ok(map)
+    }
+
+    async fn fetch_mcp_tools(
+        &self,
+        name: &str,
+        config: &McpServerConfig,
+        auth_token: Option<&str>,
+    ) -> Result<Vec<McpTool>, McpRegistryError> {
+        let url = config.remote_url().ok_or_else(|| {
+            McpRegistryError::Invalid("local MCP servers are not supported".to_string())
+        })?;
+        let request_payload = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/list",
+            "params": {}
+        });
+        let mut request = self.http_client.post(url).json(&request_payload);
+        if let Some(timeout) = config.timeout_ms() {
+            request = request.timeout(Duration::from_millis(timeout));
+        }
+        if let Some(headers) = config.headers() {
+            if !headers.is_empty() {
+                let header_map = Self::build_mcp_headers(headers)?;
+                request = request.headers(header_map);
+            }
+        }
+        if let Some(token) = auth_token {
+            request = request.bearer_auth(token);
+        }
+        let response = request
+            .send()
+            .await
+            .map_err(|err| McpRegistryError::Transport(format!("mcp request failed: {err}")))?;
+        if !response.status().is_success() {
+            return Err(McpRegistryError::Transport(format!(
+                "mcp request failed with status {}",
+                response.status()
+            )));
+        }
+        let value: Value = response.json().await.map_err(|err| {
+            McpRegistryError::Transport(format!("mcp response parse failed: {err}"))
+        })?;
+        let tools_value = value
+            .get("result")
+            .and_then(|v| v.get("tools"))
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| {
+                McpRegistryError::Transport("mcp tools response missing tools".to_string())
+            })?;
+        let mut tools = Vec::new();
+        for tool_value in tools_value {
+            let name_value = tool_value
+                .get("name")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| {
+                    McpRegistryError::Transport("mcp tool missing name".to_string())
+                })?;
+            let description = tool_value
+                .get("description")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let parameters = tool_value
+                .get("inputSchema")
+                .cloned()
+                .unwrap_or_else(|| json!({}));
+            tools.push(McpTool {
+                server: name.to_string(),
+                name: name_value.to_string(),
+                description,
+                parameters,
+            });
+        }
+        Ok(tools)
     }
 
     fn session_ref<'a>(sessions: &'a [SessionState], session_id: &str) -> Option<&'a SessionState> {
@@ -1840,6 +2792,7 @@ impl SessionManager {
                 .unregister_session(agent, &session_id, native_session_id.as_deref())
                 .await;
         }
+        self.pty_manager.cleanup_session(&session_id).await;
         Ok(())
     }
 
@@ -1958,6 +2911,28 @@ impl SessionManager {
             }
         }
         items
+    }
+
+    pub(crate) async fn tool_call_snapshot(
+        &self,
+        session_id: &str,
+        call_id: &str,
+    ) -> Option<ToolCallSnapshot> {
+        let sessions = self.sessions.lock().await;
+        let session = Self::session_ref(&sessions, session_id)?;
+        session.tool_call_snapshot(call_id)
+    }
+
+    pub(crate) async fn file_actions_for_event(
+        &self,
+        session_id: &str,
+        sequence: u64,
+    ) -> Vec<FileActionSnapshot> {
+        let sessions = self.sessions.lock().await;
+        let Some(session) = Self::session_ref(&sessions, session_id) else {
+            return Vec::new();
+        };
+        session.file_actions_for_event(sequence)
     }
 
     async fn subscribe_for_turn(
@@ -6024,6 +6999,10 @@ fn mock_tool_sequence(prefix: &str) -> Vec<EventConversion> {
             vec![tool_call_part.clone()],
         ),
     ));
+    events.push(mock_delta(
+        tool_call_native.clone(),
+        "mock tool call progress",
+    ));
     events.push(mock_item_event(
         UniversalEventType::ItemCompleted,
         mock_item(
@@ -6044,16 +7023,49 @@ fn mock_tool_sequence(prefix: &str) -> Vec<EventConversion> {
             path: format!("{prefix}/readme.md"),
             action: FileAction::Read,
             diff: None,
+            target_path: None,
         },
         ContentPart::FileRef {
             path: format!("{prefix}/output.txt"),
             action: FileAction::Write,
-            diff: Some("+mock output\n".to_string()),
+            diff: Some("mock output\n".to_string()),
+            target_path: None,
+        },
+        ContentPart::FileRef {
+            path: format!("{prefix}/patch.txt"),
+            action: FileAction::Write,
+            diff: Some("old\n".to_string()),
+            target_path: None,
         },
         ContentPart::FileRef {
             path: format!("{prefix}/patch.txt"),
             action: FileAction::Patch,
             diff: Some("@@ -1,1 +1,1 @@\n-old\n+new\n".to_string()),
+            target_path: None,
+        },
+        ContentPart::FileRef {
+            path: format!("{prefix}/rename.txt"),
+            action: FileAction::Write,
+            diff: Some("rename me\n".to_string()),
+            target_path: None,
+        },
+        ContentPart::FileRef {
+            path: format!("{prefix}/rename.txt"),
+            action: FileAction::Rename,
+            diff: None,
+            target_path: Some(format!("{prefix}/renamed.txt")),
+        },
+        ContentPart::FileRef {
+            path: format!("{prefix}/delete.txt"),
+            action: FileAction::Write,
+            diff: Some("delete me\n".to_string()),
+            target_path: None,
+        },
+        ContentPart::FileRef {
+            path: format!("{prefix}/delete.txt"),
+            action: FileAction::Delete,
+            diff: None,
+            target_path: None,
         },
     ];
     events.push(mock_item_event(
@@ -6072,7 +7084,7 @@ fn mock_tool_sequence(prefix: &str) -> Vec<EventConversion> {
             tool_result_native,
             ItemKind::ToolResult,
             ItemRole::Tool,
-            ItemStatus::Failed,
+            ItemStatus::Completed,
             tool_result_parts,
         ),
     ));

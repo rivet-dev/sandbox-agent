@@ -23,6 +23,7 @@ axum.workspace = true
 clap.workspace = true
 futures.workspace = true
 reqwest.workspace = true
+regress.workspace = true
 dirs.workspace = true
 time.workspace = true
 chrono.workspace = true
@@ -36,6 +37,7 @@ tracing-logfmt.workspace = true
 tracing-subscriber.workspace = true
 include_dir.workspace = true
 base64.workspace = true
+portable-pty = "0.8"
 tempfile = { workspace = true, optional = true }
 
 [target.'cfg(unix)'.dependencies]
