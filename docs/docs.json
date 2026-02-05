@@ -65,6 +65,7 @@
 						"cli",
 						"opencode-compatibility",
 						"inspector",
+						"agent-teams",
 						"session-transcript-schema",
 						"cors",
 					{
