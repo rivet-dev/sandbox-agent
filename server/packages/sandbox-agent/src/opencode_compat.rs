@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 use std::convert::Infallible;
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -24,6 +25,7 @@ use tokio::time::interval;
 use utoipa::{IntoParams, OpenApi, ToSchema};
 
 use crate::router::{AppState, CreateSessionRequest, PermissionReply};
+use crate::search::{FileSearchType, SearchFileParams, SearchSymbolParams, SearchTextParams};
 use sandbox_agent_agent_management::agents::AgentId;
 use sandbox_agent_error::SandboxError;
 use sandbox_agent_universal_agent_schema::{
@@ -471,18 +473,26 @@ struct ToolQuery {
 struct FindTextQuery {
     directory: Option<String>,
     pattern: Option<String>,
+    #[serde(rename = "caseSensitive")]
+    case_sensitive: Option<bool>,
+    limit: Option<usize>,
 }
 
 #[derive(Debug, Deserialize, IntoParams)]
 struct FindFilesQuery {
     directory: Option<String>,
     query: Option<String>,
+    dirs: Option<String>,
+    #[serde(rename = "type")]
+    kind: Option<String>,
+    limit: Option<usize>,
 }
 
 #[derive(Debug, Deserialize, IntoParams)]
 struct FindSymbolsQuery {
     directory: Option<String>,
     query: Option<String>,
+    limit: Option<usize>,
 }
 
 #[derive(Debug, Deserialize, IntoParams)]
@@ -3855,11 +3865,37 @@ async fn oc_file_status() -> impl IntoResponse {
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_find_text(Query(query): Query<FindTextQuery>) -> impl IntoResponse {
-    if query.pattern.is_none() {
+async fn oc_find_text(
+    State(state): State<Arc<OpenCodeAppState>>,
+    headers: HeaderMap,
+    Query(query): Query<FindTextQuery>,
+) -> impl IntoResponse {
+    let Some(pattern) = query.pattern else {
         return bad_request("pattern is required").into_response();
+    };
+
+    let directory = state
+        .opencode
+        .directory_for(&headers, query.directory.as_ref());
+    let worktree = state.opencode.worktree_for(&directory);
+    let search_params = SearchTextParams {
+        root: PathBuf::from(worktree),
+        directory: PathBuf::from(directory),
+        pattern,
+        case_sensitive: query.case_sensitive,
+        limit: query.limit,
+    };
+
+    match state
+        .inner
+        .session_manager()
+        .search_service()
+        .search_text(search_params)
+        .await
+    {
+        Ok(matches) => (StatusCode::OK, Json(matches)).into_response(),
+        Err(err) => sandbox_error_response(err).into_response(),
     }
-    (StatusCode::OK, Json(json!([]))).into_response()
 }
 
 #[utoipa::path(
@@ -3868,11 +3904,52 @@ async fn oc_find_text(Query(query): Query<FindTextQuery>) -> impl IntoResponse {
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_find_files(Query(query): Query<FindFilesQuery>) -> impl IntoResponse {
-    if query.query.is_none() {
+async fn oc_find_files(
+    State(state): State<Arc<OpenCodeAppState>>,
+    headers: HeaderMap,
+    Query(query): Query<FindFilesQuery>,
+) -> impl IntoResponse {
+    let Some(query_value) = query.query else {
         return bad_request("query is required").into_response();
+    };
+
+    let include_dirs = match query.dirs.as_deref() {
+        Some("true") => Some(true),
+        Some("false") => Some(false),
+        Some(_) => return bad_request("dirs must be true or false").into_response(),
+        None => None,
+    };
+
+    let file_type = match query.kind.as_deref() {
+        Some("file") => Some(FileSearchType::File),
+        Some("directory") => Some(FileSearchType::Directory),
+        Some(_) => return bad_request("type must be file or directory").into_response(),
+        None => None,
+    };
+
+    let directory = state
+        .opencode
+        .directory_for(&headers, query.directory.as_ref());
+    let worktree = state.opencode.worktree_for(&directory);
+    let search_params = SearchFileParams {
+        root: PathBuf::from(worktree),
+        directory: PathBuf::from(directory),
+        query: query_value,
+        include_dirs,
+        file_type,
+        limit: query.limit,
+    };
+
+    match state
+        .inner
+        .session_manager()
+        .search_service()
+        .search_files(search_params)
+        .await
+    {
+        Ok(results) => (StatusCode::OK, Json(results)).into_response(),
+        Err(err) => sandbox_error_response(err).into_response(),
     }
-    (StatusCode::OK, Json(json!([]))).into_response()
 }
 
 #[utoipa::path(
@@ -3881,11 +3958,36 @@ async fn oc_find_files(Query(query): Query<FindFilesQuery>) -> impl IntoResponse
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_find_symbols(Query(query): Query<FindSymbolsQuery>) -> impl IntoResponse {
-    if query.query.is_none() {
+async fn oc_find_symbols(
+    State(state): State<Arc<OpenCodeAppState>>,
+    headers: HeaderMap,
+    Query(query): Query<FindSymbolsQuery>,
+) -> impl IntoResponse {
+    let Some(query_value) = query.query else {
         return bad_request("query is required").into_response();
+    };
+
+    let directory = state
+        .opencode
+        .directory_for(&headers, query.directory.as_ref());
+    let worktree = state.opencode.worktree_for(&directory);
+    let search_params = SearchSymbolParams {
+        root: PathBuf::from(worktree),
+        directory: PathBuf::from(directory),
+        query: query_value,
+        limit: query.limit,
+    };
+
+    match state
+        .inner
+        .session_manager()
+        .search_service()
+        .search_symbols(search_params)
+        .await
+    {
+        Ok(results) => (StatusCode::OK, Json(results)).into_response(),
+        Err(err) => sandbox_error_response(err).into_response(),
     }
-    (StatusCode::OK, Json(json!([]))).into_response()
 }
 
 #[utoipa::path(
