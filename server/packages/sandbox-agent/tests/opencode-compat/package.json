@@ -9,10 +9,12 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "@types/ws": "^8.5.10",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
   },
   "dependencies": {
-    "@opencode-ai/sdk": "^1.1.21"
+    "@opencode-ai/sdk": "^1.1.21",
+    "ws": "^8.18.0"
   }
 }

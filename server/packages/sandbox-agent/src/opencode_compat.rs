@@ -2,28 +2,38 @@
 //!
 //! These endpoints implement the full OpenCode OpenAPI surface. Most routes are
 //! stubbed responses with deterministic helpers for snapshot testing. A minimal
-//! in-memory state tracks sessions/messages/ptys to keep behavior coherent.
+//! in-memory state tracks sessions/messages to keep behavior coherent.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::convert::Infallible;
+use std::fs;
+use std::path::Path as FsPath;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 use std::str::FromStr;
 
 use axum::extract::{Path, Query, State};
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event, KeepAlive};
 use axum::response::{IntoResponse, Sse};
 use axum::routing::{get, patch, post, put};
 use axum::{Json, Router};
-use futures::stream;
+use futures::{stream, SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use tokio::process::Command;
 use tokio::sync::{broadcast, Mutex};
 use tokio::time::interval;
+use tokio_stream::wrappers::ReceiverStream;
 use utoipa::{IntoParams, OpenApi, ToSchema};
 
-use crate::router::{AppState, CreateSessionRequest, PermissionReply};
+use crate::pty::{PtyCreateOptions, PtyEvent, PtyIo, PtyRecord, PtySizeSpec, PtyUpdateOptions};
+use crate::router::{
+    AppState, CreateSessionRequest, FileActionSnapshot, McpRegistryError, McpServerConfig,
+    PermissionReply, ToolCallSnapshot, ToolCallStatus,
+};
 use sandbox_agent_error::SandboxError;
 use sandbox_agent_agent_management::agents::AgentId;
 use sandbox_agent_universal_agent_schema::{
@@ -41,6 +51,19 @@ const OPENCODE_PROVIDER_ID: &str = "sandbox-agent";
 const OPENCODE_PROVIDER_NAME: &str = "Sandbox Agent";
 const OPENCODE_DEFAULT_MODEL_ID: &str = "mock";
 const OPENCODE_DEFAULT_AGENT_MODE: &str = "build";
+const FIND_MAX_RESULTS: usize = 200;
+const FIND_IGNORE_DIRS: &[&str] = &[
+    ".git",
+    ".idea",
+    ".sandbox-agent",
+    ".venv",
+    ".vscode",
+    "build",
+    "dist",
+    "node_modules",
+    "target",
+    "venv",
+];
 
 #[derive(Clone, Debug)]
 struct OpenCodeCompatConfig {
@@ -77,9 +100,22 @@ impl OpenCodeCompatConfig {
             .map(|d| d.as_millis() as i64)
             .unwrap_or(0)
     }
+
+    fn home_dir(&self) -> String {
+        self.fixed_home
+            .clone()
+            .or_else(|| std::env::var("HOME").ok())
+            .unwrap_or_else(|| "/".to_string())
+    }
+
+    fn state_dir(&self) -> String {
+        self.fixed_state
+            .clone()
+            .unwrap_or_else(|| format!("{}/.local/state/opencode", self.home_dir()))
+    }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct OpenCodeSessionRecord {
     id: String,
     slug: String,
@@ -91,6 +127,8 @@ struct OpenCodeSessionRecord {
     created_at: i64,
     updated_at: i64,
     share_url: Option<String>,
+    #[serde(default)]
+    status: OpenCodeSessionStatus,
 }
 
 impl OpenCodeSessionRecord {
@@ -115,7 +153,37 @@ impl OpenCodeSessionRecord {
         if let Some(url) = &self.share_url {
             map.insert("share".to_string(), json!({"url": url}));
         }
+        map.insert(
+            "status".to_string(),
+            json!({"type": self.status.status, "updated": self.status.updated_at}),
+        );
         Value::Object(map)
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+struct OpenCodeSessionStatus {
+    status: String,
+    updated_at: i64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+struct OpenCodePersistedState {
+    #[serde(default)]
+    default_project_id: String,
+    #[serde(default)]
+    next_session_id: u64,
+    #[serde(default)]
+    sessions: HashMap<String, OpenCodeSessionRecord>,
+}
+
+impl OpenCodePersistedState {
+    fn empty(default_project_id: String) -> Self {
+        Self {
+            default_project_id,
+            next_session_id: 1,
+            sessions: HashMap::new(),
+        }
     }
 }
 
@@ -125,30 +193,6 @@ struct OpenCodeMessageRecord {
     parts: Vec<Value>,
 }
 
-#[derive(Clone, Debug)]
-struct OpenCodePtyRecord {
-    id: String,
-    title: String,
-    command: String,
-    args: Vec<String>,
-    cwd: String,
-    status: String,
-    pid: i64,
-}
-
-impl OpenCodePtyRecord {
-    fn to_value(&self) -> Value {
-        json!({
-            "id": self.id,
-            "title": self.title,
-            "command": self.command,
-            "args": self.args,
-            "cwd": self.cwd,
-            "status": self.status,
-            "pid": self.pid,
-        })
-    }
-}
 
 #[derive(Clone, Debug)]
 struct OpenCodePermissionRecord {
@@ -198,6 +242,12 @@ impl OpenCodeQuestionRecord {
     }
 }
 
+#[derive(Clone, Debug)]
+struct OpenCodeEventRecord {
+    sequence: u64,
+    payload: Value,
+}
+
 #[derive(Default, Clone)]
 struct OpenCodeSessionRuntime {
     last_user_message_id: Option<String>,
@@ -217,40 +267,84 @@ struct OpenCodeSessionRuntime {
 pub struct OpenCodeState {
     config: OpenCodeCompatConfig,
     default_project_id: String,
+    session_store_path: PathBuf,
     sessions: Mutex<HashMap<String, OpenCodeSessionRecord>>,
     messages: Mutex<HashMap<String, Vec<OpenCodeMessageRecord>>>,
-    ptys: Mutex<HashMap<String, OpenCodePtyRecord>>,
     permissions: Mutex<HashMap<String, OpenCodePermissionRecord>>,
     questions: Mutex<HashMap<String, OpenCodeQuestionRecord>>,
     session_runtime: Mutex<HashMap<String, OpenCodeSessionRuntime>>,
     session_streams: Mutex<HashMap<String, bool>>,
-    event_broadcaster: broadcast::Sender<Value>,
+    event_log: StdMutex<Vec<OpenCodeEventRecord>>,
+    event_sequence: AtomicU64,
+    event_broadcaster: broadcast::Sender<OpenCodeEventRecord>,
 }
 
 impl OpenCodeState {
     pub fn new() -> Self {
         let (event_broadcaster, _) = broadcast::channel(256);
-        let project_id = format!("proj_{}", PROJECT_COUNTER.fetch_add(1, Ordering::Relaxed));
+        let config = OpenCodeCompatConfig::from_env();
+        let state_dir = config.state_dir();
+        let session_store_path = PathBuf::from(state_dir).join("sessions.json");
+        let mut persisted = load_persisted_state(&session_store_path).unwrap_or_else(|| {
+            let project_id = format!("proj_{}", PROJECT_COUNTER.fetch_add(1, Ordering::Relaxed));
+            OpenCodePersistedState::empty(project_id)
+        });
+        if persisted.default_project_id.is_empty() {
+            persisted.default_project_id =
+                format!("proj_{}", PROJECT_COUNTER.fetch_add(1, Ordering::Relaxed));
+        }
+        for session in persisted.sessions.values_mut() {
+            if session.status.status.is_empty() {
+                session.status.status = "idle".to_string();
+                session.status.updated_at = session.updated_at;
+            }
+        }
+        let derived_next = next_session_id_from(&persisted.sessions);
+        if persisted.next_session_id < derived_next {
+            persisted.next_session_id = derived_next;
+        }
+        SESSION_COUNTER.store(persisted.next_session_id, Ordering::Relaxed);
         Self {
-            config: OpenCodeCompatConfig::from_env(),
-            default_project_id: project_id,
-            sessions: Mutex::new(HashMap::new()),
+            config,
+            default_project_id: persisted.default_project_id,
+            session_store_path,
+            sessions: Mutex::new(persisted.sessions),
             messages: Mutex::new(HashMap::new()),
-            ptys: Mutex::new(HashMap::new()),
             permissions: Mutex::new(HashMap::new()),
             questions: Mutex::new(HashMap::new()),
             session_runtime: Mutex::new(HashMap::new()),
             session_streams: Mutex::new(HashMap::new()),
+            event_log: StdMutex::new(Vec::new()),
+            event_sequence: AtomicU64::new(0),
             event_broadcaster,
         }
     }
 
-    pub fn subscribe(&self) -> broadcast::Receiver<Value> {
+    pub fn subscribe(&self) -> broadcast::Receiver<OpenCodeEventRecord> {
         self.event_broadcaster.subscribe()
     }
 
     pub fn emit_event(&self, event: Value) {
-        let _ = self.event_broadcaster.send(event);
+        let sequence = self.event_sequence.fetch_add(1, Ordering::Relaxed) + 1;
+        let record = OpenCodeEventRecord {
+            sequence,
+            payload: event,
+        };
+        if let Ok(mut events) = self.event_log.lock() {
+            events.push(record.clone());
+        }
+        let _ = self.event_broadcaster.send(record);
+    }
+
+    pub fn events_since(&self, offset: u64) -> Vec<OpenCodeEventRecord> {
+        let Ok(events) = self.event_log.lock() else {
+            return Vec::new();
+        };
+        events
+            .iter()
+            .filter(|record| record.sequence > offset)
+            .cloned()
+            .collect()
     }
 
     fn now_ms(&self) -> i64 {
@@ -289,18 +383,87 @@ impl OpenCodeState {
     }
 
     fn home_dir(&self) -> String {
-        self.config
-            .fixed_home
-            .clone()
-            .or_else(|| std::env::var("HOME").ok())
-            .unwrap_or_else(|| "/".to_string())
+        self.config.home_dir()
     }
 
     fn state_dir(&self) -> String {
-        self.config
-            .fixed_state
-            .clone()
-            .unwrap_or_else(|| format!("{}/.local/state/opencode", self.home_dir()))
+        self.config.state_dir()
+    }
+
+    async fn persist_sessions(&self) {
+        let sessions = self.sessions.lock().await;
+        let persisted = OpenCodePersistedState {
+            default_project_id: self.default_project_id.clone(),
+            next_session_id: SESSION_COUNTER.load(Ordering::Relaxed),
+            sessions: sessions.clone(),
+        };
+        drop(sessions);
+        let path = self.session_store_path.clone();
+        let payload = match serde_json::to_vec_pretty(&persisted) {
+            Ok(value) => value,
+            Err(err) => {
+                tracing::warn!(
+                    target = "sandbox_agent::opencode",
+                    ?err,
+                    "failed to serialize session store"
+                );
+                return;
+            }
+        };
+        let result = tokio::task::spawn_blocking(move || {
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::write(&path, payload)
+        })
+        .await;
+        match result {
+            Ok(Ok(())) => {}
+            Ok(Err(err)) => {
+                tracing::warn!(
+                    target = "sandbox_agent::opencode",
+                    ?err,
+                    "failed to persist session store"
+                );
+            }
+            Err(err) => {
+                tracing::warn!(
+                    target = "sandbox_agent::opencode",
+                    ?err,
+                    "failed to persist session store"
+                );
+            }
+        }
+    }
+
+    async fn mutate_session(
+        &self,
+        session_id: &str,
+        update: impl FnOnce(&mut OpenCodeSessionRecord),
+    ) -> Option<OpenCodeSessionRecord> {
+        let mut sessions = self.sessions.lock().await;
+        let session = sessions.get_mut(session_id)?;
+        update(session);
+        Some(session.clone())
+    }
+
+    async fn update_session_status(
+        &self,
+        session_id: &str,
+        status: &str,
+    ) -> Option<OpenCodeSessionRecord> {
+        let now = self.now_ms();
+        let updated = self
+            .mutate_session(session_id, |session| {
+                session.status.status = status.to_string();
+                session.status.updated_at = now;
+                session.updated_at = now;
+            })
+            .await;
+        if updated.is_some() {
+            self.persist_sessions().await;
+        }
+        updated
     }
 
     async fn ensure_session(&self, session_id: &str, directory: String) -> Value {
@@ -321,12 +484,17 @@ impl OpenCodeState {
             created_at: now,
             updated_at: now,
             share_url: None,
+            status: OpenCodeSessionStatus {
+                status: "idle".to_string(),
+                updated_at: now,
+            },
         };
         let value = record.to_value();
         sessions.insert(session_id.to_string(), record);
         drop(sessions);
 
         self.emit_event(session_event("session.created", &value));
+        self.persist_sessions().await;
         value
     }
 
@@ -366,10 +534,12 @@ pub struct OpenCodeAppState {
 
 impl OpenCodeAppState {
     pub fn new(inner: Arc<AppState>) -> Arc<Self> {
-        Arc::new(Self {
+        let state = Arc::new(Self {
             inner,
             opencode: Arc::new(OpenCodeState::new()),
-        })
+        });
+        spawn_pty_event_forwarder(state.clone());
+        state
     }
 }
 
@@ -467,28 +637,55 @@ struct DirectoryQuery {
 }
 
 #[derive(Debug, Deserialize, IntoParams)]
+struct EventStreamQuery {
+    directory: Option<String>,
+    offset: Option<u64>,
+}
+
+#[derive(Debug, Deserialize, IntoParams)]
 struct ToolQuery {
     directory: Option<String>,
     provider: Option<String>,
     model: Option<String>,
 }
 
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct OpenCodeMcpRegisterRequest {
+    name: String,
+    config: McpServerConfig,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct OpenCodeMcpAuthCallbackRequest {
+    code: String,
+}
+
 #[derive(Debug, Deserialize, IntoParams)]
 struct FindTextQuery {
     directory: Option<String>,
     pattern: Option<String>,
+    #[serde(rename = "caseSensitive")]
+    case_sensitive: Option<bool>,
+    limit: Option<usize>,
 }
 
 #[derive(Debug, Deserialize, IntoParams)]
 struct FindFilesQuery {
     directory: Option<String>,
     query: Option<String>,
+    dirs: Option<bool>,
+    #[serde(rename = "type")]
+    entry_type: Option<String>,
+    limit: Option<usize>,
 }
 
 #[derive(Debug, Deserialize, IntoParams)]
 struct FindSymbolsQuery {
     directory: Option<String>,
     query: Option<String>,
+    limit: Option<usize>,
 }
 
 #[derive(Debug, Deserialize, IntoParams)]
@@ -568,11 +765,64 @@ struct PtyCreateRequest {
     args: Option<Vec<String>>,
     cwd: Option<String>,
     title: Option<String>,
+    env: Option<HashMap<String, String>>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct PtySizeRequest {
+    rows: u16,
+    cols: u16,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct PtyUpdateRequest {
+    title: Option<String>,
+    size: Option<PtySizeRequest>,
 }
 
 fn next_id(prefix: &str, counter: &AtomicU64) -> String {
     let id = counter.fetch_add(1, Ordering::Relaxed);
     format!("{}{}", prefix, id)
+}
+
+fn next_session_id_from(sessions: &HashMap<String, OpenCodeSessionRecord>) -> u64 {
+    let mut max_id = 0;
+    for session_id in sessions.keys() {
+        if let Some(raw) = session_id.strip_prefix("ses_") {
+            if let Ok(value) = raw.parse::<u64>() {
+                if value > max_id {
+                    max_id = value;
+                }
+            }
+        }
+    }
+    if max_id == 0 {
+        1
+    } else {
+        max_id + 1
+    }
+}
+
+fn bump_version(version: &str) -> String {
+    let parsed = version.parse::<u64>().unwrap_or(0);
+    (parsed + 1).to_string()
+}
+
+fn load_persisted_state(path: &FsPath) -> Option<OpenCodePersistedState> {
+    let contents = fs::read_to_string(path).ok()?;
+    match serde_json::from_str::<OpenCodePersistedState>(&contents) {
+        Ok(state) => Some(state),
+        Err(err) => {
+            tracing::warn!(
+                target = "sandbox_agent::opencode",
+                ?err,
+                "failed to parse session store"
+            );
+            None
+        }
+    }
 }
 
 fn available_agent_ids() -> Vec<AgentId> {
@@ -769,6 +1019,14 @@ fn sandbox_error_response(err: SandboxError) -> (StatusCode, Json<Value>) {
     }
 }
 
+fn mcp_error_response(err: McpRegistryError) -> (StatusCode, Json<Value>) {
+    match err {
+        McpRegistryError::NotFound => not_found("MCP server not found"),
+        McpRegistryError::Invalid(message) => bad_request(&message),
+        McpRegistryError::Transport(message) => internal_error(&message),
+    }
+}
+
 fn parse_permission_reply_value(value: Option<&str>) -> Result<PermissionReply, String> {
     let value = value.unwrap_or("once").to_ascii_lowercase();
     match value.as_str() {
@@ -781,6 +1039,40 @@ fn parse_permission_reply_value(value: Option<&str>) -> Result<PermissionReply, 
 
 fn bool_ok(value: bool) -> (StatusCode, Json<Value>) {
     (StatusCode::OK, Json(json!(value)))
+}
+
+fn pty_to_value(pty: &PtyRecord) -> Value {
+    json!({
+        "id": pty.id,
+        "title": pty.title,
+        "command": pty.command,
+        "args": pty.args,
+        "cwd": pty.cwd,
+        "status": pty.status.as_str(),
+        "pid": pty.pid,
+    })
+}
+
+fn spawn_pty_event_forwarder(state: Arc<OpenCodeAppState>) {
+    let mut receiver = state
+        .inner
+        .session_manager()
+        .pty_manager()
+        .subscribe();
+    tokio::spawn(async move {
+        loop {
+            match receiver.recv().await {
+                Ok(PtyEvent::Exited { id, exit_code }) => {
+                    state.opencode.emit_event(json!({
+                        "type": "pty.exited",
+                        "properties": {"id": id, "exitCode": exit_code}
+                    }));
+                }
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
 }
 
 fn build_user_message(
@@ -1233,7 +1525,7 @@ struct ToolContentInfo {
     tool_name: Option<String>,
     arguments: Option<String>,
     output: Option<String>,
-    file_refs: Vec<(String, FileAction, Option<String>)>,
+    file_refs: Vec<(String, FileAction, Option<String>, Option<String>)>,
 }
 
 fn extract_tool_content(parts: &[ContentPart]) -> ToolContentInfo {
@@ -1253,9 +1545,18 @@ fn extract_tool_content(parts: &[ContentPart]) -> ToolContentInfo {
                 info.call_id = Some(call_id.clone());
                 info.output = Some(output.clone());
             }
-            ContentPart::FileRef { path, action, diff } => {
-                info.file_refs
-                    .push((path.clone(), action.clone(), diff.clone()));
+            ContentPart::FileRef {
+                path,
+                action,
+                diff,
+                target_path,
+            } => {
+                info.file_refs.push((
+                    path.clone(),
+                    action.clone(),
+                    diff.clone(),
+                    target_path.clone(),
+                ));
             }
             _ => {}
         }
@@ -1273,6 +1574,105 @@ fn tool_input_from_arguments(arguments: Option<&str>) -> Value {
         }
     }
     json!({ "arguments": arguments })
+}
+
+async fn tool_call_snapshot(
+    state: &OpenCodeAppState,
+    session_id: &str,
+    call_id: &str,
+) -> Option<ToolCallSnapshot> {
+    state
+        .inner
+        .session_manager()
+        .tool_call_snapshot(session_id, call_id)
+        .await
+}
+
+async fn file_actions_for_event(
+    state: &OpenCodeAppState,
+    session_id: &str,
+    sequence: u64,
+) -> Vec<FileActionSnapshot> {
+    state
+        .inner
+        .session_manager()
+        .file_actions_for_event(session_id, sequence)
+        .await
+}
+
+fn tool_state_from_snapshot(
+    snapshot: Option<&ToolCallSnapshot>,
+    fallback_name: &str,
+    fallback_arguments: Option<&str>,
+    fallback_output: Option<&str>,
+    attachments: Vec<Value>,
+    now: i64,
+) -> (String, Value) {
+    let tool_name = snapshot
+        .and_then(|state| state.name.clone())
+        .unwrap_or_else(|| fallback_name.to_string());
+    let arguments = snapshot
+        .and_then(|state| state.arguments.clone())
+        .or_else(|| fallback_arguments.map(|value| value.to_string()));
+    let raw_args = arguments.clone().unwrap_or_default();
+    let input_value = tool_input_from_arguments(arguments.as_deref());
+    let output = snapshot
+        .and_then(|state| state.output.clone())
+        .or_else(|| fallback_output.map(|value| value.to_string()));
+    let status = snapshot.map(|state| &state.status);
+
+    let state_value = match status {
+        Some(ToolCallStatus::Result) => json!({
+            "status": "completed",
+            "input": input_value,
+            "output": output.unwrap_or_default(),
+            "title": "Tool result",
+            "metadata": {},
+            "time": {"start": now, "end": now},
+            "attachments": attachments,
+        }),
+        Some(ToolCallStatus::Failed) => json!({
+            "status": "error",
+            "input": input_value,
+            "error": output.unwrap_or_else(|| "Tool failed".to_string()),
+            "metadata": {},
+            "time": {"start": now, "end": now},
+        }),
+        Some(ToolCallStatus::Completed)
+        | Some(ToolCallStatus::Running)
+        | Some(ToolCallStatus::Delta) => json!({
+            "status": "running",
+            "input": input_value,
+            "time": {"start": now},
+        }),
+        Some(ToolCallStatus::Started) | None => json!({
+            "status": "pending",
+            "input": input_value,
+            "raw": raw_args,
+        }),
+    };
+
+    (tool_name, state_value)
+}
+
+fn file_action_applied(
+    file_actions: &[FileActionSnapshot],
+    path: &str,
+    action: &FileAction,
+    target_path: Option<&str>,
+    diff: Option<&str>,
+) -> bool {
+    file_actions.iter().any(|record| {
+        let diff_matches = match diff {
+            Some(value) => record.diff.as_deref() == Some(value),
+            None => true,
+        };
+        record.action == *action
+            && record.path == path
+            && record.target_path.as_deref() == target_path
+            && diff_matches
+            && record.applied
+    })
 }
 
 fn patterns_from_metadata(metadata: &Option<Value>) -> Vec<String> {
@@ -1334,6 +1734,10 @@ async fn apply_universal_event(state: Arc<OpenCodeAppState>, event: UniversalEve
                 "type": "session.idle",
                 "properties": {"sessionID": event.session_id}
             }));
+            let _ = state
+                .opencode
+                .update_session_status(&event.session_id, "idle")
+                .await;
         }
         UniversalEventType::PermissionRequested | UniversalEventType::PermissionResolved => {
             if let UniversalEventData::Permission(permission) = &event.data {
@@ -1348,6 +1752,13 @@ async fn apply_universal_event(state: Arc<OpenCodeAppState>, event: UniversalEve
         UniversalEventType::Error => {
             if let UniversalEventData::Error(error) = &event.data {
                 state.opencode.emit_event(json!({
+                    "type": "session.status",
+                    "properties": {
+                        "sessionID": event.session_id,
+                        "status": {"type": "error"}
+                    }
+                }));
+                state.opencode.emit_event(json!({
                     "type": "session.error",
                     "properties": {
                         "sessionID": event.session_id,
@@ -1358,6 +1769,10 @@ async fn apply_universal_event(state: Arc<OpenCodeAppState>, event: UniversalEve
                         }
                     }
                 }));
+                let _ = state
+                    .opencode
+                    .update_session_status(&event.session_id, "error")
+                    .await;
             }
         }
         _ => {}
@@ -1578,6 +1993,20 @@ async fn apply_item_event(
     state
         .opencode
         .emit_event(message_event("message.updated", &info));
+    if event.event_type == UniversalEventType::ItemCompleted {
+        state.opencode.emit_event(json!({
+            "type": "session.status",
+            "properties": {"sessionID": session_id, "status": {"type": "idle"}}
+        }));
+        state.opencode.emit_event(json!({
+            "type": "session.idle",
+            "properties": {"sessionID": session_id}
+        }));
+        let _ = state
+            .opencode
+            .update_session_status(&session_id, "idle")
+            .await;
+    }
 
     let mut runtime = state
         .opencode
@@ -1613,6 +2042,8 @@ async fn apply_item_event(
             .await;
     }
 
+    let file_actions = file_actions_for_event(&state, &session_id, event.sequence).await;
+
     for part in item.content.iter() {
         match part {
             ContentPart::Reasoning { text, .. } => {
@@ -1635,13 +2066,23 @@ async fn apply_item_event(
                     .entry(call_id.clone())
                     .or_insert_with(|| next_id("part_", &PART_COUNTER))
                     .clone();
-                let state_value = json!({
-                    "status": "pending",
-                    "input": {"arguments": arguments},
-                    "raw": arguments,
-                });
-                let tool_part =
-                    build_tool_part(&session_id, &message_id, &part_id, call_id, name, state_value);
+                let snapshot = tool_call_snapshot(&state, &session_id, call_id).await;
+                let (tool_name, state_value) = tool_state_from_snapshot(
+                    snapshot.as_ref(),
+                    name,
+                    Some(arguments),
+                    None,
+                    Vec::new(),
+                    now,
+                );
+                let tool_part = build_tool_part(
+                    &session_id,
+                    &message_id,
+                    &part_id,
+                    call_id,
+                    &tool_name,
+                    state_value,
+                );
                 upsert_message_part(&state.opencode, &session_id, &message_id, tool_part.clone())
                     .await;
                 state
@@ -1665,21 +2106,21 @@ async fn apply_item_event(
                     .entry(call_id.clone())
                     .or_insert_with(|| next_id("part_", &PART_COUNTER))
                     .clone();
-                let state_value = json!({
-                    "status": "completed",
-                    "input": {},
-                    "output": output,
-                    "title": "Tool result",
-                    "metadata": {},
-                    "time": {"start": now, "end": now},
-                    "attachments": [],
-                });
+                let snapshot = tool_call_snapshot(&state, &session_id, call_id).await;
+                let (tool_name, state_value) = tool_state_from_snapshot(
+                    snapshot.as_ref(),
+                    "tool",
+                    None,
+                    Some(output),
+                    Vec::new(),
+                    now,
+                );
                 let tool_part = build_tool_part(
                     &session_id,
                     &message_id,
                     &part_id,
                     call_id,
-                    "tool",
+                    &tool_name,
                     state_value,
                 );
                 upsert_message_part(&state.opencode, &session_id, &message_id, tool_part.clone())
@@ -1699,19 +2140,39 @@ async fn apply_item_event(
                     })
                     .await;
             }
-            ContentPart::FileRef { path, action, diff } => {
+            ContentPart::FileRef {
+                path,
+                action,
+                diff,
+                target_path,
+            } => {
                 let mime = match action {
                     FileAction::Patch => "text/x-diff",
                     _ => "text/plain",
                 };
-                let part =
-                    build_file_part_from_path(&session_id, &message_id, path, mime, diff.as_deref());
+                let display_path = target_path.as_deref().unwrap_or(path);
+                let part = build_file_part_from_path(
+                    &session_id,
+                    &message_id,
+                    display_path,
+                    mime,
+                    diff.as_deref(),
+                );
                 upsert_message_part(&state.opencode, &session_id, &message_id, part.clone()).await;
                 state
                     .opencode
                     .emit_event(part_event("message.part.updated", &part));
-                if matches!(action, FileAction::Write | FileAction::Patch) {
-                    emit_file_edited(&state.opencode, path);
+                if matches!(
+                    action,
+                    FileAction::Write | FileAction::Patch | FileAction::Rename | FileAction::Delete
+                ) && file_action_applied(
+                    &file_actions,
+                    path,
+                    action,
+                    target_path.as_deref(),
+                    diff.as_deref(),
+                ) {
+                    emit_file_edited(&state.opencode, display_path);
                 }
             }
             ContentPart::Image { path, mime } => {
@@ -1845,22 +2306,38 @@ async fn apply_tool_item_event(
         .opencode
         .emit_event(message_event("message.updated", &info));
 
+    let file_actions = file_actions_for_event(&state, &session_id, event.sequence).await;
     let mut attachments = Vec::new();
     if item.kind == ItemKind::ToolResult && event.event_type == UniversalEventType::ItemCompleted {
-        for (path, action, diff) in tool_info.file_refs.iter() {
+        for (path, action, diff, target_path) in tool_info.file_refs.iter() {
             let mime = match action {
                 FileAction::Patch => "text/x-diff",
                 _ => "text/plain",
             };
-            let part =
-                build_file_part_from_path(&session_id, &message_id, path, mime, diff.as_deref());
+            let display_path = target_path.as_deref().unwrap_or(path);
+            let part = build_file_part_from_path(
+                &session_id,
+                &message_id,
+                display_path,
+                mime,
+                diff.as_deref(),
+            );
             upsert_message_part(&state.opencode, &session_id, &message_id, part.clone()).await;
             state
                 .opencode
                 .emit_event(part_event("message.part.updated", &part));
             attachments.push(part.clone());
-            if matches!(action, FileAction::Write | FileAction::Patch) {
-                emit_file_edited(&state.opencode, path);
+            if matches!(
+                action,
+                FileAction::Write | FileAction::Patch | FileAction::Rename | FileAction::Delete
+            ) && file_action_applied(
+                &file_actions,
+                path,
+                action,
+                target_path.as_deref(),
+                diff.as_deref(),
+            ) {
+                emit_file_edited(&state.opencode, display_path);
             }
         }
     }
@@ -1870,68 +2347,22 @@ async fn apply_tool_item_event(
         .get(&call_id)
         .cloned()
         .unwrap_or_else(|| next_id("part_", &PART_COUNTER));
-    let tool_name = tool_info
-        .tool_name
-        .clone()
-        .unwrap_or_else(|| "tool".to_string());
-    let input_value = tool_input_from_arguments(tool_info.arguments.as_deref());
-    let raw_args = tool_info.arguments.clone().unwrap_or_default();
-    let output_value = tool_info
+    let snapshot = tool_call_snapshot(&state, &session_id, &call_id).await;
+    let output_fallback = tool_info
         .output
         .clone()
         .or_else(|| extract_text_from_content(&item.content));
-
-    let state_value = match event.event_type {
-        UniversalEventType::ItemStarted => {
-            if item.kind == ItemKind::ToolResult {
-                json!({
-                    "status": "running",
-                    "input": input_value,
-                    "time": {"start": now}
-                })
-            } else {
-                json!({
-                    "status": "pending",
-                    "input": input_value,
-                    "raw": raw_args,
-                })
-            }
-        }
-        UniversalEventType::ItemCompleted => {
-            if item.kind == ItemKind::ToolResult {
-                if matches!(item.status, ItemStatus::Failed) {
-                    json!({
-                        "status": "error",
-                        "input": input_value,
-                        "error": output_value.unwrap_or_else(|| "Tool failed".to_string()),
-                        "metadata": {},
-                        "time": {"start": now, "end": now},
-                    })
-                } else {
-                    json!({
-                        "status": "completed",
-                        "input": input_value,
-                        "output": output_value.unwrap_or_default(),
-                        "title": "Tool result",
-                        "metadata": {},
-                        "time": {"start": now, "end": now},
-                        "attachments": attachments,
-                    })
-                }
-            } else {
-                json!({
-                    "status": "running",
-                    "input": input_value,
-                    "time": {"start": now},
-                })
-            }
-        }
-        _ => json!({
-            "status": "pending",
-            "input": input_value,
-            "raw": raw_args,
-        }),
-    };
+    let (tool_name, state_value) = tool_state_from_snapshot(
+        snapshot.as_ref(),
+        tool_info
+            .tool_name
+            .as_deref()
+            .unwrap_or("tool"),
+        tool_info.arguments.as_deref(),
+        output_fallback.as_deref(),
+        attachments,
+        now,
+    );
 
     let tool_part = build_tool_part(
         &session_id,
@@ -2297,9 +2728,20 @@ async fn oc_config_providers() -> impl IntoResponse {
 async fn oc_event_subscribe(
     State(state): State<Arc<OpenCodeAppState>>,
     headers: HeaderMap,
-    Query(query): Query<DirectoryQuery>,
+    Query(query): Query<EventStreamQuery>,
 ) -> Sse<impl futures::Stream<Item = Result<Event, Infallible>>> {
     let receiver = state.opencode.subscribe();
+    let offset = query
+        .offset
+        .or_else(|| {
+            headers
+                .get("last-event-id")
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| value.parse::<u64>().ok())
+        })
+        .unwrap_or(0);
+    let mut pending_events: VecDeque<OpenCodeEventRecord> =
+        state.opencode.events_since(offset).into();
     let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
     let branch = state.opencode.branch_name();
     state.opencode.emit_event(json!({
@@ -2318,33 +2760,59 @@ async fn oc_event_subscribe(
         "type": "server.heartbeat",
         "properties": {}
     });
-    let stream = stream::unfold((receiver, interval(std::time::Duration::from_secs(30))), move |(mut rx, mut ticker)| {
-        let heartbeat = heartbeat_payload.clone();
-        async move {
-            tokio::select! {
-                _ = ticker.tick() => {
-                    let sse_event = Event::default()
-                        .json_data(&heartbeat)
-                        .unwrap_or_else(|_| Event::default().data("{}"));
-                    Some((Ok(sse_event), (rx, ticker)))
-                }
-                event = rx.recv() => {
-                    match event {
-                        Ok(event) => {
+    let opencode = state.opencode.clone();
+    let stream = stream::unfold(
+        (
+            receiver,
+            pending_events,
+            offset,
+            interval(std::time::Duration::from_secs(30)),
+        ),
+        move |(mut rx, mut pending, mut last_sequence, mut ticker)| {
+            let heartbeat = heartbeat_payload.clone();
+            let opencode = opencode.clone();
+            async move {
+                loop {
+                    if let Some(record) = pending.pop_front() {
+                        last_sequence = record.sequence;
+                        let sse_event = Event::default()
+                            .id(record.sequence.to_string())
+                            .json_data(&record.payload)
+                            .unwrap_or_else(|_| Event::default().data("{}"));
+                        return Some((Ok(sse_event), (rx, pending, last_sequence, ticker)));
+                    }
+                    tokio::select! {
+                        _ = ticker.tick() => {
                             let sse_event = Event::default()
-                                .json_data(&event)
+                                .json_data(&heartbeat)
                                 .unwrap_or_else(|_| Event::default().data("{}"));
-                            Some((Ok(sse_event), (rx, ticker)))
+                            return Some((Ok(sse_event), (rx, pending, last_sequence, ticker)));
                         }
-                        Err(broadcast::error::RecvError::Lagged(_)) => {
-                            Some((Ok(Event::default().comment("lagged")), (rx, ticker)))
+                        event = rx.recv() => {
+                            match event {
+                                Ok(record) => {
+                                    if record.sequence <= last_sequence {
+                                        continue;
+                                    }
+                                    last_sequence = record.sequence;
+                                    let sse_event = Event::default()
+                                        .id(record.sequence.to_string())
+                                        .json_data(&record.payload)
+                                        .unwrap_or_else(|_| Event::default().data("{}"));
+                                    return Some((Ok(sse_event), (rx, pending, last_sequence, ticker)));
+                                }
+                                Err(broadcast::error::RecvError::Lagged(_)) => {
+                                    pending = opencode.events_since(last_sequence).into();
+                                    continue;
+                                }
+                                Err(broadcast::error::RecvError::Closed) => return None,
+                            }
                         }
-                        Err(broadcast::error::RecvError::Closed) => None,
                     }
                 }
             }
-        }
-    });
+        },
+    );
 
     Sse::new(stream).keep_alive(KeepAlive::new().interval(std::time::Duration::from_secs(15)))
 }
@@ -2358,9 +2826,20 @@ async fn oc_event_subscribe(
 async fn oc_global_event(
     State(state): State<Arc<OpenCodeAppState>>,
     headers: HeaderMap,
-    Query(query): Query<DirectoryQuery>,
+    Query(query): Query<EventStreamQuery>,
 ) -> Sse<impl futures::Stream<Item = Result<Event, Infallible>>> {
     let receiver = state.opencode.subscribe();
+    let offset = query
+        .offset
+        .or_else(|| {
+            headers
+                .get("last-event-id")
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| value.parse::<u64>().ok())
+        })
+        .unwrap_or(0);
+    let mut pending_events: VecDeque<OpenCodeEventRecord> =
+        state.opencode.events_since(offset).into();
     let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
     let branch = state.opencode.branch_name();
     state.opencode.emit_event(json!({
@@ -2381,35 +2860,62 @@ async fn oc_global_event(
             "properties": {}
         }
     });
-    let stream = stream::unfold((receiver, interval(std::time::Duration::from_secs(30))), move |(mut rx, mut ticker)| {
-        let directory = directory.clone();
-        let heartbeat = heartbeat_payload.clone();
-        async move {
-            tokio::select! {
-                _ = ticker.tick() => {
-                    let sse_event = Event::default()
-                        .json_data(&heartbeat)
-                        .unwrap_or_else(|_| Event::default().data("{}"));
-                    Some((Ok(sse_event), (rx, ticker)))
-                }
-                event = rx.recv() => {
-                    match event {
-                        Ok(event) => {
-                            let payload = json!({"directory": directory, "payload": event});
+    let opencode = state.opencode.clone();
+    let stream = stream::unfold(
+        (
+            receiver,
+            pending_events,
+            offset,
+            interval(std::time::Duration::from_secs(30)),
+        ),
+        move |(mut rx, mut pending, mut last_sequence, mut ticker)| {
+            let directory = directory.clone();
+            let heartbeat = heartbeat_payload.clone();
+            let opencode = opencode.clone();
+            async move {
+                loop {
+                    if let Some(record) = pending.pop_front() {
+                        last_sequence = record.sequence;
+                        let payload = json!({"directory": directory, "payload": record.payload});
+                        let sse_event = Event::default()
+                            .id(record.sequence.to_string())
+                            .json_data(&payload)
+                            .unwrap_or_else(|_| Event::default().data("{}"));
+                        return Some((Ok(sse_event), (rx, pending, last_sequence, ticker)));
+                    }
+                    tokio::select! {
+                        _ = ticker.tick() => {
                             let sse_event = Event::default()
-                                .json_data(&payload)
+                                .json_data(&heartbeat)
                                 .unwrap_or_else(|_| Event::default().data("{}"));
-                            Some((Ok(sse_event), (rx, ticker)))
+                            return Some((Ok(sse_event), (rx, pending, last_sequence, ticker)));
                         }
-                        Err(broadcast::error::RecvError::Lagged(_)) => {
-                            Some((Ok(Event::default().comment("lagged")), (rx, ticker)))
+                        event = rx.recv() => {
+                            match event {
+                                Ok(record) => {
+                                    if record.sequence <= last_sequence {
+                                        continue;
+                                    }
+                                    last_sequence = record.sequence;
+                                    let payload = json!({"directory": directory, "payload": record.payload});
+                                    let sse_event = Event::default()
+                                        .id(record.sequence.to_string())
+                                        .json_data(&payload)
+                                        .unwrap_or_else(|_| Event::default().data("{}"));
+                                    return Some((Ok(sse_event), (rx, pending, last_sequence, ticker)));
+                                }
+                                Err(broadcast::error::RecvError::Lagged(_)) => {
+                                    pending = opencode.events_since(last_sequence).into();
+                                    continue;
+                                }
+                                Err(broadcast::error::RecvError::Closed) => return None,
+                            }
                         }
-                        Err(broadcast::error::RecvError::Closed) => None,
                     }
                 }
             }
-        }
-    });
+        },
+    );
 
     Sse::new(stream).keep_alive(KeepAlive::new().interval(std::time::Duration::from_secs(15)))
 }
@@ -2487,8 +2993,14 @@ async fn oc_log() -> impl IntoResponse {
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_lsp_status() -> impl IntoResponse {
-    (StatusCode::OK, Json(json!([])))
+async fn oc_lsp_status(
+    State(state): State<Arc<OpenCodeAppState>>,
+    headers: HeaderMap,
+    Query(query): Query<DirectoryQuery>,
+) -> impl IntoResponse {
+    let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
+    let status = state.inner.session_manager().lsp_status(&directory);
+    (StatusCode::OK, Json(status))
 }
 
 #[utoipa::path(
@@ -2497,8 +3009,14 @@ async fn oc_lsp_status() -> impl IntoResponse {
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_formatter_status() -> impl IntoResponse {
-    (StatusCode::OK, Json(json!([])))
+async fn oc_formatter_status(
+    State(state): State<Arc<OpenCodeAppState>>,
+    headers: HeaderMap,
+    Query(query): Query<DirectoryQuery>,
+) -> impl IntoResponse {
+    let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
+    let status = state.inner.session_manager().formatter_status(&directory);
+    (StatusCode::OK, Json(status))
 }
 
 #[utoipa::path(
@@ -2631,6 +3149,10 @@ async fn oc_session_create(
         created_at: now,
         updated_at: now,
         share_url: None,
+        status: OpenCodeSessionStatus {
+            status: "idle".to_string(),
+            updated_at: now,
+        },
     };
 
     let session_value = record.to_value();
@@ -2642,6 +3164,7 @@ async fn oc_session_create(
     state
         .opencode
         .emit_event(session_event("session.created", &session_value));
+    state.opencode.persist_sessions().await;
 
     (StatusCode::OK, Json(session_value))
 }
@@ -2654,8 +3177,15 @@ async fn oc_session_create(
 )]
 async fn oc_session_list(State(state): State<Arc<OpenCodeAppState>>) -> impl IntoResponse {
     let sessions = state.opencode.sessions.lock().await;
-    let values: Vec<Value> = sessions.values().map(|s| s.to_value()).collect();
-    (StatusCode::OK, Json(json!(values)))
+    let mut values: Vec<OpenCodeSessionRecord> = sessions.values().cloned().collect();
+    drop(sessions);
+    values.sort_by(|a, b| {
+        a.created_at
+            .cmp(&b.created_at)
+            .then_with(|| a.id.cmp(&b.id))
+    });
+    let response: Vec<Value> = values.into_iter().map(|s| s.to_value()).collect();
+    (StatusCode::OK, Json(json!(response)))
 }
 
 #[utoipa::path(
@@ -2691,16 +3221,22 @@ async fn oc_session_update(
     Path(session_id): Path<String>,
     Json(body): Json<OpenCodeUpdateSessionRequest>,
 ) -> impl IntoResponse {
-    let mut sessions = state.opencode.sessions.lock().await;
-    if let Some(session) = sessions.get_mut(&session_id) {
-        if let Some(title) = body.title {
-            session.title = title;
-            session.updated_at = state.opencode.now_ms();
-        }
+    let now = state.opencode.now_ms();
+    let updated = state
+        .opencode
+        .mutate_session(&session_id, |session| {
+            if let Some(title) = body.title {
+                session.title = title;
+                session.updated_at = now;
+            }
+        })
+        .await;
+    if let Some(session) = updated {
         let value = session.to_value();
         state
             .opencode
             .emit_event(session_event("session.updated", &value));
+        state.opencode.persist_sessions().await;
         return (StatusCode::OK, Json(value)).into_response();
     }
     not_found("Session not found").into_response()
@@ -2719,9 +3255,20 @@ async fn oc_session_delete(
 ) -> impl IntoResponse {
     let mut sessions = state.opencode.sessions.lock().await;
     if let Some(session) = sessions.remove(&session_id) {
+        drop(sessions);
+        let mut messages = state.opencode.messages.lock().await;
+        messages.remove(&session_id);
+        drop(messages);
+        let mut runtimes = state.opencode.session_runtime.lock().await;
+        runtimes.remove(&session_id);
+        drop(runtimes);
+        let mut streams = state.opencode.session_streams.lock().await;
+        streams.remove(&session_id);
+        drop(streams);
         state
             .opencode
             .emit_event(session_event("session.deleted", &session.to_value()));
+        state.opencode.persist_sessions().await;
         return bool_ok(true).into_response();
     }
     not_found("Session not found").into_response()
@@ -2736,8 +3283,14 @@ async fn oc_session_delete(
 async fn oc_session_status(State(state): State<Arc<OpenCodeAppState>>) -> impl IntoResponse {
     let sessions = state.opencode.sessions.lock().await;
     let mut status_map = serde_json::Map::new();
-    for id in sessions.keys() {
-        status_map.insert(id.clone(), json!({"type": "idle"}));
+    for (id, session) in sessions.iter() {
+        status_map.insert(
+            id.clone(),
+            json!({
+                "type": session.status.status,
+                "updated": session.status.updated_at,
+            }),
+        );
     }
     (StatusCode::OK, Json(Value::Object(status_map)))
 }
@@ -2750,10 +3303,25 @@ async fn oc_session_status(State(state): State<Arc<OpenCodeAppState>>) -> impl I
     tag = "opencode"
 )]
 async fn oc_session_abort(
-    State(_state): State<Arc<OpenCodeAppState>>,
-    Path(_session_id): Path<String>,
+    State(state): State<Arc<OpenCodeAppState>>,
+    Path(session_id): Path<String>,
 ) -> impl IntoResponse {
-    bool_ok(true)
+    let updated = state
+        .opencode
+        .update_session_status(&session_id, "idle")
+        .await;
+    if updated.is_none() {
+        return not_found("Session not found").into_response();
+    }
+    state.opencode.emit_event(json!({
+        "type": "session.status",
+        "properties": {"sessionID": session_id, "status": {"type": "idle"}}
+    }));
+    state.opencode.emit_event(json!({
+        "type": "session.idle",
+        "properties": {"sessionID": session_id}
+    }));
+    bool_ok(true).into_response()
 }
 
 #[utoipa::path(
@@ -2763,8 +3331,27 @@ async fn oc_session_abort(
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_session_children() -> impl IntoResponse {
-    (StatusCode::OK, Json(json!([])))
+async fn oc_session_children(
+    State(state): State<Arc<OpenCodeAppState>>,
+    Path(session_id): Path<String>,
+) -> impl IntoResponse {
+    let sessions = state.opencode.sessions.lock().await;
+    if !sessions.contains_key(&session_id) {
+        return not_found("Session not found").into_response();
+    }
+    let mut children: Vec<OpenCodeSessionRecord> = sessions
+        .values()
+        .filter(|session| session.parent_id.as_deref() == Some(&session_id))
+        .cloned()
+        .collect();
+    drop(sessions);
+    children.sort_by(|a, b| {
+        a.created_at
+            .cmp(&b.created_at)
+            .then_with(|| a.id.cmp(&b.id))
+    });
+    let response: Vec<Value> = children.into_iter().map(|s| s.to_value()).collect();
+    (StatusCode::OK, Json(json!(response))).into_response()
 }
 
 #[utoipa::path(
@@ -2774,8 +3361,19 @@ async fn oc_session_children() -> impl IntoResponse {
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_session_init() -> impl IntoResponse {
-    bool_ok(true)
+async fn oc_session_init(
+    State(state): State<Arc<OpenCodeAppState>>,
+    Path(session_id): Path<String>,
+    headers: HeaderMap,
+    Query(query): Query<DirectoryQuery>,
+) -> impl IntoResponse {
+    let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
+    let _ = state.opencode.ensure_session(&session_id, directory).await;
+    let _ = state
+        .opencode
+        .update_session_status(&session_id, "idle")
+        .await;
+    bool_ok(true).into_response()
 }
 
 #[utoipa::path(
@@ -2789,25 +3387,38 @@ async fn oc_session_init() -> impl IntoResponse {
 async fn oc_session_fork(
     State(state): State<Arc<OpenCodeAppState>>,
     Path(session_id): Path<String>,
-    headers: HeaderMap,
-    Query(query): Query<DirectoryQuery>,
 ) -> impl IntoResponse {
-    let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
     let now = state.opencode.now_ms();
+    let parent = {
+        let sessions = state.opencode.sessions.lock().await;
+        sessions.get(&session_id).cloned()
+    };
+    let Some(parent) = parent else {
+        return not_found("Session not found").into_response();
+    };
+    let (directory, project_id, title, version) = (
+        parent.directory,
+        parent.project_id,
+        format!("Fork of {}", parent.title),
+        parent.version,
+    );
     let id = next_id("ses_", &SESSION_COUNTER);
     let slug = format!("session-{}", id);
-    let title = format!("Fork of {}", session_id);
     let record = OpenCodeSessionRecord {
         id: id.clone(),
         slug,
-        project_id: state.opencode.default_project_id.clone(),
+        project_id,
         directory,
         parent_id: Some(session_id),
         title,
-        version: "0".to_string(),
+        version,
         created_at: now,
         updated_at: now,
         share_url: None,
+        status: OpenCodeSessionStatus {
+            status: "idle".to_string(),
+            updated_at: now,
+        },
     };
 
     let value = record.to_value();
@@ -2818,6 +3429,7 @@ async fn oc_session_fork(
     state
         .opencode
         .emit_event(session_event("session.created", &value));
+    state.opencode.persist_sessions().await;
 
     (StatusCode::OK, Json(value))
 }
@@ -2829,8 +3441,15 @@ async fn oc_session_fork(
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_session_diff() -> impl IntoResponse {
-    (StatusCode::OK, Json(json!([])))
+async fn oc_session_diff(
+    State(state): State<Arc<OpenCodeAppState>>,
+    Path(session_id): Path<String>,
+) -> impl IntoResponse {
+    let sessions = state.opencode.sessions.lock().await;
+    if !sessions.contains_key(&session_id) {
+        return not_found("Session not found").into_response();
+    }
+    (StatusCode::OK, Json(json!([]))).into_response()
 }
 
 #[utoipa::path(
@@ -2926,6 +3545,10 @@ async fn oc_session_message_create(
             "status": {"type": "busy"}
         }
     }));
+    let _ = state
+        .opencode
+        .update_session_status(&session_id, "busy")
+        .await;
 
     let mut user_message = build_user_message(
         &session_id,
@@ -3246,6 +3869,22 @@ async fn oc_session_revert(
     headers: HeaderMap,
     Query(query): Query<DirectoryQuery>,
 ) -> impl IntoResponse {
+    let now = state.opencode.now_ms();
+    let updated = state
+        .opencode
+        .mutate_session(&session_id, |session| {
+            session.version = bump_version(&session.version);
+            session.updated_at = now;
+        })
+        .await;
+    if let Some(session) = updated {
+        let value = session.to_value();
+        state
+            .opencode
+            .emit_event(session_event("session.updated", &value));
+        state.opencode.persist_sessions().await;
+        return (StatusCode::OK, Json(value)).into_response();
+    }
     oc_session_get(State(state), Path(session_id), headers, Query(query)).await
 }
 
@@ -3263,6 +3902,22 @@ async fn oc_session_unrevert(
     headers: HeaderMap,
     Query(query): Query<DirectoryQuery>,
 ) -> impl IntoResponse {
+    let now = state.opencode.now_ms();
+    let updated = state
+        .opencode
+        .mutate_session(&session_id, |session| {
+            session.version = bump_version(&session.version);
+            session.updated_at = now;
+        })
+        .await;
+    if let Some(session) = updated {
+        let value = session.to_value();
+        state
+            .opencode
+            .emit_event(session_event("session.updated", &value));
+        state.opencode.persist_sessions().await;
+        return (StatusCode::OK, Json(value)).into_response();
+    }
     oc_session_get(State(state), Path(session_id), headers, Query(query)).await
 }
 
@@ -3308,10 +3963,20 @@ async fn oc_session_share(
     State(state): State<Arc<OpenCodeAppState>>,
     Path(session_id): Path<String>,
 ) -> impl IntoResponse {
-    let mut sessions = state.opencode.sessions.lock().await;
-    if let Some(session) = sessions.get_mut(&session_id) {
-        session.share_url = Some(format!("https://share.local/{}", session_id));
+    let now = state.opencode.now_ms();
+    let updated = state
+        .opencode
+        .mutate_session(&session_id, |session| {
+            session.share_url = Some(format!("https://share.local/{}", session_id));
+            session.updated_at = now;
+        })
+        .await;
+    if let Some(session) = updated {
         let value = session.to_value();
+        state
+            .opencode
+            .emit_event(session_event("session.updated", &value));
+        state.opencode.persist_sessions().await;
         return (StatusCode::OK, Json(value)).into_response();
     }
     not_found("Session not found").into_response()
@@ -3328,10 +3993,20 @@ async fn oc_session_unshare(
     State(state): State<Arc<OpenCodeAppState>>,
     Path(session_id): Path<String>,
 ) -> impl IntoResponse {
-    let mut sessions = state.opencode.sessions.lock().await;
-    if let Some(session) = sessions.get_mut(&session_id) {
-        session.share_url = None;
+    let now = state.opencode.now_ms();
+    let updated = state
+        .opencode
+        .mutate_session(&session_id, |session| {
+            session.share_url = None;
+            session.updated_at = now;
+        })
+        .await;
+    if let Some(session) = updated {
         let value = session.to_value();
+        state
+            .opencode
+            .emit_event(session_event("session.updated", &value));
+        state.opencode.persist_sessions().await;
         return (StatusCode::OK, Json(value)).into_response();
     }
     not_found("Session not found").into_response()
@@ -3344,8 +4019,15 @@ async fn oc_session_unshare(
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_session_todo() -> impl IntoResponse {
-    (StatusCode::OK, Json(json!([])))
+async fn oc_session_todo(
+    State(state): State<Arc<OpenCodeAppState>>,
+    Path(session_id): Path<String>,
+) -> impl IntoResponse {
+    let sessions = state.opencode.sessions.lock().await;
+    if !sessions.contains_key(&session_id) {
+        return not_found("Session not found").into_response();
+    }
+    (StatusCode::OK, Json(json!([]))).into_response()
 }
 
 #[utoipa::path(
@@ -3621,8 +4303,8 @@ async fn oc_auth_remove(Path(_provider_id): Path<String>) -> impl IntoResponse {
     tag = "opencode"
 )]
 async fn oc_pty_list(State(state): State<Arc<OpenCodeAppState>>) -> impl IntoResponse {
-    let ptys = state.opencode.ptys.lock().await;
-    let values: Vec<Value> = ptys.values().map(|p| p.to_value()).collect();
+    let ptys = state.inner.session_manager().pty_manager().list().await;
+    let values: Vec<Value> = ptys.iter().map(pty_to_value).collect();
     (StatusCode::OK, Json(json!(values)))
 }
 
@@ -3641,23 +4323,34 @@ async fn oc_pty_create(
 ) -> impl IntoResponse {
     let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
     let id = next_id("pty_", &PTY_COUNTER);
-    let record = OpenCodePtyRecord {
+    let owner_session_id = headers
+        .get("x-opencode-session")
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.to_string());
+    let options = PtyCreateOptions {
         id: id.clone(),
         title: body.title.unwrap_or_else(|| "PTY".to_string()),
         command: body.command.unwrap_or_else(|| "bash".to_string()),
         args: body.args.unwrap_or_default(),
         cwd: body.cwd.unwrap_or_else(|| directory),
-        status: "running".to_string(),
-        pid: 0,
+        env: body.env.unwrap_or_default(),
+        owner_session_id,
     };
-    let value = record.to_value();
-    let mut ptys = state.opencode.ptys.lock().await;
-    ptys.insert(id, record);
-    drop(ptys);
+    let record = match state
+        .inner
+        .session_manager()
+        .pty_manager()
+        .create(options)
+        .await
+    {
+        Ok(record) => record,
+        Err(err) => return internal_error(&err.to_string()).into_response(),
+    };
+    let value = pty_to_value(&record);
 
     state
         .opencode
-        .emit_event(json!({"type": "pty.created", "properties": {"pty": value}}));
+        .emit_event(json!({"type": "pty.created", "properties": {"info": value}}));
 
     (StatusCode::OK, Json(value))
 }
@@ -3673,9 +4366,14 @@ async fn oc_pty_get(
     State(state): State<Arc<OpenCodeAppState>>,
     Path(pty_id): Path<String>,
 ) -> impl IntoResponse {
-    let ptys = state.opencode.ptys.lock().await;
-    if let Some(pty) = ptys.get(&pty_id) {
-        return (StatusCode::OK, Json(pty.to_value())).into_response();
+    if let Some(pty) = state
+        .inner
+        .session_manager()
+        .pty_manager()
+        .get(&pty_id)
+        .await
+    {
+        return (StatusCode::OK, Json(pty_to_value(&pty))).into_response();
     }
     not_found("PTY not found").into_response()
 }
@@ -3684,33 +4382,37 @@ async fn oc_pty_get(
     put,
     path = "/pty/{ptyID}",
     params(("ptyID" = String, Path, description = "Pty ID")),
-    request_body = String,
+    request_body = PtyUpdateRequest,
     responses((status = 200), (status = 404)),
     tag = "opencode"
 )]
 async fn oc_pty_update(
     State(state): State<Arc<OpenCodeAppState>>,
     Path(pty_id): Path<String>,
-    Json(body): Json<PtyCreateRequest>,
+    Json(body): Json<PtyUpdateRequest>,
 ) -> impl IntoResponse {
-    let mut ptys = state.opencode.ptys.lock().await;
-    if let Some(pty) = ptys.get_mut(&pty_id) {
-        if let Some(title) = body.title {
-            pty.title = title;
-        }
-        if let Some(command) = body.command {
-            pty.command = command;
-        }
-        if let Some(args) = body.args {
-            pty.args = args;
-        }
-        if let Some(cwd) = body.cwd {
-            pty.cwd = cwd;
-        }
-        let value = pty.to_value();
+    let options = PtyUpdateOptions {
+        title: body.title,
+        size: body.size.map(|size| PtySizeSpec {
+            rows: size.rows,
+            cols: size.cols,
+        }),
+    };
+    let updated = match state
+        .inner
+        .session_manager()
+        .pty_manager()
+        .update(&pty_id, options)
+        .await
+    {
+        Ok(updated) => updated,
+        Err(err) => return internal_error(&err.to_string()).into_response(),
+    };
+    if let Some(pty) = updated {
+        let value = pty_to_value(&pty);
         state
             .opencode
-            .emit_event(json!({"type": "pty.updated", "properties": {"pty": value}}));
+            .emit_event(json!({"type": "pty.updated", "properties": {"info": value}}));
         return (StatusCode::OK, Json(value)).into_response();
     }
     not_found("PTY not found").into_response()
@@ -3727,11 +4429,17 @@ async fn oc_pty_delete(
     State(state): State<Arc<OpenCodeAppState>>,
     Path(pty_id): Path<String>,
 ) -> impl IntoResponse {
-    let mut ptys = state.opencode.ptys.lock().await;
-    if let Some(pty) = ptys.remove(&pty_id) {
+    if state
+        .inner
+        .session_manager()
+        .pty_manager()
+        .remove(&pty_id)
+        .await
+        .is_some()
+    {
         state
             .opencode
-            .emit_event(json!({"type": "pty.deleted", "properties": {"pty": pty.to_value()}}));
+            .emit_event(json!({"type": "pty.deleted", "properties": {"id": pty_id}}));
         return bool_ok(true).into_response();
     }
     not_found("PTY not found").into_response()
@@ -3744,8 +4452,70 @@ async fn oc_pty_delete(
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_pty_connect(Path(_pty_id): Path<String>) -> impl IntoResponse {
-    bool_ok(true)
+async fn oc_pty_connect(
+    State(state): State<Arc<OpenCodeAppState>>,
+    Path(pty_id): Path<String>,
+    ws: Option<WebSocketUpgrade>,
+) -> impl IntoResponse {
+    let io = match state
+        .inner
+        .session_manager()
+        .pty_manager()
+        .connect(&pty_id)
+        .await
+    {
+        Some(io) => io,
+        None => return not_found("PTY not found").into_response(),
+    };
+
+    if let Some(ws) = ws {
+        return ws.on_upgrade(move |socket| handle_pty_socket(socket, io)).into_response();
+    }
+
+    let stream = ReceiverStream::new(io.output).map(|chunk| {
+        let text = String::from_utf8_lossy(&chunk).to_string();
+        Ok::<Event, Infallible>(Event::default().data(text))
+    });
+    Sse::new(stream)
+        .keep_alive(KeepAlive::new().interval(std::time::Duration::from_secs(15)))
+        .into_response()
+}
+
+async fn handle_pty_socket(socket: WebSocket, io: PtyIo) {
+    let (mut sender, mut receiver) = socket.split();
+    let mut output_rx = io.output;
+    let input_tx = io.input;
+
+    let output_task = tokio::spawn(async move {
+        while let Some(chunk) = output_rx.recv().await {
+            let text = String::from_utf8_lossy(&chunk).to_string();
+            if sender.send(Message::Text(text)).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    let input_task = tokio::spawn(async move {
+        while let Some(message) = receiver.next().await {
+            match message {
+                Ok(Message::Text(text)) => {
+                    if input_tx.send(text.into_bytes()).await.is_err() {
+                        break;
+                    }
+                }
+                Ok(Message::Binary(bytes)) => {
+                    if input_tx.send(bytes).await.is_err() {
+                        break;
+                    }
+                }
+                Ok(Message::Close(_)) => break,
+                Ok(Message::Ping(_)) | Ok(Message::Pong(_)) => {}
+                Err(_) => break,
+            }
+        }
+    });
+
+    let _ = tokio::join!(output_task, input_task);
 }
 
 #[utoipa::path(
@@ -3788,17 +4558,308 @@ async fn oc_file_status() -> impl IntoResponse {
     (StatusCode::OK, Json(json!([]))).into_response()
 }
 
+fn parse_find_limit(limit: Option<usize>) -> Result<usize, (StatusCode, Json<Value>)> {
+    let limit = limit.unwrap_or(FIND_MAX_RESULTS);
+    if limit == 0 || limit > FIND_MAX_RESULTS {
+        return Err(bad_request("limit must be between 1 and 200"));
+    }
+    Ok(limit)
+}
+
+fn resolve_find_root(
+    state: &OpenCodeAppState,
+    headers: &HeaderMap,
+    directory: Option<&String>,
+) -> Result<PathBuf, (StatusCode, Json<Value>)> {
+    let directory = state.opencode.directory_for(headers, directory);
+    let root = PathBuf::from(directory);
+    let root = root
+        .canonicalize()
+        .map_err(|_| bad_request("directory not found"))?;
+    if !root.is_dir() {
+        return Err(bad_request("directory not found"));
+    }
+    Ok(root)
+}
+
+fn normalize_path(path: &FsPath) -> String {
+    path.to_string_lossy().replace('\\', "/")
+}
+
+fn opencode_symbol_kind(kind: &str) -> u32 {
+    match kind {
+        "class" => 5,
+        "interface" | "trait" => 11,
+        "struct" => 23,
+        "enum" => 10,
+        "function" => 12,
+        _ => 12,
+    }
+}
+
+fn has_wildcards(query: &str) -> bool {
+    query.contains('*') || query.contains('?')
+}
+
+fn wildcard_match(pattern: &str, text: &str) -> bool {
+    let pattern = pattern.as_bytes();
+    let text = text.as_bytes();
+    let mut pattern_index = 0;
+    let mut text_index = 0;
+    let mut star_index: Option<usize> = None;
+    let mut match_index = 0;
+
+    while text_index < text.len() {
+        if pattern_index < pattern.len()
+            && (pattern[pattern_index] == b'?' || pattern[pattern_index] == text[text_index])
+        {
+            pattern_index += 1;
+            text_index += 1;
+            continue;
+        }
+
+        if pattern_index < pattern.len() && pattern[pattern_index] == b'*' {
+            star_index = Some(pattern_index);
+            match_index = text_index;
+            pattern_index += 1;
+            continue;
+        }
+
+        if let Some(star) = star_index {
+            pattern_index = star + 1;
+            match_index += 1;
+            text_index = match_index;
+            continue;
+        }
+
+        return false;
+    }
+
+    while pattern_index < pattern.len() && pattern[pattern_index] == b'*' {
+        pattern_index += 1;
+    }
+
+    pattern_index == pattern.len()
+}
+
+fn matches_find_query(candidate: &str, query: &str, use_wildcards: bool) -> bool {
+    if use_wildcards {
+        return wildcard_match(query, candidate);
+    }
+    candidate.contains(query)
+}
+
+fn parse_find_entry_type(
+    entry_type: Option<&str>,
+    dirs: Option<bool>,
+) -> Result<(bool, bool), (StatusCode, Json<Value>)> {
+    match entry_type {
+        Some("file") => Ok((true, false)),
+        Some("directory") => Ok((false, true)),
+        Some(_) => Err(bad_request("type must be file or directory")),
+        None => Ok((true, dirs.unwrap_or(false))),
+    }
+}
+
+fn find_files_in_root(
+    root: &FsPath,
+    query: &str,
+    include_files: bool,
+    include_dirs: bool,
+    limit: usize,
+) -> Vec<String> {
+    let mut results = Vec::new();
+    let mut queue = VecDeque::new();
+    let query_lower = query.to_ascii_lowercase();
+    let use_wildcards = has_wildcards(&query_lower);
+
+    queue.push_back(root.to_path_buf());
+
+    while let Some(dir) = queue.pop_front() {
+        let entries = match fs::read_dir(&dir) {
+            Ok(entries) => entries,
+            Err(_) => continue,
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let file_name = entry.file_name().to_string_lossy().to_string();
+            let file_name_lower = file_name.to_ascii_lowercase();
+
+            if path.is_dir() {
+                if FIND_IGNORE_DIRS.iter().any(|name| *name == file_name) {
+                    continue;
+                }
+                queue.push_back(path.clone());
+            }
+
+            let is_file = path.is_file();
+            let is_dir = path.is_dir();
+            if (is_file && !include_files) || (is_dir && !include_dirs) {
+                continue;
+            }
+
+            let relative = path.strip_prefix(root).unwrap_or(&path);
+            let relative_text = normalize_path(relative);
+            if relative_text.is_empty() {
+                continue;
+            }
+            let relative_lower = relative_text.to_ascii_lowercase();
+
+            if matches_find_query(&relative_lower, &query_lower, use_wildcards)
+                || matches_find_query(&file_name_lower, &query_lower, use_wildcards)
+            {
+                results.push(relative_text);
+                if results.len() >= limit {
+                    return results;
+                }
+            }
+        }
+    }
+
+    results
+}
+
+async fn rg_matches(
+    root: &FsPath,
+    pattern: &str,
+    limit: usize,
+    case_sensitive: Option<bool>,
+) -> Result<Vec<Value>, (StatusCode, Json<Value>)> {
+    let mut command = Command::new("rg");
+    command
+        .arg("--json")
+        .arg("--line-number")
+        .arg("--byte-offset")
+        .arg("--with-filename")
+        .arg("--max-count")
+        .arg(limit.to_string());
+    if case_sensitive == Some(false) {
+        command.arg("--ignore-case");
+    }
+    command.arg(pattern);
+    command.current_dir(root);
+
+    let output = command
+        .output()
+        .await
+        .map_err(|_| internal_error("ripgrep failed"))?;
+    if !output.status.success() {
+        if output.status.code() != Some(1) {
+            return Err(internal_error("ripgrep failed"));
+        }
+    }
+
+    let mut results = Vec::new();
+    for line in output.stdout.split(|b| *b == b'\n') {
+        if line.is_empty() {
+            continue;
+        }
+        let value: Value = serde_json::from_slice(line)
+            .map_err(|_| internal_error("invalid ripgrep output"))?;
+        if value.get("type").and_then(|v| v.as_str()) != Some("match") {
+            continue;
+        }
+        if let Some(data) = value.get("data") {
+            results.push(data.clone());
+            if results.len() >= limit {
+                break;
+            }
+        }
+    }
+
+    Ok(results)
+}
+
+fn symbol_from_match(root: &FsPath, data: &Value) -> Option<Value> {
+    let path_text = data
+        .get("path")
+        .and_then(|v| v.get("text"))
+        .and_then(|v| v.as_str())?;
+    let line_number = data.get("line_number").and_then(|v| v.as_u64())?;
+    let submatch = data
+        .get("submatches")
+        .and_then(|v| v.as_array())
+        .and_then(|v| v.first())?;
+    let match_text = submatch
+        .get("match")
+        .and_then(|v| v.get("text"))
+        .and_then(|v| v.as_str())?;
+    let start = submatch.get("start").and_then(|v| v.as_u64())?;
+    let end = submatch.get("end").and_then(|v| v.as_u64())?;
+
+    let path = FsPath::new(path_text);
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        root.join(path)
+    };
+    let uri = format!("file://{}", normalize_path(&absolute));
+    let line = line_number.saturating_sub(1);
+
+    Some(json!({
+        "name": match_text,
+        "kind": 12,
+        "location": {
+            "uri": uri,
+            "range": {
+                "start": {"line": line, "character": start},
+                "end": {"line": line, "character": end}
+            }
+        }
+    }))
+}
+
+async fn rg_symbols(
+    root: &FsPath,
+    query: &str,
+    limit: usize,
+) -> Result<Vec<Value>, (StatusCode, Json<Value>)> {
+    let matches = rg_matches(root, query, limit, None).await?;
+    let mut symbols = Vec::new();
+    for data in matches {
+        if let Some(symbol) = symbol_from_match(root, &data) {
+            symbols.push(symbol);
+            if symbols.len() >= limit {
+                break;
+            }
+        }
+    }
+    Ok(symbols)
+}
+
 #[utoipa::path(
     get,
     path = "/find",
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_find_text(Query(query): Query<FindTextQuery>) -> impl IntoResponse {
-    if query.pattern.is_none() {
-        return bad_request("pattern is required").into_response();
+async fn oc_find_text(
+    State(state): State<Arc<OpenCodeAppState>>,
+    headers: HeaderMap,
+    Query(query): Query<FindTextQuery>,
+) -> impl IntoResponse {
+    let pattern = match query.pattern.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+        Some(value) => value,
+        None => return bad_request("pattern is required").into_response(),
+    };
+    let limit = match query.limit {
+        Some(value) if value == 0 || value > 200 => {
+            return bad_request("limit must be between 1 and 200").into_response();
+        }
+        Some(value) => Some(value),
+        None => None,
+    };
+    let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
+    match state
+        .inner
+        .session_manager()
+        .find_text(&directory, pattern, query.case_sensitive, limit)
+        .await
+    {
+        Ok(results) => (StatusCode::OK, Json(results)).into_response(),
+        Err(err) => sandbox_error_response(err).into_response(),
     }
-    (StatusCode::OK, Json(json!([]))).into_response()
 }
 
 #[utoipa::path(
@@ -3807,11 +4868,43 @@ async fn oc_find_text(Query(query): Query<FindTextQuery>) -> impl IntoResponse {
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_find_files(Query(query): Query<FindFilesQuery>) -> impl IntoResponse {
-    if query.query.is_none() {
-        return bad_request("query is required").into_response();
+async fn oc_find_files(
+    State(state): State<Arc<OpenCodeAppState>>,
+    headers: HeaderMap,
+    Query(query): Query<FindFilesQuery>,
+) -> impl IntoResponse {
+    let query_value = match query.query.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+        Some(value) => value,
+        None => return bad_request("query is required").into_response(),
+    };
+    let kind = match query.entry_type.as_deref() {
+        Some("file") => FindFileKind::File,
+        Some("directory") => FindFileKind::Directory,
+        Some(_) => return bad_request("type must be file or directory").into_response(),
+        None => {
+            if query.dirs.unwrap_or(false) {
+                FindFileKind::Any
+            } else {
+                FindFileKind::File
+            }
+        }
+    };
+    let limit = query.limit.unwrap_or(200).min(200).max(1);
+    let options = FindFileOptions {
+        kind,
+        case_sensitive: false,
+        limit: Some(limit),
+    };
+    let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
+    match state
+        .inner
+        .session_manager()
+        .find_files(&directory, query_value, options)
+        .await
+    {
+        Ok(results) => (StatusCode::OK, Json(results)).into_response(),
+        Err(err) => sandbox_error_response(err).into_response(),
     }
-    (StatusCode::OK, Json(json!([]))).into_response()
 }
 
 #[utoipa::path(
@@ -3820,11 +4913,54 @@ async fn oc_find_files(Query(query): Query<FindFilesQuery>) -> impl IntoResponse
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_find_symbols(Query(query): Query<FindSymbolsQuery>) -> impl IntoResponse {
-    if query.query.is_none() {
-        return bad_request("query is required").into_response();
+async fn oc_find_symbols(
+    State(state): State<Arc<OpenCodeAppState>>,
+    headers: HeaderMap,
+    Query(query): Query<FindSymbolsQuery>,
+) -> impl IntoResponse {
+    let query_value = match query.query.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+        Some(value) => value,
+        None => return bad_request("query is required").into_response(),
+    };
+    let limit = match query.limit {
+        Some(value) if value == 0 || value > 200 => {
+            return bad_request("limit must be between 1 and 200").into_response();
+        }
+        Some(value) => Some(value),
+        None => None,
+    };
+    let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
+    match state
+        .inner
+        .session_manager()
+        .find_symbols(&directory, query_value, limit)
+        .await
+    {
+        Ok(results) => {
+            let root = PathBuf::from(&directory);
+            let symbols: Vec<Value> = results
+                .into_iter()
+                .map(|symbol| {
+                    let path = PathBuf::from(&symbol.path);
+                    let absolute = if path.is_absolute() { path } else { root.join(&symbol.path) };
+                    let uri = format!("file://{}", normalize_path(&absolute));
+                    json!({
+                        "name": symbol.name,
+                        "kind": opencode_symbol_kind(&symbol.kind),
+                        "location": {
+                            "uri": uri,
+                            "range": {
+                                "start": {"line": symbol.line.saturating_sub(1), "character": symbol.column.saturating_sub(1)},
+                                "end": {"line": symbol.line.saturating_sub(1), "character": symbol.column.saturating_sub(1)}
+                            }
+                        }
+                    })
+                })
+                .collect();
+            (StatusCode::OK, Json(symbols)).into_response()
+        }
+        Err(err) => sandbox_error_response(err).into_response(),
     }
-    (StatusCode::OK, Json(json!([]))).into_response()
 }
 
 #[utoipa::path(
@@ -3833,18 +4969,41 @@ async fn oc_find_symbols(Query(query): Query<FindSymbolsQuery>) -> impl IntoResp
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_mcp_list() -> impl IntoResponse {
-    (StatusCode::OK, Json(json!({})))
+async fn oc_mcp_list(State(state): State<Arc<OpenCodeAppState>>) -> impl IntoResponse {
+    let statuses = state.inner.session_manager().mcp_statuses().await;
+    let mut map = serde_json::Map::new();
+    for (name, status) in statuses {
+        map.insert(name, status.to_value());
+    }
+    (StatusCode::OK, Json(Value::Object(map)))
 }
 
 #[utoipa::path(
     post,
     path = "/mcp",
+    request_body = OpenCodeMcpRegisterRequest,
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_mcp_register() -> impl IntoResponse {
-    (StatusCode::OK, Json(json!({})))
+async fn oc_mcp_register(
+    State(state): State<Arc<OpenCodeAppState>>,
+    Json(body): Json<OpenCodeMcpRegisterRequest>,
+) -> impl IntoResponse {
+    match state
+        .inner
+        .session_manager()
+        .mcp_register(body.name, body.config)
+        .await
+    {
+        Ok(statuses) => {
+            let mut map = serde_json::Map::new();
+            for (name, status) in statuses {
+                map.insert(name, status.to_value());
+            }
+            (StatusCode::OK, Json(Value::Object(map))).into_response()
+        }
+        Err(err) => mcp_error_response(err).into_response(),
+    }
 }
 
 #[utoipa::path(
@@ -3855,10 +5014,18 @@ async fn oc_mcp_register() -> impl IntoResponse {
     tag = "opencode"
 )]
 async fn oc_mcp_auth(
-    Path(_name): Path<String>,
+    State(state): State<Arc<OpenCodeAppState>>,
+    Path(name): Path<String>,
     _body: Option<Json<Value>>,
 ) -> impl IntoResponse {
-    (StatusCode::OK, Json(json!({"status": "needs_auth"})))
+    match state.inner.session_manager().mcp_auth_start(&name).await {
+        Ok(url) => (
+            StatusCode::OK,
+            Json(json!({"authorizationUrl": url})),
+        )
+            .into_response(),
+        Err(err) => mcp_error_response(err).into_response(),
+    }
 }
 
 #[utoipa::path(
@@ -3868,37 +5035,56 @@ async fn oc_mcp_auth(
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_mcp_auth_remove(Path(_name): Path<String>) -> impl IntoResponse {
-    (StatusCode::OK, Json(json!({"status": "disabled"})))
+async fn oc_mcp_auth_remove(
+    State(state): State<Arc<OpenCodeAppState>>,
+    Path(name): Path<String>,
+) -> impl IntoResponse {
+    match state.inner.session_manager().mcp_auth_remove(&name).await {
+        Ok(_) => (StatusCode::OK, Json(json!({"success": true}))).into_response(),
+        Err(err) => mcp_error_response(err).into_response(),
+    }
 }
 
 #[utoipa::path(
     post,
     path = "/mcp/{name}/auth/callback",
     params(("name" = String, Path, description = "MCP server name")),
+    request_body = OpenCodeMcpAuthCallbackRequest,
     responses((status = 200)),
     tag = "opencode"
 )]
 async fn oc_mcp_auth_callback(
-    Path(_name): Path<String>,
-    _body: Option<Json<Value>>,
+    State(state): State<Arc<OpenCodeAppState>>,
+    Path(name): Path<String>,
+    Json(body): Json<OpenCodeMcpAuthCallbackRequest>,
 ) -> impl IntoResponse {
-    (StatusCode::OK, Json(json!({"status": "needs_auth"})))
+    match state
+        .inner
+        .session_manager()
+        .mcp_auth_callback(&name, body.code)
+        .await
+    {
+        Ok(status) => (StatusCode::OK, Json(status.to_value())).into_response(),
+        Err(err) => mcp_error_response(err).into_response(),
+    }
 }
 
 #[utoipa::path(
     post,
     path = "/mcp/{name}/auth/authenticate",
     params(("name" = String, Path, description = "MCP server name")),
-    request_body = String,
     responses((status = 200)),
     tag = "opencode"
 )]
 async fn oc_mcp_authenticate(
-    Path(_name): Path<String>,
+    State(state): State<Arc<OpenCodeAppState>>,
+    Path(name): Path<String>,
     _body: Option<Json<Value>>,
 ) -> impl IntoResponse {
-    (StatusCode::OK, Json(json!({"status": "needs_auth"})))
+    match state.inner.session_manager().mcp_auth_authenticate(&name).await {
+        Ok(status) => (StatusCode::OK, Json(status.to_value())).into_response(),
+        Err(err) => mcp_error_response(err).into_response(),
+    }
 }
 
 #[utoipa::path(
@@ -3908,8 +5094,14 @@ async fn oc_mcp_authenticate(
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_mcp_connect(Path(_name): Path<String>) -> impl IntoResponse {
-    bool_ok(true)
+async fn oc_mcp_connect(
+    State(state): State<Arc<OpenCodeAppState>>,
+    Path(name): Path<String>,
+) -> impl IntoResponse {
+    match state.inner.session_manager().mcp_connect(&name).await {
+        Ok(_) => bool_ok(true).into_response(),
+        Err(err) => mcp_error_response(err).into_response(),
+    }
 }
 
 #[utoipa::path(
@@ -3919,8 +5111,14 @@ async fn oc_mcp_connect(Path(_name): Path<String>) -> impl IntoResponse {
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_mcp_disconnect(Path(_name): Path<String>) -> impl IntoResponse {
-    bool_ok(true)
+async fn oc_mcp_disconnect(
+    State(state): State<Arc<OpenCodeAppState>>,
+    Path(name): Path<String>,
+) -> impl IntoResponse {
+    match state.inner.session_manager().mcp_disconnect(&name).await {
+        Ok(_) => bool_ok(true).into_response(),
+        Err(err) => mcp_error_response(err).into_response(),
+    }
 }
 
 #[utoipa::path(
@@ -3929,8 +5127,9 @@ async fn oc_mcp_disconnect(Path(_name): Path<String>) -> impl IntoResponse {
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_tool_ids() -> impl IntoResponse {
-    (StatusCode::OK, Json(json!([])))
+async fn oc_tool_ids(State(state): State<Arc<OpenCodeAppState>>) -> impl IntoResponse {
+    let tool_ids = state.inner.session_manager().mcp_tool_ids().await;
+    (StatusCode::OK, Json(json!(tool_ids)))
 }
 
 #[utoipa::path(
@@ -3939,11 +5138,16 @@ async fn oc_tool_ids() -> impl IntoResponse {
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_tool_list(Query(query): Query<ToolQuery>) -> impl IntoResponse {
+async fn oc_tool_list(
+    State(state): State<Arc<OpenCodeAppState>>,
+    Query(query): Query<ToolQuery>,
+) -> impl IntoResponse {
     if query.provider.is_none() || query.model.is_none() {
         return bad_request("provider and model are required").into_response();
     }
-    (StatusCode::OK, Json(json!([]))).into_response()
+    let tools = state.inner.session_manager().mcp_tools().await;
+    let values: Vec<Value> = tools.into_iter().map(|tool| tool.to_tool_list_item()).collect();
+    (StatusCode::OK, Json(json!(values))).into_response()
 }
 
 #[utoipa::path(
@@ -4267,7 +5471,9 @@ async fn oc_tui_select_session() -> impl IntoResponse {
         PermissionReplyRequest,
         PermissionGlobalReplyRequest,
         QuestionReplyBody,
-        PtyCreateRequest
+        PtyCreateRequest,
+        PtySizeRequest,
+        PtyUpdateRequest
     )),
     tags((name = "opencode", description = "OpenCode compatibility API"))
 )]

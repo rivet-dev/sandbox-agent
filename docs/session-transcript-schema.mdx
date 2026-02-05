@@ -291,8 +291,9 @@ File reference with optional diff.
 | Field | Type | Description |
 |-------|------|-------------|
 | `path` | string | File path |
-| `action` | string | `read`, `write`, `patch` |
+| `action` | string | `read`, `write`, `patch`, `rename`, `delete` |
 | `diff` | string? | Unified diff (for patches) |
+| `target_path` | string? | Destination path for renames |
 
 ```json
 {

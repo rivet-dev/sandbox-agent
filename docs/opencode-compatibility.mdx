@@ -17,8 +17,8 @@ Authentication matches `/v1`: if a token is configured, requests must include `A
 | GET | /config/providers | Stubbed | Returns/echoes config payloads. | E2E: openapi-coverage |
 | GET | /event | SSE stub | Emits compat events for session/message/pty updates only. | E2E: openapi-coverage, events |
 | GET | /experimental/resource | Stubbed | Experimental endpoints return empty stubs. | E2E: openapi-coverage |
-| GET | /experimental/tool | Stubbed | Experimental endpoints return empty stubs. | E2E: openapi-coverage |
-| GET | /experimental/tool/ids | Stubbed | Experimental endpoints return empty stubs. | E2E: openapi-coverage |
+| GET | /experimental/tool | Derived | Returns MCP tool metadata for connected servers. | E2E: openapi-coverage, opencode-mcp |
+| GET | /experimental/tool/ids | Derived | Returns MCP tool IDs for connected servers. | E2E: openapi-coverage, opencode-mcp |
 | DELETE | /experimental/worktree | Stubbed | Experimental endpoints return empty stubs. | E2E: openapi-coverage |
 | GET | /experimental/worktree | Stubbed | Experimental endpoints return empty stubs. | E2E: openapi-coverage |
 | POST | /experimental/worktree | Stubbed | Experimental endpoints return empty stubs. | E2E: openapi-coverage |
@@ -29,7 +29,7 @@ Authentication matches `/v1`: if a token is configured, requests must include `A
 | GET | /find | Stubbed | Returns empty results. | E2E: openapi-coverage |
 | GET | /find/file | Stubbed | Returns empty results. | E2E: openapi-coverage |
 | GET | /find/symbol | Stubbed | Returns empty results. | E2E: openapi-coverage |
-| GET | /formatter | Stubbed |  | E2E: openapi-coverage |
+| GET | /formatter | Derived | Scans workspace files to report formatter availability. | E2E: openapi-coverage, formatter-lsp |
 | GET | /global/config | Stubbed |  | E2E: openapi-coverage |
 | PATCH | /global/config | Stubbed |  | E2E: openapi-coverage |
 | POST | /global/dispose | Stubbed |  | E2E: openapi-coverage |
@@ -37,15 +37,15 @@ Authentication matches `/v1`: if a token is configured, requests must include `A
 | GET | /global/health | Stubbed |  | E2E: openapi-coverage |
 | POST | /instance/dispose | Stubbed |  | E2E: openapi-coverage |
 | POST | /log | Stubbed |  | E2E: openapi-coverage |
-| GET | /lsp | Stubbed |  | E2E: openapi-coverage |
-| GET | /mcp | Stubbed | Returns disabled/needs_auth stubs. | E2E: openapi-coverage |
-| POST | /mcp | Stubbed | Returns disabled/needs_auth stubs. | E2E: openapi-coverage |
-| DELETE | /mcp/{name}/auth | Stubbed | Returns disabled/needs_auth stubs. | E2E: openapi-coverage |
-| POST | /mcp/{name}/auth | Stubbed | Returns disabled/needs_auth stubs. | E2E: openapi-coverage |
-| POST | /mcp/{name}/auth/authenticate | Stubbed | Returns disabled/needs_auth stubs. | E2E: openapi-coverage |
-| POST | /mcp/{name}/auth/callback | Stubbed | Returns disabled/needs_auth stubs. | E2E: openapi-coverage |
-| POST | /mcp/{name}/connect | Stubbed | Returns disabled/needs_auth stubs. | E2E: openapi-coverage |
-| POST | /mcp/{name}/disconnect | Stubbed | Returns disabled/needs_auth stubs. | E2E: openapi-coverage |
+| GET | /lsp | Derived | Reports LSP status per language based on workspace scan and PATH. | E2E: openapi-coverage, formatter-lsp |
+| GET | /mcp | Stateful | Lists MCP registry status. | E2E: openapi-coverage, opencode-mcp |
+| POST | /mcp | Stateful | Registers MCP servers and stores config. | E2E: openapi-coverage, opencode-mcp |
+| DELETE | /mcp/{name}/auth | Stateful | Clears MCP auth credentials. | E2E: openapi-coverage, opencode-mcp |
+| POST | /mcp/{name}/auth | Stateful | Starts MCP auth flow. | E2E: openapi-coverage, opencode-mcp |
+| POST | /mcp/{name}/auth/authenticate | Stateful | Returns MCP auth status. | E2E: openapi-coverage, opencode-mcp |
+| POST | /mcp/{name}/auth/callback | Stateful | Completes MCP auth and connects. | E2E: openapi-coverage, opencode-mcp |
+| POST | /mcp/{name}/connect | Stateful | Connects MCP server and loads tools. | E2E: openapi-coverage, opencode-mcp |
+| POST | /mcp/{name}/disconnect | Stateful | Disconnects MCP server and clears tools. | E2E: openapi-coverage, opencode-mcp |
 | GET | /path | Derived stub |  | E2E: openapi-coverage |
 | GET | /permission | Stubbed |  | E2E: openapi-coverage, permissions |
 | POST | /permission/{requestID}/reply | Stubbed |  | E2E: openapi-coverage, permissions |

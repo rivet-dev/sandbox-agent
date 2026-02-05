@@ -477,6 +477,7 @@ fn file_part_to_content(file_part: &schema::FilePart) -> ContentPart {
         path,
         action,
         diff: None,
+        target_path: None,
     }
 }
 

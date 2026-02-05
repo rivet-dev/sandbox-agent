@@ -6,6 +6,7 @@ use crate::{
     ItemStatus, ReasoningVisibility, SessionEndReason, SessionEndedData, SessionStartedData,
     TerminatedBy, UniversalEventData, UniversalEventType, UniversalItem,
 };
+use serde_json::Value;
 
 /// Convert a Codex ServerNotification to universal events.
 pub fn notification_to_universal(
@@ -257,6 +258,26 @@ fn thread_item_to_item(item: &schema::ThreadItem, status: ItemStatus) -> Univers
             status: exec_status,
             ..
         } => {
+            if status == ItemStatus::InProgress {
+                let arguments = serde_json::json!({
+                    "command": command,
+                    "cwd": cwd,
+                })
+                .to_string();
+                return UniversalItem {
+                    item_id: String::new(),
+                    native_item_id: Some(id.clone()),
+                    parent_id: None,
+                    kind: ItemKind::ToolCall,
+                    role: Some(ItemRole::Assistant),
+                    content: vec![ContentPart::ToolCall {
+                        name: "command_execution".to_string(),
+                        arguments,
+                        call_id: id.clone(),
+                    }],
+                    status,
+                };
+            }
             let mut parts = Vec::new();
             if let Some(output) = aggregated_output {
                 parts.push(ContentPart::ToolResult {
@@ -285,20 +306,56 @@ fn thread_item_to_item(item: &schema::ThreadItem, status: ItemStatus) -> Univers
             changes,
             id,
             status: file_status,
-        } => UniversalItem {
-            item_id: String::new(),
-            native_item_id: Some(id.clone()),
-            parent_id: None,
-            kind: ItemKind::ToolResult,
-            role: Some(ItemRole::Tool),
-            content: vec![ContentPart::Json {
-                json: serde_json::json!({
+        } => {
+            if status == ItemStatus::InProgress {
+                let arguments = serde_json::json!({
                     "changes": changes,
                     "status": format!("{:?}", file_status)
-                }),
-            }],
-            status,
-        },
+                })
+                .to_string();
+                return UniversalItem {
+                    item_id: String::new(),
+                    native_item_id: Some(id.clone()),
+                    parent_id: None,
+                    kind: ItemKind::ToolCall,
+                    role: Some(ItemRole::Assistant),
+                    content: vec![ContentPart::ToolCall {
+                        name: "file_change".to_string(),
+                        arguments,
+                        call_id: id.clone(),
+                    }],
+                    status,
+                };
+            }
+            let mut parts = Vec::new();
+            let output = serde_json::json!({
+                "changes": changes,
+                "status": format!("{:?}", file_status)
+            })
+            .to_string();
+            parts.push(ContentPart::ToolResult {
+                call_id: id.clone(),
+                output,
+            });
+            for change in changes {
+                let (action, target_path) = file_action_from_change_kind(&change.kind);
+                parts.push(ContentPart::FileRef {
+                    path: change.path.clone(),
+                    action,
+                    diff: Some(change.diff.clone()),
+                    target_path,
+                });
+            }
+            UniversalItem {
+                item_id: String::new(),
+                native_item_id: Some(id.clone()),
+                parent_id: None,
+                kind: ItemKind::ToolResult,
+                role: Some(ItemRole::Tool),
+                content: parts,
+                status,
+            }
+        }
         schema::ThreadItem::McpToolCall {
             arguments,
             error,
@@ -430,6 +487,34 @@ fn thread_item_to_item(item: &schema::ThreadItem, status: ItemStatus) -> Univers
         schema::ThreadItem::ExitedReviewMode { id, review } => {
             status_item_internal(id, "review.exited", Some(review.clone()), status)
         }
+    }
+}
+
+fn file_action_from_change_kind(
+    kind: &schema::PatchChangeKind,
+) -> (crate::FileAction, Option<String>) {
+    let value = serde_json::to_value(kind).ok();
+    let kind_type = value
+        .as_ref()
+        .and_then(|v| v.get("type"))
+        .and_then(Value::as_str)
+        .unwrap_or("update");
+    let move_path = value
+        .as_ref()
+        .and_then(|v| v.get("move_path"))
+        .and_then(Value::as_str)
+        .map(|v| v.to_string());
+    match kind_type {
+        "add" => (crate::FileAction::Write, None),
+        "delete" => (crate::FileAction::Delete, None),
+        "update" => {
+            if let Some(target) = move_path {
+                (crate::FileAction::Rename, Some(target))
+            } else {
+                (crate::FileAction::Patch, None)
+            }
+        }
+        _ => (crate::FileAction::Patch, None),
     }
 }
 

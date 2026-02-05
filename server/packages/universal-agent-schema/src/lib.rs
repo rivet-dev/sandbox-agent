@@ -243,6 +243,8 @@ pub enum ContentPart {
         path: String,
         action: FileAction,
         diff: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        target_path: Option<String>,
     },
     Reasoning {
         text: String,
@@ -258,12 +260,14 @@ pub enum ContentPart {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum FileAction {
     Read,
     Write,
     Patch,
+    Rename,
+    Delete,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
