@@ -64,6 +64,7 @@
 					"pages": [
 						"cli",
 						"inspector",
+						"agent-teams",
 						"session-transcript-schema",
 						"cors",
 					{

@@ -65,6 +65,7 @@ claude \
   --output-format stream-json \
   --verbose \
   --dangerously-skip-permissions \
+  [--teammate-mode in-process|tmux|auto] \
   [--resume SESSION_ID] \
   [--model MODEL_ID] \
   [--permission-mode plan] \
@@ -82,6 +83,7 @@ claude \
 | `--resume SESSION_ID` | Resume existing session |
 | `--model MODEL_ID` | Specify model (e.g., `claude-sonnet-4-20250514`) |
 | `--permission-mode plan` | Plan mode (read-only exploration) |
+| `--teammate-mode <MODE>` | Agent teams display mode: `auto`, `in-process`, `tmux` |
 
 ### Environment Variables
 
@@ -195,6 +197,44 @@ When permissions are denied in headless mode (`--print --output-format stream-js
 Claude supports spawning subagents via the `Task` tool with `subagent_type`:
 - Custom agents defined in config
 - Built-in agents like "Explore", "Plan"
+
+## Agent Teams (Experimental)
+
+Claude Code supports multi-session teams where a lead coordinates multiple teammates. Teams are disabled by default and must be enabled explicitly.
+
+### Enablement
+
+- **Environment flag**: `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`
+- **settings.json**: `{ "env": { "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1" } }`
+
+### CLI additions
+
+- `--teammate-mode` controls display mode for teammates: `auto` (default), `in-process`, `tmux`.
+- Teams are created via natural language in interactive mode; there is no dedicated CLI subcommand.
+
+### Team components and storage
+
+- **Lead**: the session that creates and manages the team.
+- **Teammates**: independent Claude Code instances with their own context.
+- **Task list**: shared task tracker used for coordination.
+- **Mailbox**: internal messaging between teammates and lead.
+
+Claude stores team metadata locally:
+
+- `~/.claude/teams/{team-name}/config.json`
+- `~/.claude/tasks/{team-name}/`
+
+### Known limitations (from docs)
+
+- No session resumption for in-process teammates (`/resume` does not restore them).
+- Task status can lag; teammates may not mark tasks as completed.
+- Shutdown can be slow (teammates finish current requests before exiting).
+- One team per session; no nested teams.
+- Teammate permission mode inherits from the lead at spawn time.
+
+### API surface notes
+
+The public Agent SDK and CLI documentation do not describe a dedicated API for team management. Team coordination appears to be interactive-first, with state persisted locally (paths above). No streaming event types for team lifecycle are documented in the CLI/SDK references.
 
 ### ExitPlanMode (Plan Approval)
 

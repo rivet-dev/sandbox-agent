@@ -1,0 +1,86 @@
+---
+title: "Agent Teams"
+description: "Notes on Claude Code agent teams and a proposed Sandbox Agent API."
+icon: "users"
+---
+
+## Claude Code team model (external)
+
+Claude Code exposes agent teams as an interactive feature, not a public API. Key points from the upstream docs:
+
+- Enablement: `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` in env or settings.json.
+- Display mode: `--teammate-mode` supports `auto`, `in-process`, `tmux`.
+- Teams are created in natural language by the lead; teammates are independent sessions.
+- Storage:
+  - `~/.claude/teams/{team-name}/config.json`
+  - `~/.claude/tasks/{team-name}/`
+- Team concepts: lead, teammates, shared task list, mailbox for messaging.
+- No documented CLI subcommand or Agent SDK API for team management.
+
+## Current gap in Sandbox Agent
+
+Sandbox Agent controls a single agent session at a time. Claude Code team state and teammate coordination do not surface through the `stream-json` CLI output, so there is no native team lifecycle to convert into the universal schema yet.
+
+## Proposed API shape (new resource)
+
+Add a Team resource and treat a team as a first-class container for multiple sessions:
+
+### Endpoints
+
+- `POST /v1/teams/{team_id}`
+  - Create a team and optionally create a lead session.
+- `GET /v1/teams`
+  - List teams with summary metadata.
+- `GET /v1/teams/{team_id}`
+  - Get team metadata and members.
+- `POST /v1/teams/{team_id}/members`
+  - Spawn a teammate session (agent + mode + model + permission mode).
+- `POST /v1/teams/{team_id}/members/{member_id}/messages`
+  - Send a message to a specific teammate.
+- `POST /v1/teams/{team_id}/messages`
+  - Broadcast a message to all teammates.
+- `POST /v1/teams/{team_id}/tasks`
+  - Create a task in the shared list.
+- `PATCH /v1/teams/{team_id}/tasks/{task_id}`
+  - Update task state (pending/in_progress/completed) or assignment.
+- `POST /v1/teams/{team_id}/terminate`
+  - Stop all sessions and clean up team resources.
+
+### CLI mapping (proposed)
+
+```
+sandbox-agent api teams list
+sandbox-agent api teams create <TEAM_ID> --agent claude --agent-mode code
+sandbox-agent api teams members add <TEAM_ID> --agent claude --model sonnet
+sandbox-agent api teams members message <TEAM_ID> <MEMBER_ID> --message "..."
+sandbox-agent api teams broadcast <TEAM_ID> --message "..."
+sandbox-agent api teams tasks create <TEAM_ID> --title "..."
+sandbox-agent api teams tasks update <TEAM_ID> <TASK_ID> --status completed
+sandbox-agent api teams terminate <TEAM_ID>
+```
+
+### Event extensions (proposed)
+
+Add optional team-aware events to the session transcript schema. These would be emitted by the daemon when it orchestrates teams, and marked `source=daemon` for agents without native team events:
+
+- `team.created` / `team.ended`
+- `team.member.added` / `team.member.removed`
+- `team.message.sent` (for teammate or broadcast messages)
+- `team.task.created` / `team.task.updated`
+
+Each event should include `team_id` and, where relevant, `member_id` or `task_id`.
+
+### Session linkage (minimal change)
+
+Add an optional `team_id` field to `CreateSessionRequest` so existing session endpoints can still be used while associating sessions to a team container.
+
+## Compatibility strategy
+
+- Claude Code: Sandbox Agent would manage the team abstraction itself (multiple CLI sessions), since there is no public team API.
+- Other agents: Teams are supported as a daemon-level orchestration feature; events are synthetic and marked accordingly.
+
+## Open questions
+
+- Should team tasks live in the universal schema or remain a daemon-only construct?
+- Do we need a mailbox API for cross-agent messages, or are per-member messages enough?
+- How should team cleanup interact with per-session termination and resume behavior?
