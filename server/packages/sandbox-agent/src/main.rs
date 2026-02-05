@@ -515,7 +515,8 @@ fn run_opencode(cli: &Cli, args: &OpencodeArgs) -> Result<(), CliError> {
     let base_url = format!("http://{}:{}", args.host, args.port);
     wait_for_health(&mut server_child, &base_url, token.as_deref())?;
 
-    let session_id = create_opencode_session(&base_url, token.as_deref(), args.session_title.as_deref())?;
+    let session_id =
+        create_opencode_session(&base_url, token.as_deref(), args.session_title.as_deref())?;
     write_stdout_line(&format!("OpenCode session: {session_id}"))?;
 
     let attach_url = format!("{base_url}/opencode");
@@ -776,7 +777,10 @@ fn create_opencode_session(
     };
     let mut request = client.post(&url).json(&body);
     if let Ok(directory) = std::env::current_dir() {
-        request = request.header("x-opencode-directory", directory.to_string_lossy().to_string());
+        request = request.header(
+            "x-opencode-directory",
+            directory.to_string_lossy().to_string(),
+        );
     }
     if let Some(token) = token {
         request = request.bearer_auth(token);

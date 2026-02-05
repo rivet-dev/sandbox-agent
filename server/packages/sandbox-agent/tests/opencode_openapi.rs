@@ -34,8 +34,9 @@ fn official_spec_path() -> PathBuf {
 #[test]
 fn opencode_openapi_matches_official_paths() {
     let official_path = official_spec_path();
-    let official_json = fs::read_to_string(&official_path)
-        .unwrap_or_else(|err| panic!("failed to read official OpenCode spec at {official_path:?}: {err}"));
+    let official_json = fs::read_to_string(&official_path).unwrap_or_else(|err| {
+        panic!("failed to read official OpenCode spec at {official_path:?}: {err}")
+    });
     let official: Value =
         serde_json::from_str(&official_json).expect("official OpenCode spec is not valid JSON");
 
@@ -45,14 +46,8 @@ fn opencode_openapi_matches_official_paths() {
     let official_methods = collect_path_methods(&official);
     let our_methods = collect_path_methods(&ours_value);
 
-    let missing: Vec<_> = official_methods
-        .difference(&our_methods)
-        .cloned()
-        .collect();
-    let extra: Vec<_> = our_methods
-        .difference(&official_methods)
-        .cloned()
-        .collect();
+    let missing: Vec<_> = official_methods.difference(&our_methods).cloned().collect();
+    let extra: Vec<_> = our_methods.difference(&official_methods).cloned().collect();
 
     if !missing.is_empty() || !extra.is_empty() {
         let mut message = String::new();

@@ -6,9 +6,9 @@
 
 use std::collections::HashMap;
 use std::convert::Infallible;
+use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::str::FromStr;
 
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
@@ -24,12 +24,12 @@ use tokio::time::interval;
 use utoipa::{IntoParams, OpenApi, ToSchema};
 
 use crate::router::{AppState, CreateSessionRequest, PermissionReply};
-use sandbox_agent_error::SandboxError;
 use sandbox_agent_agent_management::agents::AgentId;
+use sandbox_agent_error::SandboxError;
 use sandbox_agent_universal_agent_schema::{
-    ContentPart, ItemDeltaData, ItemEventData, ItemKind, ItemRole, UniversalEvent, UniversalEventData,
-    UniversalEventType, UniversalItem, PermissionEventData, PermissionStatus, QuestionEventData,
-    QuestionStatus, FileAction, ItemStatus,
+    ContentPart, FileAction, ItemDeltaData, ItemEventData, ItemKind, ItemRole, ItemStatus,
+    PermissionEventData, PermissionStatus, QuestionEventData, QuestionStatus, UniversalEvent,
+    UniversalEventData, UniversalEventType, UniversalItem,
 };
 
 static SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -261,18 +261,12 @@ impl OpenCodeState {
         if let Some(value) = query {
             return value.clone();
         }
-        if let Some(value) = self
-            .config
-            .fixed_directory
-            .as_ref()
-            .cloned()
-            .or_else(|| {
-                headers
-                    .get("x-opencode-directory")
-                    .and_then(|v| v.to_str().ok())
-                    .map(|v| v.to_string())
-            })
-        {
+        if let Some(value) = self.config.fixed_directory.as_ref().cloned().or_else(|| {
+            headers
+                .get("x-opencode-directory")
+                .and_then(|v| v.to_str().ok())
+                .map(|v| v.to_string())
+        }) {
             return value;
         }
         std::env::current_dir()
@@ -602,7 +596,8 @@ fn resolve_agent_from_model(provider_id: &str, model_id: &str) -> Option<AgentId
 }
 
 fn normalize_agent_mode(agent: Option<String>) -> String {
-    agent.filter(|value| !value.is_empty())
+    agent
+        .filter(|value| !value.is_empty())
         .unwrap_or_else(|| default_agent_mode().to_string())
 }
 
@@ -962,7 +957,6 @@ fn unique_assistant_message_id(
     }
 }
 
-
 fn extract_text_from_content(parts: &[ContentPart]) -> Option<String> {
     let mut text = String::new();
     for part in parts {
@@ -1146,22 +1140,19 @@ fn question_event(event_type: &str, question: &Value) -> Value {
 }
 
 fn message_id_from_info(info: &Value) -> Option<String> {
-    info.get("id").and_then(|v| v.as_str()).map(|v| v.to_string())
+    info.get("id")
+        .and_then(|v| v.as_str())
+        .map(|v| v.to_string())
 }
 
-async fn upsert_message_info(
-    state: &OpenCodeState,
-    session_id: &str,
-    info: Value,
-) -> Vec<Value> {
+async fn upsert_message_info(state: &OpenCodeState, session_id: &str, info: Value) -> Vec<Value> {
     let mut messages = state.messages.lock().await;
     let entry = messages.entry(session_id.to_string()).or_default();
     let message_id = message_id_from_info(&info);
     if let Some(message_id) = message_id.clone() {
-        if let Some(existing) = entry
-            .iter_mut()
-            .find(|record| message_id_from_info(&record.info).as_deref() == Some(message_id.as_str()))
-        {
+        if let Some(existing) = entry.iter_mut().find(|record| {
+            message_id_from_info(&record.info).as_deref() == Some(message_id.as_str())
+        }) {
             existing.info = info.clone();
         } else {
             entry.push(OpenCodeMessageRecord {
@@ -1385,7 +1376,9 @@ async fn apply_permission_event(
             let mut permissions = state.opencode.permissions.lock().await;
             permissions.insert(record.id.clone(), record);
             drop(permissions);
-            state.opencode.emit_event(permission_event("permission.asked", &value));
+            state
+                .opencode
+                .emit_event(permission_event("permission.asked", &value));
         }
         PermissionStatus::Approved | PermissionStatus::Denied => {
             let reply = match permission.status {
@@ -1441,7 +1434,9 @@ async fn apply_question_event(
             let mut questions = state.opencode.questions.lock().await;
             questions.insert(record.id.clone(), record);
             drop(questions);
-            state.opencode.emit_event(question_event("question.asked", &value));
+            state
+                .opencode
+                .emit_event(question_event("question.asked", &value));
         }
         QuestionStatus::Answered => {
             let answers = question
@@ -1525,20 +1520,17 @@ async fn apply_item_event(
             }
             if let Some(id) = message_id.clone() {
                 if let Some(item_key) = item_id_key.clone() {
-                    runtime
-                        .message_id_for_item
-                        .insert(item_key, id.clone());
+                    runtime.message_id_for_item.insert(item_key, id.clone());
                 }
                 if let Some(native_key) = native_id_key.clone() {
-                    runtime
-                        .message_id_for_item
-                        .insert(native_key, id.clone());
+                    runtime.message_id_for_item.insert(native_key, id.clone());
                 }
             }
         })
         .await;
-    let message_id = message_id
-        .unwrap_or_else(|| unique_assistant_message_id(&runtime, parent_id.as_ref(), event.sequence));
+    let message_id = message_id.unwrap_or_else(|| {
+        unique_assistant_message_id(&runtime, parent_id.as_ref(), event.sequence)
+    });
     let parent_id = parent_id.or_else(|| runtime.last_user_message_id.clone());
     let agent = runtime
         .last_agent
@@ -1594,7 +1586,9 @@ async fn apply_item_event(
             .entry(message_id.clone())
             .or_insert_with(|| format!("{}_text", message_id))
             .clone();
-        runtime.text_by_message.insert(message_id.clone(), text.clone());
+        runtime
+            .text_by_message
+            .insert(message_id.clone(), text.clone());
         let part = build_text_part_with_id(&session_id, &message_id, &part_id, &text);
         upsert_message_part(&state.opencode, &session_id, &message_id, part.clone()).await;
         state
@@ -1619,8 +1613,13 @@ async fn apply_item_event(
                 let part_id = next_id("part_", &PART_COUNTER);
                 let reasoning_part =
                     build_reasoning_part(&session_id, &message_id, &part_id, text, now);
-                upsert_message_part(&state.opencode, &session_id, &message_id, reasoning_part.clone())
-                    .await;
+                upsert_message_part(
+                    &state.opencode,
+                    &session_id,
+                    &message_id,
+                    reasoning_part.clone(),
+                )
+                .await;
                 state
                     .opencode
                     .emit_event(part_event("message.part.updated", &reasoning_part));
@@ -1640,8 +1639,14 @@ async fn apply_item_event(
                     "input": {"arguments": arguments},
                     "raw": arguments,
                 });
-                let tool_part =
-                    build_tool_part(&session_id, &message_id, &part_id, call_id, name, state_value);
+                let tool_part = build_tool_part(
+                    &session_id,
+                    &message_id,
+                    &part_id,
+                    call_id,
+                    name,
+                    state_value,
+                );
                 upsert_message_part(&state.opencode, &session_id, &message_id, tool_part.clone())
                     .await;
                 state
@@ -1704,8 +1709,13 @@ async fn apply_item_event(
                     FileAction::Patch => "text/x-diff",
                     _ => "text/plain",
                 };
-                let part =
-                    build_file_part_from_path(&session_id, &message_id, path, mime, diff.as_deref());
+                let part = build_file_part_from_path(
+                    &session_id,
+                    &message_id,
+                    path,
+                    mime,
+                    diff.as_deref(),
+                );
                 upsert_message_part(&state.opencode, &session_id, &message_id, part.clone()).await;
                 state
                     .opencode
@@ -1787,14 +1797,10 @@ async fn apply_tool_item_event(
             }
             if let Some(id) = message_id.clone() {
                 if let Some(item_key) = item_id_key.clone() {
-                    runtime
-                        .message_id_for_item
-                        .insert(item_key, id.clone());
+                    runtime.message_id_for_item.insert(item_key, id.clone());
                 }
                 if let Some(native_key) = native_id_key.clone() {
-                    runtime
-                        .message_id_for_item
-                        .insert(native_key, id.clone());
+                    runtime.message_id_for_item.insert(native_key, id.clone());
                 }
                 runtime
                     .tool_message_by_call
@@ -1803,8 +1809,9 @@ async fn apply_tool_item_event(
         })
         .await;
 
-    let message_id = message_id
-        .unwrap_or_else(|| unique_assistant_message_id(&runtime, parent_id.as_ref(), event.sequence));
+    let message_id = message_id.unwrap_or_else(|| {
+        unique_assistant_message_id(&runtime, parent_id.as_ref(), event.sequence)
+    });
     let parent_id = parent_id.or_else(|| runtime.last_user_message_id.clone());
     let agent = runtime
         .last_agent
@@ -1967,7 +1974,11 @@ async fn apply_item_delta(
     delta: String,
 ) {
     let session_id = event.session_id.clone();
-    let item_id_key = if item_id.is_empty() { None } else { Some(item_id) };
+    let item_id_key = if item_id.is_empty() {
+        None
+    } else {
+        Some(item_id)
+    };
     let native_id_key = native_item_id;
     let is_user_delta = item_id_key
         .as_ref()
@@ -2003,20 +2014,17 @@ async fn apply_item_delta(
             }
             if let Some(id) = message_id.clone() {
                 if let Some(item_key) = item_id_key.clone() {
-                    runtime
-                        .message_id_for_item
-                        .insert(item_key, id.clone());
+                    runtime.message_id_for_item.insert(item_key, id.clone());
                 }
                 if let Some(native_key) = native_id_key.clone() {
-                    runtime
-                        .message_id_for_item
-                        .insert(native_key, id.clone());
+                    runtime.message_id_for_item.insert(native_key, id.clone());
                 }
             }
         })
         .await;
-    let message_id = message_id
-        .unwrap_or_else(|| unique_assistant_message_id(&runtime, parent_id.as_ref(), event.sequence));
+    let message_id = message_id.unwrap_or_else(|| {
+        unique_assistant_message_id(&runtime, parent_id.as_ref(), event.sequence)
+    });
     let parent_id = parent_id.or_else(|| runtime.last_user_message_id.clone());
     let directory = session_directory(&state.opencode, &session_id).await;
     let worktree = state.opencode.worktree_for(&directory);
@@ -2086,7 +2094,10 @@ pub fn build_opencode_router(state: Arc<OpenCodeAppState>) -> Router {
         .route("/event", get(oc_event_subscribe))
         .route("/global/event", get(oc_global_event))
         .route("/global/health", get(oc_global_health))
-        .route("/global/config", get(oc_global_config_get).patch(oc_global_config_patch))
+        .route(
+            "/global/config",
+            get(oc_global_config_get).patch(oc_global_config_patch),
+        )
         .route("/global/dispose", post(oc_global_dispose))
         .route("/instance/dispose", post(oc_instance_dispose))
         .route("/log", post(oc_log))
@@ -2124,7 +2135,10 @@ pub fn build_opencode_router(state: Arc<OpenCodeAppState>) -> Router {
             "/session/:sessionID/message/:messageID/part/:partID",
             patch(oc_message_part_update).delete(oc_message_part_delete),
         )
-        .route("/session/:sessionID/prompt_async", post(oc_session_prompt_async))
+        .route(
+            "/session/:sessionID/prompt_async",
+            post(oc_session_prompt_async),
+        )
         .route("/session/:sessionID/command", post(oc_session_command))
         .route("/session/:sessionID/shell", post(oc_session_shell))
         .route("/session/:sessionID/revert", post(oc_session_revert))
@@ -2133,7 +2147,10 @@ pub fn build_opencode_router(state: Arc<OpenCodeAppState>) -> Router {
             "/session/:sessionID/permissions/:permissionID",
             post(oc_session_permission_reply),
         )
-        .route("/session/:sessionID/share", post(oc_session_share).delete(oc_session_unshare))
+        .route(
+            "/session/:sessionID/share",
+            post(oc_session_share).delete(oc_session_unshare),
+        )
         .route("/session/:sessionID/todo", get(oc_session_todo))
         // Permissions + questions (global)
         .route("/permission", get(oc_permission_list))
@@ -2171,7 +2188,10 @@ pub fn build_opencode_router(state: Arc<OpenCodeAppState>) -> Router {
         .route("/find/symbol", get(oc_find_symbols))
         // MCP
         .route("/mcp", get(oc_mcp_list).post(oc_mcp_register))
-        .route("/mcp/:name/auth", post(oc_mcp_auth).delete(oc_mcp_auth_remove))
+        .route(
+            "/mcp/:name/auth",
+            post(oc_mcp_auth).delete(oc_mcp_auth_remove),
+        )
         .route("/mcp/:name/auth/callback", post(oc_mcp_auth_callback))
         .route("/mcp/:name/auth/authenticate", post(oc_mcp_authenticate))
         .route("/mcp/:name/connect", post(oc_mcp_connect))
@@ -2182,7 +2202,9 @@ pub fn build_opencode_router(state: Arc<OpenCodeAppState>) -> Router {
         .route("/experimental/resource", get(oc_resource_list))
         .route(
             "/experimental/worktree",
-            get(oc_worktree_list).post(oc_worktree_create).delete(oc_worktree_delete),
+            get(oc_worktree_list)
+                .post(oc_worktree_create)
+                .delete(oc_worktree_delete),
         )
         .route("/experimental/worktree/reset", post(oc_worktree_reset))
         // Skills
@@ -2300,7 +2322,9 @@ async fn oc_event_subscribe(
     Query(query): Query<DirectoryQuery>,
 ) -> Sse<impl futures::Stream<Item = Result<Event, Infallible>>> {
     let receiver = state.opencode.subscribe();
-    let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
+    let directory = state
+        .opencode
+        .directory_for(&headers, query.directory.as_ref());
     let branch = state.opencode.branch_name();
     state.opencode.emit_event(json!({
         "type": "server.connected",
@@ -2318,33 +2342,36 @@ async fn oc_event_subscribe(
         "type": "server.heartbeat",
         "properties": {}
     });
-    let stream = stream::unfold((receiver, interval(std::time::Duration::from_secs(30))), move |(mut rx, mut ticker)| {
-        let heartbeat = heartbeat_payload.clone();
-        async move {
-            tokio::select! {
-                _ = ticker.tick() => {
-                    let sse_event = Event::default()
-                        .json_data(&heartbeat)
-                        .unwrap_or_else(|_| Event::default().data("{}"));
-                    Some((Ok(sse_event), (rx, ticker)))
-                }
-                event = rx.recv() => {
-                    match event {
-                        Ok(event) => {
-                            let sse_event = Event::default()
-                                .json_data(&event)
-                                .unwrap_or_else(|_| Event::default().data("{}"));
-                            Some((Ok(sse_event), (rx, ticker)))
+    let stream = stream::unfold(
+        (receiver, interval(std::time::Duration::from_secs(30))),
+        move |(mut rx, mut ticker)| {
+            let heartbeat = heartbeat_payload.clone();
+            async move {
+                tokio::select! {
+                    _ = ticker.tick() => {
+                        let sse_event = Event::default()
+                            .json_data(&heartbeat)
+                            .unwrap_or_else(|_| Event::default().data("{}"));
+                        Some((Ok(sse_event), (rx, ticker)))
+                    }
+                    event = rx.recv() => {
+                        match event {
+                            Ok(event) => {
+                                let sse_event = Event::default()
+                                    .json_data(&event)
+                                    .unwrap_or_else(|_| Event::default().data("{}"));
+                                Some((Ok(sse_event), (rx, ticker)))
+                            }
+                            Err(broadcast::error::RecvError::Lagged(_)) => {
+                                Some((Ok(Event::default().comment("lagged")), (rx, ticker)))
+                            }
+                            Err(broadcast::error::RecvError::Closed) => None,
                         }
-                        Err(broadcast::error::RecvError::Lagged(_)) => {
-                            Some((Ok(Event::default().comment("lagged")), (rx, ticker)))
-                        }
-                        Err(broadcast::error::RecvError::Closed) => None,
                     }
                 }
             }
-        }
-    });
+        },
+    );
 
     Sse::new(stream).keep_alive(KeepAlive::new().interval(std::time::Duration::from_secs(15)))
 }
@@ -2361,7 +2388,9 @@ async fn oc_global_event(
     Query(query): Query<DirectoryQuery>,
 ) -> Sse<impl futures::Stream<Item = Result<Event, Infallible>>> {
     let receiver = state.opencode.subscribe();
-    let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
+    let directory = state
+        .opencode
+        .directory_for(&headers, query.directory.as_ref());
     let branch = state.opencode.branch_name();
     state.opencode.emit_event(json!({
         "type": "server.connected",
@@ -2381,35 +2410,38 @@ async fn oc_global_event(
             "properties": {}
         }
     });
-    let stream = stream::unfold((receiver, interval(std::time::Duration::from_secs(30))), move |(mut rx, mut ticker)| {
-        let directory = directory.clone();
-        let heartbeat = heartbeat_payload.clone();
-        async move {
-            tokio::select! {
-                _ = ticker.tick() => {
-                    let sse_event = Event::default()
-                        .json_data(&heartbeat)
-                        .unwrap_or_else(|_| Event::default().data("{}"));
-                    Some((Ok(sse_event), (rx, ticker)))
-                }
-                event = rx.recv() => {
-                    match event {
-                        Ok(event) => {
-                            let payload = json!({"directory": directory, "payload": event});
-                            let sse_event = Event::default()
-                                .json_data(&payload)
-                                .unwrap_or_else(|_| Event::default().data("{}"));
-                            Some((Ok(sse_event), (rx, ticker)))
+    let stream = stream::unfold(
+        (receiver, interval(std::time::Duration::from_secs(30))),
+        move |(mut rx, mut ticker)| {
+            let directory = directory.clone();
+            let heartbeat = heartbeat_payload.clone();
+            async move {
+                tokio::select! {
+                    _ = ticker.tick() => {
+                        let sse_event = Event::default()
+                            .json_data(&heartbeat)
+                            .unwrap_or_else(|_| Event::default().data("{}"));
+                        Some((Ok(sse_event), (rx, ticker)))
+                    }
+                    event = rx.recv() => {
+                        match event {
+                            Ok(event) => {
+                                let payload = json!({"directory": directory, "payload": event});
+                                let sse_event = Event::default()
+                                    .json_data(&payload)
+                                    .unwrap_or_else(|_| Event::default().data("{}"));
+                                Some((Ok(sse_event), (rx, ticker)))
+                            }
+                            Err(broadcast::error::RecvError::Lagged(_)) => {
+                                Some((Ok(Event::default().comment("lagged")), (rx, ticker)))
+                            }
+                            Err(broadcast::error::RecvError::Closed) => None,
                         }
-                        Err(broadcast::error::RecvError::Lagged(_)) => {
-                            Some((Ok(Event::default().comment("lagged")), (rx, ticker)))
-                        }
-                        Err(broadcast::error::RecvError::Closed) => None,
                     }
                 }
             }
-        }
-    });
+        },
+    );
 
     Sse::new(stream).keep_alive(KeepAlive::new().interval(std::time::Duration::from_secs(15)))
 }
@@ -2507,7 +2539,10 @@ async fn oc_formatter_status() -> impl IntoResponse {
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_path(State(state): State<Arc<OpenCodeAppState>>, headers: HeaderMap) -> impl IntoResponse {
+async fn oc_path(
+    State(state): State<Arc<OpenCodeAppState>>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
     let directory = state.opencode.directory_for(&headers, None);
     let worktree = state.opencode.worktree_for(&directory);
     (
@@ -2543,7 +2578,10 @@ async fn oc_vcs(State(state): State<Arc<OpenCodeAppState>>) -> impl IntoResponse
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_project_list(State(state): State<Arc<OpenCodeAppState>>, headers: HeaderMap) -> impl IntoResponse {
+async fn oc_project_list(
+    State(state): State<Arc<OpenCodeAppState>>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
     let directory = state.opencode.directory_for(&headers, None);
     let worktree = state.opencode.worktree_for(&directory);
     let now = state.opencode.now_ms();
@@ -2564,20 +2602,23 @@ async fn oc_project_list(State(state): State<Arc<OpenCodeAppState>>, headers: He
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_project_current(State(state): State<Arc<OpenCodeAppState>>, headers: HeaderMap) -> impl IntoResponse {
+async fn oc_project_current(
+    State(state): State<Arc<OpenCodeAppState>>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
     let directory = state.opencode.directory_for(&headers, None);
     let worktree = state.opencode.worktree_for(&directory);
     let now = state.opencode.now_ms();
     (
         StatusCode::OK,
         Json(json!({
-        "id": state.opencode.default_project_id.clone(),
-        "worktree": worktree,
-        "vcs": "git",
-        "name": "sandbox-agent",
-        "time": {"created": now, "updated": now},
-        "sandboxes": [],
-    })),
+            "id": state.opencode.default_project_id.clone(),
+            "worktree": worktree,
+            "vcs": "git",
+            "name": "sandbox-agent",
+            "time": {"created": now, "updated": now},
+            "sandboxes": [],
+        })),
     )
 }
 
@@ -2615,7 +2656,9 @@ async fn oc_session_create(
         parent_id: None,
         permission: None,
     });
-    let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
+    let directory = state
+        .opencode
+        .directory_for(&headers, query.directory.as_ref());
     let now = state.opencode.now_ms();
     let id = next_id("ses_", &SESSION_COUNTER);
     let slug = format!("session-{}", id);
@@ -2792,7 +2835,9 @@ async fn oc_session_fork(
     headers: HeaderMap,
     Query(query): Query<DirectoryQuery>,
 ) -> impl IntoResponse {
-    let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
+    let directory = state
+        .opencode
+        .directory_for(&headers, query.directory.as_ref());
     let now = state.opencode.now_ms();
     let id = next_id("ses_", &SESSION_COUNTER);
     let slug = format!("session-{}", id);
@@ -2841,9 +2886,7 @@ async fn oc_session_diff() -> impl IntoResponse {
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_session_summarize(
-    Json(body): Json<SessionSummarizeRequest>,
-) -> impl IntoResponse {
+async fn oc_session_summarize(Json(body): Json<SessionSummarizeRequest>) -> impl IntoResponse {
     if body.provider_id.is_none() || body.model_id.is_none() {
         return bad_request("providerID and modelID are required");
     }
@@ -2886,9 +2929,15 @@ async fn oc_session_message_create(
     Json(body): Json<SessionMessageRequest>,
 ) -> impl IntoResponse {
     if std::env::var("OPENCODE_COMPAT_LOG_BODY").is_ok() {
-        tracing::info!(target = "sandbox_agent::opencode", ?body, "opencode prompt body");
+        tracing::info!(
+            target = "sandbox_agent::opencode",
+            ?body,
+            "opencode prompt body"
+        );
     }
-    let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
+    let directory = state
+        .opencode
+        .directory_for(&headers, query.directory.as_ref());
     let _ = state
         .opencode
         .ensure_session(&session_id, directory.clone())
@@ -3161,7 +3210,9 @@ async fn oc_session_command(
     if body.command.is_none() || body.arguments.is_none() {
         return bad_request("command and arguments are required").into_response();
     }
-    let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
+    let directory = state
+        .opencode
+        .directory_for(&headers, query.directory.as_ref());
     let worktree = state.opencode.worktree_for(&directory);
     let now = state.opencode.now_ms();
     let assistant_message_id = next_id("msg_", &MESSAGE_COUNTER);
@@ -3206,7 +3257,9 @@ async fn oc_session_shell(
     if body.command.is_none() || body.agent.is_none() {
         return bad_request("agent and command are required").into_response();
     }
-    let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
+    let directory = state
+        .opencode
+        .directory_for(&headers, query.directory.as_ref());
     let worktree = state.opencode.worktree_for(&directory);
     let now = state.opencode.now_ms();
     let assistant_message_id = next_id("msg_", &MESSAGE_COUNTER);
@@ -3355,7 +3408,11 @@ async fn oc_session_todo() -> impl IntoResponse {
     tag = "opencode"
 )]
 async fn oc_permission_list(State(state): State<Arc<OpenCodeAppState>>) -> impl IntoResponse {
-    let pending = state.inner.session_manager().list_pending_permissions().await;
+    let pending = state
+        .inner
+        .session_manager()
+        .list_pending_permissions()
+        .await;
     let mut values = Vec::new();
     for item in pending {
         let record = OpenCodePermissionRecord {
@@ -3561,7 +3618,6 @@ async fn oc_provider_auth() -> impl IntoResponse {
     (StatusCode::OK, Json(auth))
 }
 
-
 #[utoipa::path(
     post,
     path = "/provider/{providerID}/oauth/authorize",
@@ -3599,7 +3655,10 @@ async fn oc_provider_oauth_callback(Path(_provider_id): Path<String>) -> impl In
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_auth_set(Path(_provider_id): Path<String>, Json(_body): Json<Value>) -> impl IntoResponse {
+async fn oc_auth_set(
+    Path(_provider_id): Path<String>,
+    Json(_body): Json<Value>,
+) -> impl IntoResponse {
     bool_ok(true)
 }
 
@@ -3639,7 +3698,9 @@ async fn oc_pty_create(
     Query(query): Query<DirectoryQuery>,
     Json(body): Json<PtyCreateRequest>,
 ) -> impl IntoResponse {
-    let directory = state.opencode.directory_for(&headers, query.directory.as_ref());
+    let directory = state
+        .opencode
+        .directory_for(&headers, query.directory.as_ref());
     let id = next_id("pty_", &PTY_COUNTER);
     let record = OpenCodePtyRecord {
         id: id.clone(),
@@ -3854,10 +3915,7 @@ async fn oc_mcp_register() -> impl IntoResponse {
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_mcp_auth(
-    Path(_name): Path<String>,
-    _body: Option<Json<Value>>,
-) -> impl IntoResponse {
+async fn oc_mcp_auth(Path(_name): Path<String>, _body: Option<Json<Value>>) -> impl IntoResponse {
     (StatusCode::OK, Json(json!({"status": "needs_auth"})))
 }
 
@@ -3962,7 +4020,10 @@ async fn oc_resource_list() -> impl IntoResponse {
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_worktree_list(State(state): State<Arc<OpenCodeAppState>>, headers: HeaderMap) -> impl IntoResponse {
+async fn oc_worktree_list(
+    State(state): State<Arc<OpenCodeAppState>>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
     let directory = state.opencode.directory_for(&headers, None);
     let worktree = state.opencode.worktree_for(&directory);
     (StatusCode::OK, Json(json!([worktree])))
@@ -3975,7 +4036,10 @@ async fn oc_worktree_list(State(state): State<Arc<OpenCodeAppState>>, headers: H
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_worktree_create(State(state): State<Arc<OpenCodeAppState>>, headers: HeaderMap) -> impl IntoResponse {
+async fn oc_worktree_create(
+    State(state): State<Arc<OpenCodeAppState>>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
     let directory = state.opencode.directory_for(&headers, None);
     let worktree = state.opencode.worktree_for(&directory);
     (

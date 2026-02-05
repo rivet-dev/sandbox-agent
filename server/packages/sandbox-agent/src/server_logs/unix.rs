@@ -56,9 +56,7 @@ impl ServerLogs {
                 .last_rotation
                 .date_naive()
                 .and_hms_opt(0, 0, 0)
-                .ok_or_else(|| {
-                    std::io::Error::new(std::io::ErrorKind::Other, "invalid date")
-                })?
+                .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::Other, "invalid date"))?
                 + Duration::days(1)),
         );
 

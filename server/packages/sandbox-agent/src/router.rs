@@ -16,6 +16,7 @@ use axum::response::{IntoResponse, Response, Sse};
 use axum::routing::{get, post};
 use axum::Json;
 use axum::Router;
+use base64::Engine;
 use futures::{stream, StreamExt};
 use reqwest::Client;
 use sandbox_agent_error::{AgentError, ErrorType, ProblemDetails, SandboxError};
@@ -34,7 +35,6 @@ use tokio::sync::{broadcast, mpsc, oneshot, Mutex};
 use tokio::time::sleep;
 use tokio_stream::wrappers::BroadcastStream;
 use tower_http::trace::TraceLayer;
-use base64::Engine;
 use tracing::Span;
 use utoipa::{Modify, OpenApi, ToSchema};
 
