@@ -89,7 +89,6 @@ jobs:
     needs: [setup]
     if: ${{ !inputs.reuse_engine_version }}
     strategy:
-      fail-fast: false
       matrix:
         include:
           - platform: linux
@@ -167,7 +166,6 @@ jobs:
     needs: [setup]
     if: ${{ !inputs.reuse_engine_version }}
     strategy:
-      fail-fast: false
       matrix:
         include:
           - platform: linux/arm64
