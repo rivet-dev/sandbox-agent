@@ -75,9 +75,21 @@ await client.createSession("my-session", {
 
 To build a static binary for use in minimal containers:
 
-```bash
-docker build -f docker/release/linux-x86_64.Dockerfile -t sandbox-agent-build .
-docker run --rm -v "$PWD/artifacts:/artifacts" sandbox-agent-build
-```
+<Tabs>
+  <Tab title="x86_64">
+    ```bash
+    docker build -f docker/release/linux-x86_64.Dockerfile -t sandbox-agent-build .
+    docker run --rm -v "$PWD/artifacts:/artifacts" sandbox-agent-build
+    ```
 
-The binary will be at `./artifacts/sandbox-agent-x86_64-unknown-linux-musl`.
+    The binary will be at `./artifacts/sandbox-agent-x86_64-unknown-linux-musl`.
+  </Tab>
+  <Tab title="ARM64 (aarch64)">
+    ```bash
+    docker build -f docker/release/linux-aarch64.Dockerfile -t sandbox-agent-build .
+    docker run --rm -v "$PWD/artifacts:/artifacts" sandbox-agent-build
+    ```
+
+    The binary will be at `./artifacts/sandbox-agent-aarch64-unknown-linux-musl`.
+  </Tab>
+</Tabs>

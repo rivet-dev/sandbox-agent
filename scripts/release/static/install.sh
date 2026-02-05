@@ -30,9 +30,16 @@ if [ "$(printf '%s' "$UNAME" | cut -c 1-6)" = "Darwin" ]; then
 	fi
 elif [ "$(printf '%s' "$UNAME" | cut -c 1-5)" = "Linux" ]; then
 	echo
-	echo "> Detected Linux ($(getconf LONG_BIT) bit)"
+	echo "> Detected Linux ($ARCH)"
 
-	FILE_NAME="sandbox-agent-x86_64-unknown-linux-musl"
+	if [ "$ARCH" = "x86_64" ]; then
+		FILE_NAME="sandbox-agent-x86_64-unknown-linux-musl"
+	elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
+		FILE_NAME="sandbox-agent-aarch64-unknown-linux-musl"
+	else
+		echo "Unknown arch $ARCH" 1>&2
+		exit 1
+	fi
 else
 	echo "Unable to determine platform" 1>&2
 	exit 1
