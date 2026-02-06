@@ -1,0 +1,105 @@
+---
+source: server/packages/sandbox-agent/tests/sessions/session_lifecycle.rs
+assertion_line: 12
+expression: value
+---
+session_a:
+  - metadata: true
+    seq: 1
+    session: started
+    type: session.started
+  - item:
+      content_types:
+        - text
+      kind: message
+      role: user
+      status: in_progress
+    seq: 2
+    type: item.started
+  - delta:
+      delta: "<redacted>"
+      item_id: "<redacted>"
+      native_item_id: "<redacted>"
+    seq: 3
+    type: item.delta
+  - item:
+      content_types:
+        - text
+      kind: message
+      role: user
+      status: completed
+    seq: 4
+    type: item.completed
+  - item:
+      content_types:
+        - text
+      kind: message
+      role: assistant
+      status: in_progress
+    seq: 5
+    type: item.started
+  - delta:
+      delta: "<redacted>"
+      item_id: "<redacted>"
+      native_item_id: "<redacted>"
+    seq: 6
+    type: item.delta
+  - delta:
+      delta: "<redacted>"
+      item_id: "<redacted>"
+      native_item_id: "<redacted>"
+    seq: 7
+    type: item.delta
+  - delta:
+      delta: "<redacted>"
+      item_id: "<redacted>"
+      native_item_id: "<redacted>"
+    seq: 8
+    type: item.delta
+  - delta:
+      delta: "<redacted>"
+      item_id: "<redacted>"
+      native_item_id: "<redacted>"
+    seq: 9
+    type: item.delta
+session_b:
+  - metadata: true
+    seq: 1
+    session: started
+    type: session.started
+  - item:
+      content_types:
+        - text
+      kind: message
+      role: user
+      status: in_progress
+    seq: 2
+    type: item.started
+  - delta:
+      delta: "<redacted>"
+      item_id: "<redacted>"
+      native_item_id: "<redacted>"
+    seq: 3
+    type: item.delta
+  - item:
+      content_types:
+        - text
+      kind: message
+      role: user
+      status: completed
+    seq: 4
+    type: item.completed
+  - item:
+      content_types:
+        - text
+      kind: message
+      role: assistant
+      status: in_progress
+    seq: 5
+    type: item.started
+  - delta:
+      delta: "<redacted>"
+      item_id: "<redacted>"
+      native_item_id: "<redacted>"
+    seq: 6
+    type: item.delta

@@ -55,15 +55,43 @@ static USER_MESSAGE_COUNTER: AtomicU64 = AtomicU64::new(1);
 const ANTHROPIC_MODELS_URL: &str = "https://api.anthropic.com/v1/models?beta=true";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BrandingMode {
+    #[default]
+    SandboxAgent,
+    Gigacode,
+}
+
+impl BrandingMode {
+    pub fn product_name(&self) -> &'static str {
+        match self {
+            BrandingMode::SandboxAgent => "Sandbox Agent",
+            BrandingMode::Gigacode => "Gigacode",
+        }
+    }
+
+    pub fn docs_url(&self) -> &'static str {
+        match self {
+            BrandingMode::SandboxAgent => "https://sandboxagent.dev",
+            BrandingMode::Gigacode => "https://gigacode.dev",
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct AppState {
     auth: AuthConfig,
     agent_manager: Arc<AgentManager>,
     session_manager: Arc<SessionManager>,
+    pub branding: BrandingMode,
 }
 
 impl AppState {
     pub fn new(auth: AuthConfig, agent_manager: AgentManager) -> Self {
+        Self::with_branding(auth, agent_manager, BrandingMode::default())
+    }
+
+    pub fn with_branding(auth: AuthConfig, agent_manager: AgentManager, branding: BrandingMode) -> Self {
         let agent_manager = Arc::new(agent_manager);
         let session_manager = Arc::new(SessionManager::new(agent_manager.clone()));
         session_manager
@@ -73,6 +101,7 @@ impl AppState {
             auth,
             agent_manager,
             session_manager,
+            branding,
         }
     }
 
@@ -152,12 +181,15 @@ pub fn build_router_with_state(shared: Arc<AppState>) -> (Router, Arc<AppState>)
         ));
     }
 
-    let mut router = Router::new()
+    let root_router = Router::new()
         .route("/", get(get_root))
+        .fallback(not_found)
+        .with_state(shared.clone());
+
+    let mut router = root_router
         .nest("/v1", v1_router)
         .nest("/opencode", opencode_router)
-        .merge(opencode_root_router)
-        .fallback(not_found);
+        .merge(opencode_root_router);
 
     if ui::is_enabled() {
         router = router.merge(ui::router());
@@ -4068,21 +4100,26 @@ async fn get_agent_models(
     Ok(Json(models))
 }
 
-const SERVER_INFO: &str = "\
-This is a Sandbox Agent server. Available endpoints:\n\
-  - GET  /           - Server info\n\
-  - GET  /v1/health  - Health check\n\
-  - GET  /ui/        - Inspector UI\n\n\
-See https://sandboxagent.dev for API documentation.";
-
-async fn get_root() -> &'static str {
-    SERVER_INFO
+fn server_info(branding: BrandingMode) -> String {
+    format!(
+        "This is a {} server. Available endpoints:\n\
+         \x20 - GET  /           - Server info\n\
+         \x20 - GET  /v1/health  - Health check\n\
+         \x20 - GET  /ui/        - Inspector UI\n\n\
+         See {} for API documentation.",
+        branding.product_name(),
+        branding.docs_url(),
+    )
 }
 
-async fn not_found() -> (StatusCode, String) {
+async fn get_root(State(state): State<Arc<AppState>>) -> String {
+    server_info(state.branding)
+}
+
+async fn not_found(State(state): State<Arc<AppState>>) -> (StatusCode, String) {
     (
         StatusCode::NOT_FOUND,
-        format!("404 Not Found\n\n{SERVER_INFO}"),
+        format!("404 Not Found\n\n{}", server_info(state.branding)),
     )
 }
 

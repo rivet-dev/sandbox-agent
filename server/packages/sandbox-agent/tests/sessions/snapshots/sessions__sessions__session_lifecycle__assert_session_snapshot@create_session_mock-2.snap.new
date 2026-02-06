@@ -1,0 +1,7 @@
+---
+source: server/packages/sandbox-agent/tests/sessions/session_lifecycle.rs
+assertion_line: 12
+expression: value
+---
+healthy: true
+nativeSessionId: "<redacted>"
