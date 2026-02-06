@@ -40,6 +40,7 @@ use utoipa::{Modify, OpenApi, ToSchema};
 
 use crate::agent_server_logs::AgentServerLogs;
 use crate::opencode_compat::{build_opencode_router, OpenCodeAppState};
+use crate::telemetry;
 use crate::ui;
 use sandbox_agent_agent_management::agents::{
     AgentError as ManagerError, AgentId, AgentManager, InstallOptions, SpawnOptions, StreamingSpawn,
@@ -1622,6 +1623,9 @@ impl SessionManager {
             session.native_session_id = Some(format!("mock-{session_id}"));
         }
 
+        let telemetry_agent = request.agent.clone();
+        let telemetry_model = request.model.clone();
+        let telemetry_variant = request.variant.clone();
         let metadata = json!({
             "agent": request.agent,
             "agentMode": session.agent_mode,
@@ -1651,6 +1655,8 @@ impl SessionManager {
         }
 
         let native_session_id = session.native_session_id.clone();
+        let telemetry_agent_mode = session.agent_mode.clone();
+        let telemetry_permission_mode = session.permission_mode.clone();
         let mut sessions = self.sessions.lock().await;
         sessions.push(session);
         drop(sessions);
@@ -1663,6 +1669,14 @@ impl SessionManager {
         if agent_id == AgentId::Opencode {
             self.ensure_opencode_stream(session_id).await?;
         }
+
+        telemetry::log_session_created(telemetry::SessionConfig {
+            agent: telemetry_agent,
+            agent_mode: Some(telemetry_agent_mode),
+            permission_mode: Some(telemetry_permission_mode),
+            model: telemetry_model,
+            variant: telemetry_variant,
+        });
 
         Ok(CreateSessionResponse {
             healthy: true,
