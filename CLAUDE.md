@@ -80,6 +80,10 @@ The OpenCode compatibility suite lives at `server/packages/sandbox-agent/tests/o
 SANDBOX_AGENT_SKIP_INSPECTOR=1 pnpm --filter @sandbox-agent/opencode-compat-tests test
 ```
 
+## Naming
+
+- The product name is "GigaCode" (capital G, capital C). The CLI binary/package is `gigacode` (lowercase).
+
 ## Git Commits
 
 - Do not include any co-authors in commit messages (no `Co-Authored-By` lines)

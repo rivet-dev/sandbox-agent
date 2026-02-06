@@ -98,9 +98,10 @@ COPY --from=inspector-build /app/frontend/packages/inspector/dist ./frontend/pac
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/build/target \
-    cargo build -p sandbox-agent --release --target aarch64-apple-darwin && \
+    cargo build -p sandbox-agent -p gigacode --release --target aarch64-apple-darwin && \
     mkdir -p /artifacts && \
-    cp target/aarch64-apple-darwin/release/sandbox-agent /artifacts/sandbox-agent-aarch64-apple-darwin
+    cp target/aarch64-apple-darwin/release/sandbox-agent /artifacts/sandbox-agent-aarch64-apple-darwin && \
+    cp target/aarch64-apple-darwin/release/gigacode /artifacts/gigacode-aarch64-apple-darwin
 
 # Default command to show help
 CMD ["ls", "-la", "/artifacts"]

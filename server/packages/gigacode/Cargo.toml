@@ -1,0 +1,17 @@
+[package]
+name = "gigacode"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Sandbox Agent CLI with OpenCode attach by default"
+repository.workspace = true
+
+[[bin]]
+name = "gigacode"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+sandbox-agent.workspace = true
+tracing.workspace = true

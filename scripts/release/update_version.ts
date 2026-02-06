@@ -33,7 +33,17 @@ export async function updateVersion(opts: ReleaseOpts) {
 			replace: `"version": "${opts.version}"`,
 		},
 		{
+			path: "sdks/gigacode/package.json",
+			find: /"version": ".*"/,
+			replace: `"version": "${opts.version}"`,
+		},
+		{
 			path: "sdks/cli/platforms/*/package.json",
+			find: /"version": ".*"/,
+			replace: `"version": "${opts.version}"`,
+		},
+		{
+			path: "sdks/gigacode/platforms/*/package.json",
 			find: /"version": ".*"/,
 			replace: `"version": "${opts.version}"`,
 		},

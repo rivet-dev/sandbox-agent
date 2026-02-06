@@ -41,7 +41,12 @@
 		"pages": [
 			{
 				"group": "Getting started",
-				"pages": ["quickstart", "building-chat-ui", "manage-sessions", "opencode-compatibility"]
+				"pages": [
+					"quickstart",
+					"building-chat-ui",
+					"manage-sessions",
+					"opencode-compatibility"
+				]
 			},
 			{
 				"group": "Deploy",
@@ -61,18 +66,18 @@
 			},
 			{
 				"group": "Reference",
-					"pages": [
-						"cli",
-						"inspector",
-						"session-transcript-schema",
-						"cors",
+				"pages": [
+					"cli",
+					"inspector",
+					"session-transcript-schema",
+					"gigacode",
 					{
 						"group": "AI",
 						"pages": ["ai/skill", "ai/llms-txt"]
 					},
 					{
 						"group": "Advanced",
-						"pages": ["telemetry"]
+						"pages": ["daemon", "cors", "telemetry"]
 					}
 				]
 			},

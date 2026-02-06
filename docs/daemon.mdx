@@ -1,0 +1,96 @@
+---
+title: "Daemon"
+description: "Background daemon lifecycle, auto-upgrade, and management."
+icon: "microchip"
+---
+
+The sandbox-agent daemon is a background server process that stays running between sessions. Commands like `sandbox-agent opencode` and `gigacode` automatically start it when needed and restart it when the binary is updated.
+
+## How it works
+
+1. When you run `sandbox-agent opencode`, `sandbox-agent daemon start`, or `gigacode`, the CLI checks if a daemon is already healthy at the configured host and port.
+2. If no daemon is running, one is spawned in the background with stdout/stderr redirected to a log file.
+3. The CLI writes a PID file and a build ID file to track the running process and its version.
+4. On subsequent invocations, if the daemon is still running but was built from a different commit, the CLI automatically stops the old daemon and starts a new one.
+
+## Auto-upgrade
+
+Each build of sandbox-agent embeds a unique **build ID** (the git short hash, or a version-timestamp fallback). When a daemon is started, this build ID is written to a version file alongside the PID file.
+
+On every invocation of `ensure_running` (called by `opencode`, `gigacode`, and `daemon start`), the CLI compares the stored build ID against the current binary's build ID. If they differ, the running daemon is stopped and replaced automatically:
+
+```
+daemon outdated (build a1b2c3d -> f4e5d6c), restarting...
+```
+
+This means installing a new version of sandbox-agent and running any daemon-aware command is enough to upgrade — no manual restart needed.
+
+## Managing the daemon
+
+### Start
+
+Start a daemon in the background. If one is already running and healthy, this is a no-op.
+
+```bash
+sandbox-agent daemon start [OPTIONS]
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `-H, --host <HOST>` | `127.0.0.1` | Host to bind to |
+| `-p, --port <PORT>` | `2468` | Port to bind to |
+| `-t, --token <TOKEN>` | - | Authentication token |
+| `-n, --no-token` | - | Disable authentication |
+
+```bash
+sandbox-agent daemon start --no-token
+```
+
+### Stop
+
+Stop a running daemon. Sends SIGTERM and waits up to 5 seconds for a graceful shutdown before falling back to SIGKILL.
+
+```bash
+sandbox-agent daemon stop [OPTIONS]
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `-H, --host <HOST>` | `127.0.0.1` | Host of the daemon |
+| `-p, --port <PORT>` | `2468` | Port of the daemon |
+
+```bash
+sandbox-agent daemon stop
+```
+
+### Status
+
+Show whether the daemon is running, its PID, build ID, and log path.
+
+```bash
+sandbox-agent daemon status [OPTIONS]
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `-H, --host <HOST>` | `127.0.0.1` | Host of the daemon |
+| `-p, --port <PORT>` | `2468` | Port of the daemon |
+
+```bash
+sandbox-agent daemon status
+# Daemon running (PID 12345, build a1b2c3d, logs: ~/.local/share/sandbox-agent/daemon/daemon-127-0-0-1-2468.log)
+```
+
+If the daemon was started with an older binary, the status includes an `[outdated, restart recommended]` notice.
+
+## Files
+
+All daemon state files live under the sandbox-agent data directory (typically `~/.local/share/sandbox-agent/daemon/`):
+
+| File | Purpose |
+|------|---------|
+| `daemon-{host}-{port}.pid` | PID of the running daemon process |
+| `daemon-{host}-{port}.version` | Build ID of the running daemon |
+| `daemon-{host}-{port}.log` | Daemon stdout/stderr log output |
+
+Multiple daemons can run on different host/port combinations without conflicting.
