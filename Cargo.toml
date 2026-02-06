@@ -66,6 +66,7 @@ zip = { version = "0.6", default-features = false, features = ["deflate"] }
 
 # Misc
 url = "2.5"
+regex = "1.10"
 regress = "0.10"
 include_dir = "0.7"
 base64 = "0.22"
