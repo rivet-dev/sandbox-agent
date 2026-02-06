@@ -50,7 +50,7 @@ export interface paths {
   "/v1/fs/file": {
     /**
      * Read File
-     * @description Reads the content of a file.
+     * @description Reads the raw bytes of a file.
      */
     get: operations["fs_read_file"];
     /**
@@ -317,8 +317,6 @@ export interface components {
     FsActionResponse: {
       path: string;
     };
-    /** @enum {string} */
-    FsContentEncoding: "utf-8" | "base64";
     FsDeleteQuery: {
       path: string;
       recursive?: boolean | null;
@@ -338,11 +336,6 @@ export interface components {
     };
     /** @enum {string} */
     FsEntryType: "file" | "directory";
-    FsFileContent: {
-      content: string;
-      encoding: components["schemas"]["FsContentEncoding"];
-      path: string;
-    };
     FsMoveRequest: {
       from: string;
       overwrite?: boolean | null;
@@ -737,7 +730,7 @@ export interface operations {
   };
   /**
    * Read File
-   * @description Reads the content of a file.
+   * @description Reads the raw bytes of a file.
    */
   fs_read_file: {
     parameters: {
@@ -752,7 +745,7 @@ export interface operations {
       /** @description File content */
       200: {
         content: {
-          "application/json": components["schemas"]["FsFileContent"];
+          "application/octet-stream": string;
         };
       };
     };

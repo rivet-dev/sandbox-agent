@@ -27,7 +27,6 @@ const script = await fs.promises.readFile(scriptFile);
 const scriptResult = await client.writeFsFile(
   { path: "/opt/skills/list-files/list-files.cjs" },
   script,
-  { contentType: "application/javascript" },
 );
 console.log(`  Script: ${scriptResult.path} (${scriptResult.bytesWritten} bytes)`);
 
@@ -35,7 +34,6 @@ const skillMd = await fs.promises.readFile(path.resolve(__dirname, "../SKILL.md"
 const skillResult = await client.writeFsFile(
   { path: "/opt/skills/list-files/SKILL.md" },
   skillMd,
-  { contentType: "text/markdown; charset=utf-8" },
 );
 console.log(`  Skill:  ${skillResult.path} (${skillResult.bytesWritten} bytes)`);
 

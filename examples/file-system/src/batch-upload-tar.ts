@@ -46,8 +46,9 @@ for (const entry of entries) {
   console.log(`    ${entry.entryType === "directory" ? "d" : "-"} ${entry.name}`);
 }
 
-const readme = await client.readFsFile({ path: "/opt/my-project/README.md" });
-console.log(`  README.md content: ${readme.content.trim()}`);
+const readmeBytes = await client.readFsFile({ path: "/opt/my-project/README.md" });
+const readmeText = new TextDecoder().decode(readmeBytes);
+console.log(`  README.md content: ${readmeText.trim()}`);
 
 // Step 5: Start interactive session
 console.log("Step 5: Creating session...");

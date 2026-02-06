@@ -298,7 +298,7 @@
           "fs"
         ],
         "summary": "Read File",
-        "description": "Reads the content of a file.",
+        "description": "Reads the raw bytes of a file.",
         "operationId": "fs_read_file",
         "parameters": [
           {
@@ -325,9 +325,10 @@
           "200": {
             "description": "File content",
             "content": {
-              "application/json": {
+              "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/FsFileContent"
+                  "type": "string",
+                  "format": "binary"
                 }
               }
             }
@@ -1706,13 +1707,6 @@
           }
         }
       },
-      "FsContentEncoding": {
-        "type": "string",
-        "enum": [
-          "utf-8",
-          "base64"
-        ]
-      },
       "FsDeleteQuery": {
         "type": "object",
         "required": [
@@ -1780,25 +1774,6 @@
           "file",
           "directory"
         ]
-      },
-      "FsFileContent": {
-        "type": "object",
-        "required": [
-          "path",
-          "content",
-          "encoding"
-        ],
-        "properties": {
-          "content": {
-            "type": "string"
-          },
-          "encoding": {
-            "$ref": "#/components/schemas/FsContentEncoding"
-          },
-          "path": {
-            "type": "string"
-          }
-        }
       },
       "FsMoveRequest": {
         "type": "object",

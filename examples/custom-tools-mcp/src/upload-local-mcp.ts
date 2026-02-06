@@ -27,7 +27,6 @@ const bundle = await fs.promises.readFile(serverFile);
 const written = await client.writeFsFile(
   { path: "/opt/mcp/custom-tools/mcp-server.cjs" },
   bundle,
-  { contentType: "application/javascript" },
 );
 console.log(`  Written: ${written.path} (${written.bytesWritten} bytes)`);
 

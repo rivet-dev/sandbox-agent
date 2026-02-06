@@ -52,7 +52,6 @@ const client = await SandboxAgent.connect({ baseUrl });
 const written = await client.writeFsFile(
   { path: "/opt/mcp/echo-server/echo-server.js" },
   ECHO_SERVER_JS,
-  { contentType: "application/javascript" },
 );
 console.log(`  Written: ${written.path} (${written.bytesWritten} bytes)`);
 

@@ -247,7 +247,6 @@ export class SandboxAgent {
     const response = await this.requestRaw("PUT", `${API_PREFIX}/fs/file`, {
       query,
       rawBody: body,
-      contentType: "application/octet-stream",
       accept: "application/json",
     });
     const text = await response.text();
