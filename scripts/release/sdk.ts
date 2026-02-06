@@ -23,7 +23,7 @@ const CLI_PACKAGES = [
 	"@sandbox-agent/cli-win32-x64",
 	"@sandbox-agent/cli-darwin-x64",
 	"@sandbox-agent/cli-darwin-arm64",
-	"gigacode",
+	"@sandbox-agent/gigacode",
 	"@sandbox-agent/gigacode-linux-x64",
 	"@sandbox-agent/gigacode-linux-arm64",
 	"@sandbox-agent/gigacode-win32-x64",
@@ -301,7 +301,7 @@ export async function publishNpmCli(opts: ReleaseOpts) {
 		let packagePath: string;
 		if (packageName === "@sandbox-agent/cli") {
 			packagePath = join(opts.root, "sdks/cli");
-		} else if (packageName === "gigacode") {
+		} else if (packageName === "@sandbox-agent/gigacode") {
 			packagePath = join(opts.root, "sdks/gigacode");
 		} else if (packageName.startsWith("@sandbox-agent/cli-")) {
 			// Platform-specific packages: @sandbox-agent/cli-linux-x64 -> sdks/cli/platforms/linux-x64

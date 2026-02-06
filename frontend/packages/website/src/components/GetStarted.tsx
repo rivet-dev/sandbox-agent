@@ -104,7 +104,7 @@ export function GetStarted() {
             Choose the installation method that works best for your use case.
           </p>
           <p className="mt-4 text-sm text-zinc-500">
-            Quick OpenCode attach: <span className="font-mono text-white">npx gigacode</span>
+            Quick OpenCode attach: <span className="font-mono text-white">npx @sandbox-agent/gigacode</span>
           </p>
         </div>
 

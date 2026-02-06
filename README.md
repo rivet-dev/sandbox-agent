@@ -193,17 +193,6 @@ npx sandbox-agent --help
 bunx sandbox-agent --help
 ```
 
-Quick OpenCode attach (runs `sandbox-agent opencode` by default):
-
-```bash
-npx gigacode --token "$SANDBOX_TOKEN"
-```
-
-```bash
-npm install -g gigacode
-gigacode --token "$SANDBOX_TOKEN"
-```
-
 [CLI documentation](https://sandboxagent.dev/docs/cli)
 
 ### Inspector
