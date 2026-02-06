@@ -22,7 +22,7 @@ const TELEMETRY_INTERVAL_SECS: u64 = 300;
 const TELEMETRY_MIN_GAP_SECS: i64 = 300;
 
 #[derive(Debug, Serialize)]
-struct TelemetryEvent {
+struct TelemetryEvent<D: Serialize> {
     // p = project identifier
     p: String,
     // dt = unix timestamp (seconds)
@@ -34,13 +34,13 @@ struct TelemetryEvent {
     // ev = event name
     ev: String,
     // d = data payload
-    d: TelemetryData,
+    d: D,
     // v = schema version
     v: u8,
 }
 
 #[derive(Debug, Serialize)]
-struct TelemetryData {
+struct BeaconData {
     version: String,
     os: OsInfo,
     provider: ProviderInfo,
@@ -110,7 +110,7 @@ async fn attempt_send(client: &Client) {
         return;
     }
 
-    let event = build_event(dt);
+    let event = build_beacon_event(dt);
     if let Err(err) = client.post(TELEMETRY_URL).json(&event).send().await {
         tracing::debug!(error = %err, "telemetry request failed");
         return;
@@ -118,15 +118,12 @@ async fn attempt_send(client: &Client) {
     write_last_sent(dt);
 }
 
-fn build_event(dt: i64) -> TelemetryEvent {
-    let eid = load_or_create_id();
-    TelemetryEvent {
-        p: "sandbox-agent".to_string(),
+fn build_beacon_event(dt: i64) -> TelemetryEvent<BeaconData> {
+    new_event(
         dt,
-        et: "sandbox".to_string(),
-        eid,
-        ev: "entity_beacon".to_string(),
-        d: TelemetryData {
+        "sandbox",
+        "entity_beacon",
+        BeaconData {
             version: env!("CARGO_PKG_VERSION").to_string(),
             os: OsInfo {
                 name: std::env::consts::OS.to_string(),
@@ -135,6 +132,18 @@ fn build_event(dt: i64) -> TelemetryEvent {
             },
             provider: detect_provider(),
         },
+    )
+}
+
+fn new_event<D: Serialize>(dt: i64, entity_type: &str, event_name: &str, data: D) -> TelemetryEvent<D> {
+    let eid = load_or_create_id();
+    TelemetryEvent {
+        p: "sandbox-agent".to_string(),
+        dt,
+        et: entity_type.to_string(),
+        eid,
+        ev: event_name.to_string(),
+        d: data,
         v: 1,
     }
 }
@@ -438,18 +447,7 @@ fn metadata_or_none(
 }
 
 #[derive(Debug, Serialize)]
-struct SessionCreatedEvent {
-    p: String,
-    dt: i64,
-    et: String,
-    eid: String,
-    ev: String,
-    d: SessionCreatedTelemetryData,
-    v: u8,
-}
-
-#[derive(Debug, Serialize)]
-struct SessionCreatedTelemetryData {
+struct SessionCreatedData {
     version: String,
     agent: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -475,6 +473,24 @@ pub fn log_session_created(config: SessionConfig) {
         return;
     }
 
+    let event = new_event(
+        OffsetDateTime::now_utc().unix_timestamp(),
+        "session",
+        "session_created",
+        SessionCreatedData {
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            agent: config.agent,
+            agent_mode: config.agent_mode,
+            permission_mode: config.permission_mode,
+            model: config.model,
+            variant: config.variant,
+        },
+    );
+
+    spawn_send(event);
+}
+
+fn spawn_send<D: Serialize + Send + 'static>(event: TelemetryEvent<D>) {
     tokio::spawn(async move {
         let client = match Client::builder()
             .timeout(Duration::from_millis(TELEMETRY_TIMEOUT_MS))
@@ -487,27 +503,8 @@ pub fn log_session_created(config: SessionConfig) {
             }
         };
 
-        let dt = OffsetDateTime::now_utc().unix_timestamp();
-        let eid = load_or_create_id();
-        let event = SessionCreatedEvent {
-            p: "sandbox-agent".to_string(),
-            dt,
-            et: "session".to_string(),
-            eid,
-            ev: "session_created".to_string(),
-            d: SessionCreatedTelemetryData {
-                version: env!("CARGO_PKG_VERSION").to_string(),
-                agent: config.agent,
-                agent_mode: config.agent_mode,
-                permission_mode: config.permission_mode,
-                model: config.model,
-                variant: config.variant,
-            },
-            v: 1,
-        };
-
         if let Err(err) = client.post(TELEMETRY_URL).json(&event).send().await {
-            tracing::debug!(error = %err, "session telemetry request failed");
+            tracing::debug!(error = %err, "telemetry send failed");
         }
     });
 }
