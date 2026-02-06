@@ -1,0 +1,66 @@
+#!/usr/bin/env node
+const { execFileSync } = require("child_process");
+const {
+  assertExecutable,
+  formatNonExecutableBinaryMessage,
+} = require("@sandbox-agent/cli-shared");
+const fs = require("fs");
+const path = require("path");
+
+const TRUST_PACKAGES =
+  "gigacode-linux-x64 gigacode-linux-arm64 gigacode-darwin-arm64 gigacode-darwin-x64 gigacode-win32-x64";
+
+function formatHint(binPath) {
+  return formatNonExecutableBinaryMessage({
+    binPath,
+    binaryName: "gigacode",
+    trustPackages: TRUST_PACKAGES,
+    bunInstallBlocks: [
+      {
+        label: "Project install",
+        commands: [
+          `bun pm trust ${TRUST_PACKAGES}`,
+          "bun add gigacode",
+        ],
+      },
+      {
+        label: "Global install",
+        commands: [
+          `bun pm -g trust ${TRUST_PACKAGES}`,
+          "bun add -g gigacode",
+        ],
+      },
+    ],
+  });
+}
+
+const PLATFORMS = {
+  "darwin-arm64": "gigacode-darwin-arm64",
+  "darwin-x64": "gigacode-darwin-x64",
+  "linux-x64": "gigacode-linux-x64",
+  "linux-arm64": "gigacode-linux-arm64",
+  "win32-x64": "gigacode-win32-x64",
+};
+
+const key = `${process.platform}-${process.arch}`;
+const pkg = PLATFORMS[key];
+if (!pkg) {
+  console.error(`Unsupported platform: ${key}`);
+  process.exit(1);
+}
+
+try {
+  const pkgPath = require.resolve(`${pkg}/package.json`);
+  const bin = process.platform === "win32" ? "gigacode.exe" : "gigacode";
+  const binPath = path.join(path.dirname(pkgPath), "bin", bin);
+
+  if (!assertExecutable(binPath, fs)) {
+    console.error(formatHint(binPath));
+    process.exit(1);
+  }
+
+  execFileSync(binPath, process.argv.slice(2), { stdio: "inherit" });
+} catch (e) {
+  if (e.status !== undefined) process.exit(e.status);
+  throw e;
+}

@@ -103,6 +103,9 @@ export function GetStarted() {
           <p className="text-lg text-zinc-400">
             Choose the installation method that works best for your use case.
           </p>
+          <p className="mt-4 text-sm text-zinc-500">
+            Quick OpenCode attach: <span className="font-mono text-white">npx gigacode</span>
+          </p>
         </div>
 
         <div className="grid grid-cols-1 gap-6 md:grid-cols-3">

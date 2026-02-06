@@ -17,30 +17,35 @@ case $TARGET in
     DOCKERFILE="linux-x86_64.Dockerfile"
     TARGET_STAGE="x86_64-builder"
     BINARY="sandbox-agent-$TARGET"
+    GIGACODE="gigacode-$TARGET"
     ;;
   aarch64-unknown-linux-musl)
     echo "Building for Linux aarch64 musl"
     DOCKERFILE="linux-aarch64.Dockerfile"
     TARGET_STAGE="aarch64-builder"
     BINARY="sandbox-agent-$TARGET"
+    GIGACODE="gigacode-$TARGET"
     ;;
   x86_64-pc-windows-gnu)
     echo "Building for Windows x86_64"
     DOCKERFILE="windows.Dockerfile"
     TARGET_STAGE=""
     BINARY="sandbox-agent-$TARGET.exe"
+    GIGACODE="gigacode-$TARGET.exe"
     ;;
   x86_64-apple-darwin)
     echo "Building for macOS x86_64"
     DOCKERFILE="macos-x86_64.Dockerfile"
     TARGET_STAGE="x86_64-builder"
     BINARY="sandbox-agent-$TARGET"
+    GIGACODE="gigacode-$TARGET"
     ;;
   aarch64-apple-darwin)
     echo "Building for macOS aarch64"
     DOCKERFILE="macos-aarch64.Dockerfile"
     TARGET_STAGE="aarch64-builder"
     BINARY="sandbox-agent-$TARGET"
+    GIGACODE="gigacode-$TARGET"
     ;;
   *)
     echo "Unsupported target: $TARGET"
@@ -59,10 +64,13 @@ CONTAINER_ID=$(docker create "sandbox-agent-builder-$TARGET")
 mkdir -p dist
 
 docker cp "$CONTAINER_ID:/artifacts/$BINARY" "dist/"
+docker cp "$CONTAINER_ID:/artifacts/$GIGACODE" "dist/"
 docker rm "$CONTAINER_ID"
 
 if [[ "$BINARY" != *.exe ]]; then
   chmod +x "dist/$BINARY"
+  chmod +x "dist/$GIGACODE"
 fi
 
 echo "Binary saved to: dist/$BINARY"
+echo "Binary saved to: dist/$GIGACODE"

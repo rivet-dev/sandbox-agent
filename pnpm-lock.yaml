@@ -382,6 +382,42 @@ importers:
 
   sdks/cli/platforms/win32-x64: {}
 
+  sdks/gigacode:
+    dependencies:
+      '@sandbox-agent/cli-shared':
+        specifier: workspace:*
+        version: link:../cli-shared
+    optionalDependencies:
+      gigacode-darwin-arm64:
+        specifier: workspace:*
+        version: link:platforms/darwin-arm64
+      gigacode-darwin-x64:
+        specifier: workspace:*
+        version: link:platforms/darwin-x64
+      gigacode-linux-arm64:
+        specifier: workspace:*
+        version: link:platforms/linux-arm64
+      gigacode-linux-x64:
+        specifier: workspace:*
+        version: link:platforms/linux-x64
+      gigacode-win32-x64:
+        specifier: workspace:*
+        version: link:platforms/win32-x64
+    devDependencies:
+      vitest:
+        specifier: ^3.0.0
+        version: 3.2.4(@types/debug@4.1.12)(@types/node@25.2.0)(jiti@1.21.7)(tsx@4.21.0)(yaml@2.8.2)
+
+  sdks/gigacode/platforms/darwin-arm64: {}
+
+  sdks/gigacode/platforms/darwin-x64: {}
+
+  sdks/gigacode/platforms/linux-arm64: {}
+
+  sdks/gigacode/platforms/linux-x64: {}
+
+  sdks/gigacode/platforms/win32-x64: {}
+
   sdks/typescript:
     dependencies:
       '@sandbox-agent/cli-shared':

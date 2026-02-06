@@ -35,6 +35,12 @@ export async function promoteArtifacts(opts: ReleaseOpts) {
 	if (opts.latest) {
 		await uploadInstallScripts(opts, "latest");
 	}
+
+	// Upload gigacode install scripts
+	await uploadGigacodeInstallScripts(opts, opts.version);
+	if (opts.latest) {
+		await uploadGigacodeInstallScripts(opts, "latest");
+	}
 }
 
 
@@ -51,6 +57,23 @@ async function uploadInstallScripts(opts: ReleaseOpts, version: string) {
 		const uploadKey = `${PREFIX}/${version}/${scriptPath.split("/").pop() ?? ""}`;
 
 		console.log(`Uploading install script: ${uploadKey}`);
+		await uploadContentToReleases(scriptContent, uploadKey);
+	}
+}
+
+async function uploadGigacodeInstallScripts(opts: ReleaseOpts, version: string) {
+	const installScriptPaths = [
+		path.resolve(opts.root, "scripts/release/static/gigacode-install.sh"),
+		path.resolve(opts.root, "scripts/release/static/gigacode-install.ps1"),
+	];
+
+	for (const scriptPath of installScriptPaths) {
+		let scriptContent = await fs.readFile(scriptPath, "utf-8");
+		scriptContent = scriptContent.replace(/__VERSION__/g, version);
+
+		const uploadKey = `${PREFIX}/${version}/${scriptPath.split("/").pop() ?? ""}`;
+
+		console.log(`Uploading gigacode install script: ${uploadKey}`);
 		await uploadContentToReleases(scriptContent, uploadKey);
 	}
 }

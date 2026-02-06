@@ -8,6 +8,7 @@ export type NonExecutableBinaryMessageOptions = {
 	trustPackages: string;
 	bunInstallBlocks: InstallCommandBlock[];
 	genericInstallCommands?: string[];
+	binaryName?: string;
 };
 
 export type FsSubset = {
@@ -63,10 +64,16 @@ export function assertExecutable(binPath: string, fs: FsSubset): boolean {
 export function formatNonExecutableBinaryMessage(
 	options: NonExecutableBinaryMessageOptions,
 ): string {
-	const { binPath, trustPackages, bunInstallBlocks, genericInstallCommands } =
-		options;
+	const {
+		binPath,
+		trustPackages,
+		bunInstallBlocks,
+		genericInstallCommands,
+		binaryName,
+	} = options;
 
-	const lines = [`sandbox-agent binary is not executable: ${binPath}`];
+	const label = binaryName ?? "sandbox-agent";
+	const lines = [`${label} binary is not executable: ${binPath}`];
 
 	if (isBunRuntime()) {
 		lines.push(

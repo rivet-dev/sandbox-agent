@@ -153,11 +153,19 @@ jobs:
 
           COMMIT_SHA_SHORT="${GITHUB_SHA::7}"
           BINARY_PATH="dist/sandbox-agent-${{ matrix.target }}${{ matrix.binary_ext }}"
+          GIGACODE_PATH="dist/gigacode-${{ matrix.target }}${{ matrix.binary_ext }}"
 
           # Must specify --checksum-algorithm for compatibility with R2
           aws s3 cp \
             "${BINARY_PATH}" \
             "s3://rivet-releases/sandbox-agent/${COMMIT_SHA_SHORT}/binaries/sandbox-agent-${{ matrix.target }}${{ matrix.binary_ext }}" \
+            --region auto \
+            --endpoint-url https://2a94c6a0ced8d35ea63cddc86c2681e7.r2.cloudflarestorage.com \
+            --checksum-algorithm CRC32
+
+          aws s3 cp \
+            "${GIGACODE_PATH}" \
+            "s3://rivet-releases/sandbox-agent/${COMMIT_SHA_SHORT}/binaries/gigacode-${{ matrix.target }}${{ matrix.binary_ext }}" \
             --region auto \
             --endpoint-url https://2a94c6a0ced8d35ea63cddc86c2681e7.r2.cloudflarestorage.com \
             --checksum-algorithm CRC32

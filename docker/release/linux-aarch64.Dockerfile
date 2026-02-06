@@ -66,9 +66,10 @@ COPY --from=inspector-build /app/frontend/packages/inspector/dist ./frontend/pac
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/build/target \
-    cargo build -p sandbox-agent --release --target aarch64-unknown-linux-musl && \
+    cargo build -p sandbox-agent -p gigacode --release --target aarch64-unknown-linux-musl && \
     mkdir -p /artifacts && \
-    cp target/aarch64-unknown-linux-musl/release/sandbox-agent /artifacts/sandbox-agent-aarch64-unknown-linux-musl
+    cp target/aarch64-unknown-linux-musl/release/sandbox-agent /artifacts/sandbox-agent-aarch64-unknown-linux-musl && \
+    cp target/aarch64-unknown-linux-musl/release/gigacode /artifacts/gigacode-aarch64-unknown-linux-musl
 
 # Default command to show help
 CMD ["ls", "-la", "/artifacts"]

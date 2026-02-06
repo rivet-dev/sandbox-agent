@@ -1,0 +1,32 @@
+{
+  "name": "gigacode",
+  "version": "0.1.6",
+  "description": "Gigacode CLI (sandbox-agent with OpenCode attach by default)",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rivet-dev/sandbox-agent"
+  },
+  "bin": {
+    "gigacode": "bin/gigacode"
+  },
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@sandbox-agent/cli-shared": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "^3.0.0"
+  },
+  "optionalDependencies": {
+    "gigacode-linux-x64": "workspace:*",
+    "gigacode-linux-arm64": "workspace:*",
+    "gigacode-darwin-arm64": "workspace:*",
+    "gigacode-darwin-x64": "workspace:*",
+    "gigacode-win32-x64": "workspace:*"
+  },
+  "files": [
+    "bin"
+  ]
+}

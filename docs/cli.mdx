@@ -58,7 +58,7 @@ sandbox-agent install-agent claude --reinstall
 
 ## OpenCode (Experimental)
 
-Start a sandbox-agent server and attach an OpenCode session (uses `opencode attach`):
+Start (or reuse) a sandbox-agent daemon and attach an OpenCode session (uses `opencode attach`):
 
 ```bash
 sandbox-agent opencode [OPTIONS]
@@ -77,7 +77,54 @@ sandbox-agent opencode [OPTIONS]
 sandbox-agent opencode --token "$TOKEN"
 ```
 
-Requires the `opencode` binary to be installed (or set `OPENCODE_BIN` / `--opencode-bin`).
+The daemon logs to a per-host log file under the sandbox-agent data directory (for example, `~/.local/share/sandbox-agent/daemon/daemon-127-0-0-1-2468.log`).
+
+Requires the `opencode` binary to be installed (or set `OPENCODE_BIN` / `--opencode-bin`). If it is not found on `PATH`, sandbox-agent installs it automatically.
+
+---
+
+## Daemon
+
+Manage the background daemon. See the [Daemon](/daemon) docs for details on lifecycle and auto-upgrade.
+
+### Start
+
+```bash
+sandbox-agent daemon start [OPTIONS]
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `-H, --host <HOST>` | `127.0.0.1` | Host to bind to |
+| `-p, --port <PORT>` | `2468` | Port to bind to |
+| `-t, --token <TOKEN>` | - | Authentication token |
+| `-n, --no-token` | - | Disable authentication |
+
+```bash
+sandbox-agent daemon start --no-token
+```
+
+### Stop
+
+```bash
+sandbox-agent daemon stop [OPTIONS]
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `-H, --host <HOST>` | `127.0.0.1` | Host of the daemon |
+| `-p, --port <PORT>` | `2468` | Port of the daemon |
+
+### Status
+
+```bash
+sandbox-agent daemon status [OPTIONS]
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `-H, --host <HOST>` | `127.0.0.1` | Host of the daemon |
+| `-p, --port <PORT>` | `2468` | Port of the daemon |
 
 ---
 
