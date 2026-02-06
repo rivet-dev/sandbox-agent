@@ -55,6 +55,32 @@ static USER_MESSAGE_COUNTER: AtomicU64 = AtomicU64::new(1);
 const ANTHROPIC_MODELS_URL: &str = "https://api.anthropic.com/v1/models?beta=true";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 
+fn claude_oauth_fallback_models() -> AgentModelsResponse {
+    AgentModelsResponse {
+        models: vec![
+            AgentModelInfo {
+                id: "default".to_string(),
+                name: Some("Default (recommended)".to_string()),
+                variants: None,
+                default_variant: None,
+            },
+            AgentModelInfo {
+                id: "opus".to_string(),
+                name: Some("Opus".to_string()),
+                variants: None,
+                default_variant: None,
+            },
+            AgentModelInfo {
+                id: "haiku".to_string(),
+                name: Some("Haiku".to_string()),
+                variants: None,
+                default_variant: None,
+            },
+        ],
+        default_model: Some("default".to_string()),
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BrandingMode {
     #[default]
@@ -3318,6 +3344,13 @@ impl SessionManager {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
+            if matches!(cred.auth_type, AuthType::Oauth) {
+                tracing::warn!(
+                    status = %status,
+                    "Anthropic model list rejected OAuth credentials; using Claude OAuth fallback models"
+                );
+                return Ok(claude_oauth_fallback_models());
+            }
             return Err(SandboxError::StreamError {
                 message: format!("Anthropic models request failed {status}: {body}"),
             });
@@ -3370,6 +3403,13 @@ impl SessionManager {
         models.sort_by(|a, b| a.id.cmp(&b.id));
         if default_model.is_none() {
             default_model = models.first().map(|model| model.id.clone());
+        }
+
+        if models.is_empty() && matches!(cred.auth_type, AuthType::Oauth) {
+            tracing::warn!(
+                "Anthropic model list was empty for OAuth credentials; using Claude OAuth fallback models"
+            );
+            return Ok(claude_oauth_fallback_models());
         }
 
         Ok(AgentModelsResponse {

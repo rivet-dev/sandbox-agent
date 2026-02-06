@@ -282,6 +282,22 @@ pub fn extract_all_credentials(options: &CredentialExtractionOptions) -> Extract
             auth_type: AuthType::ApiKey,
             provider: "anthropic".to_string(),
         });
+    } else if options.include_oauth {
+        if let Ok(value) = std::env::var("CLAUDE_CODE_OAUTH_TOKEN") {
+            result.anthropic = Some(ProviderCredentials {
+                api_key: value,
+                source: "environment".to_string(),
+                auth_type: AuthType::Oauth,
+                provider: "anthropic".to_string(),
+            });
+        } else if let Ok(value) = std::env::var("ANTHROPIC_AUTH_TOKEN") {
+            result.anthropic = Some(ProviderCredentials {
+                api_key: value,
+                source: "environment".to_string(),
+                auth_type: AuthType::Oauth,
+                provider: "anthropic".to_string(),
+            });
+        }
     }
 
     if let Ok(value) = std::env::var("OPENAI_API_KEY") {
@@ -374,5 +390,136 @@ fn is_expired_rfc3339(value: &str) -> bool {
     match OffsetDateTime::parse(value, &time::format_description::well_known::Rfc3339) {
         Ok(expiry) => expiry < OffsetDateTime::now_utc(),
         Err(_) => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::sync::Mutex;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    const ANTHROPIC_ENV_KEYS: [&str; 5] = [
+        "ANTHROPIC_API_KEY",
+        "CLAUDE_API_KEY",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "ANTHROPIC_AUTH_TOKEN",
+        "OPENAI_API_KEY",
+    ];
+
+    fn with_env(mutations: &[(&str, Option<&str>)], test_fn: impl FnOnce()) {
+        let _guard = ENV_LOCK.lock().expect("env lock poisoned");
+
+        let mut snapshot: HashMap<String, Option<String>> = HashMap::new();
+        for key in ANTHROPIC_ENV_KEYS {
+            snapshot.insert(key.to_string(), std::env::var(key).ok());
+        }
+
+        for (key, value) in mutations {
+            match value {
+                Some(value) => std::env::set_var(key, value),
+                None => std::env::remove_var(key),
+            }
+        }
+
+        test_fn();
+
+        for (key, value) in snapshot {
+            match value {
+                Some(value) => std::env::set_var(key, value),
+                None => std::env::remove_var(key),
+            }
+        }
+    }
+
+    fn empty_home_dir() -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time before unix epoch")
+            .as_nanos();
+        let path =
+            std::env::temp_dir().join(format!("sandbox-agent-agent-credentials-test-{nanos}"));
+        fs::create_dir_all(&path).expect("failed to create temp home dir");
+        path
+    }
+
+    #[test]
+    fn extract_all_credentials_reads_claude_code_oauth_env() {
+        with_env(
+            &[
+                ("ANTHROPIC_API_KEY", None),
+                ("CLAUDE_API_KEY", None),
+                ("CLAUDE_CODE_OAUTH_TOKEN", Some("oauth-token-123")),
+                ("ANTHROPIC_AUTH_TOKEN", None),
+            ],
+            || {
+                let options = CredentialExtractionOptions {
+                    home_dir: Some(empty_home_dir()),
+                    include_oauth: true,
+                };
+                let creds = extract_all_credentials(&options);
+                let anthropic = creds
+                    .anthropic
+                    .expect("expected anthropic credentials from oauth env");
+
+                assert_eq!(anthropic.api_key, "oauth-token-123");
+                assert_eq!(anthropic.source, "environment");
+                assert_eq!(anthropic.auth_type, AuthType::Oauth);
+                assert_eq!(anthropic.provider, "anthropic");
+            },
+        );
+    }
+
+    #[test]
+    fn extract_all_credentials_ignores_oauth_env_when_disabled() {
+        with_env(
+            &[
+                ("ANTHROPIC_API_KEY", None),
+                ("CLAUDE_API_KEY", None),
+                ("CLAUDE_CODE_OAUTH_TOKEN", Some("oauth-token-123")),
+                ("ANTHROPIC_AUTH_TOKEN", None),
+            ],
+            || {
+                let options = CredentialExtractionOptions {
+                    home_dir: Some(empty_home_dir()),
+                    include_oauth: false,
+                };
+                let creds = extract_all_credentials(&options);
+                assert!(
+                    creds.anthropic.is_none(),
+                    "oauth env should be ignored when include_oauth is false"
+                );
+            },
+        );
+    }
+
+    #[test]
+    fn extract_all_credentials_prefers_api_key_over_oauth_env() {
+        with_env(
+            &[
+                ("ANTHROPIC_API_KEY", Some("sk-ant-priority")),
+                ("CLAUDE_API_KEY", None),
+                ("CLAUDE_CODE_OAUTH_TOKEN", Some("oauth-token-123")),
+                ("ANTHROPIC_AUTH_TOKEN", Some("oauth-token-456")),
+            ],
+            || {
+                let options = CredentialExtractionOptions {
+                    home_dir: Some(empty_home_dir()),
+                    include_oauth: true,
+                };
+                let creds = extract_all_credentials(&options);
+                let anthropic = creds
+                    .anthropic
+                    .expect("expected anthropic credentials from api key env");
+
+                assert_eq!(anthropic.api_key, "sk-ant-priority");
+                assert_eq!(anthropic.auth_type, AuthType::ApiKey);
+            },
+        );
     }
 }
