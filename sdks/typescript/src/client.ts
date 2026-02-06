@@ -8,6 +8,18 @@ import type {
   CreateSessionResponse,
   EventsQuery,
   EventsResponse,
+  FsActionResponse,
+  FsDeleteQuery,
+  FsEntriesQuery,
+  FsEntry,
+  FsMoveRequest,
+  FsMoveResponse,
+  FsPathQuery,
+  FsSessionQuery,
+  FsStat,
+  FsUploadBatchQuery,
+  FsUploadBatchResponse,
+  FsWriteResponse,
   HealthResponse,
   MessageRequest,
   PermissionReplyRequest,
@@ -52,6 +64,8 @@ type QueryValue = string | number | boolean | null | undefined;
 type RequestOptions = {
   query?: Record<string, QueryValue>;
   body?: unknown;
+  rawBody?: BodyInit;
+  contentType?: string;
   headers?: HeadersInit;
   accept?: string;
   signal?: AbortSignal;
@@ -216,6 +230,57 @@ export class SandboxAgent {
     await this.requestJson("POST", `${API_PREFIX}/sessions/${encodeURIComponent(sessionId)}/terminate`);
   }
 
+  async listFsEntries(query?: FsEntriesQuery): Promise<FsEntry[]> {
+    return this.requestJson("GET", `${API_PREFIX}/fs/entries`, { query });
+  }
+
+  async readFsFile(query: FsPathQuery): Promise<Uint8Array> {
+    const response = await this.requestRaw("GET", `${API_PREFIX}/fs/file`, {
+      query,
+      accept: "application/octet-stream",
+    });
+    const buffer = await response.arrayBuffer();
+    return new Uint8Array(buffer);
+  }
+
+  async writeFsFile(query: FsPathQuery, body: BodyInit): Promise<FsWriteResponse> {
+    const response = await this.requestRaw("PUT", `${API_PREFIX}/fs/file`, {
+      query,
+      rawBody: body,
+      contentType: "application/octet-stream",
+      accept: "application/json",
+    });
+    const text = await response.text();
+    return text ? (JSON.parse(text) as FsWriteResponse) : { path: "", bytesWritten: 0 };
+  }
+
+  async deleteFsEntry(query: FsDeleteQuery): Promise<FsActionResponse> {
+    return this.requestJson("DELETE", `${API_PREFIX}/fs/entry`, { query });
+  }
+
+  async mkdirFs(query: FsPathQuery): Promise<FsActionResponse> {
+    return this.requestJson("POST", `${API_PREFIX}/fs/mkdir`, { query });
+  }
+
+  async moveFs(request: FsMoveRequest, query?: FsSessionQuery): Promise<FsMoveResponse> {
+    return this.requestJson("POST", `${API_PREFIX}/fs/move`, { query, body: request });
+  }
+
+  async statFs(query: FsPathQuery): Promise<FsStat> {
+    return this.requestJson("GET", `${API_PREFIX}/fs/stat`, { query });
+  }
+
+  async uploadFsBatch(body: BodyInit, query?: FsUploadBatchQuery): Promise<FsUploadBatchResponse> {
+    const response = await this.requestRaw("POST", `${API_PREFIX}/fs/upload-batch`, {
+      query,
+      rawBody: body,
+      contentType: "application/x-tar",
+      accept: "application/json",
+    });
+    const text = await response.text();
+    return text ? (JSON.parse(text) as FsUploadBatchResponse) : { paths: [], truncated: false };
+  }
+
   async dispose(): Promise<void> {
     if (this.spawnHandle) {
       await this.spawnHandle.dispose();
@@ -256,7 +321,15 @@ export class SandboxAgent {
     }
 
     const init: RequestInit = { method, headers, signal: options.signal };
-    if (options.body !== undefined) {
+    if (options.rawBody !== undefined && options.body !== undefined) {
+      throw new Error("requestRaw received both rawBody and body");
+    }
+    if (options.rawBody !== undefined) {
+      if (options.contentType) {
+        headers.set("Content-Type", options.contentType);
+      }
+      init.body = options.rawBody;
+    } else if (options.body !== undefined) {
       headers.set("Content-Type", "application/json");
       init.body = JSON.stringify(options.body);
     }

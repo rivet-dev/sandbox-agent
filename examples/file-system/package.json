@@ -1,0 +1,19 @@
+{
+  "name": "@sandbox-agent/example-file-system",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/batch-upload-tar.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@sandbox-agent/example-shared": "workspace:*",
+    "sandbox-agent": "workspace:*",
+    "tar": "^7"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "tsx": "latest",
+    "typescript": "latest"
+  }
+}

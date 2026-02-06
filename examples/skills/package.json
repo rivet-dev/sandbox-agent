@@ -1,0 +1,20 @@
+{
+  "name": "@sandbox-agent/example-skills",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:script": "tsup src/greeter.ts --format cjs --platform node --target node18 --minify --out-dir dist",
+    "start": "tsx src/upload-and-use.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@sandbox-agent/example-shared": "workspace:*",
+    "sandbox-agent": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "tsup": "latest",
+    "tsx": "latest",
+    "typescript": "latest"
+  }
+}

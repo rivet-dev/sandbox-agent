@@ -47,6 +47,16 @@ Universal schema guidance:
 - On parse failures, emit an `agent.unparsed` event (source=daemon, synthetic=true) and treat it as a test failure. Preserve raw payloads when `include_raw=true`.
 - Track subagent support in `docs/conversion.md`. For now, normalize subagent activity into normal message/tool flow, but revisit explicit subagent modeling later.
 - Keep the FAQ in `README.md` and `frontend/packages/website/src/components/FAQ.tsx` in sync. When adding or modifying FAQ entries, update both files.
+- Update `research/wip-agent-support.md` as agent support changes are implemented.
+
+### OpenAPI / utoipa requirements
+
+Every `#[utoipa::path(...)]` handler function must have a doc comment where:
+- The **first line** becomes the OpenAPI `summary` (short human-readable title, e.g. `"List Agents"`). This is used as the sidebar label and page heading in the docs site.
+- The **remaining lines** become the OpenAPI `description` (one-sentence explanation of what the endpoint does).
+- Every `responses(...)` entry must have a `description` (no empty descriptions).
+
+When adding or modifying endpoints, regenerate `docs/openapi.json` and verify titles render correctly in the docs site.
 
 ### CLI ⇄ HTTP endpoint map (keep in sync)
 
@@ -64,6 +74,14 @@ Universal schema guidance:
 - `sandbox-agent api sessions reply-question` ↔ `POST /v1/sessions/{sessionId}/questions/{questionId}/reply`
 - `sandbox-agent api sessions reject-question` ↔ `POST /v1/sessions/{sessionId}/questions/{questionId}/reject`
 - `sandbox-agent api sessions reply-permission` ↔ `POST /v1/sessions/{sessionId}/permissions/{permissionId}/reply`
+- `sandbox-agent api fs entries` ↔ `GET /v1/fs/entries`
+- `sandbox-agent api fs read` ↔ `GET /v1/fs/file`
+- `sandbox-agent api fs write` ↔ `PUT /v1/fs/file`
+- `sandbox-agent api fs delete` ↔ `DELETE /v1/fs/entry`
+- `sandbox-agent api fs mkdir` ↔ `POST /v1/fs/mkdir`
+- `sandbox-agent api fs move` ↔ `POST /v1/fs/move`
+- `sandbox-agent api fs stat` ↔ `GET /v1/fs/stat`
+- `sandbox-agent api fs upload-batch` ↔ `POST /v1/fs/upload-batch`
 
 ## OpenCode CLI (Experimental)
 

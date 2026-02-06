@@ -1,0 +1,54 @@
+---
+title: "Skills"
+description: "Auto-load skills into agent sessions."
+sidebarTitle: "Skills"
+icon: "sparkles"
+---
+
+Skills are local instruction bundles stored in `SKILL.md` files. Sandbox Agent can link skill directories into agent-specific skill paths at session start with the `skills.paths` field.
+
+## How skills.paths Works
+
+- Each path is resolved relative to the server working directory when it is a relative path.
+- The path can point to a skill directory or directly to `SKILL.md`.
+- Sandbox Agent links the skill directory into project-local skill roots (e.g. `./.claude/skills/<name>`, `./.agents/skills/<name>`).
+
+## Session Config
+
+<CodeGroup>
+
+```ts TypeScript
+import { SandboxAgent } from "sandbox-agent";
+
+const client = await SandboxAgent.connect({
+  baseUrl: "http://127.0.0.1:2468",
+  token: process.env.SANDBOX_TOKEN,
+});
+
+await client.createSession("claude-skills", {
+  agent: "claude",
+  skills: {
+    paths: ["/workspace/.agents/skills/agent-browser", "/workspace/custom-skill"],
+  },
+});
+```
+
+```bash cURL
+curl -X POST "http://127.0.0.1:2468/v1/sessions/claude-skills" \
+  -H "Authorization: Bearer $SANDBOX_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agent": "claude",
+    "skills": {
+      "paths": ["/workspace/.agents/skills/agent-browser", "/workspace/custom-skill"]
+    }
+  }'
+```
+
+</CodeGroup>
+
+You can pass either a skill directory or a direct `SKILL.md` path. Each skill directory must contain `SKILL.md`. See [Skill authoring best practices](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices) for tips on writing effective skills.
+
+## Custom Skills
+
+To write, upload, and configure your own skills inside the sandbox, see [Custom Tools](/custom-tools).

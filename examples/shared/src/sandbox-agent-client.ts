@@ -7,7 +7,7 @@ import { createInterface } from "node:readline/promises";
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { SandboxAgent } from "sandbox-agent";
-import type { PermissionEventData, QuestionEventData } from "sandbox-agent";
+import type { CreateSessionRequest, PermissionEventData, QuestionEventData } from "sandbox-agent";
 
 function normalizeBaseUrl(baseUrl: string): string {
   return baseUrl.replace(/\/+$/, "");
@@ -117,15 +117,21 @@ function detectAgent(): string {
   return "claude";
 }
 
-export async function runPrompt(baseUrl: string): Promise<void> {
+export async function runPrompt(baseUrl: string, sessionConfig?: Partial<CreateSessionRequest>): Promise<void> {
   console.log(`UI: ${buildInspectorUrl({ baseUrl })}`);
 
   const client = await SandboxAgent.connect({ baseUrl });
 
-  const agent = detectAgent();
+  const agent = sessionConfig?.agent || detectAgent();
   console.log(`Using agent: ${agent}`);
+  if (sessionConfig?.mcp) {
+    console.log(`MCP servers: ${Object.keys(sessionConfig.mcp).join(", ")}`);
+  }
+  if (sessionConfig?.skills) {
+    console.log(`Skills: ${sessionConfig.skills.paths.join(", ")}`);
+  }
   const sessionId = randomUUID();
-  await client.createSession(sessionId, { agent });
+  await client.createSession(sessionId, { ...sessionConfig, agent });
   console.log(`Session ${sessionId}. Press Ctrl+C to quit.`);
 
   const rl = createInterface({ input: process.stdin, output: process.stdout });

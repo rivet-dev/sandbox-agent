@@ -406,6 +406,8 @@ async fn ensure_backing_session(
         model: model.clone(),
         variant: variant.clone(),
         agent_version: None,
+        mcp: None,
+        skills: None,
     };
     match state
         .inner
@@ -3406,7 +3408,7 @@ async fn oc_session_message_create(
         if let Err(err) = state
             .inner
             .session_manager()
-            .send_message(session_id.clone(), prompt_text)
+            .send_message(session_id.clone(), prompt_text, Vec::new())
             .await
         {
             tracing::warn!(

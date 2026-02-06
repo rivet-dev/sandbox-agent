@@ -44,8 +44,7 @@
 				"pages": [
 					"quickstart",
 					"building-chat-ui",
-					"manage-sessions",
-					"opencode-compatibility"
+					"manage-sessions"
 				]
 			},
 			{
@@ -65,11 +64,26 @@
 				"pages": ["sdks/typescript", "sdks/python"]
 			},
 			{
+				"group": "Agent Features",
+				"pages": [
+					"agent-sessions",
+					"attachments",
+					"skills",
+					"mcp",
+					"custom-tools"
+				]
+			},
+			{
+				"group": "Features",
+				"pages": ["file-system"]
+			},
+			{
 				"group": "Reference",
 				"pages": [
 					"cli",
 					"inspector",
 					"session-transcript-schema",
+					"opencode-compatibility",
 					"gigacode",
 					{
 						"group": "AI",

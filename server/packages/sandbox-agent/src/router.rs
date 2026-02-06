@@ -1,94 +1,72 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::convert::Infallible;
-use std::io::{BufRead, BufReader, Write};
+use std::fs;
+use std::io::{BufRead, BufReader, Cursor, Write};
 use std::net::TcpListener;
-use std::path::PathBuf;
-use std::process::Stdio;
+use std::path::{Path as StdPath, PathBuf};
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
+use axum::body::Bytes;
 use axum::extract::{Path, Query, State};
-use axum::http::{HeaderMap, HeaderValue, Request, StatusCode};
+use axum::http::{header, HeaderMap, HeaderValue, Request, StatusCode};
 use axum::middleware::Next;
 use axum::response::sse::Event;
 use axum::response::{IntoResponse, Response, Sse};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::Json;
 use axum::Router;
-use base64::Engine;
 use futures::{stream, StreamExt};
 use reqwest::Client;
 use sandbox_agent_error::{AgentError, ErrorType, ProblemDetails, SandboxError};
 use sandbox_agent_universal_agent_schema::{
     codex as codex_schema, convert_amp, convert_claude, convert_codex, convert_opencode,
-    turn_completed_event, AgentUnparsedData, ContentPart, ErrorData, EventConversion, EventSource,
-    FileAction, ItemDeltaData, ItemEventData, ItemKind, ItemRole, ItemStatus, PermissionEventData,
+    AgentUnparsedData, ContentPart, ErrorData, EventConversion, EventSource, FileAction,
+    ItemDeltaData, ItemEventData, ItemKind, ItemRole, ItemStatus, PermissionEventData,
     PermissionStatus, QuestionEventData, QuestionStatus, ReasoningVisibility, SessionEndReason,
     SessionEndedData, SessionStartedData, StderrOutput, TerminatedBy, UniversalEvent,
     UniversalEventData, UniversalEventType, UniversalItem,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use tokio::sync::{broadcast, mpsc, oneshot, Mutex};
 use tokio::time::sleep;
 use tokio_stream::wrappers::BroadcastStream;
 use tower_http::trace::TraceLayer;
+use base64::Engine;
+use tar::Archive;
+use toml_edit::{value, Array, Document, Item, Table};
 use tracing::Span;
 use utoipa::{Modify, OpenApi, ToSchema};
 
 use crate::agent_server_logs::AgentServerLogs;
 use crate::opencode_compat::{build_opencode_router, OpenCodeAppState};
-use crate::telemetry;
 use crate::ui;
 use sandbox_agent_agent_management::agents::{
     AgentError as ManagerError, AgentId, AgentManager, InstallOptions, SpawnOptions, StreamingSpawn,
 };
 use sandbox_agent_agent_management::credentials::{
-    extract_all_credentials, AuthType, CredentialExtractionOptions, ExtractedCredentials,
-    ProviderCredentials,
+    extract_all_credentials, CredentialExtractionOptions, ExtractedCredentials,
 };
 
 const MOCK_EVENT_DELAY_MS: u64 = 200;
 static USER_MESSAGE_COUNTER: AtomicU64 = AtomicU64::new(1);
-const ANTHROPIC_MODELS_URL: &str = "https://api.anthropic.com/v1/models?beta=true";
-const ANTHROPIC_VERSION: &str = "2023-06-01";
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum BrandingMode {
-    #[default]
-    SandboxAgent,
-    Gigacode,
-}
-
-impl BrandingMode {
-    pub fn product_name(&self) -> &'static str {
-        match self {
-            BrandingMode::SandboxAgent => "Sandbox Agent",
-            BrandingMode::Gigacode => "Gigacode",
-        }
-    }
-
-    pub fn docs_url(&self) -> &'static str {
-        match self {
-            BrandingMode::SandboxAgent => "https://sandboxagent.dev",
-            BrandingMode::Gigacode => "https://gigacode.dev",
-        }
-    }
-}
+const SKILL_ROOTS: [&str; 3] = [".agents/skills", ".claude/skills", ".opencode/skill"];
 
 #[derive(Debug)]
 pub struct AppState {
     auth: AuthConfig,
     agent_manager: Arc<AgentManager>,
     session_manager: Arc<SessionManager>,
-    pub branding: BrandingMode,
+    pub(crate) branding: BrandingMode,
 }
 
 impl AppState {
     pub fn new(auth: AuthConfig, agent_manager: AgentManager) -> Self {
-        Self::with_branding(auth, agent_manager, BrandingMode::default())
+        Self::with_branding(auth, agent_manager, BrandingMode::SandboxAgent)
     }
 
     pub fn with_branding(
@@ -129,6 +107,21 @@ impl AuthConfig {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum BrandingMode {
+    SandboxAgent,
+    Gigacode,
+}
+
+impl BrandingMode {
+    pub fn product_name(&self) -> &'static str {
+        match self {
+            BrandingMode::SandboxAgent => "Sandbox Agent",
+            BrandingMode::Gigacode => "Gigacode",
+        }
+    }
+}
+
 pub fn build_router(state: AppState) -> Router {
     build_router_with_state(Arc::new(state)).0
 }
@@ -162,6 +155,13 @@ pub fn build_router_with_state(shared: Arc<AppState>) -> (Router, Arc<AppState>)
             "/sessions/:session_id/permissions/:permission_id/reply",
             post(reply_permission),
         )
+        .route("/fs/entries", get(fs_entries))
+        .route("/fs/file", get(fs_read_file).put(fs_write_file))
+        .route("/fs/entry", delete(fs_delete_entry))
+        .route("/fs/mkdir", post(fs_mkdir))
+        .route("/fs/move", post(fs_move))
+        .route("/fs/stat", get(fs_stat))
+        .route("/fs/upload-batch", post(fs_upload_batch))
         .with_state(shared.clone());
 
     if shared.auth.token.is_some() {
@@ -185,15 +185,12 @@ pub fn build_router_with_state(shared: Arc<AppState>) -> (Router, Arc<AppState>)
         ));
     }
 
-    let root_router = Router::new()
+    let mut router = Router::new()
         .route("/", get(get_root))
-        .fallback(not_found)
-        .with_state(shared.clone());
-
-    let mut router = root_router
         .nest("/v1", v1_router)
         .nest("/opencode", opencode_router)
-        .merge(opencode_root_router);
+        .merge(opencode_root_router)
+        .fallback(not_found);
 
     if ui::is_enabled() {
         router = router.merge(ui::router());
@@ -269,7 +266,15 @@ pub async fn shutdown_servers(state: &Arc<AppState>) {
         get_events_sse,
         reply_question,
         reject_question,
-        reply_permission
+        reply_permission,
+        fs_entries,
+        fs_read_file,
+        fs_write_file,
+        fs_delete_entry,
+        fs_mkdir,
+        fs_move,
+        fs_stat,
+        fs_upload_batch
     ),
     components(
         schemas(
@@ -287,8 +292,28 @@ pub async fn shutdown_servers(state: &Arc<AppState>) {
             SessionListResponse,
             HealthResponse,
             CreateSessionRequest,
+            SkillsConfig,
+            McpCommand,
+            McpRemoteTransport,
+            McpOAuthConfig,
+            McpOAuthConfigOrDisabled,
+            McpServerConfig,
             CreateSessionResponse,
+            FsPathQuery,
+            FsEntriesQuery,
+            FsSessionQuery,
+            FsDeleteQuery,
+            FsUploadBatchQuery,
+            FsEntryType,
+            FsEntry,
+            FsStat,
+            FsWriteResponse,
+            FsMoveRequest,
+            FsMoveResponse,
+            FsActionResponse,
+            FsUploadBatchResponse,
             MessageRequest,
+            MessageAttachment,
             EventsQuery,
             TurnStreamQuery,
             EventsResponse,
@@ -327,7 +352,8 @@ pub async fn shutdown_servers(state: &Arc<AppState>) {
     tags(
         (name = "meta", description = "Service metadata"),
         (name = "agents", description = "Agent management"),
-        (name = "sessions", description = "Session management")
+        (name = "sessions", description = "Session management"),
+        (name = "fs", description = "Filesystem operations")
     ),
     modifiers(&ServerAddon)
 )]
@@ -366,6 +392,7 @@ struct SessionState {
     permission_mode: String,
     model: Option<String>,
     variant: Option<String>,
+    working_dir: PathBuf,
     native_session_id: Option<String>,
     ended: bool,
     ended_exit_code: Option<i32>,
@@ -416,6 +443,9 @@ impl SessionState {
             request.permission_mode.as_deref(),
         )?;
         let (broadcaster, _rx) = broadcast::channel(256);
+        let working_dir = std::env::current_dir().map_err(|err| SandboxError::StreamError {
+            message: err.to_string(),
+        })?;
 
         Ok(Self {
             session_id,
@@ -424,6 +454,7 @@ impl SessionState {
             permission_mode,
             model: request.model.clone(),
             variant: request.variant.clone(),
+            working_dir,
             native_session_id: None,
             ended: false,
             ended_exit_code: None,
@@ -1600,6 +1631,33 @@ impl SessionManager {
             .find(|session| session.session_id == session_id)
     }
 
+    async fn session_working_dir(&self, session_id: &str) -> Result<PathBuf, SandboxError> {
+        let sessions = self.sessions.lock().await;
+        let session = Self::session_ref(&sessions, session_id).ok_or_else(|| {
+            SandboxError::SessionNotFound {
+                session_id: session_id.to_string(),
+            }
+        })?;
+        Ok(session.working_dir.clone())
+    }
+
+    pub(crate) async fn set_session_overrides(
+        &self,
+        session_id: &str,
+        model: Option<String>,
+        variant: Option<String>,
+    ) -> Result<(), SandboxError> {
+        let mut sessions = self.sessions.lock().await;
+        let session = Self::session_mut(&mut sessions, session_id).ok_or_else(|| {
+            SandboxError::SessionNotFound {
+                session_id: session_id.to_string(),
+            }
+        })?;
+        session.model = model;
+        session.variant = variant;
+        Ok(())
+    }
+
     /// Read agent stderr for error diagnostics
     fn read_agent_stderr(&self, agent: AgentId) -> Option<StderrOutput> {
         let logs = AgentServerLogs::new(self.server_manager.log_base_dir.clone(), agent.as_str());
@@ -1643,6 +1701,29 @@ impl SessionManager {
             install_result.map_err(|err| map_install_error(agent_id, err))?;
         }
 
+        let skill_dirs = if let Some(skills) = &request.skills {
+            let paths = skills.paths.clone();
+            Some(
+                tokio::task::spawn_blocking(move || install_skill_links(&paths))
+                    .await
+                    .map_err(|err| SandboxError::StreamError {
+                        message: err.to_string(),
+                    })??,
+            )
+        } else {
+            None
+        };
+
+        if let Some(mcp) = &request.mcp {
+            self.apply_mcp_config(agent_id, mcp).await?;
+        }
+
+        if agent_id == AgentId::Opencode {
+            if let Some(skill_dirs) = skill_dirs.as_ref() {
+                self.apply_opencode_skills(skill_dirs).await?;
+            }
+        }
+
         let mut session = SessionState::new(session_id.clone(), agent_id, &request)?;
         if agent_id == AgentId::Opencode {
             let opencode_session_id = self.create_opencode_session().await?;
@@ -1666,9 +1747,6 @@ impl SessionManager {
             session.native_session_id = Some(format!("mock-{session_id}"));
         }
 
-        let telemetry_agent = request.agent.clone();
-        let telemetry_model = request.model.clone();
-        let telemetry_variant = request.variant.clone();
         let metadata = json!({
             "agent": request.agent,
             "agentMode": session.agent_mode,
@@ -1698,8 +1776,6 @@ impl SessionManager {
         }
 
         let native_session_id = session.native_session_id.clone();
-        let telemetry_agent_mode = session.agent_mode.clone();
-        let telemetry_permission_mode = session.permission_mode.clone();
         let mut sessions = self.sessions.lock().await;
         sessions.push(session);
         drop(sessions);
@@ -1713,14 +1789,6 @@ impl SessionManager {
             self.ensure_opencode_stream(session_id).await?;
         }
 
-        telemetry::log_session_created(telemetry::SessionConfig {
-            agent: telemetry_agent,
-            agent_mode: Some(telemetry_agent_mode),
-            permission_mode: Some(telemetry_permission_mode),
-            model: telemetry_model,
-            variant: telemetry_variant,
-        });
-
         Ok(CreateSessionResponse {
             healthy: true,
             error: None,
@@ -1728,25 +1796,94 @@ impl SessionManager {
         })
     }
 
-    pub(crate) async fn set_session_overrides(
-        &self,
-        session_id: &str,
-        model: Option<String>,
-        variant: Option<String>,
+    async fn apply_mcp_config(
+        self: &Arc<Self>,
+        agent_id: AgentId,
+        mcp: &BTreeMap<String, McpServerConfig>,
     ) -> Result<(), SandboxError> {
-        let mut sessions = self.sessions.lock().await;
-        let Some(session) = SessionManager::session_mut(&mut sessions, session_id) else {
-            return Err(SandboxError::SessionNotFound {
-                session_id: session_id.to_string(),
-            });
-        };
-        if let Some(model) = model {
-            session.model = Some(model);
+        if mcp.is_empty() {
+            return Ok(());
         }
-        if let Some(variant) = variant {
-            session.variant = Some(variant);
+        match agent_id {
+            AgentId::Claude => {
+                let mcp = mcp.clone();
+                tokio::task::spawn_blocking(move || write_claude_mcp_config(&mcp))
+                    .await
+                    .map_err(|err| SandboxError::StreamError {
+                        message: err.to_string(),
+                    })??;
+                Ok(())
+            }
+            AgentId::Codex => {
+                let mcp = mcp.clone();
+                tokio::task::spawn_blocking(move || write_codex_mcp_config(&mcp))
+                    .await
+                    .map_err(|err| SandboxError::StreamError {
+                        message: err.to_string(),
+                    })??;
+                let server = self.ensure_codex_server().await?;
+                self.reload_codex_mcp(&server).await
+            }
+            AgentId::Opencode => self.apply_opencode_mcp(mcp).await,
+            AgentId::Amp => {
+                let agent_manager = self.agent_manager.clone();
+                let mcp = mcp.clone();
+                tokio::task::spawn_blocking(move || apply_amp_mcp_config(&agent_manager, &mcp))
+                    .await
+                    .map_err(|err| SandboxError::StreamError {
+                        message: err.to_string(),
+                    })??;
+                Ok(())
+            }
+            AgentId::Mock => Ok(()),
         }
-        Ok(())
+    }
+
+    async fn apply_opencode_skills(&self, skill_dirs: &[PathBuf]) -> Result<(), SandboxError> {
+        if skill_dirs.is_empty() {
+            return Ok(());
+        }
+        let base_url = self.ensure_opencode_server().await?;
+        let url = format!("{base_url}/config");
+        let response = self.http_client.get(&url).send().await;
+        let mut existing_paths = Vec::<String>::new();
+        if let Ok(response) = response {
+            if response.status().is_success() {
+                if let Ok(value) = response.json::<Value>().await {
+                    if let Some(paths) = value
+                        .get("skills")
+                        .and_then(|skills| skills.get("paths"))
+                        .and_then(Value::as_array)
+                    {
+                        existing_paths.extend(
+                            paths
+                                .iter()
+                                .filter_map(Value::as_str)
+                                .map(|path| path.to_string()),
+                        );
+                    }
+                }
+            }
+        }
+        let mut merged = existing_paths;
+        for dir in skill_dirs {
+            let path = dir.to_string_lossy().to_string();
+            if !merged.contains(&path) {
+                merged.push(path);
+            }
+        }
+        let body = json!({ "skills": { "paths": merged } });
+        let response = self.http_client.patch(&url).json(&body).send().await;
+        let response = response.map_err(|err| SandboxError::StreamError {
+            message: err.to_string(),
+        })?;
+        if response.status().is_success() {
+            Ok(())
+        } else {
+            Err(SandboxError::StreamError {
+                message: format!("OpenCode config update failed: {}", response.status()),
+            })
+        }
     }
 
     async fn agent_modes(&self, agent: AgentId) -> Result<Vec<AgentModeInfo>, SandboxError> {
@@ -1768,43 +1905,38 @@ impl SessionManager {
     }
 
     pub(crate) async fn agent_models(
-        self: &Arc<Self>,
+        &self,
         agent: AgentId,
     ) -> Result<AgentModelsResponse, SandboxError> {
-        match agent {
-            AgentId::Claude => self.fetch_claude_models().await,
-            AgentId::Codex => self.fetch_codex_models().await,
-            AgentId::Opencode => match self.fetch_opencode_models().await {
-                Ok(models) => Ok(models),
-                Err(_) => Ok(AgentModelsResponse {
-                    models: Vec::new(),
-                    default_model: None,
-                }),
-            },
-            AgentId::Amp => Ok(amp_models_response()),
-            AgentId::Mock => Ok(mock_models_response()),
-        }
+        Ok(default_agent_models(agent))
     }
 
     pub(crate) async fn send_message(
         self: &Arc<Self>,
         session_id: String,
         message: String,
+        attachments: Vec<MessageAttachment>,
     ) -> Result<(), SandboxError> {
         // Use allow_ended=true and do explicit check to allow resumable agents
         let session_snapshot = self.session_snapshot_for_message(&session_id).await?;
+        let prompt_with_attachments = format_message_with_attachments(&message, &attachments);
+        let prompt = if session_snapshot.agent == AgentId::Opencode {
+            message.clone()
+        } else {
+            prompt_with_attachments
+        };
         if session_snapshot.agent == AgentId::Mock {
-            self.send_mock_message(session_id, message).await?;
+            self.send_mock_message(session_id, prompt).await?;
             return Ok(());
         }
         if matches!(session_snapshot.agent, AgentId::Claude | AgentId::Amp) {
             let _ = self
-                .record_conversions(&session_id, user_message_conversions(&message))
+                .record_conversions(&session_id, user_message_conversions(&prompt))
                 .await;
         }
         if session_snapshot.agent == AgentId::Opencode {
             self.ensure_opencode_stream(session_id.clone()).await?;
-            self.send_opencode_prompt(&session_snapshot, &message)
+            self.send_opencode_prompt(&session_snapshot, &prompt, &attachments)
                 .await?;
             if !agent_supports_item_started(session_snapshot.agent) {
                 let _ = self
@@ -1815,7 +1947,7 @@ impl SessionManager {
         }
         if session_snapshot.agent == AgentId::Codex {
             // Use the shared Codex app-server
-            self.send_codex_turn(&session_snapshot, &message).await?;
+            self.send_codex_turn(&session_snapshot, &prompt).await?;
             if !agent_supports_item_started(session_snapshot.agent) {
                 let _ = self
                     .emit_synthetic_assistant_start(&session_snapshot.session_id)
@@ -1828,7 +1960,6 @@ impl SessionManager {
         self.reopen_session_if_ended(&session_id).await;
 
         let manager = self.agent_manager.clone();
-        let prompt = message;
         let initial_input = if session_snapshot.agent == AgentId::Claude {
             Some(claude_user_message_line(&session_snapshot, &prompt))
         } else {
@@ -3162,6 +3293,29 @@ impl SessionManager {
         }
     }
 
+    async fn reload_codex_mcp(&self, server: &CodexServer) -> Result<(), SandboxError> {
+        let id = server.next_request_id();
+        let request = codex_schema::ClientRequest::ConfigMcpServerReload {
+            id: codex_schema::RequestId::from(id),
+            params: (),
+        };
+        let rx = server
+            .send_request(id, &request)
+            .ok_or_else(|| SandboxError::StreamError {
+                message: "failed to send config/mcpServer/reload request".to_string(),
+            })?;
+        let result = tokio::time::timeout(Duration::from_secs(15), rx).await;
+        match result {
+            Ok(Ok(_)) => Ok(()),
+            Ok(Err(_)) => Err(SandboxError::StreamError {
+                message: "config/mcpServer/reload request cancelled".to_string(),
+            }),
+            Err(_) => Err(SandboxError::StreamError {
+                message: "config/mcpServer/reload request timed out".to_string(),
+            }),
+        }
+    }
+
     /// Creates a new Codex thread/session via the shared app-server.
     async fn create_codex_thread(
         self: &Arc<Self>,
@@ -3238,7 +3392,7 @@ impl SessionManager {
             approval_policy: codex_approval_policy(Some(&session.permission_mode)),
             collaboration_mode: None,
             cwd: None,
-            effort: codex_effort_from_variant(session.variant.as_deref()),
+            effort: None,
             input: vec![codex_schema::UserInput::Text {
                 text: prompt_text,
                 text_elements: Vec::new(),
@@ -3296,255 +3450,6 @@ impl SessionManager {
         })
     }
 
-    async fn fetch_claude_models(&self) -> Result<AgentModelsResponse, SandboxError> {
-        let credentials = self.extract_credentials().await?;
-        let Some(cred) = credentials.anthropic else {
-            return Ok(AgentModelsResponse {
-                models: Vec::new(),
-                default_model: None,
-            });
-        };
-
-        let headers = build_anthropic_headers(&cred)?;
-        let response = self
-            .http_client
-            .get(ANTHROPIC_MODELS_URL)
-            .headers(headers)
-            .send()
-            .await
-            .map_err(|err| SandboxError::StreamError {
-                message: err.to_string(),
-            })?;
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            return Err(SandboxError::StreamError {
-                message: format!("Anthropic models request failed {status}: {body}"),
-            });
-        }
-
-        let value: Value = response
-            .json()
-            .await
-            .map_err(|err| SandboxError::StreamError {
-                message: err.to_string(),
-            })?;
-        let data = value
-            .get("data")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default();
-
-        let mut models = Vec::new();
-        let mut default_model: Option<String> = None;
-        let mut default_created: Option<String> = None;
-        for item in data {
-            let Some(id) = item.get("id").and_then(Value::as_str) else {
-                continue;
-            };
-            let name = item
-                .get("display_name")
-                .and_then(Value::as_str)
-                .map(|value| value.to_string());
-            let created = item
-                .get("created_at")
-                .and_then(Value::as_str)
-                .map(|value| value.to_string());
-            if let Some(created) = created.as_ref() {
-                let should_update = match default_created.as_deref() {
-                    Some(current) => created.as_str() > current,
-                    None => true,
-                };
-                if should_update {
-                    default_created = Some(created.clone());
-                    default_model = Some(id.to_string());
-                }
-            }
-            models.push(AgentModelInfo {
-                id: id.to_string(),
-                name,
-                variants: None,
-                default_variant: None,
-            });
-        }
-        models.sort_by(|a, b| a.id.cmp(&b.id));
-        if default_model.is_none() {
-            default_model = models.first().map(|model| model.id.clone());
-        }
-
-        Ok(AgentModelsResponse {
-            models,
-            default_model,
-        })
-    }
-
-    async fn fetch_codex_models(self: &Arc<Self>) -> Result<AgentModelsResponse, SandboxError> {
-        let server = self.ensure_codex_server().await?;
-        let mut models: Vec<AgentModelInfo> = Vec::new();
-        let mut default_model: Option<String> = None;
-        let mut seen = HashSet::new();
-        let mut cursor: Option<String> = None;
-
-        loop {
-            let id = server.next_request_id();
-            let request = json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "method": "model/list",
-                "params": {
-                    "cursor": cursor,
-                    "limit": null
-                }
-            });
-            let rx =
-                server
-                    .send_request(id, &request)
-                    .ok_or_else(|| SandboxError::StreamError {
-                        message: "failed to send model/list request".to_string(),
-                    })?;
-
-            let result = tokio::time::timeout(Duration::from_secs(30), rx).await;
-            let value = match result {
-                Ok(Ok(value)) => value,
-                Ok(Err(_)) => {
-                    return Err(SandboxError::StreamError {
-                        message: "model/list request cancelled".to_string(),
-                    })
-                }
-                Err(_) => {
-                    return Err(SandboxError::StreamError {
-                        message: "model/list request timed out".to_string(),
-                    })
-                }
-            };
-
-            let data = value
-                .get("data")
-                .and_then(Value::as_array)
-                .cloned()
-                .unwrap_or_default();
-
-            for item in data {
-                let model_id = item
-                    .get("model")
-                    .and_then(Value::as_str)
-                    .or_else(|| item.get("id").and_then(Value::as_str));
-                let Some(model_id) = model_id else {
-                    continue;
-                };
-                if !seen.insert(model_id.to_string()) {
-                    continue;
-                }
-
-                let name = item
-                    .get("displayName")
-                    .and_then(Value::as_str)
-                    .map(|value| value.to_string());
-                let default_variant = item
-                    .get("defaultReasoningEffort")
-                    .and_then(Value::as_str)
-                    .map(|value| value.to_string());
-                let mut variants: Vec<String> = item
-                    .get("supportedReasoningEfforts")
-                    .and_then(Value::as_array)
-                    .map(|values| {
-                        values
-                            .iter()
-                            .filter_map(|value| {
-                                value
-                                    .get("reasoningEffort")
-                                    .and_then(Value::as_str)
-                                    .or_else(|| value.as_str())
-                                    .map(|entry| entry.to_string())
-                            })
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_default();
-                if variants.is_empty() {
-                    variants = codex_variants();
-                }
-                variants.sort();
-                variants.dedup();
-
-                if default_model.is_none()
-                    && item
-                        .get("isDefault")
-                        .and_then(Value::as_bool)
-                        .unwrap_or(false)
-                {
-                    default_model = Some(model_id.to_string());
-                }
-
-                models.push(AgentModelInfo {
-                    id: model_id.to_string(),
-                    name,
-                    variants: Some(variants),
-                    default_variant,
-                });
-            }
-
-            let next_cursor = value
-                .get("nextCursor")
-                .and_then(Value::as_str)
-                .map(|value| value.to_string());
-            if next_cursor.is_none() {
-                break;
-            }
-            cursor = next_cursor;
-        }
-
-        models.sort_by(|a, b| a.id.cmp(&b.id));
-        if default_model.is_none() {
-            default_model = models.first().map(|model| model.id.clone());
-        }
-
-        Ok(AgentModelsResponse {
-            models,
-            default_model,
-        })
-    }
-
-    async fn fetch_opencode_models(&self) -> Result<AgentModelsResponse, SandboxError> {
-        let base_url = self.ensure_opencode_server().await?;
-        let endpoints = [
-            format!("{base_url}/config/providers"),
-            format!("{base_url}/provider"),
-        ];
-        for url in endpoints {
-            let response = self.http_client.get(&url).send().await;
-            let response = match response {
-                Ok(response) => response,
-                Err(_) => continue,
-            };
-            if !response.status().is_success() {
-                continue;
-            }
-            let value: Value = response
-                .json()
-                .await
-                .map_err(|err| SandboxError::StreamError {
-                    message: err.to_string(),
-                })?;
-            if let Some(models) = parse_opencode_models(&value) {
-                return Ok(models);
-            }
-        }
-        Err(SandboxError::StreamError {
-            message: "OpenCode models unavailable".to_string(),
-        })
-    }
-
-    async fn extract_credentials(&self) -> Result<ExtractedCredentials, SandboxError> {
-        tokio::task::spawn_blocking(move || {
-            let options = CredentialExtractionOptions::new();
-            extract_all_credentials(&options)
-        })
-        .await
-        .map_err(|err| SandboxError::StreamError {
-            message: err.to_string(),
-        })
-    }
-
     async fn create_opencode_session(&self) -> Result<String, SandboxError> {
         let base_url = self.ensure_opencode_server().await?;
         let url = format!("{base_url}/session");
@@ -3585,10 +3490,52 @@ impl SessionManager {
         })
     }
 
+    async fn apply_opencode_mcp(
+        &self,
+        mcp: &BTreeMap<String, McpServerConfig>,
+    ) -> Result<(), SandboxError> {
+        if mcp.is_empty() {
+            return Ok(());
+        }
+        let base_url = self.ensure_opencode_server().await?;
+        let url = format!("{base_url}/mcp");
+        let mut existing = HashSet::new();
+        if let Ok(response) = self.http_client.get(&url).send().await {
+            if response.status().is_success() {
+                if let Ok(value) = response.json::<Value>().await {
+                    if let Some(map) = value.as_object() {
+                        for key in map.keys() {
+                            existing.insert(key.clone());
+                        }
+                    }
+                }
+            }
+        }
+
+        for (name, config) in mcp {
+            if existing.contains(name) {
+                continue;
+            }
+            let config_value = opencode_mcp_config(config)?;
+            let body = json!({ "name": name, "config": config_value });
+            let response = self.http_client.post(&url).json(&body).send().await;
+            let response = response.map_err(|err| SandboxError::StreamError {
+                message: err.to_string(),
+            })?;
+            if !response.status().is_success() {
+                return Err(SandboxError::StreamError {
+                    message: format!("OpenCode MCP add failed: {}", response.status()),
+                });
+            }
+        }
+        Ok(())
+    }
+
     async fn send_opencode_prompt(
         &self,
         session: &SessionSnapshot,
         prompt: &str,
+        attachments: &[MessageAttachment],
     ) -> Result<(), SandboxError> {
         let base_url = self.ensure_opencode_server().await?;
         let session_id =
@@ -3599,9 +3546,13 @@ impl SessionManager {
                     message: "missing OpenCode session id".to_string(),
                 })?;
         let url = format!("{base_url}/session/{session_id}/prompt");
+        let mut parts = vec![json!({ "type": "text", "text": prompt })];
+        for attachment in attachments {
+            parts.push(opencode_file_part_input(attachment));
+        }
         let mut body = json!({
             "agent": session.agent_mode.clone(),
-            "parts": [{ "type": "text", "text": prompt }]
+            "parts": parts
         });
         if let Some(model) = session.model.as_deref() {
             if let Some((provider, model_id)) = model.split_once('/') {
@@ -3807,20 +3758,12 @@ pub struct AgentModeInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct AgentModesResponse {
-    pub modes: Vec<AgentModeInfo>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct AgentModelInfo {
     pub id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub variants: Option<Vec<String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub default_variant: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
@@ -3829,6 +3772,12 @@ pub struct AgentModelsResponse {
     pub models: Vec<AgentModelInfo>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_model: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentModesResponse {
+    pub modes: Vec<AgentModeInfo>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
@@ -3852,7 +3801,6 @@ pub struct AgentCapabilities {
     pub mcp_tools: bool,
     pub streaming_deltas: bool,
     pub item_started: bool,
-    pub variants: bool,
     /// Whether this agent uses a shared long-running server process (vs per-turn subprocess)
     pub shared_process: bool,
 }
@@ -3930,6 +3878,234 @@ pub struct HealthResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+pub struct FsPathQuery {
+    pub path: String,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        alias = "session_id"
+    )]
+    pub session_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FsEntriesQuery {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        alias = "session_id"
+    )]
+    pub session_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FsSessionQuery {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        alias = "session_id"
+    )]
+    pub session_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FsDeleteQuery {
+    pub path: String,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        alias = "session_id"
+    )]
+    pub session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recursive: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FsUploadBatchQuery {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        alias = "session_id"
+    )]
+    pub session_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum FsEntryType {
+    File,
+    Directory,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FsEntry {
+    pub name: String,
+    pub path: String,
+    pub entry_type: FsEntryType,
+    pub size: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modified: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FsStat {
+    pub path: String,
+    pub entry_type: FsEntryType,
+    pub size: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modified: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FsWriteResponse {
+    pub path: String,
+    pub bytes_written: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FsMoveRequest {
+    pub from: String,
+    pub to: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overwrite: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FsMoveResponse {
+    pub from: String,
+    pub to: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FsActionResponse {
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FsUploadBatchResponse {
+    pub paths: Vec<String>,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillsConfig {
+    pub paths: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
+#[serde(untagged)]
+pub enum McpCommand {
+    Command(String),
+    CommandWithArgs(Vec<String>),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum McpRemoteTransport {
+    Http,
+    Sse,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct McpOAuthConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_secret: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
+#[serde(untagged)]
+pub enum McpOAuthConfigOrDisabled {
+    Config(McpOAuthConfig),
+    Disabled(bool),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
+#[serde(rename_all = "camelCase", tag = "type")]
+pub enum McpServerConfig {
+    #[serde(rename = "local", alias = "stdio")]
+    Local {
+        command: McpCommand,
+        #[serde(default)]
+        args: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none", alias = "environment")]
+        env: Option<BTreeMap<String, String>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        enabled: Option<bool>,
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            rename = "timeoutMs",
+            alias = "timeout"
+        )]
+        #[schema(rename = "timeoutMs")]
+        timeout_ms: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cwd: Option<String>,
+    },
+    #[serde(rename = "remote", alias = "http")]
+    Remote {
+        url: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        headers: Option<BTreeMap<String, String>>,
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            rename = "bearerTokenEnvVar",
+            alias = "bearerTokenEnvVar",
+            alias = "bearer_token_env_var"
+        )]
+        #[schema(rename = "bearerTokenEnvVar")]
+        bearer_token_env_var: Option<String>,
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            rename = "envHeaders",
+            alias = "envHttpHeaders",
+            alias = "env_http_headers"
+        )]
+        #[schema(rename = "envHeaders")]
+        env_headers: Option<BTreeMap<String, String>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        oauth: Option<McpOAuthConfigOrDisabled>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        enabled: Option<bool>,
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            rename = "timeoutMs",
+            alias = "timeout"
+        )]
+        #[schema(rename = "timeoutMs")]
+        timeout_ms: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        transport: Option<McpRemoteTransport>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct CreateSessionRequest {
     pub agent: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3942,6 +4118,10 @@ pub struct CreateSessionRequest {
     pub variant: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mcp: Option<BTreeMap<String, McpServerConfig>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skills: Option<SkillsConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
@@ -3958,6 +4138,18 @@ pub struct CreateSessionResponse {
 #[serde(rename_all = "camelCase")]
 pub struct MessageRequest {
     pub message: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<MessageAttachment>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageAttachment {
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mime: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filename: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
@@ -4032,13 +4224,16 @@ impl std::str::FromStr for PermissionReply {
     request_body = AgentInstallRequest,
     responses(
         (status = 204, description = "Agent installed"),
-        (status = 400, body = ProblemDetails),
-        (status = 404, body = ProblemDetails),
-        (status = 500, body = ProblemDetails)
+        (status = 400, description = "Invalid request", body = ProblemDetails),
+        (status = 404, description = "Agent not found", body = ProblemDetails),
+        (status = 500, description = "Installation failed", body = ProblemDetails)
     ),
     params(("agent" = String, Path, description = "Agent id")),
     tag = "agents"
 )]
+/// Install Agent
+///
+/// Installs or updates a coding agent (e.g. claude, codex, opencode, amp).
 async fn install_agent(
     State(state): State<Arc<AppState>>,
     Path(agent): Path<String>,
@@ -4071,12 +4266,15 @@ async fn install_agent(
     get,
     path = "/v1/agents/{agent}/modes",
     responses(
-        (status = 200, body = AgentModesResponse),
-        (status = 400, body = ProblemDetails)
+        (status = 200, description = "Available modes", body = AgentModesResponse),
+        (status = 400, description = "Invalid request", body = ProblemDetails)
     ),
     params(("agent" = String, Path, description = "Agent id")),
     tag = "agents"
 )]
+/// List Agent Modes
+///
+/// Returns the available interaction modes for an agent.
 async fn get_agent_modes(
     State(state): State<Arc<AppState>>,
     Path(agent): Path<String>,
@@ -4090,12 +4288,15 @@ async fn get_agent_modes(
     get,
     path = "/v1/agents/{agent}/models",
     responses(
-        (status = 200, body = AgentModelsResponse),
-        (status = 400, body = ProblemDetails)
+        (status = 200, description = "Available models", body = AgentModelsResponse),
+        (status = 404, description = "Agent not found", body = ProblemDetails)
     ),
     params(("agent" = String, Path, description = "Agent id")),
     tag = "agents"
 )]
+/// List Agent Models
+///
+/// Returns the available LLM models for an agent.
 async fn get_agent_models(
     State(state): State<Arc<AppState>>,
     Path(agent): Path<String>,
@@ -4105,35 +4306,33 @@ async fn get_agent_models(
     Ok(Json(models))
 }
 
-fn server_info(branding: BrandingMode) -> String {
-    format!(
-        "This is a {} server. Available endpoints:\n\
-         \x20 - GET  /           - Server info\n\
-         \x20 - GET  /v1/health  - Health check\n\
-         \x20 - GET  /ui/        - Inspector UI\n\n\
-         See {} for API documentation.",
-        branding.product_name(),
-        branding.docs_url(),
-    )
+const SERVER_INFO: &str = "\
+This is a Sandbox Agent server. Available endpoints:\n\
+  - GET  /           - Server info\n\
+  - GET  /v1/health  - Health check\n\
+  - GET  /ui/        - Inspector UI\n\n\
+See https://sandboxagent.dev for API documentation.";
+
+async fn get_root() -> &'static str {
+    SERVER_INFO
 }
 
-async fn get_root(State(state): State<Arc<AppState>>) -> String {
-    server_info(state.branding)
-}
-
-async fn not_found(State(state): State<Arc<AppState>>) -> (StatusCode, String) {
+async fn not_found() -> (StatusCode, String) {
     (
         StatusCode::NOT_FOUND,
-        format!("404 Not Found\n\n{}", server_info(state.branding)),
+        format!("404 Not Found\n\n{SERVER_INFO}"),
     )
 }
 
 #[utoipa::path(
     get,
     path = "/v1/health",
-    responses((status = 200, body = HealthResponse)),
+    responses((status = 200, description = "Server is healthy", body = HealthResponse)),
     tag = "meta"
 )]
+/// Health Check
+///
+/// Returns the server health status.
 async fn get_health() -> Json<HealthResponse> {
     Json(HealthResponse {
         status: "ok".to_string(),
@@ -4143,9 +4342,12 @@ async fn get_health() -> Json<HealthResponse> {
 #[utoipa::path(
     get,
     path = "/v1/agents",
-    responses((status = 200, body = AgentListResponse)),
+    responses((status = 200, description = "List of available agents", body = AgentListResponse)),
     tag = "agents"
 )]
+/// List Agents
+///
+/// Returns all available coding agents and their installation status.
 async fn list_agents(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<AgentListResponse>, ApiError> {
@@ -4200,9 +4402,12 @@ async fn list_agents(
 #[utoipa::path(
     get,
     path = "/v1/sessions",
-    responses((status = 200, body = SessionListResponse)),
+    responses((status = 200, description = "List of active sessions", body = SessionListResponse)),
     tag = "sessions"
 )]
+/// List Sessions
+///
+/// Returns all active sessions.
 async fn list_sessions(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<SessionListResponse>, ApiError> {
@@ -4215,13 +4420,16 @@ async fn list_sessions(
     path = "/v1/sessions/{session_id}",
     request_body = CreateSessionRequest,
     responses(
-        (status = 200, body = CreateSessionResponse),
-        (status = 400, body = ProblemDetails),
-        (status = 409, body = ProblemDetails)
+        (status = 200, description = "Session created", body = CreateSessionResponse),
+        (status = 400, description = "Invalid request", body = ProblemDetails),
+        (status = 409, description = "Session already exists", body = ProblemDetails)
     ),
     params(("session_id" = String, Path, description = "Client session id")),
     tag = "sessions"
 )]
+/// Create Session
+///
+/// Creates a new agent session with the given configuration.
 async fn create_session(
     State(state): State<Arc<AppState>>,
     Path(session_id): Path<String>,
@@ -4240,11 +4448,14 @@ async fn create_session(
     request_body = MessageRequest,
     responses(
         (status = 204, description = "Message accepted"),
-        (status = 404, body = ProblemDetails)
+        (status = 404, description = "Session not found", body = ProblemDetails)
     ),
     params(("session_id" = String, Path, description = "Session id")),
     tag = "sessions"
 )]
+/// Send Message
+///
+/// Sends a message to a session and returns immediately.
 async fn post_message(
     State(state): State<Arc<AppState>>,
     Path(session_id): Path<String>,
@@ -4252,7 +4463,7 @@ async fn post_message(
 ) -> Result<StatusCode, ApiError> {
     state
         .session_manager
-        .send_message(session_id, request.message)
+        .send_message(session_id, request.message, request.attachments)
         .await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -4267,10 +4478,13 @@ async fn post_message(
     ),
     responses(
         (status = 200, description = "SSE event stream"),
-        (status = 404, body = ProblemDetails)
+        (status = 404, description = "Session not found", body = ProblemDetails)
     ),
     tag = "sessions"
 )]
+/// Send Message (Streaming)
+///
+/// Sends a message and returns an SSE event stream of the agent's response.
 async fn post_message_stream(
     State(state): State<Arc<AppState>>,
     Path(session_id): Path<String>,
@@ -4284,7 +4498,7 @@ async fn post_message_stream(
         .await?;
     state
         .session_manager
-        .send_message(session_id, request.message)
+        .send_message(session_id, request.message, request.attachments)
         .await?;
     let stream = stream_turn_events(subscription, snapshot.agent, include_raw);
     Ok(Sse::new(stream))
@@ -4296,10 +4510,13 @@ async fn post_message_stream(
     params(("session_id" = String, Path, description = "Session id")),
     responses(
         (status = 204, description = "Session terminated"),
-        (status = 404, body = ProblemDetails)
+        (status = 404, description = "Session not found", body = ProblemDetails)
     ),
     tag = "sessions"
 )]
+/// Terminate Session
+///
+/// Terminates a running session and cleans up resources.
 async fn terminate_session(
     State(state): State<Arc<AppState>>,
     Path(session_id): Path<String>,
@@ -4318,11 +4535,14 @@ async fn terminate_session(
         ("include_raw" = Option<bool>, Query, description = "Include raw provider payloads")
     ),
     responses(
-        (status = 200, body = EventsResponse),
-        (status = 404, body = ProblemDetails)
+        (status = 200, description = "Session events", body = EventsResponse),
+        (status = 404, description = "Session not found", body = ProblemDetails)
     ),
     tag = "sessions"
 )]
+/// Get Events
+///
+/// Returns session events with optional offset-based pagination.
 async fn get_events(
     State(state): State<Arc<AppState>>,
     Path(session_id): Path<String>,
@@ -4352,6 +4572,9 @@ async fn get_events(
     responses((status = 200, description = "SSE event stream")),
     tag = "sessions"
 )]
+/// Subscribe to Events (SSE)
+///
+/// Opens an SSE stream for real-time session events.
 async fn get_events_sse(
     State(state): State<Arc<AppState>>,
     Path(session_id): Path<String>,
@@ -4395,7 +4618,7 @@ async fn get_events_sse(
     request_body = QuestionReplyRequest,
     responses(
         (status = 204, description = "Question answered"),
-        (status = 404, body = ProblemDetails)
+        (status = 404, description = "Session or question not found", body = ProblemDetails)
     ),
     params(
         ("session_id" = String, Path, description = "Session id"),
@@ -4403,6 +4626,9 @@ async fn get_events_sse(
     ),
     tag = "sessions"
 )]
+/// Reply to Question
+///
+/// Replies to a human-in-the-loop question from the agent.
 async fn reply_question(
     State(state): State<Arc<AppState>>,
     Path((session_id, question_id)): Path<(String, String)>,
@@ -4420,7 +4646,7 @@ async fn reply_question(
     path = "/v1/sessions/{session_id}/questions/{question_id}/reject",
     responses(
         (status = 204, description = "Question rejected"),
-        (status = 404, body = ProblemDetails)
+        (status = 404, description = "Session or question not found", body = ProblemDetails)
     ),
     params(
         ("session_id" = String, Path, description = "Session id"),
@@ -4428,6 +4654,9 @@ async fn reply_question(
     ),
     tag = "sessions"
 )]
+/// Reject Question
+///
+/// Rejects a human-in-the-loop question from the agent.
 async fn reject_question(
     State(state): State<Arc<AppState>>,
     Path((session_id, question_id)): Path<(String, String)>,
@@ -4445,7 +4674,7 @@ async fn reject_question(
     request_body = PermissionReplyRequest,
     responses(
         (status = 204, description = "Permission reply accepted"),
-        (status = 404, body = ProblemDetails)
+        (status = 404, description = "Session or permission not found", body = ProblemDetails)
     ),
     params(
         ("session_id" = String, Path, description = "Session id"),
@@ -4453,6 +4682,9 @@ async fn reject_question(
     ),
     tag = "sessions"
 )]
+/// Reply to Permission
+///
+/// Approves or denies a permission request from the agent.
 async fn reply_permission(
     State(state): State<Arc<AppState>>,
     Path((session_id, permission_id)): Path<(String, String)>,
@@ -4463,6 +4695,338 @@ async fn reply_permission(
         .reply_permission(&session_id, &permission_id, request.reply)
         .await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
+    get,
+    path = "/v1/fs/entries",
+    params(
+        ("path" = Option<String>, Query, description = "Path to list (relative or absolute)"),
+        ("session_id" = Option<String>, Query, description = "Session id for relative paths")
+    ),
+    responses((status = 200, description = "Directory listing", body = Vec<FsEntry>)),
+    tag = "fs"
+)]
+/// List Directory
+///
+/// Lists files and directories at the given path.
+async fn fs_entries(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<FsEntriesQuery>,
+) -> Result<Json<Vec<FsEntry>>, ApiError> {
+    let path = query.path.unwrap_or_else(|| ".".to_string());
+    let target = resolve_fs_path(&state, query.session_id.as_deref(), &path).await?;
+    let metadata = fs::metadata(&target).map_err(|err| map_fs_error(&target, err))?;
+    if !metadata.is_dir() {
+        return Err(SandboxError::InvalidRequest {
+            message: format!("path is not a directory: {}", target.display()),
+        }
+        .into());
+    }
+    let mut entries = Vec::new();
+    for entry in fs::read_dir(&target).map_err(|err| map_fs_error(&target, err))? {
+        let entry = entry.map_err(|err| SandboxError::StreamError {
+            message: err.to_string(),
+        })?;
+        let path = entry.path();
+        let metadata = entry.metadata().map_err(|err| SandboxError::StreamError {
+            message: err.to_string(),
+        })?;
+        let entry_type = if metadata.is_dir() {
+            FsEntryType::Directory
+        } else {
+            FsEntryType::File
+        };
+        let modified = metadata
+            .modified()
+            .ok()
+            .and_then(|time| chrono::DateTime::<chrono::Utc>::from(time).to_rfc3339().into());
+        entries.push(FsEntry {
+            name: entry.file_name().to_string_lossy().to_string(),
+            path: path.to_string_lossy().to_string(),
+            entry_type,
+            size: metadata.len(),
+            modified,
+        });
+    }
+    Ok(Json(entries))
+}
+
+#[utoipa::path(
+    get,
+    path = "/v1/fs/file",
+    params(
+        ("path" = String, Query, description = "File path (relative or absolute)"),
+        ("session_id" = Option<String>, Query, description = "Session id for relative paths")
+    ),
+    responses((status = 200, description = "File content", body = Vec<u8>)),
+    tag = "fs"
+)]
+/// Read File
+///
+/// Reads the raw bytes of a file.
+async fn fs_read_file(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<FsPathQuery>,
+) -> Result<Response, ApiError> {
+    let target = resolve_fs_path(&state, query.session_id.as_deref(), &query.path).await?;
+    let metadata = fs::metadata(&target).map_err(|err| map_fs_error(&target, err))?;
+    if !metadata.is_file() {
+        return Err(SandboxError::InvalidRequest {
+            message: format!("path is not a file: {}", target.display()),
+        }
+        .into());
+    }
+    let bytes = fs::read(&target).map_err(|err| map_fs_error(&target, err))?;
+    Ok((
+        [(header::CONTENT_TYPE, "application/octet-stream")],
+        Bytes::from(bytes),
+    )
+        .into_response())
+}
+
+#[utoipa::path(
+    put,
+    path = "/v1/fs/file",
+    request_body = Vec<u8>,
+    params(
+        ("path" = String, Query, description = "File path (relative or absolute)"),
+        ("session_id" = Option<String>, Query, description = "Session id for relative paths")
+    ),
+    responses((status = 200, description = "Write result", body = FsWriteResponse)),
+    tag = "fs"
+)]
+/// Write File
+///
+/// Writes raw bytes to a file, creating it if it doesn't exist.
+async fn fs_write_file(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<FsPathQuery>,
+    body: Bytes,
+) -> Result<Json<FsWriteResponse>, ApiError> {
+    let target = resolve_fs_path(&state, query.session_id.as_deref(), &query.path).await?;
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent).map_err(|err| map_fs_error(parent, err))?;
+    }
+    fs::write(&target, &body).map_err(|err| map_fs_error(&target, err))?;
+    Ok(Json(FsWriteResponse {
+        path: target.to_string_lossy().to_string(),
+        bytes_written: body.len() as u64,
+    }))
+}
+
+#[utoipa::path(
+    delete,
+    path = "/v1/fs/entry",
+    params(
+        ("path" = String, Query, description = "File or directory path"),
+        ("session_id" = Option<String>, Query, description = "Session id for relative paths"),
+        ("recursive" = Option<bool>, Query, description = "Delete directories recursively")
+    ),
+    responses((status = 200, description = "Delete result", body = FsActionResponse)),
+    tag = "fs"
+)]
+/// Delete Entry
+///
+/// Deletes a file or directory.
+async fn fs_delete_entry(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<FsDeleteQuery>,
+) -> Result<Json<FsActionResponse>, ApiError> {
+    let target = resolve_fs_path(&state, query.session_id.as_deref(), &query.path).await?;
+    let metadata = fs::metadata(&target).map_err(|err| map_fs_error(&target, err))?;
+    if metadata.is_dir() {
+        if query.recursive.unwrap_or(false) {
+            fs::remove_dir_all(&target).map_err(|err| map_fs_error(&target, err))?;
+        } else {
+            fs::remove_dir(&target).map_err(|err| map_fs_error(&target, err))?;
+        }
+    } else {
+        fs::remove_file(&target).map_err(|err| map_fs_error(&target, err))?;
+    }
+    Ok(Json(FsActionResponse {
+        path: target.to_string_lossy().to_string(),
+    }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/fs/mkdir",
+    params(
+        ("path" = String, Query, description = "Directory path to create"),
+        ("session_id" = Option<String>, Query, description = "Session id for relative paths")
+    ),
+    responses((status = 200, description = "Directory created", body = FsActionResponse)),
+    tag = "fs"
+)]
+/// Create Directory
+///
+/// Creates a directory, including any missing parent directories.
+async fn fs_mkdir(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<FsPathQuery>,
+) -> Result<Json<FsActionResponse>, ApiError> {
+    let target = resolve_fs_path(&state, query.session_id.as_deref(), &query.path).await?;
+    fs::create_dir_all(&target).map_err(|err| map_fs_error(&target, err))?;
+    Ok(Json(FsActionResponse {
+        path: target.to_string_lossy().to_string(),
+    }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/fs/move",
+    request_body = FsMoveRequest,
+    params(("session_id" = Option<String>, Query, description = "Session id for relative paths")),
+    responses((status = 200, description = "Move result", body = FsMoveResponse)),
+    tag = "fs"
+)]
+/// Move Entry
+///
+/// Moves or renames a file or directory.
+async fn fs_move(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<FsSessionQuery>,
+    Json(request): Json<FsMoveRequest>,
+) -> Result<Json<FsMoveResponse>, ApiError> {
+    let session_id = query.session_id.as_deref();
+    let from = resolve_fs_path(&state, session_id, &request.from).await?;
+    let to = resolve_fs_path(&state, session_id, &request.to).await?;
+    if to.exists() {
+        if request.overwrite.unwrap_or(false) {
+            let metadata = fs::metadata(&to).map_err(|err| map_fs_error(&to, err))?;
+            if metadata.is_dir() {
+                fs::remove_dir_all(&to).map_err(|err| map_fs_error(&to, err))?;
+            } else {
+                fs::remove_file(&to).map_err(|err| map_fs_error(&to, err))?;
+            }
+        } else {
+            return Err(SandboxError::InvalidRequest {
+                message: format!("destination already exists: {}", to.display()),
+            }
+            .into());
+        }
+    }
+    if let Some(parent) = to.parent() {
+        fs::create_dir_all(parent).map_err(|err| map_fs_error(parent, err))?;
+    }
+    fs::rename(&from, &to).map_err(|err| map_fs_error(&from, err))?;
+    Ok(Json(FsMoveResponse {
+        from: from.to_string_lossy().to_string(),
+        to: to.to_string_lossy().to_string(),
+    }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/v1/fs/stat",
+    params(
+        ("path" = String, Query, description = "Path to stat"),
+        ("session_id" = Option<String>, Query, description = "Session id for relative paths")
+    ),
+    responses((status = 200, description = "File metadata", body = FsStat)),
+    tag = "fs"
+)]
+/// Get File Info
+///
+/// Returns metadata (size, timestamps, type) for a path.
+async fn fs_stat(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<FsPathQuery>,
+) -> Result<Json<FsStat>, ApiError> {
+    let target = resolve_fs_path(&state, query.session_id.as_deref(), &query.path).await?;
+    let metadata = fs::metadata(&target).map_err(|err| map_fs_error(&target, err))?;
+    let entry_type = if metadata.is_dir() {
+        FsEntryType::Directory
+    } else {
+        FsEntryType::File
+    };
+    let modified = metadata
+        .modified()
+        .ok()
+        .and_then(|time| chrono::DateTime::<chrono::Utc>::from(time).to_rfc3339().into());
+    Ok(Json(FsStat {
+        path: target.to_string_lossy().to_string(),
+        entry_type,
+        size: metadata.len(),
+        modified,
+    }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/fs/upload-batch",
+    request_body = Vec<u8>,
+    params(
+        ("path" = Option<String>, Query, description = "Destination directory for extraction"),
+        ("session_id" = Option<String>, Query, description = "Session id for relative paths")
+    ),
+    responses((status = 200, description = "Upload result", body = FsUploadBatchResponse)),
+    tag = "fs"
+)]
+/// Upload Files
+///
+/// Uploads a tar.gz archive and extracts it to the destination directory.
+async fn fs_upload_batch(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(query): Query<FsUploadBatchQuery>,
+    body: Bytes,
+) -> Result<Json<FsUploadBatchResponse>, ApiError> {
+    let content_type = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default();
+    if !content_type.starts_with("application/x-tar") {
+        return Err(SandboxError::InvalidRequest {
+            message: "content-type must be application/x-tar".to_string(),
+        }
+        .into());
+    }
+    let path = query.path.unwrap_or_else(|| ".".to_string());
+    let base = resolve_fs_path(&state, query.session_id.as_deref(), &path).await?;
+    fs::create_dir_all(&base).map_err(|err| map_fs_error(&base, err))?;
+
+    let mut archive = Archive::new(Cursor::new(body));
+    let mut extracted = Vec::new();
+    let mut truncated = false;
+    for entry in archive.entries().map_err(|err| SandboxError::StreamError {
+        message: err.to_string(),
+    })? {
+        let mut entry = entry.map_err(|err| SandboxError::StreamError {
+            message: err.to_string(),
+        })?;
+        let entry_path = entry.path().map_err(|err| SandboxError::StreamError {
+            message: err.to_string(),
+        })?;
+        let clean_path = sanitize_relative_path(&entry_path)?;
+        if clean_path.as_os_str().is_empty() {
+            continue;
+        }
+        let dest = base.join(&clean_path);
+        if !dest.starts_with(&base) {
+            return Err(SandboxError::InvalidRequest {
+                message: format!("tar entry escapes destination: {}", entry_path.display()),
+            }
+            .into());
+        }
+        if let Some(parent) = dest.parent() {
+            fs::create_dir_all(parent).map_err(|err| map_fs_error(parent, err))?;
+        }
+        entry.unpack(&dest).map_err(|err| SandboxError::StreamError {
+            message: err.to_string(),
+        })?;
+        if extracted.len() < 1024 {
+            extracted.push(dest.to_string_lossy().to_string());
+        } else {
+            truncated = true;
+        }
+    }
+
+    Ok(Json(FsUploadBatchResponse {
+        paths: extracted,
+        truncated,
+    }))
 }
 
 fn all_agents() -> [AgentId; 5] {
@@ -4507,10 +5071,9 @@ fn agent_capabilities_for(agent: AgentId) -> AgentCapabilities {
             status: false,
             command_execution: false,
             file_changes: false,
-            mcp_tools: false,
+            mcp_tools: true,
             streaming_deltas: true,
             item_started: false,
-            variants: false,
             shared_process: false, // per-turn subprocess with --resume
         },
         AgentId::Codex => AgentCapabilities {
@@ -4531,7 +5094,6 @@ fn agent_capabilities_for(agent: AgentId) -> AgentCapabilities {
             mcp_tools: true,
             streaming_deltas: true,
             item_started: true,
-            variants: true,
             shared_process: true, // shared app-server via JSON-RPC
         },
         AgentId::Opencode => AgentCapabilities {
@@ -4549,10 +5111,9 @@ fn agent_capabilities_for(agent: AgentId) -> AgentCapabilities {
             status: true,
             command_execution: false,
             file_changes: false,
-            mcp_tools: false,
+            mcp_tools: true,
             streaming_deltas: true,
             item_started: true,
-            variants: true,
             shared_process: true, // shared HTTP server
         },
         AgentId::Amp => AgentCapabilities {
@@ -4570,10 +5131,9 @@ fn agent_capabilities_for(agent: AgentId) -> AgentCapabilities {
             status: false,
             command_execution: false,
             file_changes: false,
-            mcp_tools: false,
+            mcp_tools: true,
             streaming_deltas: false,
             item_started: false,
-            variants: true,
             shared_process: false, // per-turn subprocess with --continue
         },
         AgentId::Mock => AgentCapabilities {
@@ -4594,7 +5154,6 @@ fn agent_capabilities_for(agent: AgentId) -> AgentCapabilities {
             mcp_tools: true,
             streaming_deltas: true,
             item_started: true,
-            variants: false,
             shared_process: false, // in-memory mock (no subprocess)
         },
     }
@@ -4669,113 +5228,31 @@ fn agent_modes_for(agent: AgentId) -> Vec<AgentModeInfo> {
     }
 }
 
-fn amp_models_response() -> AgentModelsResponse {
-    // NOTE: Amp models are hardcoded based on ampcode.com manual:
-    // - smart
-    // - rush
-    // - deep
-    // - free
-    let models = ["smart", "rush", "deep", "free"]
-        .into_iter()
-        .map(|id| AgentModelInfo {
-            id: id.to_string(),
-            name: None,
-            variants: Some(amp_variants()),
-            default_variant: Some("medium".to_string()),
-        })
-        .collect();
+fn agent_display_name(agent: AgentId) -> &'static str {
+    match agent {
+        AgentId::Claude => "Claude",
+        AgentId::Codex => "Codex",
+        AgentId::Opencode => "OpenCode",
+        AgentId::Amp => "Amp",
+        AgentId::Mock => "Mock",
+    }
+}
+
+fn default_agent_models(agent: AgentId) -> AgentModelsResponse {
+    let model_id = match agent {
+        AgentId::Opencode => "mock/mock".to_string(),
+        _ => format!("{}-default", agent.as_str()),
+    };
+    let name = Some(format!("{} Default", agent_display_name(agent)));
+    let model = AgentModelInfo {
+        id: model_id.clone(),
+        name,
+        variants: None,
+    };
     AgentModelsResponse {
-        models,
-        default_model: Some("smart".to_string()),
+        models: vec![model],
+        default_model: Some(model_id),
     }
-}
-
-fn mock_models_response() -> AgentModelsResponse {
-    AgentModelsResponse {
-        models: vec![AgentModelInfo {
-            id: "mock".to_string(),
-            name: Some("Mock".to_string()),
-            variants: None,
-            default_variant: None,
-        }],
-        default_model: Some("mock".to_string()),
-    }
-}
-
-fn amp_variants() -> Vec<String> {
-    vec!["medium", "high", "xhigh"]
-        .into_iter()
-        .map(|value| value.to_string())
-        .collect()
-}
-
-fn codex_variants() -> Vec<String> {
-    vec!["none", "minimal", "low", "medium", "high", "xhigh"]
-        .into_iter()
-        .map(|value| value.to_string())
-        .collect()
-}
-
-fn parse_opencode_models(value: &Value) -> Option<AgentModelsResponse> {
-    let providers = value
-        .get("providers")
-        .and_then(Value::as_array)
-        .or_else(|| value.get("all").and_then(Value::as_array))?;
-    let default_map = value
-        .get("default")
-        .and_then(Value::as_object)
-        .cloned()
-        .unwrap_or_default();
-
-    let mut models = Vec::new();
-    let mut provider_order = Vec::new();
-    for provider in providers {
-        let provider_id = provider.get("id").and_then(Value::as_str)?;
-        provider_order.push(provider_id.to_string());
-        let Some(model_map) = provider.get("models").and_then(Value::as_object) else {
-            continue;
-        };
-        for (key, model) in model_map {
-            let model_id = model
-                .get("id")
-                .and_then(Value::as_str)
-                .unwrap_or(key.as_str());
-            let name = model
-                .get("name")
-                .and_then(Value::as_str)
-                .map(|value| value.to_string());
-            let mut variants = model
-                .get("variants")
-                .and_then(Value::as_object)
-                .map(|map| map.keys().cloned().collect::<Vec<_>>());
-            if let Some(variants) = variants.as_mut() {
-                variants.sort();
-            }
-            models.push(AgentModelInfo {
-                id: format!("{provider_id}/{model_id}"),
-                name,
-                variants,
-                default_variant: None,
-            });
-        }
-    }
-    models.sort_by(|a, b| a.id.cmp(&b.id));
-
-    let mut default_model = None;
-    for provider_id in provider_order {
-        if let Some(model_id) = default_map.get(&provider_id).and_then(Value::as_str) {
-            default_model = Some(format!("{provider_id}/{model_id}"));
-            break;
-        }
-    }
-    if default_model.is_none() {
-        default_model = models.first().map(|model| model.id.clone());
-    }
-
-    Some(AgentModelsResponse {
-        models,
-        default_model,
-    })
 }
 
 fn normalize_agent_mode(agent: AgentId, agent_mode: Option<&str>) -> Result<String, SandboxError> {
@@ -4962,6 +5439,606 @@ fn build_spawn_options(
     options
 }
 
+fn install_skill_links(paths: &[String]) -> Result<Vec<PathBuf>, SandboxError> {
+    let cwd = std::env::current_dir().map_err(|err| SandboxError::StreamError {
+        message: err.to_string(),
+    })?;
+    let mut skill_dirs = Vec::new();
+    for input in paths {
+        let mut path = PathBuf::from(input);
+        if path.is_relative() {
+            path = cwd.join(path);
+        }
+        if path.is_file() {
+            if path.file_name().is_some_and(|name| name == "SKILL.md") {
+                path = path.parent().map(StdPath::to_path_buf).ok_or_else(|| {
+                    SandboxError::InvalidRequest {
+                        message: format!("invalid skill path: {input}"),
+                    }
+                })?;
+            } else {
+                return Err(SandboxError::InvalidRequest {
+                    message: format!("skill path must be a directory or SKILL.md: {input}"),
+                });
+            }
+        }
+        if !path.is_dir() {
+            return Err(SandboxError::InvalidRequest {
+                message: format!("skill directory not found: {}", path.display()),
+            });
+        }
+        let skill_md = path.join("SKILL.md");
+        if !skill_md.exists() {
+            return Err(SandboxError::InvalidRequest {
+                message: format!("missing SKILL.md in {}", path.display()),
+            });
+        }
+        let canonical = fs::canonicalize(&path).map_err(|err| SandboxError::StreamError {
+            message: err.to_string(),
+        })?;
+        if !skill_dirs.contains(&canonical) {
+            skill_dirs.push(canonical.clone());
+        }
+        let skill_name = canonical
+            .file_name()
+            .ok_or_else(|| SandboxError::InvalidRequest {
+                message: format!("invalid skill directory: {}", canonical.display()),
+            })?
+            .to_string_lossy()
+            .to_string();
+        for root in SKILL_ROOTS {
+            let dest = cwd.join(root).join(&skill_name);
+            ensure_skill_link(&canonical, &dest)?;
+        }
+    }
+    Ok(skill_dirs)
+}
+
+fn ensure_skill_link(target: &StdPath, dest: &StdPath) -> Result<(), SandboxError> {
+    if dest.exists() {
+        if dest.is_dir() && dest.join("SKILL.md").exists() {
+            return Ok(());
+        }
+        if let Ok(link_target) = fs::read_link(dest) {
+            if link_target == target {
+                return Ok(());
+            }
+        }
+        return Err(SandboxError::InvalidRequest {
+            message: format!(
+                "skill path conflict: {} already exists",
+                dest.display()
+            ),
+        });
+    }
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent).map_err(|err| SandboxError::StreamError {
+            message: err.to_string(),
+        })?;
+    }
+    if let Err(err) = create_symlink_dir(target, dest) {
+        copy_dir_recursive(target, dest).map_err(|copy_err| SandboxError::StreamError {
+            message: format!("{err}; fallback copy failed: {copy_err}"),
+        })?;
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn create_symlink_dir(target: &StdPath, dest: &StdPath) -> std::io::Result<()> {
+    std::os::unix::fs::symlink(target, dest)
+}
+
+#[cfg(windows)]
+fn create_symlink_dir(target: &StdPath, dest: &StdPath) -> std::io::Result<()> {
+    std::os::windows::fs::symlink_dir(target, dest)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn create_symlink_dir(_target: &StdPath, _dest: &StdPath) -> std::io::Result<()> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Other,
+        "symlinks unsupported",
+    ))
+}
+
+fn copy_dir_recursive(src: &StdPath, dest: &StdPath) -> std::io::Result<()> {
+    fs::create_dir_all(dest)?;
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let src_path = entry.path();
+        let dest_path = dest.join(entry.file_name());
+        if file_type.is_dir() {
+            copy_dir_recursive(&src_path, &dest_path)?;
+        } else {
+            fs::copy(&src_path, &dest_path)?;
+        }
+    }
+    Ok(())
+}
+
+fn write_claude_mcp_config(mcp: &BTreeMap<String, McpServerConfig>) -> Result<(), SandboxError> {
+    let cwd = std::env::current_dir().map_err(|err| SandboxError::StreamError {
+        message: err.to_string(),
+    })?;
+    let path = cwd.join(".mcp.json");
+    let mut root = if path.exists() {
+        let text = fs::read_to_string(&path).map_err(|err| SandboxError::StreamError {
+            message: err.to_string(),
+        })?;
+        serde_json::from_str::<Value>(&text).map_err(|err| SandboxError::InvalidRequest {
+            message: format!("invalid .mcp.json: {err}"),
+        })?
+    } else {
+        Value::Object(Map::new())
+    };
+    let Some(object) = root.as_object_mut() else {
+        return Err(SandboxError::InvalidRequest {
+            message: "invalid .mcp.json: expected object".to_string(),
+        });
+    };
+    let servers = object
+        .entry("mcpServers")
+        .or_insert_with(|| Value::Object(Map::new()));
+    let Some(server_map) = servers.as_object_mut() else {
+        return Err(SandboxError::InvalidRequest {
+            message: "invalid .mcp.json: mcpServers must be an object".to_string(),
+        });
+    };
+    for (name, config) in mcp {
+        server_map.insert(name.clone(), claude_mcp_entry(config)?);
+    }
+    fs::write(
+        &path,
+        serde_json::to_string_pretty(&root).map_err(|err| SandboxError::StreamError {
+            message: err.to_string(),
+        })?,
+    )
+    .map_err(|err| SandboxError::StreamError {
+        message: err.to_string(),
+    })?;
+    Ok(())
+}
+
+fn write_codex_mcp_config(mcp: &BTreeMap<String, McpServerConfig>) -> Result<(), SandboxError> {
+    let cwd = std::env::current_dir().map_err(|err| SandboxError::StreamError {
+        message: err.to_string(),
+    })?;
+    let path = cwd.join(".codex").join("config.toml");
+    let mut doc = if path.exists() {
+        let text = fs::read_to_string(&path).map_err(|err| SandboxError::StreamError {
+            message: err.to_string(),
+        })?;
+        text.parse::<Document>()
+            .map_err(|err| SandboxError::InvalidRequest {
+                message: format!("invalid Codex config.toml: {err}"),
+            })?
+    } else {
+        Document::new()
+    };
+    let mcp_item = doc.entry("mcp_servers").or_insert(Item::Table(Table::new()));
+    let mcp_table = mcp_item.as_table_mut().ok_or_else(|| SandboxError::InvalidRequest {
+        message: "invalid Codex config.toml: mcp_servers must be a table".to_string(),
+    })?;
+    for (name, config) in mcp {
+        let table = codex_mcp_table(config)?;
+        mcp_table.insert(name, Item::Table(table));
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|err| SandboxError::StreamError {
+            message: err.to_string(),
+        })?;
+    }
+    fs::write(&path, doc.to_string()).map_err(|err| SandboxError::StreamError {
+        message: err.to_string(),
+    })?;
+    Ok(())
+}
+
+fn apply_amp_mcp_config(
+    agent_manager: &AgentManager,
+    mcp: &BTreeMap<String, McpServerConfig>,
+) -> Result<(), SandboxError> {
+    let path = agent_manager
+        .resolve_binary(AgentId::Amp)
+        .map_err(|_| SandboxError::AgentNotInstalled {
+            agent: "amp".to_string(),
+        })?;
+    let cwd = std::env::current_dir().map_err(|err| SandboxError::StreamError {
+        message: err.to_string(),
+    })?;
+    for (name, config) in mcp {
+        let mut cmd = Command::new(&path);
+        cmd.current_dir(&cwd);
+        cmd.arg("mcp").arg("add").arg(name);
+        match config {
+            McpServerConfig::Local { command, args, .. } => {
+                let (cmd_name, cmd_args) = mcp_command_parts(command, args)?;
+                cmd.arg("--").arg(cmd_name).args(cmd_args);
+            }
+            McpServerConfig::Remote {
+                url,
+                headers,
+                bearer_token_env_var,
+                env_headers,
+                ..
+            } => {
+                let merged = merged_headers(
+                    headers.as_ref(),
+                    bearer_token_env_var.as_ref(),
+                    env_headers.as_ref(),
+                );
+                for (key, value) in merged {
+                    cmd.arg("--header").arg(format!("{key}: {value}"));
+                }
+                cmd.arg(url);
+            }
+        }
+        let output = cmd.output().map_err(|err| SandboxError::StreamError {
+            message: err.to_string(),
+        })?;
+        if !output.status.success() {
+            return Err(SandboxError::StreamError {
+                message: format!("amp mcp add failed for {name}: {}", output.status),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn opencode_mcp_config(config: &McpServerConfig) -> Result<Value, SandboxError> {
+    match config {
+        McpServerConfig::Local {
+            command,
+            args,
+            env,
+            enabled,
+            timeout_ms,
+            ..
+        } => {
+            let (cmd_name, cmd_args) = mcp_command_parts(command, args)?;
+            let mut map = Map::new();
+            map.insert("type".to_string(), Value::String("local".to_string()));
+            let mut command_parts = vec![Value::String(cmd_name)];
+            command_parts.extend(cmd_args.into_iter().map(Value::String));
+            map.insert("command".to_string(), Value::Array(command_parts));
+            if let Some(env) = env {
+                map.insert("environment".to_string(), json!(env));
+            }
+            if let Some(enabled) = enabled {
+                map.insert("enabled".to_string(), Value::Bool(*enabled));
+            }
+            if let Some(timeout) = timeout_ms {
+                map.insert(
+                    "timeout".to_string(),
+                    Value::Number(serde_json::Number::from(*timeout)),
+                );
+            }
+            Ok(Value::Object(map))
+        }
+        McpServerConfig::Remote {
+            url,
+            headers,
+            bearer_token_env_var,
+            env_headers,
+            oauth,
+            enabled,
+            timeout_ms,
+            ..
+        } => {
+            let mut map = Map::new();
+            map.insert("type".to_string(), Value::String("remote".to_string()));
+            map.insert("url".to_string(), Value::String(url.clone()));
+            let merged = merged_headers(
+                headers.as_ref(),
+                bearer_token_env_var.as_ref(),
+                env_headers.as_ref(),
+            );
+            if !merged.is_empty() {
+                map.insert("headers".to_string(), json!(merged));
+            }
+            if let Some(oauth) = oauth {
+                map.insert(
+                    "oauth".to_string(),
+                    serde_json::to_value(oauth).map_err(|err| SandboxError::StreamError {
+                        message: err.to_string(),
+                    })?,
+                );
+            }
+            if let Some(enabled) = enabled {
+                map.insert("enabled".to_string(), Value::Bool(*enabled));
+            }
+            if let Some(timeout) = timeout_ms {
+                map.insert(
+                    "timeout".to_string(),
+                    Value::Number(serde_json::Number::from(*timeout)),
+                );
+            }
+            Ok(Value::Object(map))
+        }
+    }
+}
+
+fn claude_mcp_entry(config: &McpServerConfig) -> Result<Value, SandboxError> {
+    match config {
+        McpServerConfig::Local {
+            command,
+            args,
+            env,
+            ..
+        } => {
+            let (cmd_name, cmd_args) = mcp_command_parts(command, args)?;
+            let mut map = Map::new();
+            map.insert("command".to_string(), Value::String(cmd_name));
+            if !cmd_args.is_empty() {
+                map.insert(
+                    "args".to_string(),
+                    Value::Array(cmd_args.into_iter().map(Value::String).collect()),
+                );
+            }
+            if let Some(env) = env {
+                map.insert("env".to_string(), json!(env));
+            }
+            Ok(Value::Object(map))
+        }
+        McpServerConfig::Remote {
+            url,
+            headers,
+            bearer_token_env_var,
+            env_headers,
+            transport,
+            ..
+        } => {
+            let mut map = Map::new();
+            let transport = transport.clone().unwrap_or(McpRemoteTransport::Http);
+            map.insert(
+                "type".to_string(),
+                Value::String(
+                    match transport {
+                        McpRemoteTransport::Http => "http",
+                        McpRemoteTransport::Sse => "sse",
+                    }
+                    .to_string(),
+                ),
+            );
+            map.insert("url".to_string(), Value::String(url.clone()));
+            let merged = merged_headers(
+                headers.as_ref(),
+                bearer_token_env_var.as_ref(),
+                env_headers.as_ref(),
+            );
+            if !merged.is_empty() {
+                map.insert("headers".to_string(), json!(merged));
+            }
+            Ok(Value::Object(map))
+        }
+    }
+}
+
+fn codex_mcp_table(config: &McpServerConfig) -> Result<Table, SandboxError> {
+    let mut table = Table::new();
+    match config {
+        McpServerConfig::Local {
+            command,
+            args,
+            env,
+            enabled,
+            timeout_ms,
+            ..
+        } => {
+            let (cmd_name, cmd_args) = mcp_command_parts(command, args)?;
+            table.insert("command", value(cmd_name));
+            if !cmd_args.is_empty() {
+                let mut array = Array::new();
+                for arg in cmd_args {
+                    array.push(arg);
+                }
+                table.insert("args", value(array));
+            }
+            if let Some(env) = env {
+                let mut env_table = Table::new();
+                for (key, val) in env {
+                    env_table.insert(key, value(val.clone()));
+                }
+                table.insert("env", Item::Table(env_table));
+            }
+            if let Some(enabled) = enabled {
+                table.insert("enabled", value(*enabled));
+            }
+            if let Some(timeout) = timeout_ms {
+                let seconds = (*timeout + 999) / 1000;
+                table.insert("tool_timeout_sec", value(seconds as i64));
+            }
+        }
+        McpServerConfig::Remote {
+            url,
+            headers,
+            bearer_token_env_var,
+            env_headers,
+            enabled,
+            timeout_ms,
+            ..
+        } => {
+            table.insert("url", value(url.clone()));
+            if let Some(headers) = headers {
+                let mut header_table = Table::new();
+                for (key, val) in headers {
+                    header_table.insert(key, value(val.clone()));
+                }
+                table.insert("http_headers", Item::Table(header_table));
+            }
+            if let Some(env_headers) = env_headers {
+                let mut header_table = Table::new();
+                for (key, val) in env_headers {
+                    header_table.insert(key, value(val.clone()));
+                }
+                table.insert("env_http_headers", Item::Table(header_table));
+            }
+            if let Some(bearer) = bearer_token_env_var {
+                table.insert("bearer_token_env_var", value(bearer.clone()));
+            }
+            if let Some(enabled) = enabled {
+                table.insert("enabled", value(*enabled));
+            }
+            if let Some(timeout) = timeout_ms {
+                let seconds = (*timeout + 999) / 1000;
+                table.insert("tool_timeout_sec", value(seconds as i64));
+            }
+        }
+    }
+    Ok(table)
+}
+
+fn mcp_command_parts(
+    command: &McpCommand,
+    args: &[String],
+) -> Result<(String, Vec<String>), SandboxError> {
+    match command {
+        McpCommand::Command(value) => Ok((value.clone(), args.to_vec())),
+        McpCommand::CommandWithArgs(values) => {
+            if values.is_empty() {
+                return Err(SandboxError::InvalidRequest {
+                    message: "mcp command cannot be empty".to_string(),
+                });
+            }
+            let mut iter = values.iter();
+            let cmd = iter
+                .next()
+                .map(|value| value.to_string())
+                .ok_or_else(|| SandboxError::InvalidRequest {
+                    message: "mcp command cannot be empty".to_string(),
+                })?;
+            let mut cmd_args = iter.map(|value| value.to_string()).collect::<Vec<_>>();
+            cmd_args.extend(args.iter().cloned());
+            Ok((cmd, cmd_args))
+        }
+    }
+}
+
+fn merged_headers(
+    headers: Option<&BTreeMap<String, String>>,
+    bearer_token_env_var: Option<&String>,
+    env_headers: Option<&BTreeMap<String, String>>,
+) -> BTreeMap<String, String> {
+    let mut merged = headers.cloned().unwrap_or_default();
+    if let Some(env_var) = bearer_token_env_var {
+        merged
+            .entry("Authorization".to_string())
+            .or_insert_with(|| format!("Bearer ${env_var}"));
+    }
+    if let Some(env_headers) = env_headers {
+        for (key, value) in env_headers {
+            merged
+                .entry(key.clone())
+                .or_insert_with(|| format!("${value}"));
+        }
+    }
+    merged
+}
+
+async fn resolve_fs_path(
+    state: &Arc<AppState>,
+    session_id: Option<&str>,
+    raw_path: &str,
+) -> Result<PathBuf, SandboxError> {
+    let path = PathBuf::from(raw_path);
+    if path.is_absolute() {
+        return Ok(path);
+    }
+    let root = resolve_fs_root(state, session_id).await?;
+    let relative = sanitize_relative_path(&path)?;
+    Ok(root.join(relative))
+}
+
+async fn resolve_fs_root(
+    state: &Arc<AppState>,
+    session_id: Option<&str>,
+) -> Result<PathBuf, SandboxError> {
+    if let Some(session_id) = session_id {
+        return state.session_manager.session_working_dir(session_id).await;
+    }
+    let home = dirs::home_dir().ok_or_else(|| SandboxError::InvalidRequest {
+        message: "home directory unavailable".to_string(),
+    })?;
+    Ok(home)
+}
+
+fn sanitize_relative_path(path: &StdPath) -> Result<PathBuf, SandboxError> {
+    use std::path::Component;
+    let mut sanitized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::Normal(value) => sanitized.push(value),
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return Err(SandboxError::InvalidRequest {
+                    message: format!("invalid relative path: {}", path.display()),
+                });
+            }
+        }
+    }
+    Ok(sanitized)
+}
+
+fn map_fs_error(path: &StdPath, err: std::io::Error) -> SandboxError {
+    if err.kind() == std::io::ErrorKind::NotFound {
+        SandboxError::InvalidRequest {
+            message: format!("path not found: {}", path.display()),
+        }
+    } else {
+        SandboxError::StreamError {
+            message: err.to_string(),
+        }
+    }
+}
+
+fn format_message_with_attachments(message: &str, attachments: &[MessageAttachment]) -> String {
+    if attachments.is_empty() {
+        return message.to_string();
+    }
+    let mut combined = String::new();
+    combined.push_str(message);
+    combined.push_str("\n\nAttachments:\n");
+    for attachment in attachments {
+        combined.push_str("- ");
+        combined.push_str(&attachment.path);
+        combined.push('\n');
+    }
+    combined
+}
+
+fn opencode_file_part_input(attachment: &MessageAttachment) -> Value {
+    let path = attachment.path.as_str();
+    let url = if path.starts_with("file://") {
+        path.to_string()
+    } else {
+        format!("file://{path}")
+    };
+    let filename = attachment.filename.clone().or_else(|| {
+        let clean = path.strip_prefix("file://").unwrap_or(path);
+        StdPath::new(clean)
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string())
+    });
+    let mut map = serde_json::Map::new();
+    map.insert("type".to_string(), json!("file"));
+    map.insert(
+        "mime".to_string(),
+        json!(
+            attachment
+                .mime
+                .clone()
+                .unwrap_or_else(|| "application/octet-stream".to_string())
+        ),
+    );
+    map.insert("url".to_string(), json!(url));
+    if let Some(filename) = filename {
+        map.insert("filename".to_string(), json!(filename));
+    }
+    Value::Object(map)
+}
+
 fn claude_input_session_id(session: &SessionSnapshot) -> String {
     session
         .native_session_id
@@ -5081,7 +6158,6 @@ struct CodexAppServerState {
     next_id: i64,
     prompt: String,
     model: Option<String>,
-    effort: Option<codex_schema::ReasoningEffort>,
     cwd: Option<String>,
     approval_policy: Option<codex_schema::AskForApproval>,
     sandbox_mode: Option<codex_schema::SandboxMode>,
@@ -5106,7 +6182,6 @@ impl CodexAppServerState {
             next_id: 1,
             prompt,
             model: options.model.clone(),
-            effort: codex_effort_from_variant(options.variant.as_deref()),
             cwd,
             approval_policy: codex_approval_policy(options.permission_mode.as_deref()),
             sandbox_mode: codex_sandbox_mode(options.permission_mode.as_deref()),
@@ -5352,7 +6427,7 @@ impl CodexAppServerState {
             approval_policy: self.approval_policy,
             collaboration_mode: None,
             cwd: self.cwd.clone(),
-            effort: self.effort.clone(),
+            effort: None,
             input: vec![codex_schema::UserInput::Text {
                 text: self.prompt.clone(),
                 text_elements: Vec::new(),
@@ -5393,15 +6468,6 @@ fn codex_prompt_for_mode(prompt: &str, mode: Option<&str>) -> String {
         Some("plan") => format!("Make a plan before acting.\n\n{prompt}"),
         _ => prompt.to_string(),
     }
-}
-
-fn codex_effort_from_variant(variant: Option<&str>) -> Option<codex_schema::ReasoningEffort> {
-    let variant = variant?.trim();
-    if variant.is_empty() {
-        return None;
-    }
-    let normalized = variant.to_lowercase();
-    serde_json::from_value(Value::String(normalized)).ok()
 }
 
 fn codex_approval_policy(mode: Option<&str>) -> Option<codex_schema::AskForApproval> {
@@ -5800,6 +6866,8 @@ pub mod test_utils {
                 model: None,
                 variant: None,
                 agent_version: None,
+                mcp: None,
+                skills: None,
             };
             let mut session =
                 SessionState::new(session_id.to_string(), agent, &request).expect("session");
@@ -6089,26 +7157,7 @@ fn mock_command_conversions(prefix: &str, input: &str) -> Vec<EventConversion> {
     if trimmed.is_empty() {
         return vec![];
     }
-    let mut events = mock_command_events(prefix, trimmed);
-    if should_append_turn_completed(&events) {
-        events.push(turn_completed_event());
-    }
-    events
-}
 
-fn should_append_turn_completed(events: &[EventConversion]) -> bool {
-    let Some(last) = events.last() else {
-        return false;
-    };
-    !matches!(
-        last.event_type,
-        UniversalEventType::SessionEnded
-            | UniversalEventType::PermissionRequested
-            | UniversalEventType::QuestionRequested
-    )
-}
-
-fn mock_command_events(prefix: &str, trimmed: &str) -> Vec<EventConversion> {
     if trimmed.eq_ignore_ascii_case(MOCK_OK_PROMPT) {
         return mock_assistant_message(format!("{prefix}_ok"), "OK".to_string());
     }
@@ -6943,7 +7992,7 @@ fn stream_turn_events(
     })
 }
 
-fn is_turn_terminal(event: &UniversalEvent, _agent: AgentId) -> bool {
+fn is_turn_terminal(event: &UniversalEvent, agent: AgentId) -> bool {
     match event.event_type {
         UniversalEventType::SessionEnded
         | UniversalEventType::Error
@@ -6954,7 +8003,15 @@ fn is_turn_terminal(event: &UniversalEvent, _agent: AgentId) -> bool {
             let UniversalEventData::Item(ItemEventData { item }) = &event.data else {
                 return false;
             };
-            matches!(status_label(item), Some("turn.completed" | "session.idle"))
+            if let Some(label) = status_label(item) {
+                if label == "turn.completed" || label == "session.idle" {
+                    return true;
+                }
+            }
+            if matches!(item.role, Some(ItemRole::Assistant)) && item.kind == ItemKind::Message {
+                return agent != AgentId::Codex;
+            }
+            false
         }
         _ => false,
     }
@@ -7009,35 +8066,4 @@ pub fn add_token_header(headers: &mut HeaderMap, token: &str) {
     if let Ok(header) = HeaderValue::from_str(&value) {
         headers.insert(axum::http::header::AUTHORIZATION, header);
     }
-}
-
-fn build_anthropic_headers(
-    credentials: &ProviderCredentials,
-) -> Result<reqwest::header::HeaderMap, SandboxError> {
-    let mut headers = reqwest::header::HeaderMap::new();
-    match credentials.auth_type {
-        AuthType::ApiKey => {
-            let value =
-                reqwest::header::HeaderValue::from_str(&credentials.api_key).map_err(|_| {
-                    SandboxError::StreamError {
-                        message: "invalid anthropic api key header".to_string(),
-                    }
-                })?;
-            headers.insert("x-api-key", value);
-        }
-        AuthType::Oauth => {
-            let value = format!("Bearer {}", credentials.api_key);
-            let header = reqwest::header::HeaderValue::from_str(&value).map_err(|_| {
-                SandboxError::StreamError {
-                    message: "invalid anthropic oauth header".to_string(),
-                }
-            })?;
-            headers.insert(reqwest::header::AUTHORIZATION, header);
-        }
-    }
-    headers.insert(
-        "anthropic-version",
-        reqwest::header::HeaderValue::from_static(ANTHROPIC_VERSION),
-    );
-    Ok(headers)
 }
