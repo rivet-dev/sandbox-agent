@@ -49,6 +49,16 @@ fmt:
 	cargo fmt --all
 
 [group('dev')]
+install-fast-sa:
+	cargo build --release -p sandbox-agent
+	cp target/release/sandbox-agent ~/.cargo/bin/sandbox-agent
+
+[group('dev')]
+install-fast-gigacode:
+	cargo build --release -p gigacode
+	cp target/release/gigacode ~/.cargo/bin/gigacode
+
+[group('dev')]
 dev-docs:
 	cd docs && pnpm dlx mintlify dev
 

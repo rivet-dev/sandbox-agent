@@ -419,8 +419,6 @@ pub struct CredentialsExtractEnvArgs {
 
 #[derive(Debug, Error)]
 pub enum CliError {
-    #[error("missing --token or --no-token for server mode")]
-    MissingToken,
     #[error("invalid cors origin: {0}")]
     InvalidCorsOrigin(String),
     #[error("invalid cors method: {0}")]
@@ -489,12 +487,10 @@ pub fn run_command(command: &Command, cli: &CliConfig) -> Result<(), CliError> {
 }
 
 fn run_server(cli: &CliConfig, server: &ServerArgs) -> Result<(), CliError> {
-    let auth = if cli.no_token {
-        AuthConfig::disabled()
-    } else if let Some(token) = cli.token.clone() {
+    let auth = if let Some(token) = cli.token.clone() {
         AuthConfig::with_token(token)
     } else {
-        return Err(CliError::MissingToken);
+        AuthConfig::disabled()
     };
 
     let agent_manager = AgentManager::new(default_install_dir())

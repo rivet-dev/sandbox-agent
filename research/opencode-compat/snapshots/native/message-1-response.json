@@ -1,0 +1,69 @@
+{
+  "info": {
+    "id": "msg_c31b8e048001p0fSvme0VWmKR0",
+    "sessionID": "ses_3ce471fc8ffeS9ZUpB7rVDen7k",
+    "role": "assistant",
+    "time": {
+      "created": 1770360725576,
+      "completed": 1770360727252
+    },
+    "parentID": "msg_c31b8e040001pIkL4AzVtzdVRd",
+    "modelID": "claude-haiku-4-5",
+    "providerID": "anthropic",
+    "mode": "build",
+    "agent": "build",
+    "path": {
+      "cwd": "/home/nathan/sandbox-agent/research/opencode-compat",
+      "root": "/home/nathan/sandbox-agent"
+    },
+    "cost": 0,
+    "tokens": {
+      "input": 2,
+      "output": 7,
+      "reasoning": 0,
+      "cache": {
+        "read": 0,
+        "write": 13540
+      }
+    },
+    "finish": "stop"
+  },
+  "parts": [
+    {
+      "id": "prt_c31b8e6b10012vw5mZVWX51UQm",
+      "sessionID": "ses_3ce471fc8ffeS9ZUpB7rVDen7k",
+      "messageID": "msg_c31b8e048001p0fSvme0VWmKR0",
+      "type": "step-start",
+      "snapshot": "f93f1b3f790c9b1fe51007d1b4a46bcb2d528a91"
+    },
+    {
+      "id": "prt_c31b8e6b1002OBaD5M55iOVva6",
+      "sessionID": "ses_3ce471fc8ffeS9ZUpB7rVDen7k",
+      "messageID": "msg_c31b8e048001p0fSvme0VWmKR0",
+      "type": "text",
+      "text": "Hello from OpenCode",
+      "time": {
+        "start": 1770360727218,
+        "end": 1770360727218
+      }
+    },
+    {
+      "id": "prt_c31b8e6cd0012b1geOngJvrf2q",
+      "sessionID": "ses_3ce471fc8ffeS9ZUpB7rVDen7k",
+      "messageID": "msg_c31b8e048001p0fSvme0VWmKR0",
+      "type": "step-finish",
+      "reason": "stop",
+      "snapshot": "f93f1b3f790c9b1fe51007d1b4a46bcb2d528a91",
+      "cost": 0,
+      "tokens": {
+        "input": 2,
+        "output": 7,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 13540
+        }
+      }
+    }
+  ]
+}

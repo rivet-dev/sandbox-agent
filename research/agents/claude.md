@@ -226,6 +226,59 @@ Claude output is converted via `convertClaudeOutput()`:
 3. Parse with `ClaudeCliResponseSchema` as fallback
 4. Extract `structured_output` as metadata if present
 
+## Model Discovery
+
+Claude Code's `/models` slash command uses the **standard Anthropic Models API**.
+
+### API Endpoint
+
+```
+GET https://api.anthropic.com/v1/models?beta=true
+```
+
+Found by reverse engineering the CLI bundle at `node_modules/@anthropic-ai/claude-code/cli.js`.
+
+### API Client
+
+The CLI contains an internal `Models` class with two methods:
+
+```javascript
+// List all models
+GET /v1/models?beta=true
+
+// Retrieve a single model
+GET /v1/models/${modelId}?beta=true
+```
+
+Uses `this._client.getAPIList()` which handles paginated responses. The `?beta=true` query parameter is hardcoded to include beta/preview models.
+
+### Authentication
+
+Uses the same Anthropic API key / OAuth credentials that Claude Code uses for conversations. The request goes to the standard Anthropic API base URL.
+
+### Hardcoded Context Window Data
+
+The CLI also contains hardcoded output token limits for certain models (used as fallback):
+
+```javascript
+{
+  "claude-opus-4-20250514": 8192,
+  "claude-opus-4-0": 8192,
+  "claude-opus-4-1-20250805": 8192,
+  // ... more entries
+}
+```
+
+### How to Replicate
+
+Call the Anthropic API directly — no need to go through the Claude CLI:
+
+```
+GET https://api.anthropic.com/v1/models?beta=true
+x-api-key: <ANTHROPIC_API_KEY>
+anthropic-version: 2023-06-01
+```
+
 ## Notes
 
 - Claude CLI manages its own OAuth refresh internally
