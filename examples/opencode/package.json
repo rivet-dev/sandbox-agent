@@ -1,0 +1,21 @@
+{
+  "name": "@sandbox-agent/example-opencode",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/opencode.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@opencode-ai/sdk": "latest",
+    "@sandbox-agent/example-shared": "workspace:*",
+    "dockerode": "latest"
+  },
+  "devDependencies": {
+    "@types/dockerode": "latest",
+    "@types/node": "latest",
+    "tsx": "latest",
+    "typescript": "latest",
+    "vitest": "^3.0.0"
+  }
+}
