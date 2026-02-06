@@ -1,0 +1,106 @@
+[
+  {
+    "info": {
+      "agent": "build",
+      "id": "msg_1",
+      "model": {
+        "modelID": "mock",
+        "providerID": "sandbox-agent"
+      },
+      "role": "user",
+      "sessionID": "ses_1",
+      "time": {
+        "completed": 1770362164907,
+        "created": 1770362164907
+      }
+    },
+    "parts": [
+      {
+        "id": "part_1",
+        "messageID": "msg_1",
+        "sessionID": "ses_1",
+        "text": "echo Hello from sandbox-agent",
+        "type": "text"
+      }
+    ]
+  },
+  {
+    "info": {
+      "agent": "build",
+      "cost": 0,
+      "finish": "stop",
+      "id": "msg_1_assistant",
+      "mode": "default",
+      "modelID": "mock",
+      "parentID": "msg_1",
+      "path": {
+        "cwd": "/home/nathan/sandbox-agent/research/opencode-compat",
+        "root": "/home/nathan/sandbox-agent/research/opencode-compat"
+      },
+      "providerID": "sandbox-agent",
+      "role": "assistant",
+      "sessionID": "ses_1",
+      "time": {
+        "created": 1770362165109
+      },
+      "tokens": {
+        "cache": {
+          "read": 0,
+          "write": 0
+        },
+        "input": 0,
+        "output": 0,
+        "reasoning": 0
+      }
+    },
+    "parts": [
+      {
+        "id": "msg_1_assistant_text",
+        "messageID": "msg_1_assistant",
+        "sessionID": "ses_1",
+        "text": "echo Hello from sandbox-agent",
+        "type": "text"
+      }
+    ]
+  },
+  {
+    "info": {
+      "agent": "build",
+      "cost": 0,
+      "finish": "stop",
+      "id": "msg_1_assistant_00000000000000000005",
+      "mode": "default",
+      "modelID": "mock",
+      "parentID": "msg_1",
+      "path": {
+        "cwd": "/home/nathan/sandbox-agent/research/opencode-compat",
+        "root": "/home/nathan/sandbox-agent/research/opencode-compat"
+      },
+      "providerID": "sandbox-agent",
+      "role": "assistant",
+      "sessionID": "ses_1",
+      "time": {
+        "completed": 1770362165511,
+        "created": 1770362165511
+      },
+      "tokens": {
+        "cache": {
+          "read": 0,
+          "write": 0
+        },
+        "input": 0,
+        "output": 0,
+        "reasoning": 0
+      }
+    },
+    "parts": [
+      {
+        "id": "msg_1_assistant_00000000000000000005_text",
+        "messageID": "msg_1_assistant_00000000000000000005",
+        "sessionID": "ses_1",
+        "text": "Hello from sandbox-agent",
+        "type": "text"
+      }
+    ]
+  }
+]

@@ -212,6 +212,10 @@ struct OpenCodeSessionRuntime {
     part_id_by_message: HashMap<String, String>,
     tool_part_by_call: HashMap<String, String>,
     tool_message_by_call: HashMap<String, String>,
+    /// Tool name by call_id, persisted from ToolCall for use in ToolResult events
+    tool_name_by_call: HashMap<String, String>,
+    /// Tool arguments by call_id, persisted from ToolCall for use in ToolResult events
+    tool_args_by_call: HashMap<String, String>,
 }
 
 pub struct OpenCodeState {
@@ -1586,25 +1590,48 @@ async fn apply_item_event(
             .entry(message_id.clone())
             .or_insert_with(|| format!("{}_text", message_id))
             .clone();
-        runtime
-            .text_by_message
-            .insert(message_id.clone(), text.clone());
-        let part = build_text_part_with_id(&session_id, &message_id, &part_id, &text);
-        upsert_message_part(&state.opencode, &session_id, &message_id, part.clone()).await;
-        state
-            .opencode
-            .emit_event(part_event("message.part.updated", &part));
-        let _ = state
-            .opencode
-            .update_runtime(&session_id, |runtime| {
-                runtime
-                    .text_by_message
-                    .insert(message_id.clone(), text.clone());
-                runtime
-                    .part_id_by_message
-                    .insert(message_id.clone(), part_id.clone());
-            })
-            .await;
+        if event.event_type == UniversalEventType::ItemStarted {
+            // For ItemStarted, only store the text in runtime as the initial value
+            // without emitting a part event. Deltas will handle streaming, and
+            // ItemCompleted will emit the final text part.
+            let _ = state
+                .opencode
+                .update_runtime(&session_id, |runtime| {
+                    runtime
+                        .text_by_message
+                        .insert(message_id.clone(), String::new());
+                    runtime
+                        .part_id_by_message
+                        .insert(message_id.clone(), part_id.clone());
+                })
+                .await;
+        } else {
+            // For ItemCompleted, emit the final text part with the complete text.
+            // Use the accumulated text from deltas if available, otherwise use
+            // the text from the completed event.
+            let final_text = runtime
+                .text_by_message
+                .get(&message_id)
+                .filter(|t| !t.is_empty())
+                .cloned()
+                .unwrap_or_else(|| text.clone());
+            let part = build_text_part_with_id(&session_id, &message_id, &part_id, &final_text);
+            upsert_message_part(&state.opencode, &session_id, &message_id, part.clone()).await;
+            state
+                .opencode
+                .emit_event(part_event("message.part.updated", &part));
+            let _ = state
+                .opencode
+                .update_runtime(&session_id, |runtime| {
+                    runtime
+                        .text_by_message
+                        .insert(message_id.clone(), final_text.clone());
+                    runtime
+                        .part_id_by_message
+                        .insert(message_id.clone(), part_id.clone());
+                })
+                .await;
+        }
     }
 
     for part in item.content.iter() {
@@ -1634,9 +1661,10 @@ async fn apply_item_event(
                     .entry(call_id.clone())
                     .or_insert_with(|| next_id("part_", &PART_COUNTER))
                     .clone();
+                let input_value = tool_input_from_arguments(Some(arguments.as_str()));
                 let state_value = json!({
                     "status": "pending",
-                    "input": {"arguments": arguments},
+                    "input": input_value,
                     "raw": arguments,
                 });
                 let tool_part = build_tool_part(
@@ -1661,6 +1689,12 @@ async fn apply_item_event(
                         runtime
                             .tool_message_by_call
                             .insert(call_id.clone(), message_id.clone());
+                        runtime
+                            .tool_name_by_call
+                            .insert(call_id.clone(), name.clone());
+                        runtime
+                            .tool_args_by_call
+                            .insert(call_id.clone(), arguments.clone());
                     })
                     .await;
             }
@@ -1670,9 +1704,22 @@ async fn apply_item_event(
                     .entry(call_id.clone())
                     .or_insert_with(|| next_id("part_", &PART_COUNTER))
                     .clone();
+                // Resolve tool name from stored ToolCall data
+                let tool_name = runtime
+                    .tool_name_by_call
+                    .get(call_id)
+                    .cloned()
+                    .unwrap_or_else(|| "tool".to_string());
+                // Resolve input from stored ToolCall arguments
+                let input_value = runtime
+                    .tool_args_by_call
+                    .get(call_id)
+                    .and_then(|args| tool_input_from_arguments(Some(args.as_str())).as_object().cloned())
+                    .map(Value::Object)
+                    .unwrap_or_else(|| json!({}));
                 let state_value = json!({
                     "status": "completed",
-                    "input": {},
+                    "input": input_value,
                     "output": output,
                     "title": "Tool result",
                     "metadata": {},
@@ -1684,7 +1731,7 @@ async fn apply_item_event(
                     &message_id,
                     &part_id,
                     call_id,
-                    "tool",
+                    &tool_name,
                     state_value,
                 );
                 upsert_message_part(&state.opencode, &session_id, &message_id, tool_part.clone())
@@ -1877,12 +1924,19 @@ async fn apply_tool_item_event(
         .get(&call_id)
         .cloned()
         .unwrap_or_else(|| next_id("part_", &PART_COUNTER));
+    // Resolve tool name: prefer current event's data, fall back to stored value from ToolCall
     let tool_name = tool_info
         .tool_name
         .clone()
+        .or_else(|| runtime.tool_name_by_call.get(&call_id).cloned())
         .unwrap_or_else(|| "tool".to_string());
-    let input_value = tool_input_from_arguments(tool_info.arguments.as_deref());
-    let raw_args = tool_info.arguments.clone().unwrap_or_default();
+    // Resolve arguments: prefer current event's data, fall back to stored value from ToolCall
+    let effective_arguments = tool_info
+        .arguments
+        .clone()
+        .or_else(|| runtime.tool_args_by_call.get(&call_id).cloned());
+    let input_value = tool_input_from_arguments(effective_arguments.as_deref());
+    let raw_args = effective_arguments.clone().unwrap_or_default();
     let output_value = tool_info
         .output
         .clone()
@@ -1910,7 +1964,7 @@ async fn apply_tool_item_event(
                     json!({
                         "status": "error",
                         "input": input_value,
-                        "error": output_value.unwrap_or_else(|| "Tool failed".to_string()),
+                        "output": output_value.unwrap_or_else(|| "Tool failed".to_string()),
                         "metadata": {},
                         "time": {"start": now, "end": now},
                     })
@@ -1962,6 +2016,17 @@ async fn apply_tool_item_event(
             runtime
                 .tool_message_by_call
                 .insert(call_id.clone(), message_id.clone());
+            // Persist tool name and arguments from ToolCall for later ToolResult events
+            if let Some(name) = tool_info.tool_name.as_ref() {
+                runtime
+                    .tool_name_by_call
+                    .insert(call_id.clone(), name.clone());
+            }
+            if let Some(args) = tool_info.arguments.as_ref() {
+                runtime
+                    .tool_args_by_call
+                    .insert(call_id.clone(), args.clone());
+            }
         })
         .await;
 }
@@ -2071,7 +2136,7 @@ async fn apply_item_delta(
     upsert_message_part(&state.opencode, &session_id, &message_id, part.clone()).await;
     state
         .opencode
-        .emit_event(part_event("message.part.updated", &part));
+        .emit_event(part_event_with_delta("message.part.updated", &part, Some(&delta)));
     let _ = state
         .opencode
         .update_runtime(&session_id, |runtime| {

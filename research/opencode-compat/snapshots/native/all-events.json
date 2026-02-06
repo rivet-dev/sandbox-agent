@@ -1,0 +1,1281 @@
+[
+  {
+    "type": "server.connected",
+    "properties": {}
+  },
+  {
+    "type": "session.created",
+    "properties": {
+      "info": {
+        "id": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "slug": "witty-eagle",
+        "version": "1.1.49",
+        "projectID": "c4153c5335dc81f0e622888f1f387c4b84dc54d5",
+        "directory": "/home/nathan/sandbox-agent/research/opencode-compat",
+        "title": "New session - 2026-02-06T06:56:52.806Z",
+        "time": {
+          "created": 1770361012806,
+          "updated": 1770361012806
+        }
+      }
+    }
+  },
+  {
+    "type": "session.updated",
+    "properties": {
+      "info": {
+        "id": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "slug": "witty-eagle",
+        "version": "1.1.49",
+        "projectID": "c4153c5335dc81f0e622888f1f387c4b84dc54d5",
+        "directory": "/home/nathan/sandbox-agent/research/opencode-compat",
+        "title": "New session - 2026-02-06T06:56:52.806Z",
+        "time": {
+          "created": 1770361012806,
+          "updated": 1770361012806
+        }
+      }
+    }
+  },
+  {
+    "type": "message.updated",
+    "properties": {
+      "info": {
+        "id": "msg_c31bd424c001ICzhibLcSkazYE",
+        "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "role": "user",
+        "time": {
+          "created": 1770361012812
+        },
+        "agent": "build",
+        "model": {
+          "providerID": "anthropic",
+          "modelID": "claude-haiku-4-5"
+        }
+      }
+    }
+  },
+  {
+    "type": "message.part.updated",
+    "properties": {
+      "part": {
+        "id": "prt_c31bd424c002I8ASgZXZGMnUf2",
+        "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "messageID": "msg_c31bd424c001ICzhibLcSkazYE",
+        "type": "text",
+        "text": "Respond with exactly: 'Hello from OpenCode'. Nothing else."
+      }
+    }
+  },
+  {
+    "type": "session.updated",
+    "properties": {
+      "info": {
+        "id": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "slug": "witty-eagle",
+        "version": "1.1.49",
+        "projectID": "c4153c5335dc81f0e622888f1f387c4b84dc54d5",
+        "directory": "/home/nathan/sandbox-agent/research/opencode-compat",
+        "title": "New session - 2026-02-06T06:56:52.806Z",
+        "time": {
+          "created": 1770361012806,
+          "updated": 1770361012825
+        }
+      }
+    }
+  },
+  {
+    "type": "session.status",
+    "properties": {
+      "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+      "status": {
+        "type": "busy"
+      }
+    }
+  },
+  {
+    "type": "message.updated",
+    "properties": {
+      "info": {
+        "id": "msg_c31bd4260001o9JzwTa1Ops17t",
+        "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "role": "assistant",
+        "time": {
+          "created": 1770361012832
+        },
+        "parentID": "msg_c31bd424c001ICzhibLcSkazYE",
+        "modelID": "claude-haiku-4-5",
+        "providerID": "anthropic",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/home/nathan/sandbox-agent/research/opencode-compat",
+          "root": "/home/nathan/sandbox-agent"
+        },
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "session.status",
+    "properties": {
+      "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+      "status": {
+        "type": "busy"
+      }
+    }
+  },
+  {
+    "type": "message.updated",
+    "properties": {
+      "info": {
+        "id": "msg_c31bd424c001ICzhibLcSkazYE",
+        "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "role": "user",
+        "time": {
+          "created": 1770361012812
+        },
+        "summary": {
+          "diffs": []
+        },
+        "agent": "build",
+        "model": {
+          "providerID": "anthropic",
+          "modelID": "claude-haiku-4-5"
+        }
+      }
+    }
+  },
+  {
+    "type": "session.updated",
+    "properties": {
+      "info": {
+        "id": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "slug": "witty-eagle",
+        "version": "1.1.49",
+        "projectID": "c4153c5335dc81f0e622888f1f387c4b84dc54d5",
+        "directory": "/home/nathan/sandbox-agent/research/opencode-compat",
+        "title": "New session - 2026-02-06T06:56:52.806Z",
+        "time": {
+          "created": 1770361012806,
+          "updated": 1770361012862
+        },
+        "summary": {
+          "additions": 0,
+          "deletions": 0,
+          "files": 0
+        }
+      }
+    }
+  },
+  {
+    "type": "session.diff",
+    "properties": {
+      "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+      "diff": []
+    }
+  },
+  {
+    "type": "session.updated",
+    "properties": {
+      "info": {
+        "id": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "slug": "witty-eagle",
+        "version": "1.1.49",
+        "projectID": "c4153c5335dc81f0e622888f1f387c4b84dc54d5",
+        "directory": "/home/nathan/sandbox-agent/research/opencode-compat",
+        "title": "Hello from OpenCode",
+        "time": {
+          "created": 1770361012806,
+          "updated": 1770361012862
+        },
+        "summary": {
+          "additions": 0,
+          "deletions": 0,
+          "files": 0
+        }
+      }
+    }
+  },
+  {
+    "type": "message.updated",
+    "properties": {
+      "info": {
+        "id": "msg_c31bd424c001ICzhibLcSkazYE",
+        "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "role": "user",
+        "time": {
+          "created": 1770361012812
+        },
+        "summary": {
+          "title": "Hello from OpenCode",
+          "diffs": []
+        },
+        "agent": "build",
+        "model": {
+          "providerID": "anthropic",
+          "modelID": "claude-haiku-4-5"
+        }
+      }
+    }
+  },
+  {
+    "type": "message.part.updated",
+    "properties": {
+      "part": {
+        "id": "prt_c31bd4779001QLU4EXzj63WQ4W",
+        "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "messageID": "msg_c31bd4260001o9JzwTa1Ops17t",
+        "type": "step-start",
+        "snapshot": "302d31eedbdd77a5b1eb84e2fbc4e99e8b97e549"
+      }
+    }
+  },
+  {
+    "type": "message.part.updated",
+    "properties": {
+      "part": {
+        "id": "prt_c31bd477c001Gq3CWQQXR1h7fD",
+        "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "messageID": "msg_c31bd4260001o9JzwTa1Ops17t",
+        "type": "text",
+        "text": "Hello from OpenCode",
+        "time": {
+          "start": 1770361014140
+        }
+      },
+      "delta": "Hello from OpenCode"
+    }
+  },
+  {
+    "type": "message.part.updated",
+    "properties": {
+      "part": {
+        "id": "prt_c31bd477c001Gq3CWQQXR1h7fD",
+        "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "messageID": "msg_c31bd4260001o9JzwTa1Ops17t",
+        "type": "text",
+        "text": "Hello from OpenCode",
+        "time": {
+          "start": 1770361014146,
+          "end": 1770361014146
+        }
+      }
+    }
+  },
+  {
+    "type": "message.part.updated",
+    "properties": {
+      "part": {
+        "id": "prt_c31bd4793001LdK7WQwiUgzctY",
+        "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "messageID": "msg_c31bd4260001o9JzwTa1Ops17t",
+        "type": "step-finish",
+        "reason": "stop",
+        "snapshot": "302d31eedbdd77a5b1eb84e2fbc4e99e8b97e549",
+        "cost": 0,
+        "tokens": {
+          "input": 2,
+          "output": 7,
+          "reasoning": 0,
+          "cache": {
+            "read": 13540,
+            "write": 0
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "message.updated",
+    "properties": {
+      "info": {
+        "id": "msg_c31bd4260001o9JzwTa1Ops17t",
+        "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "role": "assistant",
+        "time": {
+          "created": 1770361012832
+        },
+        "parentID": "msg_c31bd424c001ICzhibLcSkazYE",
+        "modelID": "claude-haiku-4-5",
+        "providerID": "anthropic",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/home/nathan/sandbox-agent/research/opencode-compat",
+          "root": "/home/nathan/sandbox-agent"
+        },
+        "cost": 0,
+        "tokens": {
+          "input": 2,
+          "output": 7,
+          "reasoning": 0,
+          "cache": {
+            "read": 13540,
+            "write": 0
+          }
+        },
+        "finish": "stop"
+      }
+    }
+  },
+  {
+    "type": "message.updated",
+    "properties": {
+      "info": {
+        "id": "msg_c31bd4260001o9JzwTa1Ops17t",
+        "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "role": "assistant",
+        "time": {
+          "created": 1770361012832,
+          "completed": 1770361014171
+        },
+        "parentID": "msg_c31bd424c001ICzhibLcSkazYE",
+        "modelID": "claude-haiku-4-5",
+        "providerID": "anthropic",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/home/nathan/sandbox-agent/research/opencode-compat",
+          "root": "/home/nathan/sandbox-agent"
+        },
+        "cost": 0,
+        "tokens": {
+          "input": 2,
+          "output": 7,
+          "reasoning": 0,
+          "cache": {
+            "read": 13540,
+            "write": 0
+          }
+        },
+        "finish": "stop"
+      }
+    }
+  },
+  {
+    "type": "session.status",
+    "properties": {
+      "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+      "status": {
+        "type": "busy"
+      }
+    }
+  },
+  {
+    "type": "session.status",
+    "properties": {
+      "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+      "status": {
+        "type": "idle"
+      }
+    }
+  },
+  {
+    "type": "session.idle",
+    "properties": {
+      "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms"
+    }
+  },
+  {
+    "type": "message.updated",
+    "properties": {
+      "info": {
+        "id": "msg_c31bd424c001ICzhibLcSkazYE",
+        "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "role": "user",
+        "time": {
+          "created": 1770361012812
+        },
+        "summary": {
+          "title": "Hello from OpenCode",
+          "diffs": []
+        },
+        "agent": "build",
+        "model": {
+          "providerID": "anthropic",
+          "modelID": "claude-haiku-4-5"
+        }
+      }
+    }
+  },
+  {
+    "type": "session.updated",
+    "properties": {
+      "info": {
+        "id": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "slug": "witty-eagle",
+        "version": "1.1.49",
+        "projectID": "c4153c5335dc81f0e622888f1f387c4b84dc54d5",
+        "directory": "/home/nathan/sandbox-agent/research/opencode-compat",
+        "title": "Hello from OpenCode",
+        "time": {
+          "created": 1770361012806,
+          "updated": 1770361014177
+        },
+        "summary": {
+          "additions": 0,
+          "deletions": 0,
+          "files": 0
+        }
+      }
+    }
+  },
+  {
+    "type": "session.diff",
+    "properties": {
+      "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+      "diff": []
+    }
+  },
+  {
+    "type": "message.updated",
+    "properties": {
+      "info": {
+        "id": "msg_c31bd4c1b001xWoyoqqLd1Y28L",
+        "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "role": "user",
+        "time": {
+          "created": 1770361015323
+        },
+        "agent": "build",
+        "model": {
+          "providerID": "anthropic",
+          "modelID": "claude-haiku-4-5"
+        }
+      }
+    }
+  },
+  {
+    "type": "message.part.updated",
+    "properties": {
+      "part": {
+        "id": "prt_c31bd4c1b00250iBBBWSNWnE4G",
+        "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "messageID": "msg_c31bd4c1b001xWoyoqqLd1Y28L",
+        "type": "text",
+        "text": "List the files in the current directory. Use the list/ls tool. Only list the top-level contents, do not recurse."
+      }
+    }
+  },
+  {
+    "type": "session.updated",
+    "properties": {
+      "info": {
+        "id": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "slug": "witty-eagle",
+        "version": "1.1.49",
+        "projectID": "c4153c5335dc81f0e622888f1f387c4b84dc54d5",
+        "directory": "/home/nathan/sandbox-agent/research/opencode-compat",
+        "title": "Hello from OpenCode",
+        "time": {
+          "created": 1770361012806,
+          "updated": 1770361015323
+        },
+        "summary": {
+          "additions": 0,
+          "deletions": 0,
+          "files": 0
+        }
+      }
+    }
+  },
+  {
+    "type": "session.status",
+    "properties": {
+      "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+      "status": {
+        "type": "busy"
+      }
+    }
+  },
+  {
+    "type": "message.updated",
+    "properties": {
+      "info": {
+        "id": "msg_c31bd4c1c001iWeGOWfwf5UD2Y",
+        "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "role": "assistant",
+        "time": {
+          "created": 1770361015324
+        },
+        "parentID": "msg_c31bd4c1b001xWoyoqqLd1Y28L",
+        "modelID": "claude-haiku-4-5",
+        "providerID": "anthropic",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/home/nathan/sandbox-agent/research/opencode-compat",
+          "root": "/home/nathan/sandbox-agent"
+        },
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "session.status",
+    "properties": {
+      "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+      "status": {
+        "type": "busy"
+      }
+    }
+  },
+  {
+    "type": "message.updated",
+    "properties": {
+      "info": {
+        "id": "msg_c31bd4c1b001xWoyoqqLd1Y28L",
+        "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "role": "user",
+        "time": {
+          "created": 1770361015323
+        },
+        "summary": {
+          "diffs": []
+        },
+        "agent": "build",
+        "model": {
+          "providerID": "anthropic",
+          "modelID": "claude-haiku-4-5"
+        }
+      }
+    }
+  },
+  {
+    "type": "session.updated",
+    "properties": {
+      "info": {
+        "id": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "slug": "witty-eagle",
+        "version": "1.1.49",
+        "projectID": "c4153c5335dc81f0e622888f1f387c4b84dc54d5",
+        "directory": "/home/nathan/sandbox-agent/research/opencode-compat",
+        "title": "Hello from OpenCode",
+        "time": {
+          "created": 1770361012806,
+          "updated": 1770361015333
+        },
+        "summary": {
+          "additions": 0,
+          "deletions": 0,
+          "files": 0
+        }
+      }
+    }
+  },
+  {
+    "type": "session.diff",
+    "properties": {
+      "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+      "diff": []
+    }
+  },
+  {
+    "type": "message.updated",
+    "properties": {
+      "info": {
+        "id": "msg_c31bd4c1b001xWoyoqqLd1Y28L",
+        "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "role": "user",
+        "time": {
+          "created": 1770361015323
+        },
+        "summary": {
+          "title": "List directory contents",
+          "diffs": []
+        },
+        "agent": "build",
+        "model": {
+          "providerID": "anthropic",
+          "modelID": "claude-haiku-4-5"
+        }
+      }
+    }
+  },
+  {
+    "type": "message.part.updated",
+    "properties": {
+      "part": {
+        "id": "prt_c31bd4ef7001AOk3Asd0o7j5fD",
+        "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "messageID": "msg_c31bd4c1c001iWeGOWfwf5UD2Y",
+        "type": "step-start",
+        "snapshot": "8793fb311ffba7bff79cd1b25f87942c22349ae3"
+      }
+    }
+  },
+  {
+    "type": "message.part.updated",
+    "properties": {
+      "part": {
+        "id": "prt_c31bd4ef8001ovzy76OXAT5Qin",
+        "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "messageID": "msg_c31bd4c1c001iWeGOWfwf5UD2Y",
+        "type": "tool",
+        "callID": "toolu_017THj1iZNELroZgmFbqC6Ma",
+        "tool": "bash",
+        "state": {
+          "status": "pending",
+          "input": {},
+          "raw": ""
+        }
+      }
+    }
+  },
+  {
+    "type": "message.part.updated",
+    "properties": {
+      "part": {
+        "id": "prt_c31bd4ef8001ovzy76OXAT5Qin",
+        "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "messageID": "msg_c31bd4c1c001iWeGOWfwf5UD2Y",
+        "type": "tool",
+        "callID": "toolu_017THj1iZNELroZgmFbqC6Ma",
+        "tool": "bash",
+        "state": {
+          "status": "running",
+          "input": {
+            "command": "ls -la",
+            "description": "List files in current directory"
+          },
+          "time": {
+            "start": 1770361016309
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "message.part.updated",
+    "properties": {
+      "part": {
+        "id": "prt_c31bd4ef8001ovzy76OXAT5Qin",
+        "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "messageID": "msg_c31bd4c1c001iWeGOWfwf5UD2Y",
+        "type": "tool",
+        "callID": "toolu_017THj1iZNELroZgmFbqC6Ma",
+        "tool": "bash",
+        "state": {
+          "status": "running",
+          "input": {
+            "command": "ls -la",
+            "description": "List files in current directory"
+          },
+          "metadata": {
+            "output": "",
+            "description": "List files in current directory"
+          },
+          "time": {
+            "start": 1770361016328
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "message.part.updated",
+    "properties": {
+      "part": {
+        "id": "prt_c31bd4ef8001ovzy76OXAT5Qin",
+        "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "messageID": "msg_c31bd4c1c001iWeGOWfwf5UD2Y",
+        "type": "tool",
+        "callID": "toolu_017THj1iZNELroZgmFbqC6Ma",
+        "tool": "bash",
+        "state": {
+          "status": "running",
+          "input": {
+            "command": "ls -la",
+            "description": "List files in current directory"
+          },
+          "metadata": {
+            "output": "total 24\ndrwxr-xr-x 3 nathan nathan 4096 Feb  5 22:56 .\ndrwxr-xr-x 5 nathan nathan 4096 Feb  5 22:44 ..\n-rw-r--r-- 1 nathan nathan 9120 Feb  5 22:56 capture-native.ts\ndrwxr-xr-x 3 nathan nathan 4096 Feb  5 22:45 snapshots\n",
+            "description": "List files in current directory"
+          },
+          "time": {
+            "start": 1770361016329
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "message.part.updated",
+    "properties": {
+      "part": {
+        "id": "prt_c31bd4ef8001ovzy76OXAT5Qin",
+        "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "messageID": "msg_c31bd4c1c001iWeGOWfwf5UD2Y",
+        "type": "tool",
+        "callID": "toolu_017THj1iZNELroZgmFbqC6Ma",
+        "tool": "bash",
+        "state": {
+          "status": "completed",
+          "input": {
+            "command": "ls -la",
+            "description": "List files in current directory"
+          },
+          "output": "total 24\ndrwxr-xr-x 3 nathan nathan 4096 Feb  5 22:56 .\ndrwxr-xr-x 5 nathan nathan 4096 Feb  5 22:44 ..\n-rw-r--r-- 1 nathan nathan 9120 Feb  5 22:56 capture-native.ts\ndrwxr-xr-x 3 nathan nathan 4096 Feb  5 22:45 snapshots\n",
+          "title": "List files in current directory",
+          "metadata": {
+            "output": "total 24\ndrwxr-xr-x 3 nathan nathan 4096 Feb  5 22:56 .\ndrwxr-xr-x 5 nathan nathan 4096 Feb  5 22:44 ..\n-rw-r--r-- 1 nathan nathan 9120 Feb  5 22:56 capture-native.ts\ndrwxr-xr-x 3 nathan nathan 4096 Feb  5 22:45 snapshots\n",
+            "exit": 0,
+            "description": "List files in current directory",
+            "truncated": false
+          },
+          "time": {
+            "start": 1770361016309,
+            "end": 1770361016330
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "message.part.updated",
+    "properties": {
+      "part": {
+        "id": "prt_c31bd500e001MnhwCXaWI2pfAw",
+        "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "messageID": "msg_c31bd4c1c001iWeGOWfwf5UD2Y",
+        "type": "step-finish",
+        "reason": "tool-calls",
+        "snapshot": "8793fb311ffba7bff79cd1b25f87942c22349ae3",
+        "cost": 0,
+        "tokens": {
+          "input": 2,
+          "output": 78,
+          "reasoning": 0,
+          "cache": {
+            "read": 13547,
+            "write": 31
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "message.updated",
+    "properties": {
+      "info": {
+        "id": "msg_c31bd4c1c001iWeGOWfwf5UD2Y",
+        "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "role": "assistant",
+        "time": {
+          "created": 1770361015324
+        },
+        "parentID": "msg_c31bd4c1b001xWoyoqqLd1Y28L",
+        "modelID": "claude-haiku-4-5",
+        "providerID": "anthropic",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/home/nathan/sandbox-agent/research/opencode-compat",
+          "root": "/home/nathan/sandbox-agent"
+        },
+        "cost": 0,
+        "tokens": {
+          "input": 2,
+          "output": 78,
+          "reasoning": 0,
+          "cache": {
+            "read": 13547,
+            "write": 31
+          }
+        },
+        "finish": "tool-calls"
+      }
+    }
+  },
+  {
+    "type": "message.updated",
+    "properties": {
+      "info": {
+        "id": "msg_c31bd4c1c001iWeGOWfwf5UD2Y",
+        "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "role": "assistant",
+        "time": {
+          "created": 1770361015324,
+          "completed": 1770361016339
+        },
+        "parentID": "msg_c31bd4c1b001xWoyoqqLd1Y28L",
+        "modelID": "claude-haiku-4-5",
+        "providerID": "anthropic",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/home/nathan/sandbox-agent/research/opencode-compat",
+          "root": "/home/nathan/sandbox-agent"
+        },
+        "cost": 0,
+        "tokens": {
+          "input": 2,
+          "output": 78,
+          "reasoning": 0,
+          "cache": {
+            "read": 13547,
+            "write": 31
+          }
+        },
+        "finish": "tool-calls"
+      }
+    }
+  },
+  {
+    "type": "session.status",
+    "properties": {
+      "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+      "status": {
+        "type": "busy"
+      }
+    }
+  },
+  {
+    "type": "message.updated",
+    "properties": {
+      "info": {
+        "id": "msg_c31bd5014001lZUdLPnaNuUzrb",
+        "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "role": "assistant",
+        "time": {
+          "created": 1770361016340
+        },
+        "parentID": "msg_c31bd4c1b001xWoyoqqLd1Y28L",
+        "modelID": "claude-haiku-4-5",
+        "providerID": "anthropic",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/home/nathan/sandbox-agent/research/opencode-compat",
+          "root": "/home/nathan/sandbox-agent"
+        },
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "session.status",
+    "properties": {
+      "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+      "status": {
+        "type": "busy"
+      }
+    }
+  },
+  {
+    "type": "message.updated",
+    "properties": {
+      "info": {
+        "id": "msg_c31bd4c1b001xWoyoqqLd1Y28L",
+        "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "role": "user",
+        "time": {
+          "created": 1770361015323
+        },
+        "summary": {
+          "title": "List directory contents",
+          "diffs": []
+        },
+        "agent": "build",
+        "model": {
+          "providerID": "anthropic",
+          "modelID": "claude-haiku-4-5"
+        }
+      }
+    }
+  },
+  {
+    "type": "session.updated",
+    "properties": {
+      "info": {
+        "id": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "slug": "witty-eagle",
+        "version": "1.1.49",
+        "projectID": "c4153c5335dc81f0e622888f1f387c4b84dc54d5",
+        "directory": "/home/nathan/sandbox-agent/research/opencode-compat",
+        "title": "Hello from OpenCode",
+        "time": {
+          "created": 1770361012806,
+          "updated": 1770361016350
+        },
+        "summary": {
+          "additions": 0,
+          "deletions": 0,
+          "files": 0
+        }
+      }
+    }
+  },
+  {
+    "type": "session.diff",
+    "properties": {
+      "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+      "diff": []
+    }
+  },
+  {
+    "type": "message.part.updated",
+    "properties": {
+      "part": {
+        "id": "prt_c31bd53580017z4yaEbtkZX0zx",
+        "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "messageID": "msg_c31bd5014001lZUdLPnaNuUzrb",
+        "type": "step-start",
+        "snapshot": "8793fb311ffba7bff79cd1b25f87942c22349ae3"
+      }
+    }
+  },
+  {
+    "type": "message.part.updated",
+    "properties": {
+      "part": {
+        "id": "prt_c31bd53580021848cNw3geDcGF",
+        "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "messageID": "msg_c31bd5014001lZUdLPnaNuUzrb",
+        "type": "text",
+        "text": "Here",
+        "time": {
+          "start": 1770361017176
+        }
+      },
+      "delta": "Here"
+    }
+  },
+  {
+    "type": "message.part.updated",
+    "properties": {
+      "part": {
+        "id": "prt_c31bd53580021848cNw3geDcGF",
+        "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "messageID": "msg_c31bd5014001lZUdLPnaNuUzrb",
+        "type": "text",
+        "text": "Here are the top",
+        "time": {
+          "start": 1770361017176
+        }
+      },
+      "delta": " are the top"
+    }
+  },
+  {
+    "type": "message.part.updated",
+    "properties": {
+      "part": {
+        "id": "prt_c31bd53580021848cNw3geDcGF",
+        "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "messageID": "msg_c31bd5014001lZUdLPnaNuUzrb",
+        "type": "text",
+        "text": "Here are the top-level contents",
+        "time": {
+          "start": 1770361017176
+        }
+      },
+      "delta": "-level contents"
+    }
+  },
+  {
+    "type": "message.part.updated",
+    "properties": {
+      "part": {
+        "id": "prt_c31bd53580021848cNw3geDcGF",
+        "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "messageID": "msg_c31bd5014001lZUdLPnaNuUzrb",
+        "type": "text",
+        "text": "Here are the top-level contents of the current directory:\n\n-",
+        "time": {
+          "start": 1770361017176
+        }
+      },
+      "delta": " of the current directory:\n\n-"
+    }
+  },
+  {
+    "type": "message.part.updated",
+    "properties": {
+      "part": {
+        "id": "prt_c31bd53580021848cNw3geDcGF",
+        "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "messageID": "msg_c31bd5014001lZUdLPnaNuUzrb",
+        "type": "text",
+        "text": "Here are the top-level contents of the current directory:\n\n- **",
+        "time": {
+          "start": 1770361017176
+        }
+      },
+      "delta": " **"
+    }
+  },
+  {
+    "type": "message.part.updated",
+    "properties": {
+      "part": {
+        "id": "prt_c31bd53580021848cNw3geDcGF",
+        "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "messageID": "msg_c31bd5014001lZUdLPnaNuUzrb",
+        "type": "text",
+        "text": "Here are the top-level contents of the current directory:\n\n- **capture-native.ts** - A",
+        "time": {
+          "start": 1770361017176
+        }
+      },
+      "delta": "capture-native.ts** - A"
+    }
+  },
+  {
+    "type": "message.part.updated",
+    "properties": {
+      "part": {
+        "id": "prt_c31bd53580021848cNw3geDcGF",
+        "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "messageID": "msg_c31bd5014001lZUdLPnaNuUzrb",
+        "type": "text",
+        "text": "Here are the top-level contents of the current directory:\n\n- **capture-native.ts** - A TypeScript file",
+        "time": {
+          "start": 1770361017176
+        }
+      },
+      "delta": " TypeScript file"
+    }
+  },
+  {
+    "type": "message.part.updated",
+    "properties": {
+      "part": {
+        "id": "prt_c31bd53580021848cNw3geDcGF",
+        "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "messageID": "msg_c31bd5014001lZUdLPnaNuUzrb",
+        "type": "text",
+        "text": "Here are the top-level contents of the current directory:\n\n- **capture-native.ts** - A TypeScript file\n- **snapshots/**",
+        "time": {
+          "start": 1770361017176
+        }
+      },
+      "delta": "\n- **snapshots/**"
+    }
+  },
+  {
+    "type": "message.part.updated",
+    "properties": {
+      "part": {
+        "id": "prt_c31bd53580021848cNw3geDcGF",
+        "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "messageID": "msg_c31bd5014001lZUdLPnaNuUzrb",
+        "type": "text",
+        "text": "Here are the top-level contents of the current directory:\n\n- **capture-native.ts** - A TypeScript file\n- **snapshots/** - A directory",
+        "time": {
+          "start": 1770361017176
+        }
+      },
+      "delta": " - A directory"
+    }
+  },
+  {
+    "type": "message.part.updated",
+    "properties": {
+      "part": {
+        "id": "prt_c31bd53580021848cNw3geDcGF",
+        "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "messageID": "msg_c31bd5014001lZUdLPnaNuUzrb",
+        "type": "text",
+        "text": "Here are the top-level contents of the current directory:\n\n- **capture-native.ts** - A TypeScript file\n- **snapshots/** - A directory",
+        "time": {
+          "start": 1770361017436,
+          "end": 1770361017436
+        }
+      }
+    }
+  },
+  {
+    "type": "message.part.updated",
+    "properties": {
+      "part": {
+        "id": "prt_c31bd546d001cppsZFrg2ZJy7S",
+        "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "messageID": "msg_c31bd5014001lZUdLPnaNuUzrb",
+        "type": "step-finish",
+        "reason": "stop",
+        "snapshot": "8793fb311ffba7bff79cd1b25f87942c22349ae3",
+        "cost": 0,
+        "tokens": {
+          "input": 5,
+          "output": 38,
+          "reasoning": 0,
+          "cache": {
+            "read": 13578,
+            "write": 207
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "message.updated",
+    "properties": {
+      "info": {
+        "id": "msg_c31bd5014001lZUdLPnaNuUzrb",
+        "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "role": "assistant",
+        "time": {
+          "created": 1770361016340
+        },
+        "parentID": "msg_c31bd4c1b001xWoyoqqLd1Y28L",
+        "modelID": "claude-haiku-4-5",
+        "providerID": "anthropic",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/home/nathan/sandbox-agent/research/opencode-compat",
+          "root": "/home/nathan/sandbox-agent"
+        },
+        "cost": 0,
+        "tokens": {
+          "input": 5,
+          "output": 38,
+          "reasoning": 0,
+          "cache": {
+            "read": 13578,
+            "write": 207
+          }
+        },
+        "finish": "stop"
+      }
+    }
+  },
+  {
+    "type": "message.updated",
+    "properties": {
+      "info": {
+        "id": "msg_c31bd5014001lZUdLPnaNuUzrb",
+        "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "role": "assistant",
+        "time": {
+          "created": 1770361016340,
+          "completed": 1770361017458
+        },
+        "parentID": "msg_c31bd4c1b001xWoyoqqLd1Y28L",
+        "modelID": "claude-haiku-4-5",
+        "providerID": "anthropic",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/home/nathan/sandbox-agent/research/opencode-compat",
+          "root": "/home/nathan/sandbox-agent"
+        },
+        "cost": 0,
+        "tokens": {
+          "input": 5,
+          "output": 38,
+          "reasoning": 0,
+          "cache": {
+            "read": 13578,
+            "write": 207
+          }
+        },
+        "finish": "stop"
+      }
+    }
+  },
+  {
+    "type": "session.status",
+    "properties": {
+      "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+      "status": {
+        "type": "busy"
+      }
+    }
+  },
+  {
+    "type": "session.status",
+    "properties": {
+      "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+      "status": {
+        "type": "idle"
+      }
+    }
+  },
+  {
+    "type": "session.idle",
+    "properties": {
+      "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms"
+    }
+  },
+  {
+    "type": "message.updated",
+    "properties": {
+      "info": {
+        "id": "msg_c31bd4c1b001xWoyoqqLd1Y28L",
+        "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "role": "user",
+        "time": {
+          "created": 1770361015323
+        },
+        "summary": {
+          "title": "List directory contents",
+          "diffs": []
+        },
+        "agent": "build",
+        "model": {
+          "providerID": "anthropic",
+          "modelID": "claude-haiku-4-5"
+        }
+      }
+    }
+  },
+  {
+    "type": "session.updated",
+    "properties": {
+      "info": {
+        "id": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "slug": "witty-eagle",
+        "version": "1.1.49",
+        "projectID": "c4153c5335dc81f0e622888f1f387c4b84dc54d5",
+        "directory": "/home/nathan/sandbox-agent/research/opencode-compat",
+        "title": "Hello from OpenCode",
+        "time": {
+          "created": 1770361012806,
+          "updated": 1770361017462
+        },
+        "summary": {
+          "additions": 0,
+          "deletions": 0,
+          "files": 0
+        }
+      }
+    }
+  },
+  {
+    "type": "session.diff",
+    "properties": {
+      "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+      "diff": []
+    }
+  }
+]

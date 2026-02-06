@@ -1,0 +1,3716 @@
+{
+  "providers": [
+    {
+      "id": "opencode",
+      "source": "api",
+      "name": "OpenCode Zen",
+      "env": [
+        "OPENCODE_API_KEY"
+      ],
+      "options": {},
+      "models": {
+        "glm-4.7": {
+          "id": "glm-4.7",
+          "providerID": "opencode",
+          "name": "GLM-4.7",
+          "family": "glm",
+          "api": {
+            "id": "glm-4.7",
+            "url": "https://opencode.ai/zen/v1",
+            "npm": "@ai-sdk/openai-compatible"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 0.6,
+            "output": 2.2,
+            "cache": {
+              "read": 0.1,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 204800,
+            "output": 131072
+          },
+          "capabilities": {
+            "temperature": true,
+            "reasoning": true,
+            "attachment": false,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": {
+              "field": "reasoning_content"
+            }
+          },
+          "release_date": "2025-12-22",
+          "variants": {}
+        },
+        "qwen3-coder": {
+          "id": "qwen3-coder",
+          "providerID": "opencode",
+          "name": "Qwen3 Coder",
+          "family": "qwen",
+          "api": {
+            "id": "qwen3-coder",
+            "url": "https://opencode.ai/zen/v1",
+            "npm": "@ai-sdk/openai-compatible"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 0.45,
+            "output": 1.8,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 262144,
+            "output": 65536
+          },
+          "capabilities": {
+            "temperature": true,
+            "reasoning": false,
+            "attachment": false,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2025-07-23",
+          "variants": {}
+        },
+        "claude-opus-4-1": {
+          "id": "claude-opus-4-1",
+          "providerID": "opencode",
+          "name": "Claude Opus 4.1",
+          "family": "claude-opus",
+          "api": {
+            "id": "claude-opus-4-1",
+            "url": "https://opencode.ai/zen/v1",
+            "npm": "@ai-sdk/anthropic"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 15,
+            "output": 75,
+            "cache": {
+              "read": 1.5,
+              "write": 18.75
+            }
+          },
+          "limit": {
+            "context": 200000,
+            "output": 32000
+          },
+          "capabilities": {
+            "temperature": true,
+            "reasoning": true,
+            "attachment": true,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": true,
+              "video": false,
+              "pdf": true
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2025-08-05",
+          "variants": {
+            "high": {
+              "thinking": {
+                "type": "enabled",
+                "budgetTokens": 15999
+              }
+            },
+            "max": {
+              "thinking": {
+                "type": "enabled",
+                "budgetTokens": 31999
+              }
+            }
+          }
+        },
+        "kimi-k2": {
+          "id": "kimi-k2",
+          "providerID": "opencode",
+          "name": "Kimi K2",
+          "family": "kimi",
+          "api": {
+            "id": "kimi-k2",
+            "url": "https://opencode.ai/zen/v1",
+            "npm": "@ai-sdk/openai-compatible"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 0.4,
+            "output": 2.5,
+            "cache": {
+              "read": 0.4,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 262144,
+            "output": 262144
+          },
+          "capabilities": {
+            "temperature": true,
+            "reasoning": false,
+            "attachment": false,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2025-09-05",
+          "variants": {}
+        },
+        "gpt-5.2-codex": {
+          "id": "gpt-5.2-codex",
+          "providerID": "opencode",
+          "name": "GPT-5.2 Codex",
+          "family": "gpt-codex",
+          "api": {
+            "id": "gpt-5.2-codex",
+            "url": "https://opencode.ai/zen/v1",
+            "npm": "@ai-sdk/openai"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 1.75,
+            "output": 14,
+            "cache": {
+              "read": 0.175,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 400000,
+            "input": 272000,
+            "output": 128000
+          },
+          "capabilities": {
+            "temperature": false,
+            "reasoning": true,
+            "attachment": true,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": true,
+              "video": false,
+              "pdf": true
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2026-01-14",
+          "variants": {
+            "low": {
+              "reasoningEffort": "low",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            },
+            "medium": {
+              "reasoningEffort": "medium",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            },
+            "high": {
+              "reasoningEffort": "high",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            },
+            "xhigh": {
+              "reasoningEffort": "xhigh",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            }
+          }
+        },
+        "gpt-5.1-codex": {
+          "id": "gpt-5.1-codex",
+          "providerID": "opencode",
+          "name": "GPT-5.1 Codex",
+          "family": "gpt-codex",
+          "api": {
+            "id": "gpt-5.1-codex",
+            "url": "https://opencode.ai/zen/v1",
+            "npm": "@ai-sdk/openai"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 1.07,
+            "output": 8.5,
+            "cache": {
+              "read": 0.107,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 400000,
+            "input": 272000,
+            "output": 128000
+          },
+          "capabilities": {
+            "temperature": false,
+            "reasoning": true,
+            "attachment": true,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": true,
+              "video": false,
+              "pdf": false
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2025-11-13",
+          "variants": {
+            "low": {
+              "reasoningEffort": "low",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            },
+            "medium": {
+              "reasoningEffort": "medium",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            },
+            "high": {
+              "reasoningEffort": "high",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            }
+          }
+        },
+        "claude-haiku-4-5": {
+          "id": "claude-haiku-4-5",
+          "providerID": "opencode",
+          "name": "Claude Haiku 4.5",
+          "family": "claude-haiku",
+          "api": {
+            "id": "claude-haiku-4-5",
+            "url": "https://opencode.ai/zen/v1",
+            "npm": "@ai-sdk/anthropic"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 1,
+            "output": 5,
+            "cache": {
+              "read": 0.1,
+              "write": 1.25
+            }
+          },
+          "limit": {
+            "context": 200000,
+            "output": 64000
+          },
+          "capabilities": {
+            "temperature": true,
+            "reasoning": true,
+            "attachment": true,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": true,
+              "video": false,
+              "pdf": true
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2025-10-15",
+          "variants": {
+            "high": {
+              "thinking": {
+                "type": "enabled",
+                "budgetTokens": 16000
+              }
+            },
+            "max": {
+              "thinking": {
+                "type": "enabled",
+                "budgetTokens": 31999
+              }
+            }
+          }
+        },
+        "claude-opus-4-6": {
+          "id": "claude-opus-4-6",
+          "providerID": "opencode",
+          "name": "Claude Opus 4.6",
+          "family": "claude-opus",
+          "api": {
+            "id": "claude-opus-4-6",
+            "url": "https://opencode.ai/zen/v1",
+            "npm": "@ai-sdk/anthropic"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 5,
+            "output": 25,
+            "cache": {
+              "read": 0.5,
+              "write": 6.25
+            },
+            "experimentalOver200K": {
+              "cache": {
+                "read": 1,
+                "write": 12.5
+              },
+              "input": 10,
+              "output": 37.5
+            }
+          },
+          "limit": {
+            "context": 1000000,
+            "output": 128000
+          },
+          "capabilities": {
+            "temperature": true,
+            "reasoning": true,
+            "attachment": true,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": true,
+              "video": false,
+              "pdf": true
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2026-02-05",
+          "variants": {
+            "high": {
+              "thinking": {
+                "type": "enabled",
+                "budgetTokens": 16000
+              }
+            },
+            "max": {
+              "thinking": {
+                "type": "enabled",
+                "budgetTokens": 31999
+              }
+            }
+          }
+        },
+        "trinity-large-preview-free": {
+          "id": "trinity-large-preview-free",
+          "providerID": "opencode",
+          "name": "Trinity Large Preview",
+          "family": "trinity",
+          "api": {
+            "id": "trinity-large-preview-free",
+            "url": "https://opencode.ai/zen/v1",
+            "npm": "@ai-sdk/openai-compatible"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 131072,
+            "output": 131072
+          },
+          "capabilities": {
+            "temperature": true,
+            "reasoning": false,
+            "attachment": false,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2026-01-28",
+          "variants": {}
+        },
+        "claude-opus-4-5": {
+          "id": "claude-opus-4-5",
+          "providerID": "opencode",
+          "name": "Claude Opus 4.5",
+          "family": "claude-opus",
+          "api": {
+            "id": "claude-opus-4-5",
+            "url": "https://opencode.ai/zen/v1",
+            "npm": "@ai-sdk/anthropic"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 5,
+            "output": 25,
+            "cache": {
+              "read": 0.5,
+              "write": 6.25
+            }
+          },
+          "limit": {
+            "context": 200000,
+            "output": 64000
+          },
+          "capabilities": {
+            "temperature": true,
+            "reasoning": true,
+            "attachment": true,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": true,
+              "video": false,
+              "pdf": true
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2025-11-24",
+          "variants": {
+            "high": {
+              "thinking": {
+                "type": "enabled",
+                "budgetTokens": 16000
+              }
+            },
+            "max": {
+              "thinking": {
+                "type": "enabled",
+                "budgetTokens": 31999
+              }
+            }
+          }
+        },
+        "kimi-k2.5": {
+          "id": "kimi-k2.5",
+          "providerID": "opencode",
+          "name": "Kimi K2.5",
+          "family": "kimi",
+          "api": {
+            "id": "kimi-k2.5",
+            "url": "https://opencode.ai/zen/v1",
+            "npm": "@ai-sdk/openai-compatible"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 0.6,
+            "output": 3,
+            "cache": {
+              "read": 0.08,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 262144,
+            "output": 262144
+          },
+          "capabilities": {
+            "temperature": true,
+            "reasoning": true,
+            "attachment": true,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": true,
+              "video": true,
+              "pdf": false
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": {
+              "field": "reasoning_content"
+            }
+          },
+          "release_date": "2026-01-27",
+          "variants": {}
+        },
+        "gemini-3-pro": {
+          "id": "gemini-3-pro",
+          "providerID": "opencode",
+          "name": "Gemini 3 Pro",
+          "family": "gemini-pro",
+          "api": {
+            "id": "gemini-3-pro",
+            "url": "https://opencode.ai/zen/v1",
+            "npm": "@ai-sdk/google"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 2,
+            "output": 12,
+            "cache": {
+              "read": 0.2,
+              "write": 0
+            },
+            "experimentalOver200K": {
+              "cache": {
+                "read": 0.4,
+                "write": 0
+              },
+              "input": 4,
+              "output": 18
+            }
+          },
+          "limit": {
+            "context": 1048576,
+            "output": 65536
+          },
+          "capabilities": {
+            "temperature": true,
+            "reasoning": true,
+            "attachment": true,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": true,
+              "image": true,
+              "video": true,
+              "pdf": true
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2025-11-18",
+          "variants": {
+            "low": {
+              "includeThoughts": true,
+              "thinkingLevel": "low"
+            },
+            "high": {
+              "includeThoughts": true,
+              "thinkingLevel": "high"
+            }
+          }
+        },
+        "claude-sonnet-4-5": {
+          "id": "claude-sonnet-4-5",
+          "providerID": "opencode",
+          "name": "Claude Sonnet 4.5",
+          "family": "claude-sonnet",
+          "api": {
+            "id": "claude-sonnet-4-5",
+            "url": "https://opencode.ai/zen/v1",
+            "npm": "@ai-sdk/anthropic"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 3,
+            "output": 15,
+            "cache": {
+              "read": 0.3,
+              "write": 3.75
+            },
+            "experimentalOver200K": {
+              "cache": {
+                "read": 0.6,
+                "write": 7.5
+              },
+              "input": 6,
+              "output": 22.5
+            }
+          },
+          "limit": {
+            "context": 1000000,
+            "output": 64000
+          },
+          "capabilities": {
+            "temperature": true,
+            "reasoning": true,
+            "attachment": true,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": true,
+              "video": false,
+              "pdf": true
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": true
+          },
+          "release_date": "2025-09-29",
+          "variants": {
+            "high": {
+              "thinking": {
+                "type": "enabled",
+                "budgetTokens": 16000
+              }
+            },
+            "max": {
+              "thinking": {
+                "type": "enabled",
+                "budgetTokens": 31999
+              }
+            }
+          }
+        },
+        "gpt-5.1-codex-mini": {
+          "id": "gpt-5.1-codex-mini",
+          "providerID": "opencode",
+          "name": "GPT-5.1 Codex Mini",
+          "family": "gpt-codex",
+          "api": {
+            "id": "gpt-5.1-codex-mini",
+            "url": "https://opencode.ai/zen/v1",
+            "npm": "@ai-sdk/openai"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 0.25,
+            "output": 2,
+            "cache": {
+              "read": 0.025,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 400000,
+            "input": 272000,
+            "output": 128000
+          },
+          "capabilities": {
+            "temperature": false,
+            "reasoning": true,
+            "attachment": true,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": true,
+              "video": false,
+              "pdf": false
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2025-11-13",
+          "variants": {
+            "low": {
+              "reasoningEffort": "low",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            },
+            "medium": {
+              "reasoningEffort": "medium",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            },
+            "high": {
+              "reasoningEffort": "high",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            }
+          }
+        },
+        "kimi-k2-thinking": {
+          "id": "kimi-k2-thinking",
+          "providerID": "opencode",
+          "name": "Kimi K2 Thinking",
+          "family": "kimi-thinking",
+          "api": {
+            "id": "kimi-k2-thinking",
+            "url": "https://opencode.ai/zen/v1",
+            "npm": "@ai-sdk/openai-compatible"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 0.4,
+            "output": 2.5,
+            "cache": {
+              "read": 0.4,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 262144,
+            "output": 262144
+          },
+          "capabilities": {
+            "temperature": true,
+            "reasoning": true,
+            "attachment": false,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": {
+              "field": "reasoning_content"
+            }
+          },
+          "release_date": "2025-09-05",
+          "variants": {}
+        },
+        "gpt-5.1": {
+          "id": "gpt-5.1",
+          "providerID": "opencode",
+          "name": "GPT-5.1",
+          "family": "gpt",
+          "api": {
+            "id": "gpt-5.1",
+            "url": "https://opencode.ai/zen/v1",
+            "npm": "@ai-sdk/openai"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 1.07,
+            "output": 8.5,
+            "cache": {
+              "read": 0.107,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 400000,
+            "input": 272000,
+            "output": 128000
+          },
+          "capabilities": {
+            "temperature": false,
+            "reasoning": true,
+            "attachment": true,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": true,
+              "video": false,
+              "pdf": false
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2025-11-13",
+          "variants": {
+            "none": {
+              "reasoningEffort": "none",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            },
+            "low": {
+              "reasoningEffort": "low",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            },
+            "medium": {
+              "reasoningEffort": "medium",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            },
+            "high": {
+              "reasoningEffort": "high",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            }
+          }
+        },
+        "gpt-5-nano": {
+          "id": "gpt-5-nano",
+          "providerID": "opencode",
+          "name": "GPT-5 Nano",
+          "family": "gpt-nano",
+          "api": {
+            "id": "gpt-5-nano",
+            "url": "https://opencode.ai/zen/v1",
+            "npm": "@ai-sdk/openai"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 400000,
+            "input": 272000,
+            "output": 128000
+          },
+          "capabilities": {
+            "temperature": false,
+            "reasoning": true,
+            "attachment": true,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": true,
+              "video": false,
+              "pdf": false
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2025-08-07",
+          "variants": {
+            "minimal": {
+              "reasoningEffort": "minimal",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            },
+            "low": {
+              "reasoningEffort": "low",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            },
+            "medium": {
+              "reasoningEffort": "medium",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            },
+            "high": {
+              "reasoningEffort": "high",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            }
+          }
+        },
+        "gpt-5-codex": {
+          "id": "gpt-5-codex",
+          "providerID": "opencode",
+          "name": "GPT-5 Codex",
+          "family": "gpt-codex",
+          "api": {
+            "id": "gpt-5-codex",
+            "url": "https://opencode.ai/zen/v1",
+            "npm": "@ai-sdk/openai"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 1.07,
+            "output": 8.5,
+            "cache": {
+              "read": 0.107,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 400000,
+            "input": 272000,
+            "output": 128000
+          },
+          "capabilities": {
+            "temperature": false,
+            "reasoning": true,
+            "attachment": true,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": true,
+              "video": false,
+              "pdf": false
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2025-09-15",
+          "variants": {
+            "low": {
+              "reasoningEffort": "low",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            },
+            "medium": {
+              "reasoningEffort": "medium",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            },
+            "high": {
+              "reasoningEffort": "high",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            }
+          }
+        },
+        "big-pickle": {
+          "id": "big-pickle",
+          "providerID": "opencode",
+          "name": "Big Pickle",
+          "family": "big-pickle",
+          "api": {
+            "id": "big-pickle",
+            "url": "https://opencode.ai/zen/v1",
+            "npm": "@ai-sdk/openai-compatible"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 200000,
+            "output": 128000
+          },
+          "capabilities": {
+            "temperature": true,
+            "reasoning": true,
+            "attachment": false,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2025-10-17",
+          "variants": {
+            "low": {
+              "reasoningEffort": "low"
+            },
+            "medium": {
+              "reasoningEffort": "medium"
+            },
+            "high": {
+              "reasoningEffort": "high"
+            }
+          }
+        },
+        "claude-3-5-haiku": {
+          "id": "claude-3-5-haiku",
+          "providerID": "opencode",
+          "name": "Claude Haiku 3.5",
+          "family": "claude-haiku",
+          "api": {
+            "id": "claude-3-5-haiku",
+            "url": "https://opencode.ai/zen/v1",
+            "npm": "@ai-sdk/anthropic"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 0.8,
+            "output": 4,
+            "cache": {
+              "read": 0.08,
+              "write": 1
+            }
+          },
+          "limit": {
+            "context": 200000,
+            "output": 8192
+          },
+          "capabilities": {
+            "temperature": true,
+            "reasoning": false,
+            "attachment": true,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": true,
+              "video": false,
+              "pdf": true
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2024-10-22",
+          "variants": {}
+        },
+        "glm-4.6": {
+          "id": "glm-4.6",
+          "providerID": "opencode",
+          "name": "GLM-4.6",
+          "family": "glm",
+          "api": {
+            "id": "glm-4.6",
+            "url": "https://opencode.ai/zen/v1",
+            "npm": "@ai-sdk/openai-compatible"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 0.6,
+            "output": 2.2,
+            "cache": {
+              "read": 0.1,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 204800,
+            "output": 131072
+          },
+          "capabilities": {
+            "temperature": true,
+            "reasoning": true,
+            "attachment": false,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2025-09-30",
+          "variants": {}
+        },
+        "glm-4.7-free": {
+          "id": "glm-4.7-free",
+          "providerID": "opencode",
+          "name": "GLM-4.7 Free",
+          "family": "glm-free",
+          "api": {
+            "id": "glm-4.7-free",
+            "url": "https://opencode.ai/zen/v1",
+            "npm": "@ai-sdk/openai-compatible"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 204800,
+            "output": 131072
+          },
+          "capabilities": {
+            "temperature": true,
+            "reasoning": true,
+            "attachment": false,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": {
+              "field": "reasoning_content"
+            }
+          },
+          "release_date": "2025-12-22",
+          "variants": {}
+        },
+        "gemini-3-flash": {
+          "id": "gemini-3-flash",
+          "providerID": "opencode",
+          "name": "Gemini 3 Flash",
+          "family": "gemini-flash",
+          "api": {
+            "id": "gemini-3-flash",
+            "url": "https://opencode.ai/zen/v1",
+            "npm": "@ai-sdk/google"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 0.5,
+            "output": 3,
+            "cache": {
+              "read": 0.05,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 1048576,
+            "output": 65536
+          },
+          "capabilities": {
+            "temperature": true,
+            "reasoning": true,
+            "attachment": true,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": true,
+              "image": true,
+              "video": true,
+              "pdf": true
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2025-12-17",
+          "variants": {
+            "low": {
+              "includeThoughts": true,
+              "thinkingLevel": "low"
+            },
+            "high": {
+              "includeThoughts": true,
+              "thinkingLevel": "high"
+            }
+          }
+        },
+        "gpt-5.1-codex-max": {
+          "id": "gpt-5.1-codex-max",
+          "providerID": "opencode",
+          "name": "GPT-5.1 Codex Max",
+          "family": "gpt-codex",
+          "api": {
+            "id": "gpt-5.1-codex-max",
+            "url": "https://opencode.ai/zen/v1",
+            "npm": "@ai-sdk/openai"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 1.25,
+            "output": 10,
+            "cache": {
+              "read": 0.125,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 400000,
+            "input": 272000,
+            "output": 128000
+          },
+          "capabilities": {
+            "temperature": false,
+            "reasoning": true,
+            "attachment": true,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": true,
+              "video": false,
+              "pdf": false
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2025-11-13",
+          "variants": {
+            "low": {
+              "reasoningEffort": "low",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            },
+            "medium": {
+              "reasoningEffort": "medium",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            },
+            "high": {
+              "reasoningEffort": "high",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            }
+          }
+        },
+        "minimax-m2.1-free": {
+          "id": "minimax-m2.1-free",
+          "providerID": "opencode",
+          "name": "MiniMax M2.1 Free",
+          "family": "minimax-free",
+          "api": {
+            "id": "minimax-m2.1-free",
+            "url": "https://opencode.ai/zen/v1",
+            "npm": "@ai-sdk/anthropic"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 204800,
+            "output": 131072
+          },
+          "capabilities": {
+            "temperature": true,
+            "reasoning": true,
+            "attachment": false,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2025-12-23",
+          "variants": {}
+        },
+        "kimi-k2.5-free": {
+          "id": "kimi-k2.5-free",
+          "providerID": "opencode",
+          "name": "Kimi K2.5 Free",
+          "family": "kimi-free",
+          "api": {
+            "id": "kimi-k2.5-free",
+            "url": "https://opencode.ai/zen/v1",
+            "npm": "@ai-sdk/openai-compatible"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 262144,
+            "output": 262144
+          },
+          "capabilities": {
+            "temperature": true,
+            "reasoning": true,
+            "attachment": true,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": true,
+              "video": true,
+              "pdf": false
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": {
+              "field": "reasoning_content"
+            }
+          },
+          "release_date": "2026-01-27",
+          "variants": {}
+        },
+        "claude-sonnet-4": {
+          "id": "claude-sonnet-4",
+          "providerID": "opencode",
+          "name": "Claude Sonnet 4",
+          "family": "claude-sonnet",
+          "api": {
+            "id": "claude-sonnet-4",
+            "url": "https://opencode.ai/zen/v1",
+            "npm": "@ai-sdk/anthropic"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 3,
+            "output": 15,
+            "cache": {
+              "read": 0.3,
+              "write": 3.75
+            },
+            "experimentalOver200K": {
+              "cache": {
+                "read": 0.6,
+                "write": 7.5
+              },
+              "input": 6,
+              "output": 22.5
+            }
+          },
+          "limit": {
+            "context": 1000000,
+            "output": 64000
+          },
+          "capabilities": {
+            "temperature": true,
+            "reasoning": true,
+            "attachment": true,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": true,
+              "video": false,
+              "pdf": true
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2025-05-22",
+          "variants": {
+            "high": {
+              "thinking": {
+                "type": "enabled",
+                "budgetTokens": 16000
+              }
+            },
+            "max": {
+              "thinking": {
+                "type": "enabled",
+                "budgetTokens": 31999
+              }
+            }
+          }
+        },
+        "gpt-5": {
+          "id": "gpt-5",
+          "providerID": "opencode",
+          "name": "GPT-5",
+          "family": "gpt",
+          "api": {
+            "id": "gpt-5",
+            "url": "https://opencode.ai/zen/v1",
+            "npm": "@ai-sdk/openai"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 1.07,
+            "output": 8.5,
+            "cache": {
+              "read": 0.107,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 400000,
+            "input": 272000,
+            "output": 128000
+          },
+          "capabilities": {
+            "temperature": false,
+            "reasoning": true,
+            "attachment": true,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": true,
+              "video": false,
+              "pdf": false
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2025-08-07",
+          "variants": {
+            "minimal": {
+              "reasoningEffort": "minimal",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            },
+            "low": {
+              "reasoningEffort": "low",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            },
+            "medium": {
+              "reasoningEffort": "medium",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            },
+            "high": {
+              "reasoningEffort": "high",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            }
+          }
+        },
+        "minimax-m2.1": {
+          "id": "minimax-m2.1",
+          "providerID": "opencode",
+          "name": "MiniMax M2.1",
+          "family": "minimax",
+          "api": {
+            "id": "minimax-m2.1",
+            "url": "https://opencode.ai/zen/v1",
+            "npm": "@ai-sdk/openai-compatible"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 0.3,
+            "output": 1.2,
+            "cache": {
+              "read": 0.1,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 204800,
+            "output": 131072
+          },
+          "capabilities": {
+            "temperature": true,
+            "reasoning": true,
+            "attachment": false,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": {
+              "field": "reasoning_content"
+            }
+          },
+          "release_date": "2025-12-23",
+          "variants": {}
+        },
+        "gpt-5.2": {
+          "id": "gpt-5.2",
+          "providerID": "opencode",
+          "name": "GPT-5.2",
+          "family": "gpt",
+          "api": {
+            "id": "gpt-5.2",
+            "url": "https://opencode.ai/zen/v1",
+            "npm": "@ai-sdk/openai"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 1.75,
+            "output": 14,
+            "cache": {
+              "read": 0.175,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 400000,
+            "input": 272000,
+            "output": 128000
+          },
+          "capabilities": {
+            "temperature": false,
+            "reasoning": true,
+            "attachment": true,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": true,
+              "video": false,
+              "pdf": false
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2025-12-11",
+          "variants": {
+            "none": {
+              "reasoningEffort": "none",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            },
+            "low": {
+              "reasoningEffort": "low",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            },
+            "medium": {
+              "reasoningEffort": "medium",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            },
+            "high": {
+              "reasoningEffort": "high",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            },
+            "xhigh": {
+              "reasoningEffort": "xhigh",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            }
+          }
+        }
+      },
+      "key": "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"
+    },
+    {
+      "id": "cerebras",
+      "source": "api",
+      "name": "Cerebras",
+      "env": [
+        "CEREBRAS_API_KEY"
+      ],
+      "options": {
+        "headers": {
+          "X-Cerebras-3rd-Party-Integration": "opencode"
+        }
+      },
+      "models": {
+        "zai-glm-4.7": {
+          "id": "zai-glm-4.7",
+          "providerID": "cerebras",
+          "name": "Z.AI GLM-4.7",
+          "api": {
+            "id": "zai-glm-4.7",
+            "npm": "@ai-sdk/cerebras"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 131072,
+            "output": 40000
+          },
+          "capabilities": {
+            "temperature": true,
+            "reasoning": false,
+            "attachment": false,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2026-01-10",
+          "variants": {}
+        },
+        "qwen-3-235b-a22b-instruct-2507": {
+          "id": "qwen-3-235b-a22b-instruct-2507",
+          "providerID": "cerebras",
+          "name": "Qwen 3 235B Instruct",
+          "family": "qwen",
+          "api": {
+            "id": "qwen-3-235b-a22b-instruct-2507",
+            "npm": "@ai-sdk/cerebras"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 0.6,
+            "output": 1.2,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 131000,
+            "output": 32000
+          },
+          "capabilities": {
+            "temperature": true,
+            "reasoning": false,
+            "attachment": false,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2025-07-22",
+          "variants": {}
+        },
+        "gpt-oss-120b": {
+          "id": "gpt-oss-120b",
+          "providerID": "cerebras",
+          "name": "GPT OSS 120B",
+          "family": "gpt-oss",
+          "api": {
+            "id": "gpt-oss-120b",
+            "npm": "@ai-sdk/cerebras"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 0.25,
+            "output": 0.69,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 131072,
+            "output": 32768
+          },
+          "capabilities": {
+            "temperature": true,
+            "reasoning": true,
+            "attachment": false,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2025-08-05",
+          "variants": {
+            "low": {
+              "reasoningEffort": "low"
+            },
+            "medium": {
+              "reasoningEffort": "medium"
+            },
+            "high": {
+              "reasoningEffort": "high"
+            }
+          }
+        }
+      },
+      "key": "csk-me9n8whxtf2eekkfxe36569ppxpmk3ewh54d9t29cch5wnyd"
+    },
+    {
+      "id": "openai",
+      "source": "custom",
+      "name": "OpenAI",
+      "env": [
+        "OPENAI_API_KEY"
+      ],
+      "options": {
+        "apiKey": "opencode-oauth-dummy-key"
+      },
+      "models": {
+        "gpt-5.2-codex": {
+          "id": "gpt-5.2-codex",
+          "providerID": "openai",
+          "name": "GPT-5.2 Codex",
+          "family": "gpt-codex",
+          "api": {
+            "id": "gpt-5.2-codex",
+            "npm": "@ai-sdk/openai"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 400000,
+            "input": 272000,
+            "output": 128000
+          },
+          "capabilities": {
+            "temperature": false,
+            "reasoning": true,
+            "attachment": true,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": true,
+              "video": false,
+              "pdf": true
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2025-12-11",
+          "variants": {
+            "low": {
+              "reasoningEffort": "low",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            },
+            "medium": {
+              "reasoningEffort": "medium",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            },
+            "high": {
+              "reasoningEffort": "high",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            },
+            "xhigh": {
+              "reasoningEffort": "xhigh",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            }
+          }
+        },
+        "gpt-5.1-codex": {
+          "id": "gpt-5.1-codex",
+          "providerID": "openai",
+          "name": "GPT-5.1 Codex",
+          "family": "gpt-codex",
+          "api": {
+            "id": "gpt-5.1-codex",
+            "npm": "@ai-sdk/openai"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 400000,
+            "input": 272000,
+            "output": 128000
+          },
+          "capabilities": {
+            "temperature": false,
+            "reasoning": true,
+            "attachment": true,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": true,
+              "video": false,
+              "pdf": false
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2025-11-13",
+          "variants": {
+            "low": {
+              "reasoningEffort": "low",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            },
+            "medium": {
+              "reasoningEffort": "medium",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            },
+            "high": {
+              "reasoningEffort": "high",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            }
+          }
+        },
+        "gpt-5.1-codex-mini": {
+          "id": "gpt-5.1-codex-mini",
+          "providerID": "openai",
+          "name": "GPT-5.1 Codex mini",
+          "family": "gpt-codex",
+          "api": {
+            "id": "gpt-5.1-codex-mini",
+            "npm": "@ai-sdk/openai"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 400000,
+            "input": 272000,
+            "output": 128000
+          },
+          "capabilities": {
+            "temperature": false,
+            "reasoning": true,
+            "attachment": true,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": true,
+              "video": false,
+              "pdf": false
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2025-11-13",
+          "variants": {
+            "low": {
+              "reasoningEffort": "low",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            },
+            "medium": {
+              "reasoningEffort": "medium",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            },
+            "high": {
+              "reasoningEffort": "high",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            }
+          }
+        },
+        "gpt-5.1-codex-max": {
+          "id": "gpt-5.1-codex-max",
+          "providerID": "openai",
+          "name": "GPT-5.1 Codex Max",
+          "family": "gpt-codex",
+          "api": {
+            "id": "gpt-5.1-codex-max",
+            "npm": "@ai-sdk/openai"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 400000,
+            "input": 272000,
+            "output": 128000
+          },
+          "capabilities": {
+            "temperature": false,
+            "reasoning": true,
+            "attachment": true,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": true,
+              "video": false,
+              "pdf": false
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2025-11-13",
+          "variants": {
+            "low": {
+              "reasoningEffort": "low",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            },
+            "medium": {
+              "reasoningEffort": "medium",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            },
+            "high": {
+              "reasoningEffort": "high",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            }
+          }
+        },
+        "gpt-5.2": {
+          "id": "gpt-5.2",
+          "providerID": "openai",
+          "name": "GPT-5.2",
+          "family": "gpt",
+          "api": {
+            "id": "gpt-5.2",
+            "npm": "@ai-sdk/openai"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 400000,
+            "input": 272000,
+            "output": 128000
+          },
+          "capabilities": {
+            "temperature": false,
+            "reasoning": true,
+            "attachment": true,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": true,
+              "video": false,
+              "pdf": false
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2025-12-11",
+          "variants": {
+            "none": {
+              "reasoningEffort": "none",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            },
+            "low": {
+              "reasoningEffort": "low",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            },
+            "medium": {
+              "reasoningEffort": "medium",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            },
+            "high": {
+              "reasoningEffort": "high",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            },
+            "xhigh": {
+              "reasoningEffort": "xhigh",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "anthropic",
+      "source": "custom",
+      "name": "Anthropic",
+      "env": [
+        "ANTHROPIC_API_KEY"
+      ],
+      "options": {
+        "apiKey": "",
+        "headers": {
+          "anthropic-beta": "claude-code-20250219,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14"
+        }
+      },
+      "models": {
+        "claude-opus-4-0": {
+          "id": "claude-opus-4-0",
+          "providerID": "anthropic",
+          "name": "Claude Opus 4 (latest)",
+          "family": "claude-opus",
+          "api": {
+            "id": "claude-opus-4-0",
+            "npm": "@ai-sdk/anthropic"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 200000,
+            "output": 32000
+          },
+          "capabilities": {
+            "temperature": true,
+            "reasoning": true,
+            "attachment": true,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": true,
+              "video": false,
+              "pdf": true
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2025-05-22",
+          "variants": {
+            "high": {
+              "thinking": {
+                "type": "enabled",
+                "budgetTokens": 15999
+              }
+            },
+            "max": {
+              "thinking": {
+                "type": "enabled",
+                "budgetTokens": 31999
+              }
+            }
+          }
+        },
+        "claude-3-5-sonnet-20241022": {
+          "id": "claude-3-5-sonnet-20241022",
+          "providerID": "anthropic",
+          "name": "Claude Sonnet 3.5 v2",
+          "family": "claude-sonnet",
+          "api": {
+            "id": "claude-3-5-sonnet-20241022",
+            "npm": "@ai-sdk/anthropic"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 200000,
+            "output": 8192
+          },
+          "capabilities": {
+            "temperature": true,
+            "reasoning": false,
+            "attachment": true,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": true,
+              "video": false,
+              "pdf": true
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2024-10-22",
+          "variants": {}
+        },
+        "claude-opus-4-1": {
+          "id": "claude-opus-4-1",
+          "providerID": "anthropic",
+          "name": "Claude Opus 4.1 (latest)",
+          "family": "claude-opus",
+          "api": {
+            "id": "claude-opus-4-1",
+            "npm": "@ai-sdk/anthropic"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 200000,
+            "output": 32000
+          },
+          "capabilities": {
+            "temperature": true,
+            "reasoning": true,
+            "attachment": true,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": true,
+              "video": false,
+              "pdf": true
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2025-08-05",
+          "variants": {
+            "high": {
+              "thinking": {
+                "type": "enabled",
+                "budgetTokens": 15999
+              }
+            },
+            "max": {
+              "thinking": {
+                "type": "enabled",
+                "budgetTokens": 31999
+              }
+            }
+          }
+        },
+        "claude-haiku-4-5": {
+          "id": "claude-haiku-4-5",
+          "providerID": "anthropic",
+          "name": "Claude Haiku 4.5 (latest)",
+          "family": "claude-haiku",
+          "api": {
+            "id": "claude-haiku-4-5",
+            "npm": "@ai-sdk/anthropic"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 200000,
+            "output": 64000
+          },
+          "capabilities": {
+            "temperature": true,
+            "reasoning": true,
+            "attachment": true,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": true,
+              "video": false,
+              "pdf": true
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2025-10-15",
+          "variants": {
+            "high": {
+              "thinking": {
+                "type": "enabled",
+                "budgetTokens": 16000
+              }
+            },
+            "max": {
+              "thinking": {
+                "type": "enabled",
+                "budgetTokens": 31999
+              }
+            }
+          }
+        },
+        "claude-3-5-sonnet-20240620": {
+          "id": "claude-3-5-sonnet-20240620",
+          "providerID": "anthropic",
+          "name": "Claude Sonnet 3.5",
+          "family": "claude-sonnet",
+          "api": {
+            "id": "claude-3-5-sonnet-20240620",
+            "npm": "@ai-sdk/anthropic"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 200000,
+            "output": 8192
+          },
+          "capabilities": {
+            "temperature": true,
+            "reasoning": false,
+            "attachment": true,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": true,
+              "video": false,
+              "pdf": true
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2024-06-20",
+          "variants": {}
+        },
+        "claude-opus-4-6": {
+          "id": "claude-opus-4-6",
+          "providerID": "anthropic",
+          "name": "Claude Opus 4.6",
+          "family": "claude-opus",
+          "api": {
+            "id": "claude-opus-4-6",
+            "npm": "@ai-sdk/anthropic"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 1000000,
+            "output": 128000
+          },
+          "capabilities": {
+            "temperature": true,
+            "reasoning": true,
+            "attachment": true,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": true,
+              "video": false,
+              "pdf": true
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2026-02-05",
+          "variants": {
+            "high": {
+              "thinking": {
+                "type": "enabled",
+                "budgetTokens": 16000
+              }
+            },
+            "max": {
+              "thinking": {
+                "type": "enabled",
+                "budgetTokens": 31999
+              }
+            }
+          }
+        },
+        "claude-3-5-haiku-latest": {
+          "id": "claude-3-5-haiku-latest",
+          "providerID": "anthropic",
+          "name": "Claude Haiku 3.5 (latest)",
+          "family": "claude-haiku",
+          "api": {
+            "id": "claude-3-5-haiku-latest",
+            "npm": "@ai-sdk/anthropic"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 200000,
+            "output": 8192
+          },
+          "capabilities": {
+            "temperature": true,
+            "reasoning": false,
+            "attachment": true,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": true,
+              "video": false,
+              "pdf": true
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2024-10-22",
+          "variants": {}
+        },
+        "claude-opus-4-5": {
+          "id": "claude-opus-4-5",
+          "providerID": "anthropic",
+          "name": "Claude Opus 4.5 (latest)",
+          "family": "claude-opus",
+          "api": {
+            "id": "claude-opus-4-5",
+            "npm": "@ai-sdk/anthropic"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 200000,
+            "output": 64000
+          },
+          "capabilities": {
+            "temperature": true,
+            "reasoning": true,
+            "attachment": true,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": true,
+              "video": false,
+              "pdf": true
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2025-11-24",
+          "variants": {
+            "high": {
+              "thinking": {
+                "type": "enabled",
+                "budgetTokens": 16000
+              }
+            },
+            "max": {
+              "thinking": {
+                "type": "enabled",
+                "budgetTokens": 31999
+              }
+            }
+          }
+        },
+        "claude-3-opus-20240229": {
+          "id": "claude-3-opus-20240229",
+          "providerID": "anthropic",
+          "name": "Claude Opus 3",
+          "family": "claude-opus",
+          "api": {
+            "id": "claude-3-opus-20240229",
+            "npm": "@ai-sdk/anthropic"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 200000,
+            "output": 4096
+          },
+          "capabilities": {
+            "temperature": true,
+            "reasoning": false,
+            "attachment": true,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": true,
+              "video": false,
+              "pdf": true
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2024-02-29",
+          "variants": {}
+        },
+        "claude-opus-4-5-20251101": {
+          "id": "claude-opus-4-5-20251101",
+          "providerID": "anthropic",
+          "name": "Claude Opus 4.5",
+          "family": "claude-opus",
+          "api": {
+            "id": "claude-opus-4-5-20251101",
+            "npm": "@ai-sdk/anthropic"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 200000,
+            "output": 64000
+          },
+          "capabilities": {
+            "temperature": true,
+            "reasoning": true,
+            "attachment": true,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": true,
+              "video": false,
+              "pdf": true
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2025-11-01",
+          "variants": {
+            "high": {
+              "thinking": {
+                "type": "enabled",
+                "budgetTokens": 16000
+              }
+            },
+            "max": {
+              "thinking": {
+                "type": "enabled",
+                "budgetTokens": 31999
+              }
+            }
+          }
+        },
+        "claude-sonnet-4-5": {
+          "id": "claude-sonnet-4-5",
+          "providerID": "anthropic",
+          "name": "Claude Sonnet 4.5 (latest)",
+          "family": "claude-sonnet",
+          "api": {
+            "id": "claude-sonnet-4-5",
+            "npm": "@ai-sdk/anthropic"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 200000,
+            "output": 64000
+          },
+          "capabilities": {
+            "temperature": true,
+            "reasoning": true,
+            "attachment": true,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": true,
+              "video": false,
+              "pdf": true
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2025-09-29",
+          "variants": {
+            "high": {
+              "thinking": {
+                "type": "enabled",
+                "budgetTokens": 16000
+              }
+            },
+            "max": {
+              "thinking": {
+                "type": "enabled",
+                "budgetTokens": 31999
+              }
+            }
+          }
+        },
+        "claude-sonnet-4-5-20250929": {
+          "id": "claude-sonnet-4-5-20250929",
+          "providerID": "anthropic",
+          "name": "Claude Sonnet 4.5",
+          "family": "claude-sonnet",
+          "api": {
+            "id": "claude-sonnet-4-5-20250929",
+            "npm": "@ai-sdk/anthropic"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 200000,
+            "output": 64000
+          },
+          "capabilities": {
+            "temperature": true,
+            "reasoning": true,
+            "attachment": true,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": true,
+              "video": false,
+              "pdf": true
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2025-09-29",
+          "variants": {
+            "high": {
+              "thinking": {
+                "type": "enabled",
+                "budgetTokens": 16000
+              }
+            },
+            "max": {
+              "thinking": {
+                "type": "enabled",
+                "budgetTokens": 31999
+              }
+            }
+          }
+        },
+        "claude-sonnet-4-20250514": {
+          "id": "claude-sonnet-4-20250514",
+          "providerID": "anthropic",
+          "name": "Claude Sonnet 4",
+          "family": "claude-sonnet",
+          "api": {
+            "id": "claude-sonnet-4-20250514",
+            "npm": "@ai-sdk/anthropic"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 200000,
+            "output": 64000
+          },
+          "capabilities": {
+            "temperature": true,
+            "reasoning": true,
+            "attachment": true,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": true,
+              "video": false,
+              "pdf": true
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2025-05-22",
+          "variants": {
+            "high": {
+              "thinking": {
+                "type": "enabled",
+                "budgetTokens": 16000
+              }
+            },
+            "max": {
+              "thinking": {
+                "type": "enabled",
+                "budgetTokens": 31999
+              }
+            }
+          }
+        },
+        "claude-opus-4-20250514": {
+          "id": "claude-opus-4-20250514",
+          "providerID": "anthropic",
+          "name": "Claude Opus 4",
+          "family": "claude-opus",
+          "api": {
+            "id": "claude-opus-4-20250514",
+            "npm": "@ai-sdk/anthropic"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 200000,
+            "output": 32000
+          },
+          "capabilities": {
+            "temperature": true,
+            "reasoning": true,
+            "attachment": true,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": true,
+              "video": false,
+              "pdf": true
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2025-05-22",
+          "variants": {
+            "high": {
+              "thinking": {
+                "type": "enabled",
+                "budgetTokens": 15999
+              }
+            },
+            "max": {
+              "thinking": {
+                "type": "enabled",
+                "budgetTokens": 31999
+              }
+            }
+          }
+        },
+        "claude-3-5-haiku-20241022": {
+          "id": "claude-3-5-haiku-20241022",
+          "providerID": "anthropic",
+          "name": "Claude Haiku 3.5",
+          "family": "claude-haiku",
+          "api": {
+            "id": "claude-3-5-haiku-20241022",
+            "npm": "@ai-sdk/anthropic"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 200000,
+            "output": 8192
+          },
+          "capabilities": {
+            "temperature": true,
+            "reasoning": false,
+            "attachment": true,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": true,
+              "video": false,
+              "pdf": true
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2024-10-22",
+          "variants": {}
+        },
+        "claude-3-haiku-20240307": {
+          "id": "claude-3-haiku-20240307",
+          "providerID": "anthropic",
+          "name": "Claude Haiku 3",
+          "family": "claude-haiku",
+          "api": {
+            "id": "claude-3-haiku-20240307",
+            "npm": "@ai-sdk/anthropic"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 200000,
+            "output": 4096
+          },
+          "capabilities": {
+            "temperature": true,
+            "reasoning": false,
+            "attachment": true,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": true,
+              "video": false,
+              "pdf": true
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2024-03-13",
+          "variants": {}
+        },
+        "claude-3-7-sonnet-20250219": {
+          "id": "claude-3-7-sonnet-20250219",
+          "providerID": "anthropic",
+          "name": "Claude Sonnet 3.7",
+          "family": "claude-sonnet",
+          "api": {
+            "id": "claude-3-7-sonnet-20250219",
+            "npm": "@ai-sdk/anthropic"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 200000,
+            "output": 64000
+          },
+          "capabilities": {
+            "temperature": true,
+            "reasoning": true,
+            "attachment": true,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": true,
+              "video": false,
+              "pdf": true
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2025-02-19",
+          "variants": {
+            "high": {
+              "thinking": {
+                "type": "enabled",
+                "budgetTokens": 16000
+              }
+            },
+            "max": {
+              "thinking": {
+                "type": "enabled",
+                "budgetTokens": 31999
+              }
+            }
+          }
+        },
+        "claude-3-7-sonnet-latest": {
+          "id": "claude-3-7-sonnet-latest",
+          "providerID": "anthropic",
+          "name": "Claude Sonnet 3.7 (latest)",
+          "family": "claude-sonnet",
+          "api": {
+            "id": "claude-3-7-sonnet-latest",
+            "npm": "@ai-sdk/anthropic"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 200000,
+            "output": 64000
+          },
+          "capabilities": {
+            "temperature": true,
+            "reasoning": true,
+            "attachment": true,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": true,
+              "video": false,
+              "pdf": true
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2025-02-19",
+          "variants": {
+            "high": {
+              "thinking": {
+                "type": "enabled",
+                "budgetTokens": 16000
+              }
+            },
+            "max": {
+              "thinking": {
+                "type": "enabled",
+                "budgetTokens": 31999
+              }
+            }
+          }
+        },
+        "claude-sonnet-4-0": {
+          "id": "claude-sonnet-4-0",
+          "providerID": "anthropic",
+          "name": "Claude Sonnet 4 (latest)",
+          "family": "claude-sonnet",
+          "api": {
+            "id": "claude-sonnet-4-0",
+            "npm": "@ai-sdk/anthropic"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 200000,
+            "output": 64000
+          },
+          "capabilities": {
+            "temperature": true,
+            "reasoning": true,
+            "attachment": true,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": true,
+              "video": false,
+              "pdf": true
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2025-05-22",
+          "variants": {
+            "high": {
+              "thinking": {
+                "type": "enabled",
+                "budgetTokens": 16000
+              }
+            },
+            "max": {
+              "thinking": {
+                "type": "enabled",
+                "budgetTokens": 31999
+              }
+            }
+          }
+        },
+        "claude-opus-4-1-20250805": {
+          "id": "claude-opus-4-1-20250805",
+          "providerID": "anthropic",
+          "name": "Claude Opus 4.1",
+          "family": "claude-opus",
+          "api": {
+            "id": "claude-opus-4-1-20250805",
+            "npm": "@ai-sdk/anthropic"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 200000,
+            "output": 32000
+          },
+          "capabilities": {
+            "temperature": true,
+            "reasoning": true,
+            "attachment": true,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": true,
+              "video": false,
+              "pdf": true
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2025-08-05",
+          "variants": {
+            "high": {
+              "thinking": {
+                "type": "enabled",
+                "budgetTokens": 15999
+              }
+            },
+            "max": {
+              "thinking": {
+                "type": "enabled",
+                "budgetTokens": 31999
+              }
+            }
+          }
+        },
+        "claude-3-sonnet-20240229": {
+          "id": "claude-3-sonnet-20240229",
+          "providerID": "anthropic",
+          "name": "Claude Sonnet 3",
+          "family": "claude-sonnet",
+          "api": {
+            "id": "claude-3-sonnet-20240229",
+            "npm": "@ai-sdk/anthropic"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 200000,
+            "output": 4096
+          },
+          "capabilities": {
+            "temperature": true,
+            "reasoning": false,
+            "attachment": true,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": true,
+              "video": false,
+              "pdf": true
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2024-03-04",
+          "variants": {}
+        },
+        "claude-haiku-4-5-20251001": {
+          "id": "claude-haiku-4-5-20251001",
+          "providerID": "anthropic",
+          "name": "Claude Haiku 4.5",
+          "family": "claude-haiku",
+          "api": {
+            "id": "claude-haiku-4-5-20251001",
+            "npm": "@ai-sdk/anthropic"
+          },
+          "status": "active",
+          "headers": {},
+          "options": {},
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 200000,
+            "output": 64000
+          },
+          "capabilities": {
+            "temperature": true,
+            "reasoning": true,
+            "attachment": true,
+            "toolcall": true,
+            "input": {
+              "text": true,
+              "audio": false,
+              "image": true,
+              "video": false,
+              "pdf": true
+            },
+            "output": {
+              "text": true,
+              "audio": false,
+              "image": false,
+              "video": false,
+              "pdf": false
+            },
+            "interleaved": false
+          },
+          "release_date": "2025-10-15",
+          "variants": {
+            "high": {
+              "thinking": {
+                "type": "enabled",
+                "budgetTokens": 16000
+              }
+            },
+            "max": {
+              "thinking": {
+                "type": "enabled",
+                "budgetTokens": 31999
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "default": {
+    "opencode": "gemini-3-pro",
+    "cerebras": "zai-glm-4.7",
+    "openai": "gpt-5.2-codex",
+    "anthropic": "claude-sonnet-4-5-20250929"
+  }
+}

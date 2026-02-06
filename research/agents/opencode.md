@@ -509,6 +509,82 @@ const pollInterval = setInterval(async () => {
 }, 2000);
 ```
 
+## Model Discovery
+
+OpenCode has the richest model discovery support with both CLI and HTTP API.
+
+### CLI Commands
+
+```bash
+opencode models                 # List all available models
+opencode models <provider>      # List models for a specific provider
+```
+
+### HTTP Endpoint
+
+```
+GET /provider
+```
+
+### Response Schema
+
+```json
+{
+  "all": [
+    {
+      "id": "anthropic",
+      "name": "Anthropic",
+      "api": "string",
+      "env": ["ANTHROPIC_API_KEY"],
+      "npm": "string",
+      "models": {
+        "model-key": {
+          "id": "string",
+          "name": "string",
+          "family": "string",
+          "release_date": "string",
+          "attachment": true,
+          "reasoning": false,
+          "tool_call": true,
+          "cost": {
+            "input": 0.003,
+            "output": 0.015,
+            "cache_read": 0.0003,
+            "cache_write": 0.00375
+          },
+          "limit": {
+            "context": 200000,
+            "input": 200000,
+            "output": 8192
+          },
+          "modalities": {
+            "input": ["text", "image"],
+            "output": ["text"]
+          },
+          "experimental": false,
+          "status": "beta"
+        }
+      }
+    }
+  ],
+  "default": {
+    "anthropic": "claude-sonnet-4-20250514"
+  },
+  "connected": ["anthropic"]
+}
+```
+
+### SDK Usage
+
+```typescript
+const client = createOpencodeClient();
+const response = await client.provider.list();
+```
+
+### How to Replicate
+
+When an OpenCode server is running, call `GET /provider` on its HTTP port. Returns full model metadata including capabilities, costs, context limits, and modalities.
+
 ## Notes
 
 - OpenCode is the most feature-rich runtime (streaming, questions, permissions)
