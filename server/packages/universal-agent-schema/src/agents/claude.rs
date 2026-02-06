@@ -3,9 +3,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use serde_json::Value;
 
 use crate::{
-    ContentPart, EventConversion, ItemDeltaData, ItemEventData, ItemKind, ItemRole, ItemStatus,
-    PermissionEventData, PermissionStatus, QuestionEventData, QuestionStatus, SessionStartedData,
-    UniversalEventData, UniversalEventType, UniversalItem,
+    turn_completed_event, ContentPart, EventConversion, ItemDeltaData, ItemEventData, ItemKind,
+    ItemRole, ItemStatus, PermissionEventData, PermissionStatus, QuestionEventData, QuestionStatus,
+    SessionStartedData, UniversalEventData, UniversalEventType, UniversalItem,
 };
 
 static TEMP_ID: AtomicU64 = AtomicU64::new(1);
@@ -420,10 +420,13 @@ fn result_event_to_universal(event: &Value, session_id: &str) -> Vec<EventConver
         status: ItemStatus::Completed,
     };
 
-    vec![EventConversion::new(
-        UniversalEventType::ItemCompleted,
-        UniversalEventData::Item(ItemEventData { item: message_item }),
-    )]
+    vec![
+        EventConversion::new(
+            UniversalEventType::ItemCompleted,
+            UniversalEventData::Item(ItemEventData { item: message_item }),
+        ),
+        turn_completed_event(),
+    ]
 }
 
 fn claude_message_id(event: &Value, session_id: &str) -> String {

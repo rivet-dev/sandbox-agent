@@ -22,8 +22,8 @@ use reqwest::Client;
 use sandbox_agent_error::{AgentError, ErrorType, ProblemDetails, SandboxError};
 use sandbox_agent_universal_agent_schema::{
     codex as codex_schema, convert_amp, convert_claude, convert_codex, convert_opencode,
-    AgentUnparsedData, ContentPart, ErrorData, EventConversion, EventSource, FileAction,
-    ItemDeltaData, ItemEventData, ItemKind, ItemRole, ItemStatus, PermissionEventData,
+    turn_completed_event, AgentUnparsedData, ContentPart, ErrorData, EventConversion, EventSource,
+    FileAction, ItemDeltaData, ItemEventData, ItemKind, ItemRole, ItemStatus, PermissionEventData,
     PermissionStatus, QuestionEventData, QuestionStatus, ReasoningVisibility, SessionEndReason,
     SessionEndedData, SessionStartedData, StderrOutput, TerminatedBy, UniversalEvent,
     UniversalEventData, UniversalEventType, UniversalItem,
@@ -6029,7 +6029,26 @@ fn mock_command_conversions(prefix: &str, input: &str) -> Vec<EventConversion> {
     if trimmed.is_empty() {
         return vec![];
     }
+    let mut events = mock_command_events(prefix, trimmed);
+    if should_append_turn_completed(&events) {
+        events.push(turn_completed_event());
+    }
+    events
+}
 
+fn should_append_turn_completed(events: &[EventConversion]) -> bool {
+    let Some(last) = events.last() else {
+        return false;
+    };
+    !matches!(
+        last.event_type,
+        UniversalEventType::SessionEnded
+            | UniversalEventType::PermissionRequested
+            | UniversalEventType::QuestionRequested
+    )
+}
+
+fn mock_command_events(prefix: &str, trimmed: &str) -> Vec<EventConversion> {
     if trimmed.eq_ignore_ascii_case(MOCK_OK_PROMPT) {
         return mock_assistant_message(format!("{prefix}_ok"), "OK".to_string());
     }
@@ -6864,7 +6883,7 @@ fn stream_turn_events(
     })
 }
 
-fn is_turn_terminal(event: &UniversalEvent, agent: AgentId) -> bool {
+fn is_turn_terminal(event: &UniversalEvent, _agent: AgentId) -> bool {
     match event.event_type {
         UniversalEventType::SessionEnded
         | UniversalEventType::Error
@@ -6875,15 +6894,7 @@ fn is_turn_terminal(event: &UniversalEvent, agent: AgentId) -> bool {
             let UniversalEventData::Item(ItemEventData { item }) = &event.data else {
                 return false;
             };
-            if let Some(label) = status_label(item) {
-                if label == "turn.completed" || label == "session.idle" {
-                    return true;
-                }
-            }
-            if matches!(item.role, Some(ItemRole::Assistant)) && item.kind == ItemKind::Message {
-                return agent != AgentId::Codex;
-            }
-            false
+            matches!(status_label(item), Some("turn.completed" | "session.idle"))
         }
         _ => false,
     }
