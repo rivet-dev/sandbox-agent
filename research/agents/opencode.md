@@ -34,18 +34,40 @@ opencode run -s SESSION_ID "prompt"   # Continue specific session
 opencode run -f file1.ts -f file2.ts "review these files"
 ```
 
-### Key CLI Flags
-| Flag | Description |
-|------|-------------|
-| `--format json` | Output raw JSON events (for parsing) |
-| `-m, --model PROVIDER/MODEL` | Model in format `provider/model` |
-| `--agent AGENT` | Agent to use (`build`, `plan`) |
-| `-c, --continue` | Continue last session |
-| `-s, --session ID` | Continue specific session |
-| `-f, --file FILE` | Attach file(s) to message |
-| `--attach URL` | Attach to running server |
-| `--port PORT` | Local server port |
-| `--variant VARIANT` | Reasoning effort (e.g., `high`, `max`) |
+### Custom Args (CLI Flags)
+
+#### Core Flags
+
+| Flag | Type | Description |
+|------|------|-------------|
+| `-m, --model PROVIDER/MODEL` | string | Model in format `provider/model` (e.g., `anthropic/claude-sonnet-4-20250514`) |
+| `--agent AGENT` | string | Agent to use (`build`, `plan`, or custom agent ID) |
+| `--format FORMAT` | enum | `default` (formatted) or `json` (raw JSON events) |
+| `--variant VARIANT` | string | Reasoning effort level (e.g., `high`, `max`, `minimal`) |
+
+#### Session Flags
+
+| Flag | Type | Description |
+|------|------|-------------|
+| `-c, --continue` | bool | Continue the last session |
+| `-s, --session ID` | string | Continue a specific session by ID |
+| `--title TEXT` | string | Title for the session (uses truncated prompt if omitted) |
+| `--share` | bool | Share the session publicly |
+
+#### Input/Output Flags
+
+| Flag | Type | Description |
+|------|------|-------------|
+| `-f, --file FILE` | path[] | Attach file(s) to message (repeatable) |
+| `--attach URL` | string | Attach to a running OpenCode server (e.g., `http://localhost:4096`) |
+| `--port PORT` | int | Port for the local server (random if not specified) |
+
+#### Debugging Flags
+
+| Flag | Type | Values | Description |
+|------|------|--------|-------------|
+| `--log-level LEVEL` | enum | `DEBUG`, `INFO`, `WARN`, `ERROR` | Log verbosity level |
+| `--print-logs` | bool | - | Print logs to stderr |
 
 ### Headless Server Mode
 ```bash

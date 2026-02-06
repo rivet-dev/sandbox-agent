@@ -379,6 +379,8 @@ async fn ensure_backing_session(
         model: None,
         variant: None,
         agent_version: None,
+        raw_session_args: None,
+        raw_session_options: None,
     };
     match state
         .inner

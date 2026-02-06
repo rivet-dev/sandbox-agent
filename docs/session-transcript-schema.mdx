@@ -29,6 +29,8 @@ This table shows which agent feature coverage appears in the universal event str
 | File Changes       |   -    |   ✓   |      -       |      -       |
 | MCP Tools          |   -    |   ✓   |      -       |      -       |
 | Streaming Deltas   |   ✓    |   ✓   |      ✓       |      -       |
+| Raw Session Args   |   ✓    |       |      ✓       |      ✓       |
+| Raw Session Options|   ✓    |   ✓   |      ✓       |      ✓       |
 
 Agents: [Claude Code](https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview) · [Codex](https://github.com/openai/codex) · [OpenCode](https://github.com/opencode-ai/opencode) · [Amp](https://ampcode.com)
 
@@ -75,6 +77,12 @@ Agents: [Claude Code](https://docs.anthropic.com/en/docs/agents-and-tools/claude
   </Accordion>
   <Accordion title="Streaming Deltas">
     Native streaming of content deltas. When not supported, the daemon emits a single synthetic delta before `item.completed`.
+  </Accordion>
+  <Accordion title="Raw Session Args">
+    Pass raw CLI arguments directly to the agent at session creation via `rawSessionArgs`. Only supported for CLI-based agents (Claude, OpenCode, Amp). Codex uses JSON-RPC, so CLI args are not applicable.
+  </Accordion>
+  <Accordion title="Raw Session Options">
+    Pass raw options to the agent at session creation via `rawSessionOptions`. For long-running server agents, options are passed through the agent's native protocol. For Codex, options are merged into the `thread/start` config.
   </Accordion>
 </AccordionGroup>
 

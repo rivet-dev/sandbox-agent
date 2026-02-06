@@ -62,6 +62,26 @@ await client.createSession("demo-session", {
 await client.postMessage("demo-session", { message: "Hello" });
 ```
 
+### Raw session arguments
+
+Pass low-level arguments directly to agents at session creation:
+
+```ts
+// CLI args for Claude, OpenCode, Amp (not Codex)
+await client.createSession("my-session", {
+  agent: "claude",
+  rawSessionArgs: ["--max-turns", "5"],
+});
+
+// Options passed through agent's native protocol (long-running servers only)
+await client.createSession("my-session", {
+  agent: "codex",
+  rawSessionOptions: { sandbox: "workspace-write" },
+});
+```
+
+Check `capabilities.rawSessionArgs` and `capabilities.rawSessionOptions` to see what each agent supports.
+
 List agents and inspect feature coverage (available on `capabilities`):
 
 ```ts

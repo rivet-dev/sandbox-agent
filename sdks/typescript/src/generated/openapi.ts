@@ -64,6 +64,10 @@ export interface components {
       permissions: boolean;
       planMode: boolean;
       questions: boolean;
+      /** @description Whether this agent supports raw CLI arguments passed at session creation */
+      rawSessionArgs: boolean;
+      /** @description Whether this agent supports raw options passed at session creation */
+      rawSessionOptions: boolean;
       reasoning: boolean;
       sessionLifecycle: boolean;
       /** @description Whether this agent uses a shared long-running server process (vs per-turn subprocess) */
@@ -156,6 +160,12 @@ export interface components {
       model?: string | null;
       permissionMode?: string | null;
       variant?: string | null;
+      /** @description Raw CLI arguments to pass to the agent (for CLI-based agents like Claude, OpenCode, Amp) */
+      rawSessionArgs?: string[] | null;
+      /** @description Raw options to pass to the agent (for long-running server agents like Codex) */
+      rawSessionOptions?: {
+        [key: string]: unknown;
+      } | null;
     };
     CreateSessionResponse: {
       error?: components["schemas"]["AgentError"] | null;
