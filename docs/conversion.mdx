@@ -22,6 +22,21 @@ Notes:
 - opt-in via `include_raw=true` on events endpoints (HTTP + SSE).
 - If parsing fails, emit agent.unparsed (source=daemon, synthetic=true). Tests must assert zero unparsed events.
 
+Runtime model by agent
+
+| Agent | Runtime model | Notes |
+|---|---|---|
+| Claude | Per-message subprocess streaming | Routed through `AgentManager::spawn_streaming` with Claude stream-json stdin. |
+| Amp | Per-message subprocess streaming | Routed through `AgentManager::spawn_streaming` with parsed JSONL output. |
+| Codex | Shared app-server (stdio JSON-RPC) | One shared server process, daemon sessions map to Codex thread IDs. |
+| OpenCode | Shared HTTP server + SSE | One shared HTTP server, daemon sessions map to OpenCode session IDs. |
+| Pi | Dedicated per-session RPC process | Canonical path is router-managed Pi runtime (`pi --mode rpc`), one process per daemon session. |
+
+Pi runtime contract:
+- Session/message lifecycle for Pi must stay on router-managed per-session RPC runtime.
+- `AgentManager::spawn(Pi)` is kept for one-shot utility/testing flows.
+- `AgentManager::spawn_streaming(Pi)` is intentionally unsupported.
+
 Events / Message Flow
 
 +------------------------+------------------------------+--------------------------------------------+-----------------------------------------+----------------------------------+----------------------------+

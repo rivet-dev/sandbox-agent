@@ -325,8 +325,17 @@ impl AgentManager {
                 });
             }
             AgentId::Pi => {
-                return Err(AgentError::UnsupportedAgent {
-                    agent: agent.as_str().to_string(),
+                let output = spawn_pi(&path, &working_dir, &options)?;
+                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                let events = parse_jsonl_from_outputs(&stdout, &stderr);
+                return Ok(SpawnResult {
+                    status: output.status,
+                    stdout,
+                    stderr,
+                    session_id: extract_session_id(agent, &events),
+                    result: extract_result_text(agent, &events),
+                    events,
                 });
             }
             AgentId::Mock => {
@@ -359,6 +368,15 @@ impl AgentManager {
         agent: AgentId,
         mut options: SpawnOptions,
     ) -> Result<StreamingSpawn, AgentError> {
+        // Pi sessions are intentionally handled by the router's dedicated RPC runtime
+        // (one process per daemon session), not by generic subprocess streaming.
+        if agent == AgentId::Pi {
+            return Err(AgentError::UnsupportedRuntimePath {
+                agent,
+                operation: "spawn_streaming",
+                recommended_path: "router-managed per-session RPC runtime",
+            });
+        }
         let codex_options = if agent == AgentId::Codex {
             Some(options.clone())
         } else {
@@ -596,6 +614,19 @@ impl AgentManager {
     }
 
     fn build_command(&self, agent: AgentId, options: &SpawnOptions) -> Result<Command, AgentError> {
+        if agent == AgentId::Pi {
+            return Err(AgentError::UnsupportedRuntimePath {
+                agent,
+                operation: "build_command",
+                recommended_path: "router-managed per-session RPC runtime",
+            });
+        }
+        if agent == AgentId::Mock {
+            return Err(AgentError::UnsupportedAgent {
+                agent: agent.as_str().to_string(),
+            });
+        }
+
         let path = self.resolve_binary(agent)?;
         let working_dir = options
             .working_dir
@@ -665,14 +696,10 @@ impl AgentManager {
                 return Ok(build_amp_command(&path, &working_dir, options));
             }
             AgentId::Pi => {
-                return Err(AgentError::UnsupportedAgent {
-                    agent: agent.as_str().to_string(),
-                });
+                unreachable!("Pi is handled by router RPC runtime");
             }
             AgentId::Mock => {
-                return Err(AgentError::UnsupportedAgent {
-                    agent: agent.as_str().to_string(),
-                });
+                unreachable!("Mock is handled above");
             }
         }
 
@@ -789,6 +816,12 @@ pub enum AgentError {
     ExtractFailed(String),
     #[error("resume unsupported for {agent}")]
     ResumeUnsupported { agent: AgentId },
+    #[error("unsupported runtime path for {agent}: {operation}; use {recommended_path}")]
+    UnsupportedRuntimePath {
+        agent: AgentId,
+        operation: &'static str,
+        recommended_path: &'static str,
+    },
 }
 
 fn parse_version_output(output: &std::process::Output) -> Option<String> {
@@ -990,7 +1023,25 @@ fn extract_session_id(agent: AgentId, events: &[Value]) -> Option<String> {
                     return Some(id);
                 }
             }
-            AgentId::Pi => {}
+            AgentId::Pi => {
+                if event.get("type").and_then(Value::as_str) == Some("session") {
+                    if let Some(id) = event.get("id").and_then(Value::as_str) {
+                        return Some(id.to_string());
+                    }
+                }
+                if let Some(id) = event.get("session_id").and_then(Value::as_str) {
+                    return Some(id.to_string());
+                }
+                if let Some(id) = event.get("sessionId").and_then(Value::as_str) {
+                    return Some(id.to_string());
+                }
+                if let Some(id) = extract_nested_string(event, &["data", "sessionId"]) {
+                    return Some(id);
+                }
+                if let Some(id) = extract_nested_string(event, &["session", "id"]) {
+                    return Some(id);
+                }
+            }
             AgentId::Mock => {}
         }
     }
@@ -1073,9 +1124,122 @@ fn extract_result_text(agent: AgentId, events: &[Value]) -> Option<String> {
                 Some(buffer)
             }
         }
-        AgentId::Pi => None,
+        AgentId::Pi => extract_pi_result_text(events),
         AgentId::Mock => None,
     }
+}
+
+fn extract_text_from_content_parts(content: &Value) -> Option<String> {
+    let parts = content.as_array()?;
+    let mut text = String::new();
+    for part in parts {
+        if part.get("type").and_then(Value::as_str) != Some("text") {
+            continue;
+        }
+        if let Some(part_text) = part.get("text").and_then(Value::as_str) {
+            text.push_str(part_text);
+        }
+    }
+    if text.is_empty() {
+        None
+    } else {
+        Some(text)
+    }
+}
+
+fn extract_assistant_message_text(message: &Value) -> Option<String> {
+    if message.get("role").and_then(Value::as_str) != Some("assistant") {
+        return None;
+    }
+    if let Some(content) = message.get("content") {
+        return extract_text_from_content_parts(content);
+    }
+    None
+}
+
+fn extract_pi_result_text(events: &[Value]) -> Option<String> {
+    let mut delta_buffer = String::new();
+    let mut last_full = None;
+    for event in events {
+        if event.get("type").and_then(Value::as_str) == Some("message_update") {
+            if let Some(delta_kind) =
+                extract_nested_string(event, &["assistantMessageEvent", "type"])
+            {
+                if delta_kind == "text_delta" {
+                    if let Some(delta) =
+                        extract_nested_string(event, &["assistantMessageEvent", "delta"])
+                    {
+                        delta_buffer.push_str(&delta);
+                    }
+                    if let Some(delta) =
+                        extract_nested_string(event, &["assistantMessageEvent", "text"])
+                    {
+                        delta_buffer.push_str(&delta);
+                    }
+                }
+            }
+        }
+        if let Some(message) = event.get("message") {
+            if let Some(text) = extract_assistant_message_text(message) {
+                last_full = Some(text);
+            }
+        }
+        if event.get("type").and_then(Value::as_str) == Some("agent_end") {
+            if let Some(messages) = event.get("messages").and_then(Value::as_array) {
+                for message in messages {
+                    if let Some(text) = extract_assistant_message_text(message) {
+                        last_full = Some(text);
+                    }
+                }
+            }
+        }
+    }
+    if delta_buffer.is_empty() {
+        last_full
+    } else {
+        Some(delta_buffer)
+    }
+}
+
+fn apply_pi_model_args(command: &mut Command, model: Option<&str>) {
+    let Some(model) = model else {
+        return;
+    };
+    if let Some((provider, model_id)) = model.split_once('/') {
+        command
+            .arg("--provider")
+            .arg(provider)
+            .arg("--model")
+            .arg(model_id);
+        return;
+    }
+    command.arg("--model").arg(model);
+}
+
+fn spawn_pi(
+    path: &Path,
+    working_dir: &Path,
+    options: &SpawnOptions,
+) -> Result<std::process::Output, AgentError> {
+    if options.session_id.is_some() {
+        return Err(AgentError::ResumeUnsupported { agent: AgentId::Pi });
+    }
+
+    let mut command = Command::new(path);
+    command
+        .current_dir(working_dir)
+        .arg("--mode")
+        .arg("json")
+        .arg("--print");
+    apply_pi_model_args(&mut command, options.model.as_deref());
+    if let Some(variant) = options.variant.as_deref() {
+        command.arg("--thinking").arg(variant);
+    }
+    command.arg(&options.prompt);
+    for (key, value) in &options.env {
+        command.env(key, value);
+    }
+    command.output().map_err(AgentError::Io)
 }
 
 fn spawn_amp(
@@ -1504,4 +1668,88 @@ fn find_file_recursive(dir: &Path, filename: &str) -> Result<Option<PathBuf>, Ag
         }
     }
     Ok(None)
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::{
+        extract_result_text, extract_session_id, AgentError, AgentId, AgentManager, SpawnOptions,
+    };
+
+    #[test]
+    fn pi_spawn_streaming_fails_fast_with_runtime_contract_error() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let manager = AgentManager::new(temp_dir.path().join("bin")).expect("agent manager");
+        let err = manager
+            .spawn_streaming(AgentId::Pi, SpawnOptions::new("hello"))
+            .expect_err("expected Pi spawn_streaming to be rejected");
+        assert!(matches!(
+            err,
+            AgentError::UnsupportedRuntimePath {
+                agent: AgentId::Pi,
+                operation: "spawn_streaming",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn extract_pi_session_id_from_session_event() {
+        let events = vec![json!({
+            "type": "session",
+            "id": "pi-session-123"
+        })];
+        assert_eq!(
+            extract_session_id(AgentId::Pi, &events).as_deref(),
+            Some("pi-session-123")
+        );
+    }
+
+    #[test]
+    fn extract_pi_result_text_from_agent_end_message() {
+        let events = vec![json!({
+            "type": "agent_end",
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "OK"
+                        }
+                    ]
+                }
+            ]
+        })];
+        assert_eq!(
+            extract_result_text(AgentId::Pi, &events).as_deref(),
+            Some("OK")
+        );
+    }
+
+    #[test]
+    fn extract_pi_result_text_from_message_update_deltas() {
+        let events = vec![
+            json!({
+                "type": "message_update",
+                "assistantMessageEvent": {
+                    "type": "text_delta",
+                    "delta": "O"
+                }
+            }),
+            json!({
+                "type": "message_update",
+                "assistantMessageEvent": {
+                    "type": "text_delta",
+                    "delta": "K"
+                }
+            }),
+        ];
+        assert_eq!(
+            extract_result_text(AgentId::Pi, &events).as_deref(),
+            Some("OK")
+        );
+    }
 }

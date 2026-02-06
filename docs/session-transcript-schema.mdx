@@ -29,13 +29,14 @@ This table shows which agent feature coverage appears in the universal event str
 | File Changes       |   -    |   ✓   |      -       |      -       |              |
 | MCP Tools          |   -    |   ✓   |      -       |      -       |              |
 | Streaming Deltas   |   ✓    |   ✓   |      ✓       |      -       |      ✓       |
-| Variants           |        |   ✓   |      ✓       |      ✓       |              |
+| Variants           |        |   ✓   |      ✓       |      ✓       |      ✓       |
 
 Agents: [Claude Code](https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview) · [Codex](https://github.com/openai/codex) · [OpenCode](https://github.com/opencode-ai/opencode) · [Amp](https://ampcode.com) · [Pi](https://buildwithpi.ai/pi-cli)
 
 - ✓ = Appears in session events
 - \- = Agent supports natively, schema conversion coming soon
 - (blank) = Not supported by agent
+- Pi runtime model is router-managed per-session RPC (`pi --mode rpc`); it does not use generic subprocess streaming.
 
 <AccordionGroup>
   <Accordion title="Text Messages">

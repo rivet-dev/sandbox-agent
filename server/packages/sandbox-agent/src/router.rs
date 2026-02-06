@@ -1786,6 +1786,8 @@ impl SessionManager {
             session.native_session_id = Some(thread_id);
         }
         if agent_id == AgentId::Pi {
+            // Pi uses one dedicated RPC process per daemon session.
+            // This is the canonical runtime path for Pi sessions.
             let pi = self
                 .create_pi_session(&session_id, session.model.as_deref())
                 .await?;
@@ -1970,6 +1972,8 @@ impl SessionManager {
             return Ok(());
         }
         if session_snapshot.agent == AgentId::Pi {
+            // Pi bypasses generic AgentManager::spawn_streaming and stays on
+            // router-managed per-session RPC runtime for lifecycle isolation.
             self.send_pi_prompt(&session_snapshot, &message).await?;
             if !agent_supports_item_started(session_snapshot.agent) {
                 let _ = self
@@ -3859,11 +3863,33 @@ impl SessionManager {
             "message": prompt
         });
 
-        runtime
+        let response_rx = runtime
             .send_request(id, &request)
             .ok_or_else(|| SandboxError::StreamError {
                 message: "failed to send pi prompt request".to_string(),
             })?;
+        let response = tokio::time::timeout(Duration::from_secs(30), response_rx)
+            .await
+            .map_err(|_| SandboxError::StreamError {
+                message: "pi prompt request timed out".to_string(),
+            })?
+            .map_err(|_| SandboxError::StreamError {
+                message: "pi prompt request cancelled".to_string(),
+            })?;
+        if response
+            .get("success")
+            .and_then(Value::as_bool)
+            .is_some_and(|success| !success)
+        {
+            let detail = response
+                .get("error")
+                .cloned()
+                .or_else(|| response.get("data").and_then(|data| data.get("error")).cloned())
+                .unwrap_or_else(|| response.clone());
+            return Err(SandboxError::InvalidRequest {
+                message: format!("pi prompt failed: {detail}"),
+            });
+        }
 
         Ok(())
     }
@@ -5718,6 +5744,9 @@ fn map_install_error(agent: AgentId, err: ManagerError) -> SandboxError {
         ManagerError::ResumeUnsupported { agent } => SandboxError::InvalidRequest {
             message: format!("resume unsupported for {agent}"),
         },
+        ManagerError::UnsupportedRuntimePath { .. } => SandboxError::InvalidRequest {
+            message: err.to_string(),
+        },
         ManagerError::UnsupportedPlatform { .. }
         | ManagerError::DownloadFailed { .. }
         | ManagerError::Http(_)
@@ -5737,6 +5766,9 @@ fn map_spawn_error(agent: AgentId, err: ManagerError) -> SandboxError {
         },
         ManagerError::ResumeUnsupported { agent } => SandboxError::InvalidRequest {
             message: format!("resume unsupported for {agent}"),
+        },
+        ManagerError::UnsupportedRuntimePath { .. } => SandboxError::InvalidRequest {
+            message: err.to_string(),
         },
         _ => SandboxError::AgentProcessExited {
             agent: agent.as_str().to_string(),
@@ -6671,6 +6703,33 @@ mod agent_capabilities_tests {
 }
 
 #[cfg(test)]
+mod runtime_contract_tests {
+    use super::*;
+
+    #[test]
+    fn map_spawn_error_maps_unsupported_runtime_path_to_invalid_request() {
+        let error = map_spawn_error(
+            AgentId::Pi,
+            ManagerError::UnsupportedRuntimePath {
+                agent: AgentId::Pi,
+                operation: "spawn_streaming",
+                recommended_path: "router-managed per-session RPC runtime",
+            },
+        );
+        match error {
+            SandboxError::InvalidRequest { message } => {
+                assert!(message.contains("spawn_streaming"), "{message}");
+                assert!(
+                    message.contains("router-managed per-session RPC runtime"),
+                    "{message}"
+                );
+            }
+            other => panic!("expected InvalidRequest, got {other:?}"),
+        }
+    }
+}
+
+#[cfg(test)]
 mod pi_runtime_tests {
     use super::*;
     use tempfile::TempDir;
@@ -6933,8 +6992,101 @@ mod pi_runtime_tests {
             prompt_request.get("message").and_then(Value::as_str),
             Some("Hello")
         );
+        let prompt_id = prompt_request
+            .get("id")
+            .and_then(Value::as_i64)
+            .expect("prompt id");
+        runtime.complete_request(
+            prompt_id,
+            json!({
+                "type": "response",
+                "id": prompt_id,
+                "success": true
+            }),
+        );
 
         task.await.expect("join").expect("send_pi_prompt ok");
+    }
+
+    #[tokio::test]
+    async fn send_pi_prompt_maps_explicit_rpc_error_to_invalid_request() {
+        let (session_manager, runtime, mut stdin_rx, _temp_dir) =
+            setup_pi_session_with_stdin("pi-prompt-error").await;
+        let snapshot = SessionSnapshot {
+            session_id: "pi-prompt-error".to_string(),
+            agent: AgentId::Pi,
+            agent_mode: "build".to_string(),
+            permission_mode: "default".to_string(),
+            model: None,
+            variant: None,
+            native_session_id: Some("native-pi-prompt-error".to_string()),
+        };
+        let manager_for_task = session_manager.clone();
+        let task =
+            tokio::spawn(async move { manager_for_task.send_pi_prompt(&snapshot, "Hello").await });
+
+        let prompt_line = stdin_rx.recv().await.expect("prompt request");
+        let prompt_request: Value = serde_json::from_str(&prompt_line).expect("json request");
+        assert_eq!(prompt_request.get("type").and_then(Value::as_str), Some("prompt"));
+        let prompt_id = prompt_request
+            .get("id")
+            .and_then(Value::as_i64)
+            .expect("prompt id");
+        runtime.complete_request(
+            prompt_id,
+            json!({
+                "type": "response",
+                "id": prompt_id,
+                "success": false,
+                "error": "turn already in progress"
+            }),
+        );
+
+        let err = task
+            .await
+            .expect("join")
+            .expect_err("send_pi_prompt should fail");
+        match err {
+            SandboxError::InvalidRequest { message } => {
+                assert!(message.contains("turn already in progress"), "{message}");
+            }
+            other => panic!("expected InvalidRequest, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn send_pi_prompt_reports_cancelled_response() {
+        let (session_manager, runtime, mut stdin_rx, _temp_dir) =
+            setup_pi_session_with_stdin("pi-prompt-cancelled").await;
+        let snapshot = SessionSnapshot {
+            session_id: "pi-prompt-cancelled".to_string(),
+            agent: AgentId::Pi,
+            agent_mode: "build".to_string(),
+            permission_mode: "default".to_string(),
+            model: None,
+            variant: None,
+            native_session_id: Some("native-pi-prompt-cancelled".to_string()),
+        };
+        let manager_for_task = session_manager.clone();
+        let task = tokio::spawn(async move {
+            manager_for_task
+                .send_pi_prompt(&snapshot, "This should cancel")
+                .await
+        });
+
+        let _ = stdin_rx.recv().await.expect("prompt request");
+        runtime.clear_pending();
+
+        let err = task
+            .await
+            .expect("join")
+            .expect_err("send_pi_prompt should fail");
+        match err {
+            SandboxError::StreamError { message } => {
+                assert!(message.contains("pi prompt request cancelled"), "{message}");
+            }
+            other => panic!("expected StreamError, got {other:?}"),
+        }
     }
 
     #[tokio::test]

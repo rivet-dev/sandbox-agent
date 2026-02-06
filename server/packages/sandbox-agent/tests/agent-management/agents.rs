@@ -54,6 +54,25 @@ fn pi_on_path() -> bool {
 }
 
 #[test]
+fn pi_spawn_streaming_is_rejected_with_runtime_contract_error(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let temp_dir = tempfile::tempdir()?;
+    let manager = AgentManager::new(temp_dir.path().join("bin"))?;
+    let err = manager
+        .spawn_streaming(AgentId::Pi, SpawnOptions::new(prompt_ok("IGNORED")))
+        .expect_err("expected Pi spawn_streaming to be rejected");
+    assert!(matches!(
+        err,
+        AgentError::UnsupportedRuntimePath {
+            agent: AgentId::Pi,
+            operation: "spawn_streaming",
+            ..
+        }
+    ));
+    Ok(())
+}
+
+#[test]
 fn test_agents_install_version_spawn() -> Result<(), Box<dyn std::error::Error>> {
     let temp_dir = tempfile::tempdir()?;
     let manager = AgentManager::new(temp_dir.path().join("bin"))?;
