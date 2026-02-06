@@ -28,22 +28,25 @@ describe("OpenCode-compatible Model API", () => {
 
   it("should list models grouped by agent with real model IDs", async () => {
     const response = await client.provider.list();
-    const provider = response.data?.all?.find((entry) => entry.id === "sandbox-agent");
-    expect(provider).toBeDefined();
+    const providers = response.data?.all ?? [];
+    const mockProvider = providers.find((entry) => entry.id === "mock");
+    const ampProvider = providers.find((entry) => entry.id === "amp");
+    const sandboxProvider = providers.find((entry) => entry.id === "sandbox-agent");
+    expect(sandboxProvider).toBeUndefined();
+    expect(mockProvider).toBeDefined();
+    expect(ampProvider).toBeDefined();
 
-    const models = provider?.models ?? {};
-    const modelIds = Object.keys(models);
-    expect(modelIds.length).toBeGreaterThan(0);
+    const mockModels = mockProvider?.models ?? {};
+    expect(mockModels["mock"]).toBeDefined();
+    expect(mockModels["mock"].id).toBe("mock");
+    expect(mockModels["mock"].family).toBe("Mock");
 
-    expect(models["mock"]).toBeDefined();
-    expect(models["mock"].id).toBe("mock");
-    expect(models["mock"].family).toBe("Mock");
+    const ampModels = ampProvider?.models ?? {};
+    expect(ampModels["smart"]).toBeDefined();
+    expect(ampModels["smart"].id).toBe("smart");
+    expect(ampModels["smart"].family).toBe("Amp");
 
-    expect(models["smart"]).toBeDefined();
-    expect(models["smart"].id).toBe("smart");
-    expect(models["smart"].family).toBe("Amp");
-
-    expect(models["amp"]).toBeUndefined();
-    expect(response.data?.default?.["sandbox-agent"]).toBe("mock");
+    expect(response.data?.default?.["mock"]).toBe("mock");
+    expect(response.data?.default?.["amp"]).toBe("smart");
   });
 });

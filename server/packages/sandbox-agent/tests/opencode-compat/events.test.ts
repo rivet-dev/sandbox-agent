@@ -115,7 +115,7 @@ describe("OpenCode-compatible Event Streaming", () => {
       await client.session.prompt({
         path: { id: sessionId },
         body: {
-          model: { providerID: "sandbox-agent", modelID: "mock" },
+          model: { providerID: "mock", modelID: "mock" },
           parts: [{ type: "text", text: "Say hello" }],
         },
       });
@@ -180,7 +180,7 @@ describe("OpenCode-compatible Event Streaming", () => {
       await client.session.prompt({
         path: { id: sessionId },
         body: {
-          model: { providerID: "sandbox-agent", modelID: "mock" },
+          model: { providerID: "mock", modelID: "mock" },
           parts: [{ type: "text", text: "echo hello" }],
         },
       });
@@ -223,7 +223,7 @@ describe("OpenCode-compatible Event Streaming", () => {
       await client.session.prompt({
         path: { id: sessionId },
         body: {
-          model: { providerID: "sandbox-agent", modelID: "mock" },
+          model: { providerID: "mock", modelID: "mock" },
           parts: [{ type: "text", text: "tool" }],
         },
       });

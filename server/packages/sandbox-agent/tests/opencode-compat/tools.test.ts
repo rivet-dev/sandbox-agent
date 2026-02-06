@@ -72,7 +72,7 @@ describe("OpenCode-compatible Tool + File Actions", () => {
     await client.session.prompt({
       path: { id: sessionId },
       body: {
-        model: { providerID: "sandbox-agent", modelID: "mock" },
+        model: { providerID: "mock", modelID: "mock" },
         parts: [{ type: "text", text: "tool" }],
       },
     });
