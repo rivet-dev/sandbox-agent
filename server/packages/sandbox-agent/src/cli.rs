@@ -15,8 +15,8 @@ use reqwest::blocking::Client as HttpClient;
 use reqwest::Method;
 use crate::router::{build_router_with_state, shutdown_servers};
 use crate::router::{
-    AgentInstallRequest, AppState, AuthConfig, CreateSessionRequest, MessageRequest,
-    PermissionReply, PermissionReplyRequest, QuestionReplyRequest,
+    AgentInstallRequest, AppState, AuthConfig, BrandingMode, CreateSessionRequest,
+    MessageRequest, PermissionReply, PermissionReplyRequest, QuestionReplyRequest,
 };
 use crate::router::{
     AgentListResponse, AgentModelsResponse, AgentModesResponse, CreateSessionResponse,
@@ -502,9 +502,14 @@ fn run_server(cli: &CliConfig, server: &ServerArgs) -> Result<(), CliError> {
         AuthConfig::disabled()
     };
 
+    let branding = if cli.gigacode {
+        BrandingMode::Gigacode
+    } else {
+        BrandingMode::SandboxAgent
+    };
     let agent_manager = AgentManager::new(default_install_dir())
         .map_err(|err| CliError::Server(err.to_string()))?;
-    let state = Arc::new(AppState::new(auth, agent_manager));
+    let state = Arc::new(AppState::with_branding(auth, agent_manager, branding));
     let (mut router, state) = build_router_with_state(state);
 
     let cors = build_cors_layer(server)?;
@@ -581,7 +586,7 @@ fn run_api(command: &ApiCommand, cli: &CliConfig) -> Result<(), CliError> {
 
 fn run_opencode(cli: &CliConfig, args: &OpencodeArgs) -> Result<(), CliError> {
     let name = if cli.gigacode { "Gigacode" } else { "OpenCode command" };
-    write_stderr_line(&format!("EXPERIMENTAL: Please report bugs to:\n- GitHub: https://github.com/rivet-dev/sandbox-agent/issues\n- Discord: https://rivet.dev/discord\n\n{name} is powered by:- OpenCode (TUI): https://opencode.ai/\n- Sandbox Agent SDK (multi-agent compatibility): https://sandboxagent.dev/\n\n"))?;
+    write_stderr_line(&format!("\nEXPERIMENTAL: Please report bugs to:\n- GitHub: https://github.com/rivet-dev/sandbox-agent/issues\n- Discord: https://rivet.dev/discord\n\n{name} is powered by:\n- OpenCode (TUI): https://opencode.ai/\n- Sandbox Agent SDK (multi-agent compatibility): https://sandboxagent.dev/\n\n"))?;
 
     let token = cli.token.clone();
 

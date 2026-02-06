@@ -2573,9 +2573,10 @@ pub fn build_opencode_router(state: Arc<OpenCodeAppState>) -> Router {
     tag = "opencode"
 )]
 async fn oc_agent_list(State(state): State<Arc<OpenCodeAppState>>) -> impl IntoResponse {
+    let name = state.inner.branding.product_name();
     let agent = json!({
-        "name": "Sandbox Agent",
-        "description": "Sandbox Agent compatibility layer",
+        "name": name,
+        "description": format!("{name} compatibility layer"),
         "mode": "all",
         "native": false,
         "hidden": false,
