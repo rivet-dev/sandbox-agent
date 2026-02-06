@@ -1,0 +1,99 @@
+[
+  {
+    "info": {
+      "id": "msg_c31bd424c001ICzhibLcSkazYE",
+      "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+      "role": "user",
+      "time": {
+        "created": 1770361012812
+      },
+      "summary": {
+        "title": "Hello from OpenCode",
+        "diffs": []
+      },
+      "agent": "build",
+      "model": {
+        "providerID": "anthropic",
+        "modelID": "claude-haiku-4-5"
+      }
+    },
+    "parts": [
+      {
+        "id": "prt_c31bd424c002I8ASgZXZGMnUf2",
+        "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "messageID": "msg_c31bd424c001ICzhibLcSkazYE",
+        "type": "text",
+        "text": "Respond with exactly: 'Hello from OpenCode'. Nothing else."
+      }
+    ]
+  },
+  {
+    "info": {
+      "id": "msg_c31bd4260001o9JzwTa1Ops17t",
+      "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+      "role": "assistant",
+      "time": {
+        "created": 1770361012832,
+        "completed": 1770361014171
+      },
+      "parentID": "msg_c31bd424c001ICzhibLcSkazYE",
+      "modelID": "claude-haiku-4-5",
+      "providerID": "anthropic",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "/home/nathan/sandbox-agent/research/opencode-compat",
+        "root": "/home/nathan/sandbox-agent"
+      },
+      "cost": 0,
+      "tokens": {
+        "input": 2,
+        "output": 7,
+        "reasoning": 0,
+        "cache": {
+          "read": 13540,
+          "write": 0
+        }
+      },
+      "finish": "stop"
+    },
+    "parts": [
+      {
+        "id": "prt_c31bd4779001QLU4EXzj63WQ4W",
+        "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "messageID": "msg_c31bd4260001o9JzwTa1Ops17t",
+        "type": "step-start",
+        "snapshot": "302d31eedbdd77a5b1eb84e2fbc4e99e8b97e549"
+      },
+      {
+        "id": "prt_c31bd477c001Gq3CWQQXR1h7fD",
+        "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "messageID": "msg_c31bd4260001o9JzwTa1Ops17t",
+        "type": "text",
+        "text": "Hello from OpenCode",
+        "time": {
+          "start": 1770361014146,
+          "end": 1770361014146
+        }
+      },
+      {
+        "id": "prt_c31bd4793001LdK7WQwiUgzctY",
+        "sessionID": "ses_3ce42bdb9ffeEIUUu08AuKTJms",
+        "messageID": "msg_c31bd4260001o9JzwTa1Ops17t",
+        "type": "step-finish",
+        "reason": "stop",
+        "snapshot": "302d31eedbdd77a5b1eb84e2fbc4e99e8b97e549",
+        "cost": 0,
+        "tokens": {
+          "input": 2,
+          "output": 7,
+          "reasoning": 0,
+          "cache": {
+            "read": 13540,
+            "write": 0
+          }
+        }
+      }
+    ]
+  }
+]

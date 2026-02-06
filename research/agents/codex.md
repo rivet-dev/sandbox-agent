@@ -318,6 +318,35 @@ fn codex_thread_id_from_server_notification(notification) -> Option<String> {
 }
 ```
 
+## Model Discovery
+
+Codex exposes a `model/list` JSON-RPC method through its app-server process.
+
+### JSON-RPC Method
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "model/list",
+  "params": {
+    "cursor": null,
+    "limit": null
+  }
+}
+```
+
+Supports pagination via `cursor` and `limit` parameters. Defined in `resources/agent-schemas/artifacts/json-schema/codex.json`.
+
+### How to Replicate
+
+Requires a running Codex app-server process. Send the JSON-RPC request to the app-server over stdio. The response contains the list of models available to the Codex instance (depends on configured API keys / providers).
+
+### Limitations
+
+- Requires an active app-server process (cannot query models without starting one)
+- No standalone CLI command like `codex models`
+
 ## Notes
 
 - SDK is dynamically imported to reduce bundle size

@@ -1,0 +1,52 @@
+{
+  "info": {
+    "id": "msg_c31b349c3001C3jUz57fj5vRae",
+    "sessionID": "ses_3ce4cbd76ffeHVa3mLvB00FXDV",
+    "role": "assistant",
+    "time": {
+      "created": 1770360359363,
+      "completed": 1770360359565
+    },
+    "error": {
+      "name": "APIError",
+      "data": {
+        "message": "Unauthorized: {\"type\":\"error\",\"error\":{\"type\":\"AuthError\",\"message\":\"Invalid API key.\"}}",
+        "statusCode": 401,
+        "isRetryable": false,
+        "responseHeaders": {
+          "cf-placement": "local-SJC",
+          "cf-ray": "9c98b01658355024-SJC",
+          "connection": "keep-alive",
+          "content-length": "74",
+          "content-type": "text/plain;charset=UTF-8",
+          "date": "Fri, 06 Feb 2026 06:45:59 GMT",
+          "server": "cloudflare"
+        },
+        "responseBody": "{\"type\":\"error\",\"error\":{\"type\":\"AuthError\",\"message\":\"Invalid API key.\"}}",
+        "metadata": {
+          "url": "https://opencode.ai/zen/v1/models/gemini-3-pro:streamGenerateContent?alt=sse"
+        }
+      }
+    },
+    "parentID": "msg_c31b349c2001kJD7I7MRSAVo57",
+    "modelID": "gemini-3-pro",
+    "providerID": "opencode",
+    "mode": "build",
+    "agent": "build",
+    "path": {
+      "cwd": "/home/nathan/sandbox-agent/research/opencode-compat",
+      "root": "/home/nathan/sandbox-agent"
+    },
+    "cost": 0,
+    "tokens": {
+      "input": 0,
+      "output": 0,
+      "reasoning": 0,
+      "cache": {
+        "read": 0,
+        "write": 0
+      }
+    }
+  },
+  "parts": []
+}

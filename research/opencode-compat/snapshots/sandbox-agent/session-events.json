@@ -1,0 +1,655 @@
+[
+  {
+    "properties": {
+      "info": {
+        "directory": "/home/nathan/sandbox-agent/research/opencode-compat",
+        "id": "ses_1",
+        "projectID": "proj_1",
+        "slug": "session-ses_1",
+        "time": {
+          "created": 1770362164904,
+          "updated": 1770362164904
+        },
+        "title": "Session ses_1",
+        "version": "0"
+      }
+    },
+    "type": "session.created"
+  },
+  {
+    "properties": {
+      "sessionID": "ses_1",
+      "status": {
+        "type": "busy"
+      }
+    },
+    "type": "session.status"
+  },
+  {
+    "properties": {
+      "info": {
+        "agent": "build",
+        "id": "msg_1",
+        "model": {
+          "modelID": "mock",
+          "providerID": "sandbox-agent"
+        },
+        "role": "user",
+        "sessionID": "ses_1",
+        "time": {
+          "completed": 1770362164907,
+          "created": 1770362164907
+        }
+      },
+      "sessionID": "ses_1"
+    },
+    "type": "message.updated"
+  },
+  {
+    "properties": {
+      "messageID": "msg_1",
+      "part": {
+        "id": "part_1",
+        "messageID": "msg_1",
+        "sessionID": "ses_1",
+        "text": "echo Hello from sandbox-agent",
+        "type": "text"
+      },
+      "sessionID": "ses_1"
+    },
+    "type": "message.part.updated"
+  },
+  {
+    "properties": {
+      "info": {
+        "agent": "build",
+        "cost": 0,
+        "finish": "stop",
+        "id": "msg_1_assistant",
+        "mode": "default",
+        "modelID": "mock",
+        "parentID": "msg_1",
+        "path": {
+          "cwd": "/home/nathan/sandbox-agent/research/opencode-compat",
+          "root": "/home/nathan/sandbox-agent/research/opencode-compat"
+        },
+        "providerID": "sandbox-agent",
+        "role": "assistant",
+        "sessionID": "ses_1",
+        "time": {
+          "created": 1770362165109
+        },
+        "tokens": {
+          "cache": {
+            "read": 0,
+            "write": 0
+          },
+          "input": 0,
+          "output": 0,
+          "reasoning": 0
+        }
+      },
+      "sessionID": "ses_1"
+    },
+    "type": "message.updated"
+  },
+  {
+    "properties": {
+      "delta": "echo Hello from sandbox-agent",
+      "messageID": "msg_1_assistant",
+      "part": {
+        "id": "msg_1_assistant_text",
+        "messageID": "msg_1_assistant",
+        "sessionID": "ses_1",
+        "text": "echo Hello from sandbox-agent",
+        "type": "text"
+      },
+      "sessionID": "ses_1"
+    },
+    "type": "message.part.updated"
+  },
+  {
+    "properties": {
+      "info": {
+        "agent": "build",
+        "cost": 0,
+        "finish": "stop",
+        "id": "msg_1_assistant_00000000000000000005",
+        "mode": "default",
+        "modelID": "mock",
+        "parentID": "msg_1",
+        "path": {
+          "cwd": "/home/nathan/sandbox-agent/research/opencode-compat",
+          "root": "/home/nathan/sandbox-agent/research/opencode-compat"
+        },
+        "providerID": "sandbox-agent",
+        "role": "assistant",
+        "sessionID": "ses_1",
+        "time": {
+          "created": 1770362165309
+        },
+        "tokens": {
+          "cache": {
+            "read": 0,
+            "write": 0
+          },
+          "input": 0,
+          "output": 0,
+          "reasoning": 0
+        }
+      },
+      "sessionID": "ses_1"
+    },
+    "type": "message.updated"
+  },
+  {
+    "properties": {
+      "info": {
+        "agent": "build",
+        "cost": 0,
+        "finish": "stop",
+        "id": "msg_1_assistant_00000000000000000005",
+        "mode": "default",
+        "modelID": "mock",
+        "parentID": "msg_1",
+        "path": {
+          "cwd": "/home/nathan/sandbox-agent/research/opencode-compat",
+          "root": "/home/nathan/sandbox-agent/research/opencode-compat"
+        },
+        "providerID": "sandbox-agent",
+        "role": "assistant",
+        "sessionID": "ses_1",
+        "time": {
+          "created": 1770362165511
+        },
+        "tokens": {
+          "cache": {
+            "read": 0,
+            "write": 0
+          },
+          "input": 0,
+          "output": 0,
+          "reasoning": 0
+        }
+      },
+      "sessionID": "ses_1"
+    },
+    "type": "message.updated"
+  },
+  {
+    "properties": {
+      "delta": "Hello from sandbox-agent",
+      "messageID": "msg_1_assistant_00000000000000000005",
+      "part": {
+        "id": "msg_1_assistant_00000000000000000005_text",
+        "messageID": "msg_1_assistant_00000000000000000005",
+        "sessionID": "ses_1",
+        "text": "Hello from sandbox-agent",
+        "type": "text"
+      },
+      "sessionID": "ses_1"
+    },
+    "type": "message.part.updated"
+  },
+  {
+    "properties": {
+      "info": {
+        "agent": "build",
+        "cost": 0,
+        "finish": "stop",
+        "id": "msg_1_assistant_00000000000000000005",
+        "mode": "default",
+        "modelID": "mock",
+        "parentID": "msg_1",
+        "path": {
+          "cwd": "/home/nathan/sandbox-agent/research/opencode-compat",
+          "root": "/home/nathan/sandbox-agent/research/opencode-compat"
+        },
+        "providerID": "sandbox-agent",
+        "role": "assistant",
+        "sessionID": "ses_1",
+        "time": {
+          "completed": 1770362165511,
+          "created": 1770362165511
+        },
+        "tokens": {
+          "cache": {
+            "read": 0,
+            "write": 0
+          },
+          "input": 0,
+          "output": 0,
+          "reasoning": 0
+        }
+      },
+      "sessionID": "ses_1"
+    },
+    "type": "message.updated"
+  },
+  {
+    "properties": {
+      "messageID": "msg_1_assistant_00000000000000000005",
+      "part": {
+        "id": "msg_1_assistant_00000000000000000005_text",
+        "messageID": "msg_1_assistant_00000000000000000005",
+        "sessionID": "ses_1",
+        "text": "Hello from sandbox-agent",
+        "type": "text"
+      },
+      "sessionID": "ses_1"
+    },
+    "type": "message.part.updated"
+  },
+  {
+    "properties": {
+      "sessionID": "ses_1",
+      "status": {
+        "type": "idle"
+      }
+    },
+    "type": "session.status"
+  },
+  {
+    "properties": {
+      "sessionID": "ses_1"
+    },
+    "type": "session.idle"
+  },
+  {
+    "properties": {
+      "sessionID": "ses_1",
+      "status": {
+        "type": "busy"
+      }
+    },
+    "type": "session.status"
+  },
+  {
+    "properties": {
+      "info": {
+        "agent": "build",
+        "id": "msg_2",
+        "model": {
+          "modelID": "mock",
+          "providerID": "sandbox-agent"
+        },
+        "role": "user",
+        "sessionID": "ses_1",
+        "time": {
+          "completed": 1770362166412,
+          "created": 1770362166412
+        }
+      },
+      "sessionID": "ses_1"
+    },
+    "type": "message.updated"
+  },
+  {
+    "properties": {
+      "messageID": "msg_2",
+      "part": {
+        "id": "part_2",
+        "messageID": "msg_2",
+        "sessionID": "ses_1",
+        "text": "tool",
+        "type": "text"
+      },
+      "sessionID": "ses_1"
+    },
+    "type": "message.part.updated"
+  },
+  {
+    "properties": {
+      "info": {
+        "agent": "build",
+        "cost": 0,
+        "finish": "stop",
+        "id": "msg_2_assistant",
+        "mode": "default",
+        "modelID": "mock",
+        "parentID": "msg_2",
+        "path": {
+          "cwd": "/home/nathan/sandbox-agent/research/opencode-compat",
+          "root": "/home/nathan/sandbox-agent/research/opencode-compat"
+        },
+        "providerID": "sandbox-agent",
+        "role": "assistant",
+        "sessionID": "ses_1",
+        "time": {
+          "created": 1770362166614
+        },
+        "tokens": {
+          "cache": {
+            "read": 0,
+            "write": 0
+          },
+          "input": 0,
+          "output": 0,
+          "reasoning": 0
+        }
+      },
+      "sessionID": "ses_1"
+    },
+    "type": "message.updated"
+  },
+  {
+    "properties": {
+      "delta": "tool",
+      "messageID": "msg_2_assistant",
+      "part": {
+        "id": "msg_2_assistant_text",
+        "messageID": "msg_2_assistant",
+        "sessionID": "ses_1",
+        "text": "tool",
+        "type": "text"
+      },
+      "sessionID": "ses_1"
+    },
+    "type": "message.part.updated"
+  },
+  {
+    "properties": {
+      "info": {
+        "agent": "build",
+        "cost": 0,
+        "finish": "stop",
+        "id": "msg_2_assistant_00000000000000000011",
+        "mode": "default",
+        "modelID": "mock",
+        "parentID": "msg_2",
+        "path": {
+          "cwd": "/home/nathan/sandbox-agent/research/opencode-compat",
+          "root": "/home/nathan/sandbox-agent/research/opencode-compat"
+        },
+        "providerID": "sandbox-agent",
+        "role": "assistant",
+        "sessionID": "ses_1",
+        "time": {
+          "created": 1770362166815
+        },
+        "tokens": {
+          "cache": {
+            "read": 0,
+            "write": 0
+          },
+          "input": 0,
+          "output": 0,
+          "reasoning": 0
+        }
+      },
+      "sessionID": "ses_1"
+    },
+    "type": "message.updated"
+  },
+  {
+    "properties": {
+      "messageID": "msg_2_assistant_00000000000000000011",
+      "part": {
+        "callID": "mock_2_call",
+        "id": "part_3",
+        "messageID": "msg_2_assistant_00000000000000000011",
+        "metadata": {},
+        "sessionID": "ses_1",
+        "state": {
+          "input": {
+            "query": "example"
+          },
+          "raw": "{\"query\":\"example\"}",
+          "status": "pending"
+        },
+        "tool": "mock.search",
+        "type": "tool"
+      },
+      "sessionID": "ses_1"
+    },
+    "type": "message.part.updated"
+  },
+  {
+    "properties": {
+      "info": {
+        "agent": "build",
+        "cost": 0,
+        "finish": "stop",
+        "id": "msg_2_assistant_00000000000000000011",
+        "mode": "default",
+        "modelID": "mock",
+        "parentID": "msg_2",
+        "path": {
+          "cwd": "/home/nathan/sandbox-agent/research/opencode-compat",
+          "root": "/home/nathan/sandbox-agent/research/opencode-compat"
+        },
+        "providerID": "sandbox-agent",
+        "role": "assistant",
+        "sessionID": "ses_1",
+        "time": {
+          "completed": 1770362167016,
+          "created": 1770362167016
+        },
+        "tokens": {
+          "cache": {
+            "read": 0,
+            "write": 0
+          },
+          "input": 0,
+          "output": 0,
+          "reasoning": 0
+        }
+      },
+      "sessionID": "ses_1"
+    },
+    "type": "message.updated"
+  },
+  {
+    "properties": {
+      "messageID": "msg_2_assistant_00000000000000000011",
+      "part": {
+        "callID": "mock_2_call",
+        "id": "part_3",
+        "messageID": "msg_2_assistant_00000000000000000011",
+        "metadata": {},
+        "sessionID": "ses_1",
+        "state": {
+          "input": {
+            "query": "example"
+          },
+          "status": "running",
+          "time": {
+            "start": 1770362167016
+          }
+        },
+        "tool": "mock.search",
+        "type": "tool"
+      },
+      "sessionID": "ses_1"
+    },
+    "type": "message.part.updated"
+  },
+  {
+    "properties": {
+      "info": {
+        "agent": "build",
+        "cost": 0,
+        "finish": "stop",
+        "id": "msg_2_assistant_00000000000000000011",
+        "mode": "default",
+        "modelID": "mock",
+        "parentID": "msg_2",
+        "path": {
+          "cwd": "/home/nathan/sandbox-agent/research/opencode-compat",
+          "root": "/home/nathan/sandbox-agent/research/opencode-compat"
+        },
+        "providerID": "sandbox-agent",
+        "role": "assistant",
+        "sessionID": "ses_1",
+        "time": {
+          "created": 1770362167218
+        },
+        "tokens": {
+          "cache": {
+            "read": 0,
+            "write": 0
+          },
+          "input": 0,
+          "output": 0,
+          "reasoning": 0
+        }
+      },
+      "sessionID": "ses_1"
+    },
+    "type": "message.updated"
+  },
+  {
+    "properties": {
+      "messageID": "msg_2_assistant_00000000000000000011",
+      "part": {
+        "callID": "mock_2_call",
+        "id": "part_3",
+        "messageID": "msg_2_assistant_00000000000000000011",
+        "metadata": {},
+        "sessionID": "ses_1",
+        "state": {
+          "input": {
+            "query": "example"
+          },
+          "status": "running",
+          "time": {
+            "start": 1770362167218
+          }
+        },
+        "tool": "mock.search",
+        "type": "tool"
+      },
+      "sessionID": "ses_1"
+    },
+    "type": "message.part.updated"
+  },
+  {
+    "properties": {
+      "info": {
+        "agent": "build",
+        "cost": 0,
+        "finish": "stop",
+        "id": "msg_2_assistant_00000000000000000011",
+        "mode": "default",
+        "modelID": "mock",
+        "parentID": "msg_2",
+        "path": {
+          "cwd": "/home/nathan/sandbox-agent/research/opencode-compat",
+          "root": "/home/nathan/sandbox-agent/research/opencode-compat"
+        },
+        "providerID": "sandbox-agent",
+        "role": "assistant",
+        "sessionID": "ses_1",
+        "time": {
+          "completed": 1770362167418,
+          "created": 1770362167418
+        },
+        "tokens": {
+          "cache": {
+            "read": 0,
+            "write": 0
+          },
+          "input": 0,
+          "output": 0,
+          "reasoning": 0
+        }
+      },
+      "sessionID": "ses_1"
+    },
+    "type": "message.updated"
+  },
+  {
+    "properties": {
+      "messageID": "msg_2_assistant_00000000000000000011",
+      "part": {
+        "filename": "mock_2/readme.md",
+        "id": "part_4",
+        "messageID": "msg_2_assistant_00000000000000000011",
+        "mime": "text/plain",
+        "sessionID": "ses_1",
+        "type": "file",
+        "url": "file://mock_2/readme.md"
+      },
+      "sessionID": "ses_1"
+    },
+    "type": "message.part.updated"
+  },
+  {
+    "properties": {
+      "messageID": "msg_2_assistant_00000000000000000011",
+      "part": {
+        "filename": "mock_2/output.txt",
+        "id": "part_5",
+        "messageID": "msg_2_assistant_00000000000000000011",
+        "mime": "text/plain",
+        "sessionID": "ses_1",
+        "source": {
+          "path": "mock_2/output.txt",
+          "text": {
+            "end": 13,
+            "start": 0,
+            "value": "+mock output\n"
+          },
+          "type": "file"
+        },
+        "type": "file",
+        "url": "file://mock_2/output.txt"
+      },
+      "sessionID": "ses_1"
+    },
+    "type": "message.part.updated"
+  },
+  {
+    "properties": {
+      "messageID": "msg_2_assistant_00000000000000000011",
+      "part": {
+        "filename": "mock_2/patch.txt",
+        "id": "part_6",
+        "messageID": "msg_2_assistant_00000000000000000011",
+        "mime": "text/x-diff",
+        "sessionID": "ses_1",
+        "source": {
+          "path": "mock_2/patch.txt",
+          "text": {
+            "end": 26,
+            "start": 0,
+            "value": "@@ -1,1 +1,1 @@\n-old\n+new\n"
+          },
+          "type": "file"
+        },
+        "type": "file",
+        "url": "file://mock_2/patch.txt"
+      },
+      "sessionID": "ses_1"
+    },
+    "type": "message.part.updated"
+  },
+  {
+    "properties": {
+      "messageID": "msg_2_assistant_00000000000000000011",
+      "part": {
+        "callID": "mock_2_call",
+        "id": "part_3",
+        "messageID": "msg_2_assistant_00000000000000000011",
+        "metadata": {},
+        "sessionID": "ses_1",
+        "state": {
+          "input": {
+            "query": "example"
+          },
+          "metadata": {},
+          "output": "mock search results",
+          "status": "error",
+          "time": {
+            "end": 1770362167418,
+            "start": 1770362167418
+          }
+        },
+        "tool": "mock.search",
+        "type": "tool"
+      },
+      "sessionID": "ses_1"
+    },
+    "type": "message.part.updated"
+  }
+]

@@ -1,0 +1,11 @@
+[
+  {
+    "description": "Sandbox Agent compatibility layer",
+    "hidden": false,
+    "mode": "all",
+    "name": "Sandbox Agent",
+    "native": false,
+    "options": {},
+    "permission": []
+  }
+]

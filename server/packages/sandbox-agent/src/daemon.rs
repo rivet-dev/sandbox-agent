@@ -222,12 +222,8 @@ pub fn spawn_sandbox_agent_daemon(
         .stdout(Stdio::from(log_file))
         .stderr(Stdio::from(log_file_err));
 
-    if cli.no_token {
-        cmd.arg("--no-token");
-    } else if let Some(token) = token {
+    if let Some(token) = token {
         cmd.arg("--token").arg(token);
-    } else {
-        return Err(CliError::MissingToken);
     }
 
     cmd.spawn().map_err(CliError::from)
