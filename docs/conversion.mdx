@@ -84,9 +84,6 @@ Message normalization notes
 - If Pi message_update events omit messageId, we synthesize a stable message id and emit a synthetic item.started before the first delta so streaming text stays grouped.
 - Pi auto_compaction_start/auto_compaction_end and auto_retry_start/auto_retry_end events are mapped to status items (label `pi.*`).
 - Pi extension_ui_request/extension_error events are mapped to status items.
-<<<<<<< Updated upstream
 - Pi RPC from pi-coding-agent does not include sessionId in events; each daemon session owns a dedicated Pi RPC process, so events are routed by runtime ownership (parallel sessions supported).
-=======
-- Pi runtime mode is capability-selected: default is per-session process isolation, while shared multiplexing is used only for allowlisted Pi capabilities.
-- In shared mode, pi-coding-agent events without sessionId are routed using the current-session mapping.
->>>>>>> Stashed changes
+- PI `variant` maps directly to PI RPC `set_thinking_level.level` before prompts are sent.
+- PI remains source of truth for thinking-level constraints: unsupported levels (including non-reasoning models and model-specific limits such as `xhigh`) are PI-native clamped or rejected.

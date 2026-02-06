@@ -186,3 +186,76 @@ async fn agent_endpoints_snapshots() {
         });
     }
 }
+
+fn pi_test_config() -> Option<TestAgentConfig> {
+    let configs = match test_agents_from_env() {
+        Ok(configs) => configs,
+        Err(err) => {
+            eprintln!("Skipping PI endpoint variant test: {err}");
+            return None;
+        }
+    };
+    configs
+        .into_iter()
+        .find(|config| config.agent == AgentId::Pi)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn pi_capabilities_and_models_expose_variants() {
+    let Some(config) = pi_test_config() else {
+        return;
+    };
+
+    let app = TestApp::new();
+    let _guard = apply_credentials(&config.credentials);
+    install_agent(&app.app, AgentId::Pi).await;
+
+    let capabilities = fetch_capabilities(&app.app).await;
+    let pi_caps = capabilities.get("pi").expect("pi capabilities");
+    assert!(pi_caps.variants, "pi capabilities should enable variants");
+
+    let (status, payload) = send_json(&app.app, Method::GET, "/v1/agents/pi/models", None).await;
+    assert_eq!(status, StatusCode::OK, "pi models endpoint");
+    let models = payload
+        .get("models")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    assert!(!models.is_empty(), "pi models should not be empty");
+
+    let full_levels = vec!["off", "minimal", "low", "medium", "high", "xhigh"];
+    for model in models {
+        let model_id = model
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or("<unknown>");
+        let variants = model
+            .get("variants")
+            .and_then(Value::as_array)
+            .expect("pi model variants");
+        let default_variant = model
+            .get("defaultVariant")
+            .and_then(Value::as_str)
+            .expect("pi model defaultVariant");
+        let variant_ids = variants
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>();
+        assert!(!variant_ids.is_empty(), "pi model {model_id} has no variants");
+        if variant_ids == vec!["off"] {
+            assert_eq!(
+                default_variant, "off",
+                "pi model {model_id} expected default off for non-thinking model"
+            );
+        } else {
+            assert_eq!(
+                variant_ids, full_levels,
+                "pi model {model_id} expected full thinking levels"
+            );
+            assert_eq!(
+                default_variant, "medium",
+                "pi model {model_id} expected medium default for thinking model"
+            );
+        }
+    }
+}

@@ -10,11 +10,7 @@
     "license": {
       "name": "Apache-2.0"
     },
-<<<<<<< Updated upstream
     "version": "0.1.7"
-=======
-    "version": "0.1.6"
->>>>>>> Stashed changes
   },
   "servers": [
     {

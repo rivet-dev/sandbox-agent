@@ -2628,12 +2628,8 @@ pub fn build_opencode_router(state: Arc<OpenCodeAppState>) -> Router {
     responses((status = 200)),
     tag = "opencode"
 )]
-<<<<<<< Updated upstream
 async fn oc_agent_list(State(state): State<Arc<OpenCodeAppState>>) -> impl IntoResponse {
     let name = state.inner.branding.product_name();
-=======
-async fn oc_agent_list(State(_state): State<Arc<OpenCodeAppState>>) -> impl IntoResponse {
->>>>>>> Stashed changes
     let agent = json!({
         "name": name,
         "description": format!("{name} compatibility layer"),
@@ -4278,7 +4274,6 @@ async fn oc_file_list() -> impl IntoResponse {
     tag = "opencode"
 )]
 async fn oc_file_content(Query(query): Query<FileContentQuery>) -> impl IntoResponse {
-    let _directory = query.directory.as_deref();
     if query.path.is_none() {
         return bad_request("path is required").into_response();
     }
@@ -4309,7 +4304,6 @@ async fn oc_file_status() -> impl IntoResponse {
     tag = "opencode"
 )]
 async fn oc_find_text(Query(query): Query<FindTextQuery>) -> impl IntoResponse {
-    let _directory = query.directory.as_deref();
     if query.pattern.is_none() {
         return bad_request("pattern is required").into_response();
     }
@@ -4323,7 +4317,6 @@ async fn oc_find_text(Query(query): Query<FindTextQuery>) -> impl IntoResponse {
     tag = "opencode"
 )]
 async fn oc_find_files(Query(query): Query<FindFilesQuery>) -> impl IntoResponse {
-    let _directory = query.directory.as_deref();
     if query.query.is_none() {
         return bad_request("query is required").into_response();
     }
@@ -4337,7 +4330,6 @@ async fn oc_find_files(Query(query): Query<FindFilesQuery>) -> impl IntoResponse
     tag = "opencode"
 )]
 async fn oc_find_symbols(Query(query): Query<FindSymbolsQuery>) -> impl IntoResponse {
-    let _directory = query.directory.as_deref();
     if query.query.is_none() {
         return bad_request("query is required").into_response();
     }
@@ -4454,7 +4446,6 @@ async fn oc_tool_ids() -> impl IntoResponse {
     tag = "opencode"
 )]
 async fn oc_tool_list(Query(query): Query<ToolQuery>) -> impl IntoResponse {
-    let _directory = query.directory.as_deref();
     if query.provider.is_none() || query.model.is_none() {
         return bad_request("provider and model are required").into_response();
     }
