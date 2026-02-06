@@ -882,8 +882,11 @@ export default function App() {
   const selectedModelId = model || defaultModel;
   const selectedModel = modelOptions.find((entry) => entry.id === selectedModelId);
   const variantOptions = selectedModel?.variants ?? [];
-  const defaultVariant = selectedModel?.defaultVariant ?? "";
-  const supportsVariants = Boolean(currentAgent?.capabilities?.variants);
+  const defaultVariant = "";
+  const supportsVariants =
+    modelsLoading ||
+    Boolean(modelsError) ||
+    modelOptions.some((entry) => (entry.variants?.length ?? 0) > 0);
   const agentDisplayNames: Record<string, string> = {
     claude: "Claude Code",
     codex: "Codex",

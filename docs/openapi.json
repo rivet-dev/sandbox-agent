@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "sandbox-agent",
-    "description": "Universal API for automatic coding agents in sandboxes. Supprots Claude Code, Codex, OpenCode, and Amp.",
+    "description": "Universal API for automatic coding agents in sandboxes. Supports Claude Code, Codex, OpenCode, and Amp.",
     "contact": {
       "name": "Rivet Gaming, LLC",
       "email": "developer@rivet.gg"
@@ -23,10 +23,12 @@
         "tags": [
           "agents"
         ],
+        "summary": "List Agents",
+        "description": "Returns all available coding agents and their installation status.",
         "operationId": "list_agents",
         "responses": {
           "200": {
-            "description": "",
+            "description": "List of available agents",
             "content": {
               "application/json": {
                 "schema": {
@@ -43,6 +45,8 @@
         "tags": [
           "agents"
         ],
+        "summary": "Install Agent",
+        "description": "Installs or updates a coding agent (e.g. claude, codex, opencode, amp).",
         "operationId": "install_agent",
         "parameters": [
           {
@@ -70,7 +74,7 @@
             "description": "Agent installed"
           },
           "400": {
-            "description": "",
+            "description": "Invalid request",
             "content": {
               "application/json": {
                 "schema": {
@@ -80,7 +84,7 @@
             }
           },
           "404": {
-            "description": "",
+            "description": "Agent not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -90,7 +94,7 @@
             }
           },
           "500": {
-            "description": "",
+            "description": "Installation failed",
             "content": {
               "application/json": {
                 "schema": {
@@ -107,6 +111,8 @@
         "tags": [
           "agents"
         ],
+        "summary": "List Agent Models",
+        "description": "Returns the available LLM models for an agent.",
         "operationId": "get_agent_models",
         "parameters": [
           {
@@ -121,7 +127,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "Available models",
             "content": {
               "application/json": {
                 "schema": {
@@ -130,8 +136,8 @@
               }
             }
           },
-          "400": {
-            "description": "",
+          "404": {
+            "description": "Agent not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -148,6 +154,8 @@
         "tags": [
           "agents"
         ],
+        "summary": "List Agent Modes",
+        "description": "Returns the available interaction modes for an agent.",
         "operationId": "get_agent_modes",
         "parameters": [
           {
@@ -162,7 +170,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "Available modes",
             "content": {
               "application/json": {
                 "schema": {
@@ -172,11 +180,392 @@
             }
           },
           "400": {
-            "description": "",
+            "description": "Invalid request",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/fs/entries": {
+      "get": {
+        "tags": [
+          "fs"
+        ],
+        "summary": "List Directory",
+        "description": "Lists files and directories at the given path.",
+        "operationId": "fs_entries",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "query",
+            "description": "Path to list (relative or absolute)",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "query",
+            "description": "Session id for relative paths",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Directory listing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/FsEntry"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/fs/entry": {
+      "delete": {
+        "tags": [
+          "fs"
+        ],
+        "summary": "Delete Entry",
+        "description": "Deletes a file or directory.",
+        "operationId": "fs_delete_entry",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "query",
+            "description": "File or directory path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "query",
+            "description": "Session id for relative paths",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "recursive",
+            "in": "query",
+            "description": "Delete directories recursively",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Delete result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FsActionResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/fs/file": {
+      "get": {
+        "tags": [
+          "fs"
+        ],
+        "summary": "Read File",
+        "description": "Reads the raw bytes of a file.",
+        "operationId": "fs_read_file",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "query",
+            "description": "File path (relative or absolute)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "query",
+            "description": "Session id for relative paths",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "File content",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "fs"
+        ],
+        "summary": "Write File",
+        "description": "Writes raw bytes to a file, creating it if it doesn't exist.",
+        "operationId": "fs_write_file",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "query",
+            "description": "File path (relative or absolute)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "query",
+            "description": "Session id for relative paths",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Write result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FsWriteResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/fs/mkdir": {
+      "post": {
+        "tags": [
+          "fs"
+        ],
+        "summary": "Create Directory",
+        "description": "Creates a directory, including any missing parent directories.",
+        "operationId": "fs_mkdir",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "query",
+            "description": "Directory path to create",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "query",
+            "description": "Session id for relative paths",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Directory created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FsActionResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/fs/move": {
+      "post": {
+        "tags": [
+          "fs"
+        ],
+        "summary": "Move Entry",
+        "description": "Moves or renames a file or directory.",
+        "operationId": "fs_move",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "query",
+            "description": "Session id for relative paths",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FsMoveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Move result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FsMoveResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/fs/stat": {
+      "get": {
+        "tags": [
+          "fs"
+        ],
+        "summary": "Get File Info",
+        "description": "Returns metadata (size, timestamps, type) for a path.",
+        "operationId": "fs_stat",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "query",
+            "description": "Path to stat",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "query",
+            "description": "Session id for relative paths",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "File metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FsStat"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/fs/upload-batch": {
+      "post": {
+        "tags": [
+          "fs"
+        ],
+        "summary": "Upload Files",
+        "description": "Uploads a tar.gz archive and extracts it to the destination directory.",
+        "operationId": "fs_upload_batch",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "query",
+            "description": "Destination directory for extraction",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "query",
+            "description": "Session id for relative paths",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Upload result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FsUploadBatchResponse"
                 }
               }
             }
@@ -189,10 +578,12 @@
         "tags": [
           "meta"
         ],
+        "summary": "Health Check",
+        "description": "Returns the server health status.",
         "operationId": "get_health",
         "responses": {
           "200": {
-            "description": "",
+            "description": "Server is healthy",
             "content": {
               "application/json": {
                 "schema": {
@@ -209,10 +600,12 @@
         "tags": [
           "sessions"
         ],
+        "summary": "List Sessions",
+        "description": "Returns all active sessions.",
         "operationId": "list_sessions",
         "responses": {
           "200": {
-            "description": "",
+            "description": "List of active sessions",
             "content": {
               "application/json": {
                 "schema": {
@@ -229,6 +622,8 @@
         "tags": [
           "sessions"
         ],
+        "summary": "Create Session",
+        "description": "Creates a new agent session with the given configuration.",
         "operationId": "create_session",
         "parameters": [
           {
@@ -253,7 +648,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "Session created",
             "content": {
               "application/json": {
                 "schema": {
@@ -263,7 +658,7 @@
             }
           },
           "400": {
-            "description": "",
+            "description": "Invalid request",
             "content": {
               "application/json": {
                 "schema": {
@@ -273,7 +668,7 @@
             }
           },
           "409": {
-            "description": "",
+            "description": "Session already exists",
             "content": {
               "application/json": {
                 "schema": {
@@ -290,6 +685,8 @@
         "tags": [
           "sessions"
         ],
+        "summary": "Get Events",
+        "description": "Returns session events with optional offset-based pagination.",
         "operationId": "get_events",
         "parameters": [
           {
@@ -338,7 +735,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "Session events",
             "content": {
               "application/json": {
                 "schema": {
@@ -348,7 +745,7 @@
             }
           },
           "404": {
-            "description": "",
+            "description": "Session not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -365,6 +762,8 @@
         "tags": [
           "sessions"
         ],
+        "summary": "Subscribe to Events (SSE)",
+        "description": "Opens an SSE stream for real-time session events.",
         "operationId": "get_events_sse",
         "parameters": [
           {
@@ -411,6 +810,8 @@
         "tags": [
           "sessions"
         ],
+        "summary": "Send Message",
+        "description": "Sends a message to a session and returns immediately.",
         "operationId": "post_message",
         "parameters": [
           {
@@ -438,7 +839,7 @@
             "description": "Message accepted"
           },
           "404": {
-            "description": "",
+            "description": "Session not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -455,6 +856,8 @@
         "tags": [
           "sessions"
         ],
+        "summary": "Send Message (Streaming)",
+        "description": "Sends a message and returns an SSE event stream of the agent's response.",
         "operationId": "post_message_stream",
         "parameters": [
           {
@@ -492,7 +895,7 @@
             "description": "SSE event stream"
           },
           "404": {
-            "description": "",
+            "description": "Session not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -509,6 +912,8 @@
         "tags": [
           "sessions"
         ],
+        "summary": "Reply to Permission",
+        "description": "Approves or denies a permission request from the agent.",
         "operationId": "reply_permission",
         "parameters": [
           {
@@ -545,7 +950,7 @@
             "description": "Permission reply accepted"
           },
           "404": {
-            "description": "",
+            "description": "Session or permission not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -562,6 +967,8 @@
         "tags": [
           "sessions"
         ],
+        "summary": "Reject Question",
+        "description": "Rejects a human-in-the-loop question from the agent.",
         "operationId": "reject_question",
         "parameters": [
           {
@@ -588,7 +995,7 @@
             "description": "Question rejected"
           },
           "404": {
-            "description": "",
+            "description": "Session or question not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -605,6 +1012,8 @@
         "tags": [
           "sessions"
         ],
+        "summary": "Reply to Question",
+        "description": "Replies to a human-in-the-loop question from the agent.",
         "operationId": "reply_question",
         "parameters": [
           {
@@ -641,7 +1050,7 @@
             "description": "Question answered"
           },
           "404": {
-            "description": "",
+            "description": "Session or question not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -658,6 +1067,8 @@
         "tags": [
           "sessions"
         ],
+        "summary": "Terminate Session",
+        "description": "Terminates a running session and cleans up resources.",
         "operationId": "terminate_session",
         "parameters": [
           {
@@ -675,7 +1086,7 @@
             "description": "Session terminated"
           },
           "404": {
-            "description": "",
+            "description": "Session not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -710,7 +1121,6 @@
           "mcpTools",
           "streamingDeltas",
           "itemStarted",
-          "variants",
           "sharedProcess"
         ],
         "properties": {
@@ -767,9 +1177,6 @@
             "type": "boolean"
           },
           "toolResults": {
-            "type": "boolean"
-          },
-          "variants": {
             "type": "boolean"
           }
         }
@@ -883,10 +1290,6 @@
           "id"
         ],
         "properties": {
-          "defaultVariant": {
-            "type": "string",
-            "nullable": true
-          },
           "id": {
             "type": "string"
           },
@@ -1152,12 +1555,27 @@
             "type": "string",
             "nullable": true
           },
+          "mcp": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/McpServerConfig"
+            },
+            "nullable": true
+          },
           "model": {
             "type": "string",
             "nullable": true
           },
           "permissionMode": {
             "type": "string",
+            "nullable": true
+          },
+          "skills": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SkillsConfig"
+              }
+            ],
             "nullable": true
           },
           "variant": {
@@ -1278,6 +1696,216 @@
           "patch"
         ]
       },
+      "FsActionResponse": {
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        }
+      },
+      "FsDeleteQuery": {
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "recursive": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "sessionId": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "FsEntriesQuery": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "nullable": true
+          },
+          "sessionId": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "FsEntry": {
+        "type": "object",
+        "required": [
+          "name",
+          "path",
+          "entryType",
+          "size"
+        ],
+        "properties": {
+          "entryType": {
+            "$ref": "#/components/schemas/FsEntryType"
+          },
+          "modified": {
+            "type": "string",
+            "nullable": true
+          },
+          "name": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "FsEntryType": {
+        "type": "string",
+        "enum": [
+          "file",
+          "directory"
+        ]
+      },
+      "FsMoveRequest": {
+        "type": "object",
+        "required": [
+          "from",
+          "to"
+        ],
+        "properties": {
+          "from": {
+            "type": "string"
+          },
+          "overwrite": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "to": {
+            "type": "string"
+          }
+        }
+      },
+      "FsMoveResponse": {
+        "type": "object",
+        "required": [
+          "from",
+          "to"
+        ],
+        "properties": {
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          }
+        }
+      },
+      "FsPathQuery": {
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "sessionId": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "FsSessionQuery": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "FsStat": {
+        "type": "object",
+        "required": [
+          "path",
+          "entryType",
+          "size"
+        ],
+        "properties": {
+          "entryType": {
+            "$ref": "#/components/schemas/FsEntryType"
+          },
+          "modified": {
+            "type": "string",
+            "nullable": true
+          },
+          "path": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "FsUploadBatchQuery": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "nullable": true
+          },
+          "sessionId": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "FsUploadBatchResponse": {
+        "type": "object",
+        "required": [
+          "paths",
+          "truncated"
+        ],
+        "properties": {
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        }
+      },
+      "FsWriteResponse": {
+        "type": "object",
+        "required": [
+          "path",
+          "bytesWritten"
+        ],
+        "properties": {
+          "bytesWritten": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "path": {
+            "type": "string"
+          }
+        }
+      },
       "HealthResponse": {
         "type": "object",
         "required": [
@@ -1347,12 +1975,198 @@
           "failed"
         ]
       },
+      "McpCommand": {
+        "oneOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "McpOAuthConfig": {
+        "type": "object",
+        "properties": {
+          "clientId": {
+            "type": "string",
+            "nullable": true
+          },
+          "clientSecret": {
+            "type": "string",
+            "nullable": true
+          },
+          "scope": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "McpOAuthConfigOrDisabled": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/McpOAuthConfig"
+          },
+          {
+            "type": "boolean"
+          }
+        ]
+      },
+      "McpRemoteTransport": {
+        "type": "string",
+        "enum": [
+          "http",
+          "sse"
+        ]
+      },
+      "McpServerConfig": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "command",
+              "type"
+            ],
+            "properties": {
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "command": {
+                "$ref": "#/components/schemas/McpCommand"
+              },
+              "cwd": {
+                "type": "string",
+                "nullable": true
+              },
+              "enabled": {
+                "type": "boolean",
+                "nullable": true
+              },
+              "env": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "nullable": true
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "format": "int64",
+                "nullable": true,
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "local"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "url",
+              "type"
+            ],
+            "properties": {
+              "bearerTokenEnvVar": {
+                "type": "string",
+                "nullable": true
+              },
+              "enabled": {
+                "type": "boolean",
+                "nullable": true
+              },
+              "envHeaders": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "nullable": true
+              },
+              "headers": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "nullable": true
+              },
+              "oauth": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/McpOAuthConfigOrDisabled"
+                  }
+                ],
+                "nullable": true
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "format": "int64",
+                "nullable": true,
+                "minimum": 0
+              },
+              "transport": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/McpRemoteTransport"
+                  }
+                ],
+                "nullable": true
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "remote"
+                ]
+              },
+              "url": {
+                "type": "string"
+              }
+            }
+          }
+        ],
+        "discriminator": {
+          "propertyName": "type"
+        }
+      },
+      "MessageAttachment": {
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "filename": {
+            "type": "string",
+            "nullable": true
+          },
+          "mime": {
+            "type": "string",
+            "nullable": true
+          },
+          "path": {
+            "type": "string"
+          }
+        }
+      },
       "MessageRequest": {
         "type": "object",
         "required": [
           "message"
         ],
         "properties": {
+          "attachments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MessageAttachment"
+            }
+          },
           "message": {
             "type": "string"
           }
@@ -1648,6 +2462,20 @@
           }
         }
       },
+      "SkillsConfig": {
+        "type": "object",
+        "required": [
+          "paths"
+        ],
+        "properties": {
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
       "StderrOutput": {
         "type": "object",
         "required": [
@@ -1840,6 +2668,10 @@
     {
       "name": "sessions",
       "description": "Session management"
+    },
+    {
+      "name": "fs",
+      "description": "Filesystem operations"
     }
   ]
 }

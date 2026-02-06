@@ -1,0 +1,278 @@
+---
+title: "Agent Sessions"
+description: "Create sessions and send messages to agents."
+sidebarTitle: "Sessions"
+icon: "comments"
+---
+
+Sessions are the unit of interaction with an agent. You create one session per task, then send messages and stream events.
+
+## Session Options
+
+`POST /v1/sessions/{sessionId}` accepts the following fields:
+
+- `agent` (required): `claude`, `codex`, `opencode`, `amp`, or `mock`
+- `agentMode`: agent mode string (for example, `build`, `plan`)
+- `permissionMode`: permission mode string (`default`, `plan`, `bypass`, etc.)
+- `model`: model override (agent-specific)
+- `variant`: model variant (agent-specific)
+- `agentVersion`: agent version override
+- `mcp`: MCP server config map (see `MCP`)
+- `skills`: skill path config (see `Skills`)
+
+## Create A Session
+
+<CodeGroup>
+```ts TypeScript
+import { SandboxAgent } from "sandbox-agent";
+
+const client = await SandboxAgent.connect({
+  baseUrl: "http://127.0.0.1:2468",
+  token: process.env.SANDBOX_TOKEN,
+});
+
+await client.createSession("build-session", {
+  agent: "codex",
+  agentMode: "build",
+  permissionMode: "default",
+  model: "gpt-4.1",
+  variant: "reasoning",
+  agentVersion: "latest",
+});
+```
+
+```bash cURL
+curl -X POST "http://127.0.0.1:2468/v1/sessions/build-session" \
+  -H "Authorization: Bearer $SANDBOX_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agent": "codex",
+    "agentMode": "build",
+    "permissionMode": "default",
+    "model": "gpt-4.1",
+    "variant": "reasoning",
+    "agentVersion": "latest"
+  }'
+```
+</CodeGroup>
+
+## Send A Message
+
+<CodeGroup>
+```ts TypeScript
+import { SandboxAgent } from "sandbox-agent";
+
+const client = await SandboxAgent.connect({
+  baseUrl: "http://127.0.0.1:2468",
+  token: process.env.SANDBOX_TOKEN,
+});
+
+await client.postMessage("build-session", {
+  message: "Summarize the repository structure.",
+});
+```
+
+```bash cURL
+curl -X POST "http://127.0.0.1:2468/v1/sessions/build-session/messages" \
+  -H "Authorization: Bearer $SANDBOX_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"message":"Summarize the repository structure."}'
+```
+</CodeGroup>
+
+## Stream A Turn
+
+<CodeGroup>
+```ts TypeScript
+import { SandboxAgent } from "sandbox-agent";
+
+const client = await SandboxAgent.connect({
+  baseUrl: "http://127.0.0.1:2468",
+  token: process.env.SANDBOX_TOKEN,
+});
+
+const response = await client.postMessageStream("build-session", {
+  message: "Explain the main entrypoints.",
+});
+
+const reader = response.body?.getReader();
+if (reader) {
+  const decoder = new TextDecoder();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    console.log(decoder.decode(value, { stream: true }));
+  }
+}
+```
+
+```bash cURL
+curl -N -X POST "http://127.0.0.1:2468/v1/sessions/build-session/messages/stream" \
+  -H "Authorization: Bearer $SANDBOX_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"message":"Explain the main entrypoints."}'
+```
+</CodeGroup>
+
+## Fetch Events
+
+<CodeGroup>
+```ts TypeScript
+import { SandboxAgent } from "sandbox-agent";
+
+const client = await SandboxAgent.connect({
+  baseUrl: "http://127.0.0.1:2468",
+  token: process.env.SANDBOX_TOKEN,
+});
+
+const events = await client.getEvents("build-session", {
+  offset: 0,
+  limit: 50,
+  includeRaw: false,
+});
+
+console.log(events.events);
+```
+
+```bash cURL
+curl -X GET "http://127.0.0.1:2468/v1/sessions/build-session/events?offset=0&limit=50" \
+  -H "Authorization: Bearer $SANDBOX_TOKEN"
+```
+</CodeGroup>
+
+`GET /v1/sessions/{sessionId}/get-messages` is an alias for `events`.
+
+## Stream Events (SSE)
+
+<CodeGroup>
+```ts TypeScript
+import { SandboxAgent } from "sandbox-agent";
+
+const client = await SandboxAgent.connect({
+  baseUrl: "http://127.0.0.1:2468",
+  token: process.env.SANDBOX_TOKEN,
+});
+
+for await (const event of client.streamEvents("build-session", { offset: 0 })) {
+  console.log(event.type, event.data);
+}
+```
+
+```bash cURL
+curl -N -X GET "http://127.0.0.1:2468/v1/sessions/build-session/events/sse?offset=0" \
+  -H "Authorization: Bearer $SANDBOX_TOKEN"
+```
+</CodeGroup>
+
+## List Sessions
+
+<CodeGroup>
+```ts TypeScript
+import { SandboxAgent } from "sandbox-agent";
+
+const client = await SandboxAgent.connect({
+  baseUrl: "http://127.0.0.1:2468",
+  token: process.env.SANDBOX_TOKEN,
+});
+
+const sessions = await client.listSessions();
+console.log(sessions.sessions);
+```
+
+```bash cURL
+curl -X GET "http://127.0.0.1:2468/v1/sessions" \
+  -H "Authorization: Bearer $SANDBOX_TOKEN"
+```
+</CodeGroup>
+
+## Reply To A Question
+
+When the agent asks a question, reply with an array of answers. Each inner array is one multi-select response.
+
+<CodeGroup>
+```ts TypeScript
+import { SandboxAgent } from "sandbox-agent";
+
+const client = await SandboxAgent.connect({
+  baseUrl: "http://127.0.0.1:2468",
+  token: process.env.SANDBOX_TOKEN,
+});
+
+await client.replyQuestion("build-session", "question-1", {
+  answers: [["yes"]],
+});
+```
+
+```bash cURL
+curl -X POST "http://127.0.0.1:2468/v1/sessions/build-session/questions/question-1/reply" \
+  -H "Authorization: Bearer $SANDBOX_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"answers":[["yes"]]}'
+```
+</CodeGroup>
+
+## Reject A Question
+
+<CodeGroup>
+```ts TypeScript
+import { SandboxAgent } from "sandbox-agent";
+
+const client = await SandboxAgent.connect({
+  baseUrl: "http://127.0.0.1:2468",
+  token: process.env.SANDBOX_TOKEN,
+});
+
+await client.rejectQuestion("build-session", "question-1");
+```
+
+```bash cURL
+curl -X POST "http://127.0.0.1:2468/v1/sessions/build-session/questions/question-1/reject" \
+  -H "Authorization: Bearer $SANDBOX_TOKEN"
+```
+</CodeGroup>
+
+## Reply To A Permission Request
+
+Use `once`, `always`, or `reject`.
+
+<CodeGroup>
+```ts TypeScript
+import { SandboxAgent } from "sandbox-agent";
+
+const client = await SandboxAgent.connect({
+  baseUrl: "http://127.0.0.1:2468",
+  token: process.env.SANDBOX_TOKEN,
+});
+
+await client.replyPermission("build-session", "permission-1", {
+  reply: "once",
+});
+```
+
+```bash cURL
+curl -X POST "http://127.0.0.1:2468/v1/sessions/build-session/permissions/permission-1/reply" \
+  -H "Authorization: Bearer $SANDBOX_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"reply":"once"}'
+```
+</CodeGroup>
+
+## Terminate A Session
+
+<CodeGroup>
+```ts TypeScript
+import { SandboxAgent } from "sandbox-agent";
+
+const client = await SandboxAgent.connect({
+  baseUrl: "http://127.0.0.1:2468",
+  token: process.env.SANDBOX_TOKEN,
+});
+
+await client.terminateSession("build-session");
+```
+
+```bash cURL
+curl -X POST "http://127.0.0.1:2468/v1/sessions/build-session/terminate" \
+  -H "Authorization: Bearer $SANDBOX_TOKEN"
+```
+</CodeGroup>

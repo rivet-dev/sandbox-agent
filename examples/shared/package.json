@@ -3,15 +3,18 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/sandbox-agent-client.ts"
+    ".": "./src/sandbox-agent-client.ts",
+    "./docker": "./src/docker.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "dockerode": "latest",
     "sandbox-agent": "workspace:*"
   },
   "devDependencies": {
+    "@types/dockerode": "latest",
     "@types/node": "latest",
     "typescript": "latest"
   }

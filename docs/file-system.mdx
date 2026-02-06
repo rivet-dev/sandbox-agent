@@ -1,0 +1,184 @@
+---
+title: "File System"
+description: "Read, write, and manage files inside the sandbox."
+sidebarTitle: "File System"
+icon: "folder"
+---
+
+The filesystem API lets you list, read, write, move, and delete files inside the sandbox, plus upload batches of files via tar archives.
+
+## Path Resolution
+
+- Absolute paths are used as-is.
+- Relative paths use the session working directory when `sessionId` is provided.
+- Without `sessionId`, relative paths resolve against the server home directory.
+- Relative paths cannot contain `..` or absolute prefixes; requests that attempt to escape the root are rejected.
+
+The session working directory is the server process current working directory at the moment the session is created.
+
+## List Entries
+
+<CodeGroup>
+```ts TypeScript
+import { SandboxAgent } from "sandbox-agent";
+
+const client = await SandboxAgent.connect({
+  baseUrl: "http://127.0.0.1:2468",
+  token: process.env.SANDBOX_TOKEN,
+});
+
+const entries = await client.listFsEntries({
+  path: "./workspace",
+  sessionId: "my-session",
+});
+
+console.log(entries);
+```
+
+```bash cURL
+curl -X GET "http://127.0.0.1:2468/v1/fs/entries?path=./workspace&sessionId=my-session" \
+  -H "Authorization: Bearer $SANDBOX_TOKEN"
+```
+</CodeGroup>
+
+## Read And Write Files
+
+`PUT /v1/fs/file` writes raw bytes. `GET /v1/fs/file` returns raw bytes.
+
+<CodeGroup>
+```ts TypeScript
+import { SandboxAgent } from "sandbox-agent";
+
+const client = await SandboxAgent.connect({
+  baseUrl: "http://127.0.0.1:2468",
+  token: process.env.SANDBOX_TOKEN,
+});
+
+await client.writeFsFile({ path: "./notes.txt", sessionId: "my-session" }, "hello");
+
+const bytes = await client.readFsFile({
+  path: "./notes.txt",
+  sessionId: "my-session",
+});
+
+const text = new TextDecoder().decode(bytes);
+console.log(text);
+```
+
+```bash cURL
+curl -X PUT "http://127.0.0.1:2468/v1/fs/file?path=./notes.txt&sessionId=my-session" \
+  -H "Authorization: Bearer $SANDBOX_TOKEN" \
+  --data-binary "hello"
+
+curl -X GET "http://127.0.0.1:2468/v1/fs/file?path=./notes.txt&sessionId=my-session" \
+  -H "Authorization: Bearer $SANDBOX_TOKEN" \
+  --output ./notes.txt
+```
+</CodeGroup>
+
+## Create Directories
+
+<CodeGroup>
+```ts TypeScript
+import { SandboxAgent } from "sandbox-agent";
+
+const client = await SandboxAgent.connect({
+  baseUrl: "http://127.0.0.1:2468",
+  token: process.env.SANDBOX_TOKEN,
+});
+
+await client.mkdirFs({
+  path: "./data",
+  sessionId: "my-session",
+});
+```
+
+```bash cURL
+curl -X POST "http://127.0.0.1:2468/v1/fs/mkdir?path=./data&sessionId=my-session" \
+  -H "Authorization: Bearer $SANDBOX_TOKEN"
+```
+</CodeGroup>
+
+## Move, Delete, And Stat
+
+<CodeGroup>
+```ts TypeScript
+import { SandboxAgent } from "sandbox-agent";
+
+const client = await SandboxAgent.connect({
+  baseUrl: "http://127.0.0.1:2468",
+  token: process.env.SANDBOX_TOKEN,
+});
+
+await client.moveFs(
+  { from: "./notes.txt", to: "./notes-old.txt", overwrite: true },
+  { sessionId: "my-session" },
+);
+
+const stat = await client.statFs({
+  path: "./notes-old.txt",
+  sessionId: "my-session",
+});
+
+await client.deleteFsEntry({
+  path: "./notes-old.txt",
+  sessionId: "my-session",
+});
+
+console.log(stat);
+```
+
+```bash cURL
+curl -X POST "http://127.0.0.1:2468/v1/fs/move?sessionId=my-session" \
+  -H "Authorization: Bearer $SANDBOX_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"from":"./notes.txt","to":"./notes-old.txt","overwrite":true}'
+
+curl -X GET "http://127.0.0.1:2468/v1/fs/stat?path=./notes-old.txt&sessionId=my-session" \
+  -H "Authorization: Bearer $SANDBOX_TOKEN"
+
+curl -X DELETE "http://127.0.0.1:2468/v1/fs/entry?path=./notes-old.txt&sessionId=my-session" \
+  -H "Authorization: Bearer $SANDBOX_TOKEN"
+```
+</CodeGroup>
+
+## Batch Upload (Tar)
+
+Batch upload accepts `application/x-tar` only and extracts into the destination directory. The response returns absolute paths for extracted files, capped at 1024 entries.
+
+<CodeGroup>
+```ts TypeScript
+import { SandboxAgent } from "sandbox-agent";
+import fs from "node:fs";
+import path from "node:path";
+import tar from "tar";
+
+const client = await SandboxAgent.connect({
+  baseUrl: "http://127.0.0.1:2468",
+  token: process.env.SANDBOX_TOKEN,
+});
+
+const archivePath = path.join(process.cwd(), "skills.tar");
+await tar.c({
+  cwd: "./skills",
+  file: archivePath,
+}, ["."]);
+
+const tarBuffer = await fs.promises.readFile(archivePath);
+const result = await client.uploadFsBatch(tarBuffer, {
+  path: "./skills",
+  sessionId: "my-session",
+});
+
+console.log(result);
+```
+
+```bash cURL
+tar -cf skills.tar -C ./skills .
+
+curl -X POST "http://127.0.0.1:2468/v1/fs/upload-batch?path=./skills&sessionId=my-session" \
+  -H "Authorization: Bearer $SANDBOX_TOKEN" \
+  -H "Content-Type: application/x-tar" \
+  --data-binary @skills.tar
+```
+</CodeGroup>

@@ -1,7 +1,7 @@
 {
   "name": "sandbox-agent",
   "version": "0.1.7",
-  "description": "Universal API for automatic coding agents in sandboxes. Supprots Claude Code, Codex, OpenCode, and Amp.",
+  "description": "Universal API for automatic coding agents in sandboxes. Supports Claude Code, Codex, OpenCode, and Amp.",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",

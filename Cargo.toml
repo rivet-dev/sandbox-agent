@@ -8,7 +8,7 @@ edition = "2021"
 authors = [ "Rivet Gaming, LLC <developer@rivet.gg>" ]
 license = "Apache-2.0"
 repository = "https://github.com/rivet-dev/sandbox-agent"
-description = "Universal API for automatic coding agents in sandboxes. Supprots Claude Code, Codex, OpenCode, and Amp."
+description = "Universal API for automatic coding agents in sandboxes. Supports Claude Code, Codex, OpenCode, and Amp."
 
 [workspace.dependencies]
 # Internal crates
@@ -69,6 +69,7 @@ url = "2.5"
 regress = "0.10"
 include_dir = "0.7"
 base64 = "0.22"
+toml_edit = "0.22"
 
 # Code generation (build deps)
 typify = "0.4"
