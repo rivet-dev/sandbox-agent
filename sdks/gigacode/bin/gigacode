@@ -20,14 +20,14 @@ function formatHint(binPath) {
         label: "Project install",
         commands: [
           `bun pm trust ${TRUST_PACKAGES}`,
-          "bun add gigacode",
+          "bun add @sandbox-agent/gigacode",
         ],
       },
       {
         label: "Global install",
         commands: [
           `bun pm -g trust ${TRUST_PACKAGES}`,
-          "bun add -g gigacode",
+          "bun add -g @sandbox-agent/gigacode",
         ],
       },
     ],

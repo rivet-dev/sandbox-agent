@@ -51,14 +51,14 @@ curl -fsSL https://releases.rivet.dev/sandbox-agent/latest/gigacode-install.sh |
 **npm i -g**
 
 ```bash
-npm install -g gigacode
+npm install -g @sandbox-agent/gigacode
 gigacode --help
 ```
 
 **bun add -g**
 
 ```bash
-bun add -g gigacode
+bun add -g @sandbox-agent/gigacode
 # Allow Bun to run postinstall scripts for native binaries.
 bun pm -g trust @sandbox-agent/gigacode-linux-x64 @sandbox-agent/gigacode-linux-arm64 @sandbox-agent/gigacode-darwin-arm64 @sandbox-agent/gigacode-darwin-x64 @sandbox-agent/gigacode-win32-x64
 gigacode --help
@@ -67,13 +67,13 @@ gigacode --help
 **npx**
 
 ```bash
-npx gigacode --help
+npx @sandbox-agent/gigacode --help
 ```
 
 **bunx**
 
 ```bash
-bunx gigacode --help
+bunx @sandbox-agent/gigacode --help
 ```
 
 > **Note:** Windows is unsupported. Please use [WSL](https://learn.microsoft.com/en-us/windows/wsl/install).
