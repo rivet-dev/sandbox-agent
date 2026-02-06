@@ -3,12 +3,15 @@ use std::env;
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use reqwest::Client;
 use serde::Serialize;
 use time::OffsetDateTime;
 use tokio::time::Instant;
+
+static TELEMETRY_ENABLED: AtomicBool = AtomicBool::new(false);
 
 const TELEMETRY_URL: &str = "https://tc.rivet.dev";
 const TELEMETRY_ENV_DEBUG: &str = "SANDBOX_AGENT_TELEMETRY_DEBUG";
@@ -60,15 +63,17 @@ struct ProviderInfo {
 }
 
 pub fn telemetry_enabled(no_telemetry: bool) -> bool {
-    if no_telemetry {
-        return false;
-    }
-    if cfg!(debug_assertions) {
-        return env::var(TELEMETRY_ENV_DEBUG)
+    let enabled = if no_telemetry {
+        false
+    } else if cfg!(debug_assertions) {
+        env::var(TELEMETRY_ENV_DEBUG)
             .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE"))
-            .unwrap_or(false);
-    }
-    true
+            .unwrap_or(false)
+    } else {
+        true
+    };
+    TELEMETRY_ENABLED.store(enabled, Ordering::Relaxed);
+    enabled
 }
 
 pub fn log_enabled_message() {
@@ -430,4 +435,79 @@ fn metadata_or_none(
     } else {
         Some(map)
     }
+}
+
+#[derive(Debug, Serialize)]
+struct SessionCreatedEvent {
+    p: String,
+    dt: i64,
+    et: String,
+    eid: String,
+    ev: String,
+    d: SessionCreatedTelemetryData,
+    v: u8,
+}
+
+#[derive(Debug, Serialize)]
+struct SessionCreatedTelemetryData {
+    version: String,
+    agent: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    agent_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    permission_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    variant: Option<String>,
+}
+
+pub struct SessionConfig {
+    pub agent: String,
+    pub agent_mode: Option<String>,
+    pub permission_mode: Option<String>,
+    pub model: Option<String>,
+    pub variant: Option<String>,
+}
+
+pub fn log_session_created(config: SessionConfig) {
+    if !TELEMETRY_ENABLED.load(Ordering::Relaxed) {
+        return;
+    }
+
+    tokio::spawn(async move {
+        let client = match Client::builder()
+            .timeout(Duration::from_millis(TELEMETRY_TIMEOUT_MS))
+            .build()
+        {
+            Ok(client) => client,
+            Err(err) => {
+                tracing::debug!(error = %err, "failed to build telemetry client");
+                return;
+            }
+        };
+
+        let dt = OffsetDateTime::now_utc().unix_timestamp();
+        let eid = load_or_create_id();
+        let event = SessionCreatedEvent {
+            p: "sandbox-agent".to_string(),
+            dt,
+            et: "session".to_string(),
+            eid,
+            ev: "session_created".to_string(),
+            d: SessionCreatedTelemetryData {
+                version: env!("CARGO_PKG_VERSION").to_string(),
+                agent: config.agent,
+                agent_mode: config.agent_mode,
+                permission_mode: config.permission_mode,
+                model: config.model,
+                variant: config.variant,
+            },
+            v: 1,
+        };
+
+        if let Err(err) = client.post(TELEMETRY_URL).json(&event).send().await {
+            tracing::debug!(error = %err, "session telemetry request failed");
+        }
+    });
 }
