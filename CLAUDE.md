@@ -83,7 +83,7 @@ SANDBOX_AGENT_SKIP_INSPECTOR=1 pnpm --filter @sandbox-agent/opencode-compat-test
 
 ## Naming
 
-- The product name is "GigaCode" (capital G, capital C). The CLI binary/package is `gigacode` (lowercase).
+- The product name is "Gigacode" (capital G, lowercase c). The CLI binary/package is `gigacode` (lowercase).
 
 ## Git Commits
 

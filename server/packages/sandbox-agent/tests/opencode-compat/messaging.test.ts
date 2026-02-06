@@ -45,7 +45,7 @@ describe("OpenCode-compatible Messaging API", () => {
       const response = await client.session.prompt({
         path: { id: sessionId },
         body: {
-          model: { providerID: "sandbox-agent", modelID: "mock" },
+          model: { providerID: "mock", modelID: "mock" },
           parts: [{ type: "text", text: "Hello, world!" }],
         },
       });
@@ -58,7 +58,7 @@ describe("OpenCode-compatible Messaging API", () => {
       const response = await client.session.prompt({
         path: { id: sessionId },
         body: {
-          model: { providerID: "sandbox-agent", modelID: "mock" },
+          model: { providerID: "mock", modelID: "mock" },
           parts: [{ type: "text", text: "Say hello" }],
         },
       });
@@ -72,7 +72,7 @@ describe("OpenCode-compatible Messaging API", () => {
       const response = await client.session.promptAsync({
         path: { id: sessionId },
         body: {
-          model: { providerID: "sandbox-agent", modelID: "mock" },
+          model: { providerID: "mock", modelID: "mock" },
           parts: [{ type: "text", text: "Process this asynchronously" }],
         },
       });
@@ -96,7 +96,7 @@ describe("OpenCode-compatible Messaging API", () => {
       await client.session.prompt({
         path: { id: sessionId },
         body: {
-          model: { providerID: "sandbox-agent", modelID: "mock" },
+          model: { providerID: "mock", modelID: "mock" },
           parts: [{ type: "text", text: "Test message" }],
         },
       });
@@ -116,7 +116,7 @@ describe("OpenCode-compatible Messaging API", () => {
       await client.session.prompt({
         path: { id: sessionId },
         body: {
-          model: { providerID: "sandbox-agent", modelID: "mock" },
+          model: { providerID: "mock", modelID: "mock" },
           parts: [{ type: "text", text: "Test" }],
         },
       });
@@ -144,7 +144,7 @@ describe("OpenCode-compatible Messaging API", () => {
       await client.session.promptAsync({
         path: { id: sessionId },
         body: {
-          model: { providerID: "sandbox-agent", modelID: "mock" },
+          model: { providerID: "mock", modelID: "mock" },
           parts: [{ type: "text", text: "Long running task" }],
         },
       });

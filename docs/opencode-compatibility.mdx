@@ -112,6 +112,7 @@ for await (const event of events.stream) {
 - **Authentication**: If sandbox-agent is started with `--token`, include `Authorization: Bearer <token>` header or use `--password` flag with CLI
 - **CORS**: When using the web UI from a different origin, configure `--cors-allow-origin`
 - **Provider Selection**: Use the provider/model selector in the UI to choose which backing agent to use (claude, codex, opencode, amp)
+- **Models & Variants**: Providers are grouped by backing agent (e.g. Claude Code, Codex, Amp). OpenCode models are grouped by `OpenCode (<provider>)` to preserve their native provider grouping. Each model keeps its real model ID, and variants are exposed when available (Codex/OpenCode/Amp).
 
 ## Endpoint Coverage
 
@@ -132,7 +133,7 @@ See the full endpoint compatibility table below. Most endpoints are functional f
 | `POST /permission/{id}/reply` | ✓ | Respond to permission requests |
 | `GET /question` | ✓ | List pending questions |
 | `POST /question/{id}/reply` | ✓ | Answer agent questions |
-| `GET /provider` | − | Returns provider metadata |
+| `GET /provider` | ✓ | Returns provider metadata |
 | `GET /agent` | − | Returns agent list |
 | `GET /config` | − | Returns config |
 | *other endpoints* | − | Return empty/stub responses |

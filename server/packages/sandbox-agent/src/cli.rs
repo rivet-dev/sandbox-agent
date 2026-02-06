@@ -580,7 +580,7 @@ fn run_api(command: &ApiCommand, cli: &CliConfig) -> Result<(), CliError> {
 }
 
 fn run_opencode(cli: &CliConfig, args: &OpencodeArgs) -> Result<(), CliError> {
-    let name = if cli.gigacode { "GigaCode" } else { "OpenCode command" };
+    let name = if cli.gigacode { "Gigacode" } else { "OpenCode command" };
     write_stderr_line(&format!("EXPERIMENTAL: Please report bugs to:\n- GitHub: https://github.com/rivet-dev/sandbox-agent/issues\n- Discord: https://rivet.dev/discord\n\n{name} is powered by:- OpenCode (TUI): https://opencode.ai/\n- Sandbox Agent SDK (multi-agent compatibility): https://sandboxagent.dev/\n\n"))?;
 
     let token = cli.token.clone();

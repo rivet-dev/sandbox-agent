@@ -66,15 +66,15 @@ install:
     pnpm install
     pnpm build --filter @sandbox-agent/inspector...
     cargo install --path server/packages/sandbox-agent --debug
-    cargo install --path server/packages/gigacode --debug
+    cargo install --path gigacode --debug
 
 install-fast:
     SANDBOX_AGENT_SKIP_INSPECTOR=1 cargo install --path server/packages/sandbox-agent --debug
-    SANDBOX_AGENT_SKIP_INSPECTOR=1 cargo install --path server/packages/gigacode --debug
+    SANDBOX_AGENT_SKIP_INSPECTOR=1 cargo install --path gigacode --debug
 
 install-release:
     pnpm install
     pnpm build --filter @sandbox-agent/inspector...
     cargo install --path server/packages/sandbox-agent
-    cargo install --path server/packages/gigacode
+    cargo install --path gigacode
 

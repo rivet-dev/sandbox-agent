@@ -1692,6 +1692,27 @@ impl SessionManager {
         })
     }
 
+    pub(crate) async fn set_session_overrides(
+        &self,
+        session_id: &str,
+        model: Option<String>,
+        variant: Option<String>,
+    ) -> Result<(), SandboxError> {
+        let mut sessions = self.sessions.lock().await;
+        let Some(session) = SessionManager::session_mut(&mut sessions, session_id) else {
+            return Err(SandboxError::SessionNotFound {
+                session_id: session_id.to_string(),
+            });
+        };
+        if let Some(model) = model {
+            session.model = Some(model);
+        }
+        if let Some(variant) = variant {
+            session.variant = Some(variant);
+        }
+        Ok(())
+    }
+
     async fn agent_modes(&self, agent: AgentId) -> Result<Vec<AgentModeInfo>, SandboxError> {
         if agent != AgentId::Opencode {
             return Ok(agent_modes_for(agent));

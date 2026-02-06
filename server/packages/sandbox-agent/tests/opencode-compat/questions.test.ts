@@ -49,7 +49,7 @@ describe("OpenCode-compatible Question API", () => {
   it("should ask a question and accept a reply", async () => {
     await client.session.prompt({
       sessionID: sessionId,
-      model: { providerID: "sandbox-agent", modelID: "mock" },
+      model: { providerID: "mock", modelID: "mock" },
       parts: [{ type: "text", text: questionPrompt }],
     });
 
@@ -67,7 +67,7 @@ describe("OpenCode-compatible Question API", () => {
   it("should allow rejecting a question", async () => {
     await client.session.prompt({
       sessionID: sessionId,
-      model: { providerID: "sandbox-agent", modelID: "mock" },
+      model: { providerID: "mock", modelID: "mock" },
       parts: [{ type: "text", text: questionPrompt }],
     });
 

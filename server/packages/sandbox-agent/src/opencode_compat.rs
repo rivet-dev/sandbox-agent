@@ -4,7 +4,7 @@
 //! stubbed responses with deterministic helpers for snapshot testing. A minimal
 //! in-memory state tracks sessions/messages/ptys to keep behavior coherent.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::convert::Infallible;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -37,9 +37,8 @@ static MESSAGE_COUNTER: AtomicU64 = AtomicU64::new(1);
 static PART_COUNTER: AtomicU64 = AtomicU64::new(1);
 static PTY_COUNTER: AtomicU64 = AtomicU64::new(1);
 static PROJECT_COUNTER: AtomicU64 = AtomicU64::new(1);
-const OPENCODE_PROVIDER_ID: &str = "sandbox-agent";
-const OPENCODE_PROVIDER_NAME: &str = "Sandbox Agent";
 const OPENCODE_DEFAULT_MODEL_ID: &str = "mock";
+const OPENCODE_DEFAULT_PROVIDER_ID: &str = "mock";
 const OPENCODE_DEFAULT_AGENT_MODE: &str = "build";
 
 #[derive(Clone, Debug)]
@@ -220,14 +219,19 @@ struct OpenCodeSessionRuntime {
 
 #[derive(Clone, Debug)]
 struct OpenCodeModelEntry {
-    agent: AgentId,
     model: AgentModelInfo,
+    group_id: String,
+    group_name: String,
 }
 
 #[derive(Clone, Debug)]
 struct OpenCodeModelCache {
     entries: Vec<OpenCodeModelEntry>,
     model_lookup: HashMap<String, AgentId>,
+    group_defaults: HashMap<String, String>,
+    group_agents: HashMap<String, AgentId>,
+    group_names: HashMap<String, String>,
+    default_group: String,
     default_model: String,
 }
 
@@ -390,13 +394,17 @@ async fn ensure_backing_session(
     state: &Arc<OpenCodeAppState>,
     session_id: &str,
     agent: &str,
+    model: Option<String>,
+    variant: Option<String>,
 ) -> Result<(), SandboxError> {
+    let model = model.filter(|value| !value.trim().is_empty());
+    let variant = variant.filter(|value| !value.trim().is_empty());
     let request = CreateSessionRequest {
         agent: agent.to_string(),
         agent_mode: None,
         permission_mode: None,
-        model: None,
-        variant: None,
+        model: model.clone(),
+        variant: variant.clone(),
         agent_version: None,
     };
     match state
@@ -406,7 +414,17 @@ async fn ensure_backing_session(
         .await
     {
         Ok(_) => Ok(()),
-        Err(SandboxError::SessionAlreadyExists { .. }) => Ok(()),
+        Err(SandboxError::SessionAlreadyExists { .. }) => {
+            state
+                .inner
+                .session_manager()
+                .set_session_overrides(session_id, model, variant)
+                .await
+                .or_else(|err| match err {
+                    SandboxError::SessionNotFound { .. } => Ok(()),
+                    other => Err(other),
+                })
+        }
         Err(err) => Err(err),
     }
 }
@@ -623,6 +641,10 @@ async fn opencode_model_cache(state: &OpenCodeAppState) -> OpenCodeModelCache {
 async fn build_opencode_model_cache(state: &OpenCodeAppState) -> OpenCodeModelCache {
     let mut entries = Vec::new();
     let mut model_lookup = HashMap::new();
+    let mut ambiguous_models = HashSet::new();
+    let mut group_defaults: HashMap<String, String> = HashMap::new();
+    let mut group_agents: HashMap<String, AgentId> = HashMap::new();
+    let mut group_names: HashMap<String, String> = HashMap::new();
     let mut default_model: Option<String> = None;
 
     for agent in available_agent_ids() {
@@ -631,32 +653,97 @@ async fn build_opencode_model_cache(state: &OpenCodeAppState) -> OpenCodeModelCa
             Err(_) => continue,
         };
 
-        if default_model.is_none() {
-            default_model = response
-                .default_model
-                .clone()
-                .or_else(|| response.models.first().map(|model| model.id.clone()));
-        }
-
+        let first_model_id = response.models.first().map(|model| model.id.clone());
         for model in response.models {
             let model_id = model.id.clone();
-            if model_lookup.contains_key(&model_id) {
-                continue;
+            let (group_id, group_name) = group_for_agent_model(agent, &model_id);
+
+            if response.default_model.as_deref() == Some(model_id.as_str()) {
+                group_defaults.insert(group_id.clone(), model_id.clone());
             }
-            model_lookup.insert(model_id.clone(), agent);
-            entries.push(OpenCodeModelEntry { agent, model });
+
+            group_agents.entry(group_id.clone()).or_insert(agent);
+            group_names
+                .entry(group_id.clone())
+                .or_insert_with(|| group_name.clone());
+
+            if !ambiguous_models.contains(&model_id) {
+                match model_lookup.get(&model_id) {
+                    None => {
+                        model_lookup.insert(model_id.clone(), agent);
+                    }
+                    Some(existing) if *existing != agent => {
+                        model_lookup.remove(&model_id);
+                        ambiguous_models.insert(model_id.clone());
+                    }
+                    _ => {}
+                }
+            }
+
+            entries.push(OpenCodeModelEntry {
+                model,
+                group_id,
+                group_name,
+            });
+        }
+
+        if default_model.is_none() {
+            default_model = response.default_model.clone().or(first_model_id);
         }
     }
 
-    let default_model = if model_lookup.contains_key(OPENCODE_DEFAULT_MODEL_ID) {
-        OPENCODE_DEFAULT_MODEL_ID.to_string()
-    } else {
-        default_model.unwrap_or_else(|| OPENCODE_DEFAULT_MODEL_ID.to_string())
-    };
+    let mut groups: BTreeMap<String, Vec<&OpenCodeModelEntry>> = BTreeMap::new();
+    for entry in &entries {
+        groups
+            .entry(entry.group_id.clone())
+            .or_default()
+            .push(entry);
+    }
+    for entries in groups.values_mut() {
+        entries.sort_by(|a, b| a.model.id.cmp(&b.model.id));
+    }
+
+    if entries
+        .iter()
+        .any(|entry| entry.model.id == OPENCODE_DEFAULT_MODEL_ID)
+    {
+        default_model = Some(OPENCODE_DEFAULT_MODEL_ID.to_string());
+    }
+
+    let default_model = default_model.unwrap_or_else(|| {
+        entries
+            .first()
+            .map(|entry| entry.model.id.clone())
+            .unwrap_or_else(|| OPENCODE_DEFAULT_MODEL_ID.to_string())
+    });
+
+    let mut default_group = entries
+        .iter()
+        .find(|entry| entry.model.id == default_model)
+        .map(|entry| entry.group_id.clone())
+        .unwrap_or_else(|| OPENCODE_DEFAULT_PROVIDER_ID.to_string());
+
+    if !groups.contains_key(&default_group) {
+        if let Some((group_id, _)) = groups.iter().next() {
+            default_group = group_id.clone();
+        }
+    }
+
+    for (group_id, entries) in &groups {
+        if !group_defaults.contains_key(group_id) {
+            if let Some(entry) = entries.first() {
+                group_defaults.insert(group_id.clone(), entry.model.id.clone());
+            }
+        }
+    }
 
     OpenCodeModelCache {
         entries,
         model_lookup,
+        group_defaults,
+        group_agents,
+        group_names,
+        default_group,
         default_model,
     }
 }
@@ -666,14 +753,17 @@ fn resolve_agent_from_model(
     provider_id: &str,
     model_id: &str,
 ) -> Option<AgentId> {
-    if provider_id != OPENCODE_PROVIDER_ID {
-        return None;
+    if let Some(agent) = cache.group_agents.get(provider_id) {
+        return Some(*agent);
     }
     if let Some(agent) = cache.model_lookup.get(model_id) {
         return Some(*agent);
     }
     if let Some(agent) = AgentId::parse(model_id) {
         return Some(agent);
+    }
+    if opencode_group_provider(provider_id).is_some() {
+        return Some(AgentId::Opencode);
     }
     if model_id.contains('/') {
         return Some(AgentId::Opencode);
@@ -706,15 +796,31 @@ async fn resolve_session_agent(
     let default_model_id = cache.default_model.clone();
     let mut provider_id = requested_provider
         .filter(|value| !value.is_empty())
-        .unwrap_or(OPENCODE_PROVIDER_ID)
-        .to_string();
-    let mut model_id = requested_model
+        .filter(|value| *value != "sandbox-agent")
+        .map(|value| value.to_string());
+    let model_id = requested_model
         .filter(|value| !value.is_empty())
-        .unwrap_or(default_model_id.as_str())
-        .to_string();
+        .map(|value| value.to_string());
+    if provider_id.is_none() {
+        if let Some(model_value) = model_id.as_deref() {
+            if let Some(entry) = cache
+                .entries
+                .iter()
+                .find(|entry| entry.model.id == model_value)
+            {
+                provider_id = Some(entry.group_id.clone());
+            } else if let Some(agent) = AgentId::parse(model_value) {
+                provider_id = Some(agent.as_str().to_string());
+            }
+        }
+    }
+    let mut provider_id = provider_id.unwrap_or_else(|| cache.default_group.clone());
+    let mut model_id = model_id
+        .or_else(|| cache.group_defaults.get(&provider_id).cloned())
+        .unwrap_or_else(|| default_model_id.clone());
     let mut resolved_agent = resolve_agent_from_model(&cache, &provider_id, &model_id);
     if resolved_agent.is_none() {
-        provider_id = OPENCODE_PROVIDER_ID.to_string();
+        provider_id = cache.default_group.clone();
         model_id = default_model_id.clone();
         resolved_agent =
             resolve_agent_from_model(&cache, &provider_id, &model_id).or_else(|| Some(default_agent_id()));
@@ -756,19 +862,63 @@ fn agent_display_name(agent: AgentId) -> &'static str {
     }
 }
 
-fn model_config_entry(agent: AgentId, model: &AgentModelInfo) -> Value {
-    let model_name = model.name.clone().unwrap_or_else(|| model.id.clone());
-    let variants = model_variants_object(model);
+fn opencode_model_provider(model_id: &str) -> Option<&str> {
+    model_id.split_once('/').map(|(provider, _)| provider)
+}
+
+fn opencode_group_provider(group_id: &str) -> Option<&str> {
+    group_id.strip_prefix("opencode:")
+}
+
+fn group_for_agent_model(agent: AgentId, model_id: &str) -> (String, String) {
+    if agent == AgentId::Opencode {
+        let provider = opencode_model_provider(model_id).unwrap_or("unknown");
+        return (
+            format!("opencode:{provider}"),
+            format!("OpenCode ({provider})"),
+        );
+    }
+    let group_id = agent.as_str().to_string();
+    let group_name = agent_display_name(agent).to_string();
+    (group_id, group_name)
+}
+
+fn backing_model_for_agent(agent: AgentId, provider_id: &str, model_id: &str) -> Option<String> {
+    if model_id.trim().is_empty() {
+        return None;
+    }
+    if AgentId::parse(model_id).is_some() {
+        return None;
+    }
+    if agent != AgentId::Opencode {
+        return Some(model_id.to_string());
+    }
+    if model_id.contains('/') {
+        return Some(model_id.to_string());
+    }
+    if let Some(provider) = opencode_group_provider(provider_id) {
+        return Some(format!("{provider}/{model_id}"));
+    }
+    Some(model_id.to_string())
+}
+
+fn model_config_entry(entry: &OpenCodeModelEntry) -> Value {
+    let model_name = entry
+        .model
+        .name
+        .clone()
+        .unwrap_or_else(|| entry.model.id.clone());
+    let variants = model_variants_object(&entry.model);
     json!({
-        "id": model.id,
-        "providerID": OPENCODE_PROVIDER_ID,
+        "id": entry.model.id,
+        "providerID": entry.group_id,
         "api": {
             "id": "sandbox-agent",
             "url": "http://localhost",
             "npm": "@sandbox-agent/sdk"
         },
         "name": model_name,
-        "family": agent_display_name(agent),
+        "family": entry.group_name,
         "capabilities": {
             "temperature": true,
             "reasoning": true,
@@ -807,13 +957,17 @@ fn model_config_entry(agent: AgentId, model: &AgentModelInfo) -> Value {
     })
 }
 
-fn model_summary_entry(agent: AgentId, model: &AgentModelInfo) -> Value {
-    let model_name = model.name.clone().unwrap_or_else(|| model.id.clone());
-    let variants = model_variants_object(model);
+fn model_summary_entry(entry: &OpenCodeModelEntry) -> Value {
+    let model_name = entry
+        .model
+        .name
+        .clone()
+        .unwrap_or_else(|| entry.model.id.clone());
+    let variants = model_variants_object(&entry.model);
     json!({
-        "id": model.id,
+        "id": entry.model.id,
         "name": model_name,
-        "family": agent_display_name(agent),
+        "family": entry.group_name,
         "release_date": "2024-01-01",
         "attachment": false,
         "reasoning": true,
@@ -1673,7 +1827,7 @@ async fn apply_item_event(
     let provider_id = runtime
         .last_model_provider
         .clone()
-        .unwrap_or_else(|| OPENCODE_PROVIDER_ID.to_string());
+        .unwrap_or_else(|| OPENCODE_DEFAULT_PROVIDER_ID.to_string());
     let model_id = runtime
         .last_model_id
         .clone()
@@ -1984,7 +2138,7 @@ async fn apply_tool_item_event(
     let provider_id = runtime
         .last_model_provider
         .clone()
-        .unwrap_or_else(|| OPENCODE_PROVIDER_ID.to_string());
+        .unwrap_or_else(|| OPENCODE_DEFAULT_PROVIDER_ID.to_string());
     let model_id = runtime
         .last_model_id
         .clone()
@@ -2218,7 +2372,7 @@ async fn apply_item_delta(
     let provider_id = runtime
         .last_model_provider
         .clone()
-        .unwrap_or_else(|| OPENCODE_PROVIDER_ID.to_string());
+        .unwrap_or_else(|| OPENCODE_DEFAULT_PROVIDER_ID.to_string());
     let model_id = runtime
         .last_model_id
         .clone()
@@ -2420,7 +2574,7 @@ pub fn build_opencode_router(state: Arc<OpenCodeAppState>) -> Router {
 )]
 async fn oc_agent_list(State(state): State<Arc<OpenCodeAppState>>) -> impl IntoResponse {
     let agent = json!({
-        "name": OPENCODE_PROVIDER_NAME,
+        "name": "Sandbox Agent",
         "description": "Sandbox Agent compatibility layer",
         "mode": "all",
         "native": false,
@@ -2472,28 +2626,41 @@ async fn oc_config_providers(
     State(state): State<Arc<OpenCodeAppState>>,
 ) -> impl IntoResponse {
     let cache = opencode_model_cache(&state).await;
-    let mut models = serde_json::Map::new();
+    let mut grouped: BTreeMap<String, Vec<&OpenCodeModelEntry>> = BTreeMap::new();
     for entry in &cache.entries {
-        models.insert(
-            entry.model.id.clone(),
-            model_config_entry(entry.agent, &entry.model),
-        );
+        grouped
+            .entry(entry.group_id.clone())
+            .or_default()
+            .push(entry);
+    }
+    let mut providers = Vec::new();
+    let mut defaults = serde_json::Map::new();
+    for (group_id, entries) in grouped {
+        let mut models = serde_json::Map::new();
+        for entry in entries {
+            models.insert(entry.model.id.clone(), model_config_entry(entry));
+        }
+        let name = cache
+            .group_names
+            .get(&group_id)
+            .cloned()
+            .unwrap_or_else(|| group_id.clone());
+        providers.push(json!({
+            "id": group_id,
+            "name": name,
+            "source": "custom",
+            "env": [],
+            "key": "",
+            "options": {},
+            "models": Value::Object(models),
+        }));
+        if let Some(default_model) = cache.group_defaults.get(&group_id) {
+            defaults.insert(group_id, Value::String(default_model.clone()));
+        }
     }
     let providers = json!({
-        "providers": [
-            {
-                "id": OPENCODE_PROVIDER_ID,
-                "name": OPENCODE_PROVIDER_NAME,
-                "source": "custom",
-                "env": [],
-                "key": "",
-                "options": {},
-                "models": Value::Object(models),
-            }
-        ],
-        "default": {
-            OPENCODE_PROVIDER_ID: cache.default_model
-        }
+        "providers": providers,
+        "default": Value::Object(defaults),
     });
     (StatusCode::OK, Json(providers))
 }
@@ -3144,6 +3311,9 @@ async fn oc_session_message_create(
         .and_then(|v| v.as_str());
     let (session_agent, provider_id, model_id) =
         resolve_session_agent(&state, &session_id, requested_provider, requested_model).await;
+    let session_agent_id = AgentId::parse(&session_agent).unwrap_or_else(default_agent_id);
+    let backing_model = backing_model_for_agent(session_agent_id, &provider_id, &model_id);
+    let backing_variant = body.variant.clone();
 
     let parts_input = body.parts.unwrap_or_default();
     if parts_input.is_empty() {
@@ -3207,7 +3377,15 @@ async fn oc_session_message_create(
         })
         .await;
 
-    if let Err(err) = ensure_backing_session(&state, &session_id, &session_agent).await {
+    if let Err(err) = ensure_backing_session(
+        &state,
+        &session_id,
+        &session_agent,
+        backing_model,
+        backing_variant,
+    )
+    .await
+    {
         tracing::warn!(
             target = "sandbox_agent::opencode",
             ?err,
@@ -3413,7 +3591,7 @@ async fn oc_session_command(
         &directory,
         &worktree,
         &agent,
-        OPENCODE_PROVIDER_ID,
+        OPENCODE_DEFAULT_PROVIDER_ID,
         OPENCODE_DEFAULT_MODEL_ID,
     );
 
@@ -3463,7 +3641,7 @@ async fn oc_session_shell(
             .as_ref()
             .and_then(|v| v.get("providerID"))
             .and_then(|v| v.as_str())
-            .unwrap_or(OPENCODE_PROVIDER_ID),
+            .unwrap_or(OPENCODE_DEFAULT_PROVIDER_ID),
         body.model
             .as_ref()
             .and_then(|v| v.get("modelID"))
@@ -3775,26 +3953,41 @@ async fn oc_provider_list(
     State(state): State<Arc<OpenCodeAppState>>,
 ) -> impl IntoResponse {
     let cache = opencode_model_cache(&state).await;
-    let mut models = serde_json::Map::new();
+    let mut grouped: BTreeMap<String, Vec<&OpenCodeModelEntry>> = BTreeMap::new();
     for entry in &cache.entries {
-        models.insert(
-            entry.model.id.clone(),
-            model_summary_entry(entry.agent, &entry.model),
-        );
+        grouped
+            .entry(entry.group_id.clone())
+            .or_default()
+            .push(entry);
+    }
+    let mut providers = Vec::new();
+    let mut defaults = serde_json::Map::new();
+    let mut connected = Vec::new();
+    for (group_id, entries) in grouped {
+        let mut models = serde_json::Map::new();
+        for entry in entries {
+            models.insert(entry.model.id.clone(), model_summary_entry(entry));
+        }
+        let name = cache
+            .group_names
+            .get(&group_id)
+            .cloned()
+            .unwrap_or_else(|| group_id.clone());
+        providers.push(json!({
+            "id": group_id,
+            "name": name,
+            "env": [],
+            "models": Value::Object(models),
+        }));
+        if let Some(default_model) = cache.group_defaults.get(&group_id) {
+            defaults.insert(group_id.clone(), Value::String(default_model.clone()));
+        }
+        connected.push(group_id);
     }
     let providers = json!({
-        "all": [
-            {
-                "id": OPENCODE_PROVIDER_ID,
-                "name": OPENCODE_PROVIDER_NAME,
-                "env": [],
-                "models": Value::Object(models),
-            }
-        ],
-        "default": {
-            OPENCODE_PROVIDER_ID: cache.default_model
-        },
-        "connected": [OPENCODE_PROVIDER_ID]
+        "all": providers,
+        "default": Value::Object(defaults),
+        "connected": connected
     });
     (StatusCode::OK, Json(providers))
 }
@@ -3805,11 +3998,15 @@ async fn oc_provider_list(
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_provider_auth() -> impl IntoResponse {
-    let auth = json!({
-        OPENCODE_PROVIDER_ID: []
-    });
-    (StatusCode::OK, Json(auth))
+async fn oc_provider_auth(
+    State(state): State<Arc<OpenCodeAppState>>,
+) -> impl IntoResponse {
+    let cache = opencode_model_cache(&state).await;
+    let mut auth_map = serde_json::Map::new();
+    for group_id in cache.group_names.keys() {
+        auth_map.insert(group_id.clone(), json!([]));
+    }
+    (StatusCode::OK, Json(Value::Object(auth_map)))
 }
 
 #[utoipa::path(

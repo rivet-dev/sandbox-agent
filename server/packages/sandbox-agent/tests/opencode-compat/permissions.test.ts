@@ -57,7 +57,7 @@ describe("OpenCode-compatible Permission API", () => {
     it("should receive permission.asked and reply via global endpoint", async () => {
       await client.session.prompt({
         sessionID: sessionId,
-        model: { providerID: "sandbox-agent", modelID: "mock" },
+        model: { providerID: "mock", modelID: "mock" },
         parts: [{ type: "text", text: permissionPrompt }],
       });
 
@@ -77,7 +77,7 @@ describe("OpenCode-compatible Permission API", () => {
     it("should accept permission response for a session", async () => {
       await client.session.prompt({
         sessionID: sessionId,
-        model: { providerID: "sandbox-agent", modelID: "mock" },
+        model: { providerID: "mock", modelID: "mock" },
         parts: [{ type: "text", text: permissionPrompt }],
       });
 
