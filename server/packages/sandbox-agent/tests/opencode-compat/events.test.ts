@@ -145,4 +145,98 @@ describe("OpenCode-compatible Event Streaming", () => {
       expect(response.data).toBeDefined();
     });
   });
+
+  describe("session.idle count", () => {
+    it("should emit exactly one session.idle for echo flow", async () => {
+      const session = await client.session.create();
+      const sessionId = session.data?.id!;
+
+      const eventStream = await client.event.subscribe();
+      const idleEvents: any[] = [];
+
+      // Wait for first idle, then linger 1s for duplicates
+      const collectIdle = new Promise<void>((resolve, reject) => {
+        let lingerTimer: ReturnType<typeof setTimeout> | null = null;
+        const timeout = setTimeout(() => reject(new Error("Timed out waiting for session.idle")), 15_000);
+        (async () => {
+          try {
+            for await (const event of (eventStream as any).stream) {
+              if (event.type === "session.idle") {
+                idleEvents.push(event);
+                if (!lingerTimer) {
+                  lingerTimer = setTimeout(() => {
+                    clearTimeout(timeout);
+                    resolve();
+                  }, 1000);
+                }
+              }
+            }
+          } catch {
+            // Stream ended
+          }
+        })();
+      });
+
+      await client.session.prompt({
+        path: { id: sessionId },
+        body: {
+          model: { providerID: "sandbox-agent", modelID: "mock" },
+          parts: [{ type: "text", text: "echo hello" }],
+        },
+      });
+
+      await collectIdle;
+      expect(idleEvents.length).toBe(1);
+    });
+
+    it("should emit exactly one session.idle for tool flow", async () => {
+      const session = await client.session.create();
+      const sessionId = session.data?.id!;
+
+      const eventStream = await client.event.subscribe();
+      const allEvents: any[] = [];
+      const idleEvents: any[] = [];
+
+      const collectIdle = new Promise<void>((resolve, reject) => {
+        let lingerTimer: ReturnType<typeof setTimeout> | null = null;
+        const timeout = setTimeout(() => reject(new Error("Timed out waiting for session.idle")), 15_000);
+        (async () => {
+          try {
+            for await (const event of (eventStream as any).stream) {
+              allEvents.push(event);
+              if (event.type === "session.idle") {
+                idleEvents.push(event);
+                if (!lingerTimer) {
+                  lingerTimer = setTimeout(() => {
+                    clearTimeout(timeout);
+                    resolve();
+                  }, 1000);
+                }
+              }
+            }
+          } catch {
+            // Stream ended
+          }
+        })();
+      });
+
+      await client.session.prompt({
+        path: { id: sessionId },
+        body: {
+          model: { providerID: "sandbox-agent", modelID: "mock" },
+          parts: [{ type: "text", text: "tool" }],
+        },
+      });
+
+      await collectIdle;
+
+      expect(idleEvents.length).toBe(1);
+
+      // All tool parts should have been emitted before idle
+      const toolParts = allEvents.filter(
+        (e) => e.type === "message.part.updated" && e.properties?.part?.type === "tool"
+      );
+      expect(toolParts.length).toBeGreaterThan(0);
+    });
+  });
 });

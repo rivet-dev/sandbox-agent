@@ -317,6 +317,27 @@ impl EventConversion {
     }
 }
 
+pub fn turn_completed_event() -> EventConversion {
+    EventConversion::new(
+        UniversalEventType::ItemCompleted,
+        UniversalEventData::Item(ItemEventData {
+            item: UniversalItem {
+                item_id: String::new(),
+                native_item_id: None,
+                parent_id: None,
+                kind: ItemKind::Status,
+                role: Some(ItemRole::System),
+                content: vec![ContentPart::Status {
+                    label: "turn.completed".to_string(),
+                    detail: None,
+                }],
+                status: ItemStatus::Completed,
+            },
+        }),
+    )
+    .synthetic()
+}
+
 pub fn item_from_text(role: ItemRole, text: String) -> UniversalItem {
     UniversalItem {
         item_id: String::new(),

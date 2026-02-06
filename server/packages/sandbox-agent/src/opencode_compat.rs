@@ -1410,6 +1410,25 @@ async fn apply_universal_event(state: Arc<OpenCodeAppState>, event: UniversalEve
     match event.event_type {
         UniversalEventType::ItemStarted | UniversalEventType::ItemCompleted => {
             if let UniversalEventData::Item(ItemEventData { item }) = &event.data {
+                // turn.completed or session.idle status → emit session.idle
+                if event.event_type == UniversalEventType::ItemCompleted
+                    && item.kind == ItemKind::Status
+                {
+                    if let Some(ContentPart::Status { label, .. }) = item.content.first() {
+                        if label == "turn.completed" || label == "session.idle" {
+                            let session_id = event.session_id.clone();
+                            state.opencode.emit_event(json!({
+                                "type": "session.status",
+                                "properties": {"sessionID": session_id, "status": {"type": "idle"}}
+                            }));
+                            state.opencode.emit_event(json!({
+                                "type": "session.idle",
+                                "properties": {"sessionID": session_id}
+                            }));
+                            return;
+                        }
+                    }
+                }
                 apply_item_event(state, event.clone(), item.clone()).await;
             }
         }
@@ -1894,19 +1913,6 @@ async fn apply_item_event(
         }
     }
 
-    if event.event_type == UniversalEventType::ItemCompleted {
-        state.opencode.emit_event(json!({
-            "type": "session.status",
-            "properties": {
-                "sessionID": session_id,
-                "status": {"type": "idle"}
-            }
-        }));
-        state.opencode.emit_event(json!({
-            "type": "session.idle",
-            "properties": { "sessionID": session_id }
-        }));
-    }
 }
 
 async fn apply_tool_item_event(
