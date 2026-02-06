@@ -24,11 +24,11 @@ const CLI_PACKAGES = [
 	"@sandbox-agent/cli-darwin-x64",
 	"@sandbox-agent/cli-darwin-arm64",
 	"gigacode",
-	"gigacode-linux-x64",
-	"gigacode-linux-arm64",
-	"gigacode-win32-x64",
-	"gigacode-darwin-x64",
-	"gigacode-darwin-arm64",
+	"@sandbox-agent/gigacode-linux-x64",
+	"@sandbox-agent/gigacode-linux-arm64",
+	"@sandbox-agent/gigacode-win32-x64",
+	"@sandbox-agent/gigacode-darwin-x64",
+	"@sandbox-agent/gigacode-darwin-arm64",
 ] as const;
 
 // Mapping from npm package name to Rust target and binary extension
@@ -61,27 +61,27 @@ const CLI_PLATFORM_MAP: Record<
 		binaryExt: "",
 		binaryName: "sandbox-agent",
 	},
-	"gigacode-linux-x64": {
+	"@sandbox-agent/gigacode-linux-x64": {
 		target: "x86_64-unknown-linux-musl",
 		binaryExt: "",
 		binaryName: "gigacode",
 	},
-	"gigacode-linux-arm64": {
+	"@sandbox-agent/gigacode-linux-arm64": {
 		target: "aarch64-unknown-linux-musl",
 		binaryExt: "",
 		binaryName: "gigacode",
 	},
-	"gigacode-win32-x64": {
+	"@sandbox-agent/gigacode-win32-x64": {
 		target: "x86_64-pc-windows-gnu",
 		binaryExt: ".exe",
 		binaryName: "gigacode",
 	},
-	"gigacode-darwin-x64": {
+	"@sandbox-agent/gigacode-darwin-x64": {
 		target: "x86_64-apple-darwin",
 		binaryExt: "",
 		binaryName: "gigacode",
 	},
-	"gigacode-darwin-arm64": {
+	"@sandbox-agent/gigacode-darwin-arm64": {
 		target: "aarch64-apple-darwin",
 		binaryExt: "",
 		binaryName: "gigacode",
@@ -307,9 +307,9 @@ export async function publishNpmCli(opts: ReleaseOpts) {
 			// Platform-specific packages: @sandbox-agent/cli-linux-x64 -> sdks/cli/platforms/linux-x64
 			const platform = packageName.replace("@sandbox-agent/cli-", "");
 			packagePath = join(opts.root, "sdks/cli/platforms", platform);
-		} else if (packageName.startsWith("gigacode-")) {
-			// Platform-specific packages: gigacode-linux-x64 -> sdks/gigacode/platforms/linux-x64
-			const platform = packageName.replace("gigacode-", "");
+		} else if (packageName.startsWith("@sandbox-agent/gigacode-")) {
+			// Platform-specific packages: @sandbox-agent/gigacode-linux-x64 -> sdks/gigacode/platforms/linux-x64
+			const platform = packageName.replace("@sandbox-agent/gigacode-", "");
 			packagePath = join(opts.root, "sdks/gigacode/platforms", platform);
 		} else {
 			throw new Error(`Unknown CLI package: ${packageName}`);

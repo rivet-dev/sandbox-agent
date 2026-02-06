@@ -8,7 +8,7 @@ const fs = require("fs");
 const path = require("path");
 
 const TRUST_PACKAGES =
-  "gigacode-linux-x64 gigacode-linux-arm64 gigacode-darwin-arm64 gigacode-darwin-x64 gigacode-win32-x64";
+  "@sandbox-agent/gigacode-linux-x64 @sandbox-agent/gigacode-linux-arm64 @sandbox-agent/gigacode-darwin-arm64 @sandbox-agent/gigacode-darwin-x64 @sandbox-agent/gigacode-win32-x64";
 
 function formatHint(binPath) {
   return formatNonExecutableBinaryMessage({
@@ -35,11 +35,11 @@ function formatHint(binPath) {
 }
 
 const PLATFORMS = {
-  "darwin-arm64": "gigacode-darwin-arm64",
-  "darwin-x64": "gigacode-darwin-x64",
-  "linux-x64": "gigacode-linux-x64",
-  "linux-arm64": "gigacode-linux-arm64",
-  "win32-x64": "gigacode-win32-x64",
+  "darwin-arm64": "@sandbox-agent/gigacode-darwin-arm64",
+  "darwin-x64": "@sandbox-agent/gigacode-darwin-x64",
+  "linux-x64": "@sandbox-agent/gigacode-linux-x64",
+  "linux-arm64": "@sandbox-agent/gigacode-linux-arm64",
+  "win32-x64": "@sandbox-agent/gigacode-win32-x64",
 };
 
 const key = `${process.platform}-${process.arch}`;

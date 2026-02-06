@@ -20,11 +20,11 @@
     "vitest": "^3.0.0"
   },
   "optionalDependencies": {
-    "gigacode-linux-x64": "workspace:*",
-    "gigacode-linux-arm64": "workspace:*",
-    "gigacode-darwin-arm64": "workspace:*",
-    "gigacode-darwin-x64": "workspace:*",
-    "gigacode-win32-x64": "workspace:*"
+    "@sandbox-agent/gigacode-linux-x64": "workspace:*",
+    "@sandbox-agent/gigacode-linux-arm64": "workspace:*",
+    "@sandbox-agent/gigacode-darwin-arm64": "workspace:*",
+    "@sandbox-agent/gigacode-darwin-x64": "workspace:*",
+    "@sandbox-agent/gigacode-win32-x64": "workspace:*"
   },
   "files": [
     "bin"
