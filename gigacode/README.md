@@ -60,7 +60,7 @@ gigacode --help
 ```bash
 bun add -g gigacode
 # Allow Bun to run postinstall scripts for native binaries.
-bun pm -g trust gigacode-linux-x64 gigacode-linux-arm64 gigacode-darwin-arm64 gigacode-darwin-x64 gigacode-win32-x64
+bun pm -g trust @sandbox-agent/gigacode-linux-x64 @sandbox-agent/gigacode-linux-arm64 @sandbox-agent/gigacode-darwin-arm64 @sandbox-agent/gigacode-darwin-x64 @sandbox-agent/gigacode-win32-x64
 gigacode --help
 ```
 
