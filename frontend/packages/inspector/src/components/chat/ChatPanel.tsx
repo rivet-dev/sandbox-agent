@@ -1,6 +1,6 @@
 import { MessageSquare, PauseCircle, PlayCircle, Plus, Square, Terminal } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import type { AgentInfo, AgentModeInfo, PermissionEventData, QuestionEventData } from "sandbox-agent";
+import type { AgentInfo, AgentModelInfo, AgentModeInfo, PermissionEventData, QuestionEventData } from "sandbox-agent";
 import ApprovalsTab from "../debug/ApprovalsTab";
 import ChatInput from "./ChatInput";
 import ChatMessages from "./ChatMessages";
@@ -28,6 +28,13 @@ const ChatPanel = ({
   permissionMode,
   model,
   variant,
+  modelOptions,
+  defaultModel,
+  modelsLoading,
+  modelsError,
+  variantOptions,
+  defaultVariant,
+  supportsVariants,
   streamMode,
   activeModes,
   currentAgentVersion,
@@ -70,6 +77,13 @@ const ChatPanel = ({
   permissionMode: string;
   model: string;
   variant: string;
+  modelOptions: AgentModelInfo[];
+  defaultModel: string;
+  modelsLoading: boolean;
+  modelsError: string | null;
+  variantOptions: string[];
+  defaultVariant: string;
+  supportsVariants: boolean;
   streamMode: "poll" | "sse" | "turn";
   activeModes: AgentModeInfo[];
   currentAgentVersion?: string | null;
@@ -277,6 +291,13 @@ const ChatPanel = ({
         permissionMode={permissionMode}
         model={model}
         variant={variant}
+        modelOptions={modelOptions}
+        defaultModel={defaultModel}
+        modelsLoading={modelsLoading}
+        modelsError={modelsError}
+        variantOptions={variantOptions}
+        defaultVariant={defaultVariant}
+        supportsVariants={supportsVariants}
         activeModes={activeModes}
         modesLoading={modesLoading}
         modesError={modesError}

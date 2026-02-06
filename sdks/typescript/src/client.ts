@@ -2,6 +2,7 @@ import type { SandboxAgentSpawnHandle, SandboxAgentSpawnOptions } from "./spawn.
 import type {
   AgentInstallRequest,
   AgentListResponse,
+  AgentModelsResponse,
   AgentModesResponse,
   CreateSessionRequest,
   CreateSessionResponse,
@@ -111,6 +112,10 @@ export class SandboxAgent {
 
   async getAgentModes(agent: string): Promise<AgentModesResponse> {
     return this.requestJson("GET", `${API_PREFIX}/agents/${encodeURIComponent(agent)}/modes`);
+  }
+
+  async getAgentModels(agent: string): Promise<AgentModelsResponse> {
+    return this.requestJson("GET", `${API_PREFIX}/agents/${encodeURIComponent(agent)}/models`);
   }
 
   async createSession(sessionId: string, request: CreateSessionRequest): Promise<CreateSessionResponse> {

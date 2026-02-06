@@ -53,6 +53,7 @@ Universal schema guidance:
 - `sandbox-agent api agents list` ↔ `GET /v1/agents`
 - `sandbox-agent api agents install` ↔ `POST /v1/agents/{agent}/install`
 - `sandbox-agent api agents modes` ↔ `GET /v1/agents/{agent}/modes`
+- `sandbox-agent api agents models` ↔ `GET /v1/agents/{agent}/models`
 - `sandbox-agent api sessions list` ↔ `GET /v1/sessions`
 - `sandbox-agent api sessions create` ↔ `POST /v1/sessions/{sessionId}`
 - `sandbox-agent api sessions send-message` ↔ `POST /v1/sessions/{sessionId}/messages`
