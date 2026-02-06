@@ -1,5 +1,5 @@
 {
-  "name": "gigacode-linux-x64",
+  "name": "@sandbox-agent/gigacode-linux-x64",
   "version": "0.1.6",
   "description": "gigacode CLI binary for Linux x64",
   "license": "Apache-2.0",
