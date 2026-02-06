@@ -1,5 +1,9 @@
 # Instructions
 
+## License
+
+This project is licensed under Apache 2.0. See `LICENSE` in the repo root.
+
 ## SDK Modes
 
 There are two ways to work with the SDKs:
