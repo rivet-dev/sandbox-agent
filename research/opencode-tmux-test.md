@@ -9,7 +9,8 @@ This plan captures OpenCode TUI output and sends input via tmux so we can valida
 
 ## Environment
 - `SANDBOX_AGENT_LOG_DIR=/path` to set server log dir
-- `SANDBOX_AGENT_LOG_STDOUT=1` to keep logs on stdout/stderr
+- `SANDBOX_AGENT_LOG_TO_FILE=1` to redirect logs to files
+- `SANDBOX_AGENT_LOG_STDOUT=1` to force logs on stdout/stderr
 - `SANDBOX_AGENT_LOG_HTTP=0` to disable request logs
 - `SANDBOX_AGENT_LOG_HTTP_HEADERS=1` to include request headers (Authorization redacted)
 - `RUST_LOG=...` for trace filtering
@@ -42,7 +43,7 @@ This plan captures OpenCode TUI output and sends input via tmux so we can valida
    ```bash
    tmux capture-pane -pt opencode:0.0 -S -200 > /tmp/opencode-screen.txt
    ```
-6. Inspect server logs for requests:
+6. Inspect server logs for requests (when log-to-file is enabled):
    ```bash
    tail -n 200 ~/.local/share/sandbox-agent/logs/log-$(date +%m-%d-%y)
    ```

@@ -92,6 +92,9 @@ struct ServerArgs {
 
     #[arg(long = "no-telemetry")]
     no_telemetry: bool,
+
+    #[arg(long = "log-to-file")]
+    log_to_file: bool,
 }
 
 #[derive(Args, Debug)]
@@ -388,8 +391,8 @@ fn main() {
 }
 
 fn init_logging(cli: &Cli) -> Result<(), CliError> {
-    if matches!(cli.command, Command::Server(_)) {
-        maybe_redirect_server_logs();
+    if let Command::Server(server) = &cli.command {
+        maybe_redirect_server_logs(server);
     }
 
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
@@ -472,8 +475,20 @@ fn default_server_log_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(".").join(".sandbox-agent").join("logs"))
 }
 
-fn maybe_redirect_server_logs() {
-    if std::env::var("SANDBOX_AGENT_LOG_STDOUT").is_ok() {
+fn maybe_redirect_server_logs(server: &ServerArgs) {
+    let force_stdout = match std::env::var("SANDBOX_AGENT_LOG_STDOUT") {
+        Ok(value) if value == "0" || value.eq_ignore_ascii_case("false") => false,
+        Ok(_) => true,
+        Err(_) => false,
+    };
+    let log_to_file_env = match std::env::var("SANDBOX_AGENT_LOG_TO_FILE") {
+        Ok(value) if value == "0" || value.eq_ignore_ascii_case("false") => false,
+        Ok(_) => true,
+        Err(_) => false,
+    };
+    let log_to_file = server.log_to_file || log_to_file_env;
+
+    if force_stdout || !log_to_file {
         return;
     }
 
