@@ -211,3 +211,57 @@ async fn fs_upload_batch_truncates_paths() {
     assert_eq!(paths.len(), 1024);
     assert_eq!(payload.get("truncated").and_then(|value| value.as_bool()), Some(true));
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fs_mkdir_stat_and_delete_directory() {
+    let app = TestApp::new();
+    let cwd = std::env::current_dir().expect("cwd");
+    let temp = tempfile::tempdir_in(&cwd).expect("tempdir");
+
+    let dir_path = temp.path().join("nested");
+    let dir_path_str = dir_path.to_string_lossy().to_string();
+
+    let status = send_status(
+        &app.app,
+        Method::POST,
+        &format!("/v1/fs/mkdir?path={dir_path_str}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "mkdir");
+    assert!(dir_path.exists(), "directory created");
+
+    let (status, stat) = send_json(
+        &app.app,
+        Method::GET,
+        &format!("/v1/fs/stat?path={dir_path_str}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "stat directory");
+    assert_eq!(stat["entryType"], "directory");
+
+    let file_path = dir_path.join("note.txt");
+    stdfs::write(&file_path, "content").expect("write file");
+    let file_path_str = file_path.to_string_lossy().to_string();
+
+    let (status, stat) = send_json(
+        &app.app,
+        Method::GET,
+        &format!("/v1/fs/stat?path={file_path_str}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "stat file");
+    assert_eq!(stat["entryType"], "file");
+
+    let status = send_status(
+        &app.app,
+        Method::DELETE,
+        &format!("/v1/fs/entry?path={dir_path_str}&recursive=true"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "delete directory");
+    assert!(!dir_path.exists(), "directory deleted");
+}
