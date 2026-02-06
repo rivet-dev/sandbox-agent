@@ -11,6 +11,9 @@ export interface paths {
   "/v1/agents/{agent}/install": {
     post: operations["install_agent"];
   };
+  "/v1/agents/{agent}/models": {
+    get: operations["get_agent_models"];
+  };
   "/v1/agents/{agent}/modes": {
     get: operations["get_agent_modes"];
   };
@@ -73,6 +76,7 @@ export interface components {
       textMessages: boolean;
       toolCalls: boolean;
       toolResults: boolean;
+      variants: boolean;
     };
     AgentError: {
       agent?: string | null;
@@ -99,6 +103,16 @@ export interface components {
       description: string;
       id: string;
       name: string;
+    };
+    AgentModelInfo: {
+      defaultVariant?: string | null;
+      id: string;
+      name?: string | null;
+      variants?: string[] | null;
+    };
+    AgentModelsResponse: {
+      defaultModel?: string | null;
+      models: components["schemas"]["AgentModelInfo"][];
     };
     AgentModesResponse: {
       modes: components["schemas"]["AgentModeInfo"][];
@@ -377,6 +391,26 @@ export interface operations {
         };
       };
       500: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  get_agent_models: {
+    parameters: {
+      path: {
+        /** @description Agent id */
+        agent: string;
+      };
+    };
+    responses: {
+      200: {
+        content: {
+          "application/json": components["schemas"]["AgentModelsResponse"];
+        };
+      };
+      400: {
         content: {
           "application/json": components["schemas"]["ProblemDetails"];
         };

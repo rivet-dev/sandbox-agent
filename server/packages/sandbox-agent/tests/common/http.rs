@@ -736,6 +736,81 @@ fn normalize_agent_modes(value: &Value) -> Value {
     json!({ "modes": normalized })
 }
 
+fn normalize_agent_models(value: &Value, agent: AgentId) -> Value {
+    let models = value
+        .get("models")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let default_model = value.get("defaultModel").and_then(Value::as_str);
+
+    let mut map = Map::new();
+    let model_count = models.len();
+    map.insert("nonEmpty".to_string(), Value::Bool(model_count > 0));
+    map.insert("hasDefault".to_string(), Value::Bool(default_model.is_some()));
+    let default_in_list = default_model.map_or(false, |default_id| {
+        models
+            .iter()
+            .any(|model| model.get("id").and_then(Value::as_str) == Some(default_id))
+    });
+    map.insert(
+        "defaultInList".to_string(),
+        Value::Bool(default_in_list),
+    );
+    let has_variants = models.iter().any(|model| {
+        model
+            .get("variants")
+            .and_then(Value::as_array)
+            .is_some_and(|variants| !variants.is_empty())
+    });
+    match agent {
+        AgentId::Claude | AgentId::Opencode => {
+            map.insert(
+                "hasVariants".to_string(),
+                Value::String("<redacted>".to_string()),
+            );
+        }
+        _ => {
+            map.insert("hasVariants".to_string(), Value::Bool(has_variants));
+        }
+    }
+
+    if matches!(agent, AgentId::Amp | AgentId::Mock) {
+        map.insert(
+            "modelCount".to_string(),
+            Value::Number(model_count.into()),
+        );
+        let mut ids: Vec<String> = models
+            .iter()
+            .filter_map(|model| model.get("id").and_then(Value::as_str).map(|id| id.to_string()))
+            .collect();
+        ids.sort();
+        map.insert("ids".to_string(), json!(ids));
+        if let Some(default_model) = default_model {
+            map.insert(
+                "defaultModel".to_string(),
+                Value::String(default_model.to_string()),
+            );
+        }
+        if agent == AgentId::Amp {
+            if let Some(variants) = models
+                .first()
+                .and_then(|model| model.get("variants"))
+                .and_then(Value::as_array)
+            {
+                let mut variant_ids: Vec<String> = variants
+                    .iter()
+                    .filter_map(|variant| variant.as_str().map(|id| id.to_string()))
+                    .collect();
+                variant_ids.sort();
+                map.insert("variants".to_string(), json!(variant_ids));
+            }
+        }
+    }
+
+    Value::Object(map)
+}
+
 fn normalize_sessions(value: &Value) -> Value {
     let sessions = value
         .get("sessions")

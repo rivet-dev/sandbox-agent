@@ -10,6 +10,7 @@ import {
   GitBranch,
   HelpCircle,
   Image,
+  Layers,
   MessageSquare,
   Paperclip,
   PlayCircle,
@@ -37,7 +38,8 @@ const badges = [
   { key: "fileChanges", label: "File Changes", icon: FileDiff },
   { key: "mcpTools", label: "MCP", icon: Plug },
   { key: "streamingDeltas", label: "Deltas", icon: Activity },
-  { key: "itemStarted", label: "Item Start", icon: CircleDot }
+  { key: "itemStarted", label: "Item Start", icon: CircleDot },
+  { key: "variants", label: "Variants", icon: Layers }
 ] as const;
 
 type BadgeItem = (typeof badges)[number];

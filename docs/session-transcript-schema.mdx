@@ -29,6 +29,7 @@ This table shows which agent feature coverage appears in the universal event str
 | File Changes       |   -    |   ✓   |      -       |      -       |
 | MCP Tools          |   -    |   ✓   |      -       |      -       |
 | Streaming Deltas   |   ✓    |   ✓   |      ✓       |      -       |
+| Variants           |        |   ✓   |      ✓       |      ✓       |
 
 Agents: [Claude Code](https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview) · [Codex](https://github.com/openai/codex) · [OpenCode](https://github.com/opencode-ai/opencode) · [Amp](https://ampcode.com)
 
@@ -75,6 +76,9 @@ Agents: [Claude Code](https://docs.anthropic.com/en/docs/agents-and-tools/claude
   </Accordion>
   <Accordion title="Streaming Deltas">
     Native streaming of content deltas. When not supported, the daemon emits a single synthetic delta before `item.completed`.
+  </Accordion>
+  <Accordion title="Variants">
+    Model variants such as reasoning effort or depth. Agents may expose different variant sets per model.
   </Accordion>
 </AccordionGroup>
 

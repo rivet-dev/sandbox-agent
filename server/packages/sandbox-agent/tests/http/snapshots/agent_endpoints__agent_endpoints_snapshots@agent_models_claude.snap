@@ -1,0 +1,8 @@
+---
+source: server/packages/sandbox-agent/tests/http_sse_snapshots.rs
+expression: normalize_agent_models(&models, config.agent)
+---
+nonEmpty: true
+hasDefault: true
+defaultInList: true
+hasVariants: "<redacted>"

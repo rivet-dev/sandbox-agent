@@ -14,6 +14,7 @@ export type FeatureCoverageView = AgentCapabilities & {
   mcpTools?: boolean;
   streamingDeltas?: boolean;
   itemStarted?: boolean;
+  variants?: boolean;
 };
 
 export const emptyFeatureCoverage: FeatureCoverageView = {
@@ -34,5 +35,6 @@ export const emptyFeatureCoverage: FeatureCoverageView = {
   mcpTools: false,
   streamingDeltas: false,
   itemStarted: false,
+  variants: false,
   sharedProcess: false
 };

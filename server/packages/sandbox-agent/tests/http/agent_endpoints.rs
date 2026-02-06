@@ -162,4 +162,27 @@ async fn agent_endpoints_snapshots() {
             insta::assert_yaml_snapshot!(normalize_agent_modes(&modes));
         });
     }
+
+    for config in &configs {
+        let _guard = apply_credentials(&config.credentials);
+        let (status, models) = send_json(
+            &app.app,
+            Method::GET,
+            &format!("/v1/agents/{}/models", config.agent.as_str()),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "agent models");
+        let model_count = models
+            .get("models")
+            .and_then(|value| value.as_array())
+            .map(|models| models.len())
+            .unwrap_or_default();
+        assert!(model_count > 0, "agent models should not be empty");
+        insta::with_settings!({
+            snapshot_suffix => snapshot_name("agent_models", Some(config.agent)),
+        }, {
+            insta::assert_yaml_snapshot!(normalize_agent_models(&models, config.agent));
+        });
+    }
 }

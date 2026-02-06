@@ -46,11 +46,14 @@ use sandbox_agent_agent_management::agents::{
     AgentError as ManagerError, AgentId, AgentManager, InstallOptions, SpawnOptions, StreamingSpawn,
 };
 use sandbox_agent_agent_management::credentials::{
-    extract_all_credentials, CredentialExtractionOptions, ExtractedCredentials,
+    extract_all_credentials, AuthType, CredentialExtractionOptions, ExtractedCredentials,
+    ProviderCredentials,
 };
 
 const MOCK_EVENT_DELAY_MS: u64 = 200;
 static USER_MESSAGE_COUNTER: AtomicU64 = AtomicU64::new(1);
+const ANTHROPIC_MODELS_URL: &str = "https://api.anthropic.com/v1/models?beta=true";
+const ANTHROPIC_VERSION: &str = "2023-06-01";
 
 #[derive(Debug)]
 pub struct AppState {
@@ -103,6 +106,7 @@ pub fn build_router_with_state(shared: Arc<AppState>) -> (Router, Arc<AppState>)
         .route("/agents", get(list_agents))
         .route("/agents/:agent/install", post(install_agent))
         .route("/agents/:agent/modes", get(get_agent_modes))
+        .route("/agents/:agent/models", get(get_agent_models))
         .route("/sessions", get(list_sessions))
         .route("/sessions/:session_id", post(create_session))
         .route("/sessions/:session_id/messages", post(post_message))
@@ -218,6 +222,7 @@ pub async fn shutdown_servers(state: &Arc<AppState>) {
         get_health,
         install_agent,
         get_agent_modes,
+        get_agent_models,
         list_agents,
         list_sessions,
         create_session,
@@ -235,6 +240,8 @@ pub async fn shutdown_servers(state: &Arc<AppState>) {
             AgentInstallRequest,
             AgentModeInfo,
             AgentModesResponse,
+            AgentModelInfo,
+            AgentModelsResponse,
             AgentCapabilities,
             AgentInfo,
             AgentListResponse,
@@ -1703,6 +1710,25 @@ impl SessionManager {
         }
     }
 
+    pub(crate) async fn agent_models(
+        self: &Arc<Self>,
+        agent: AgentId,
+    ) -> Result<AgentModelsResponse, SandboxError> {
+        match agent {
+            AgentId::Claude => self.fetch_claude_models().await,
+            AgentId::Codex => self.fetch_codex_models().await,
+            AgentId::Opencode => match self.fetch_opencode_models().await {
+                Ok(models) => Ok(models),
+                Err(_) => Ok(AgentModelsResponse {
+                    models: Vec::new(),
+                    default_model: None,
+                }),
+            },
+            AgentId::Amp => Ok(amp_models_response()),
+            AgentId::Mock => Ok(mock_models_response()),
+        }
+    }
+
     pub(crate) async fn send_message(
         self: &Arc<Self>,
         session_id: String,
@@ -3155,7 +3181,7 @@ impl SessionManager {
             approval_policy: codex_approval_policy(Some(&session.permission_mode)),
             collaboration_mode: None,
             cwd: None,
-            effort: None,
+            effort: codex_effort_from_variant(session.variant.as_deref()),
             input: vec![codex_schema::UserInput::Text {
                 text: prompt_text,
                 text_elements: Vec::new(),
@@ -3210,6 +3236,254 @@ impl SessionManager {
         }
         Err(SandboxError::StreamError {
             message: "OpenCode agent modes unavailable".to_string(),
+        })
+    }
+
+    async fn fetch_claude_models(&self) -> Result<AgentModelsResponse, SandboxError> {
+        let credentials = self.extract_credentials().await?;
+        let Some(cred) = credentials.anthropic else {
+            return Ok(AgentModelsResponse {
+                models: Vec::new(),
+                default_model: None,
+            });
+        };
+
+        let headers = build_anthropic_headers(&cred)?;
+        let response = self
+            .http_client
+            .get(ANTHROPIC_MODELS_URL)
+            .headers(headers)
+            .send()
+            .await
+            .map_err(|err| SandboxError::StreamError {
+                message: err.to_string(),
+            })?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(SandboxError::StreamError {
+                message: format!("Anthropic models request failed {status}: {body}"),
+            });
+        }
+
+        let value: Value = response
+            .json()
+            .await
+            .map_err(|err| SandboxError::StreamError {
+                message: err.to_string(),
+            })?;
+        let data = value
+            .get("data")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+
+        let mut models = Vec::new();
+        let mut default_model: Option<String> = None;
+        let mut default_created: Option<String> = None;
+        for item in data {
+            let Some(id) = item.get("id").and_then(Value::as_str) else {
+                continue;
+            };
+            let name = item
+                .get("display_name")
+                .and_then(Value::as_str)
+                .map(|value| value.to_string());
+            let created = item
+                .get("created_at")
+                .and_then(Value::as_str)
+                .map(|value| value.to_string());
+            if let Some(created) = created.as_ref() {
+                let should_update = match default_created.as_deref() {
+                    Some(current) => created.as_str() > current,
+                    None => true,
+                };
+                if should_update {
+                    default_created = Some(created.clone());
+                    default_model = Some(id.to_string());
+                }
+            }
+            models.push(AgentModelInfo {
+                id: id.to_string(),
+                name,
+                variants: None,
+                default_variant: None,
+            });
+        }
+        models.sort_by(|a, b| a.id.cmp(&b.id));
+        if default_model.is_none() {
+            default_model = models.first().map(|model| model.id.clone());
+        }
+
+        Ok(AgentModelsResponse {
+            models,
+            default_model,
+        })
+    }
+
+    async fn fetch_codex_models(self: &Arc<Self>) -> Result<AgentModelsResponse, SandboxError> {
+        let server = self.ensure_codex_server().await?;
+        let mut models: Vec<AgentModelInfo> = Vec::new();
+        let mut default_model: Option<String> = None;
+        let mut seen = HashSet::new();
+        let mut cursor: Option<String> = None;
+
+        loop {
+            let id = server.next_request_id();
+            let request = json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "method": "model/list",
+                "params": {
+                    "cursor": cursor,
+                    "limit": null
+                }
+            });
+            let rx = server
+                .send_request(id, &request)
+                .ok_or_else(|| SandboxError::StreamError {
+                    message: "failed to send model/list request".to_string(),
+                })?;
+
+            let result = tokio::time::timeout(Duration::from_secs(30), rx).await;
+            let value = match result {
+                Ok(Ok(value)) => value,
+                Ok(Err(_)) => {
+                    return Err(SandboxError::StreamError {
+                        message: "model/list request cancelled".to_string(),
+                    })
+                }
+                Err(_) => {
+                    return Err(SandboxError::StreamError {
+                        message: "model/list request timed out".to_string(),
+                    })
+                }
+            };
+
+            let data = value
+                .get("data")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+
+            for item in data {
+                let model_id = item
+                    .get("model")
+                    .and_then(Value::as_str)
+                    .or_else(|| item.get("id").and_then(Value::as_str));
+                let Some(model_id) = model_id else {
+                    continue;
+                };
+                if !seen.insert(model_id.to_string()) {
+                    continue;
+                }
+
+                let name = item
+                    .get("displayName")
+                    .and_then(Value::as_str)
+                    .map(|value| value.to_string());
+                let default_variant = item
+                    .get("defaultReasoningEffort")
+                    .and_then(Value::as_str)
+                    .map(|value| value.to_string());
+                let mut variants: Vec<String> = item
+                    .get("supportedReasoningEfforts")
+                    .and_then(Value::as_array)
+                    .map(|values| {
+                        values
+                            .iter()
+                            .filter_map(|value| {
+                                value
+                                    .get("reasoningEffort")
+                                    .and_then(Value::as_str)
+                                    .or_else(|| value.as_str())
+                                    .map(|entry| entry.to_string())
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                if variants.is_empty() {
+                    variants = codex_variants();
+                }
+                variants.sort();
+                variants.dedup();
+
+                if default_model.is_none()
+                    && item
+                        .get("isDefault")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false)
+                {
+                    default_model = Some(model_id.to_string());
+                }
+
+                models.push(AgentModelInfo {
+                    id: model_id.to_string(),
+                    name,
+                    variants: Some(variants),
+                    default_variant,
+                });
+            }
+
+            let next_cursor = value
+                .get("nextCursor")
+                .and_then(Value::as_str)
+                .map(|value| value.to_string());
+            if next_cursor.is_none() {
+                break;
+            }
+            cursor = next_cursor;
+        }
+
+        models.sort_by(|a, b| a.id.cmp(&b.id));
+        if default_model.is_none() {
+            default_model = models.first().map(|model| model.id.clone());
+        }
+
+        Ok(AgentModelsResponse {
+            models,
+            default_model,
+        })
+    }
+
+    async fn fetch_opencode_models(&self) -> Result<AgentModelsResponse, SandboxError> {
+        let base_url = self.ensure_opencode_server().await?;
+        let endpoints = [
+            format!("{base_url}/config/providers"),
+            format!("{base_url}/provider"),
+        ];
+        for url in endpoints {
+            let response = self.http_client.get(&url).send().await;
+            let response = match response {
+                Ok(response) => response,
+                Err(_) => continue,
+            };
+            if !response.status().is_success() {
+                continue;
+            }
+            let value: Value = response
+                .json()
+                .await
+                .map_err(|err| SandboxError::StreamError {
+                    message: err.to_string(),
+                })?;
+            if let Some(models) = parse_opencode_models(&value) {
+                return Ok(models);
+            }
+        }
+        Err(SandboxError::StreamError {
+            message: "OpenCode models unavailable".to_string(),
+        })
+    }
+
+    async fn extract_credentials(&self) -> Result<ExtractedCredentials, SandboxError> {
+        tokio::task::spawn_blocking(move || {
+            let options = CredentialExtractionOptions::new();
+            extract_all_credentials(&options)
+        })
+        .await
+        .map_err(|err| SandboxError::StreamError {
+            message: err.to_string(),
         })
     }
 
@@ -3481,6 +3755,26 @@ pub struct AgentModesResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+pub struct AgentModelInfo {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub variants: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_variant: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentModelsResponse {
+    pub models: Vec<AgentModelInfo>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_model: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct AgentCapabilities {
     // TODO: add agent-agnostic tests that cover every capability flag here.
     pub plan_mode: bool,
@@ -3500,6 +3794,7 @@ pub struct AgentCapabilities {
     pub mcp_tools: bool,
     pub streaming_deltas: bool,
     pub item_started: bool,
+    pub variants: bool,
     /// Whether this agent uses a shared long-running server process (vs per-turn subprocess)
     pub shared_process: bool,
 }
@@ -3731,6 +4026,25 @@ async fn get_agent_modes(
     let agent_id = parse_agent_id(&agent)?;
     let modes = state.session_manager.agent_modes(agent_id).await?;
     Ok(Json(AgentModesResponse { modes }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/v1/agents/{agent}/models",
+    responses(
+        (status = 200, body = AgentModelsResponse),
+        (status = 400, body = ProblemDetails)
+    ),
+    params(("agent" = String, Path, description = "Agent id")),
+    tag = "agents"
+)]
+async fn get_agent_models(
+    State(state): State<Arc<AppState>>,
+    Path(agent): Path<String>,
+) -> Result<Json<AgentModelsResponse>, ApiError> {
+    let agent_id = parse_agent_id(&agent)?;
+    let models = state.session_manager.agent_models(agent_id).await?;
+    Ok(Json(models))
 }
 
 const SERVER_INFO: &str = "\
@@ -4133,6 +4447,7 @@ fn agent_capabilities_for(agent: AgentId) -> AgentCapabilities {
             mcp_tools: false,
             streaming_deltas: true,
             item_started: false,
+            variants: false,
             shared_process: false, // per-turn subprocess with --resume
         },
         AgentId::Codex => AgentCapabilities {
@@ -4153,6 +4468,7 @@ fn agent_capabilities_for(agent: AgentId) -> AgentCapabilities {
             mcp_tools: true,
             streaming_deltas: true,
             item_started: true,
+            variants: true,
             shared_process: true, // shared app-server via JSON-RPC
         },
         AgentId::Opencode => AgentCapabilities {
@@ -4173,6 +4489,7 @@ fn agent_capabilities_for(agent: AgentId) -> AgentCapabilities {
             mcp_tools: false,
             streaming_deltas: true,
             item_started: true,
+            variants: true,
             shared_process: true, // shared HTTP server
         },
         AgentId::Amp => AgentCapabilities {
@@ -4193,6 +4510,7 @@ fn agent_capabilities_for(agent: AgentId) -> AgentCapabilities {
             mcp_tools: false,
             streaming_deltas: false,
             item_started: false,
+            variants: true,
             shared_process: false, // per-turn subprocess with --continue
         },
         AgentId::Mock => AgentCapabilities {
@@ -4213,6 +4531,7 @@ fn agent_capabilities_for(agent: AgentId) -> AgentCapabilities {
             mcp_tools: true,
             streaming_deltas: true,
             item_started: true,
+            variants: false,
             shared_process: false, // in-memory mock (no subprocess)
         },
     }
@@ -4285,6 +4604,118 @@ fn agent_modes_for(agent: AgentId) -> Vec<AgentModeInfo> {
             },
         ],
     }
+}
+
+fn amp_models_response() -> AgentModelsResponse {
+    // NOTE: Amp models are hardcoded based on ampcode.com manual:
+    // - smart
+    // - rush
+    // - deep
+    // - free
+    let models = ["smart", "rush", "deep", "free"]
+        .into_iter()
+        .map(|id| AgentModelInfo {
+            id: id.to_string(),
+            name: None,
+            variants: Some(amp_variants()),
+            default_variant: Some("medium".to_string()),
+        })
+        .collect();
+    AgentModelsResponse {
+        models,
+        default_model: Some("smart".to_string()),
+    }
+}
+
+fn mock_models_response() -> AgentModelsResponse {
+    AgentModelsResponse {
+        models: vec![AgentModelInfo {
+            id: "mock".to_string(),
+            name: Some("Mock".to_string()),
+            variants: None,
+            default_variant: None,
+        }],
+        default_model: Some("mock".to_string()),
+    }
+}
+
+fn amp_variants() -> Vec<String> {
+    vec!["medium", "high", "xhigh"]
+        .into_iter()
+        .map(|value| value.to_string())
+        .collect()
+}
+
+fn codex_variants() -> Vec<String> {
+    vec!["none", "minimal", "low", "medium", "high", "xhigh"]
+        .into_iter()
+        .map(|value| value.to_string())
+        .collect()
+}
+
+fn parse_opencode_models(value: &Value) -> Option<AgentModelsResponse> {
+    let providers = value
+        .get("providers")
+        .and_then(Value::as_array)
+        .or_else(|| value.get("all").and_then(Value::as_array))?;
+    let default_map = value
+        .get("default")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+
+    let mut models = Vec::new();
+    let mut provider_order = Vec::new();
+    for provider in providers {
+        let provider_id = provider.get("id").and_then(Value::as_str)?;
+        provider_order.push(provider_id.to_string());
+        let Some(model_map) = provider.get("models").and_then(Value::as_object) else {
+            continue;
+        };
+        for (key, model) in model_map {
+            let model_id = model
+                .get("id")
+                .and_then(Value::as_str)
+                .unwrap_or(key.as_str());
+            let name = model
+                .get("name")
+                .and_then(Value::as_str)
+                .map(|value| value.to_string());
+            let mut variants = model
+                .get("variants")
+                .and_then(Value::as_object)
+                .map(|map| map.keys().cloned().collect::<Vec<_>>());
+            if let Some(variants) = variants.as_mut() {
+                variants.sort();
+            }
+            models.push(AgentModelInfo {
+                id: format!("{provider_id}/{model_id}"),
+                name,
+                variants,
+                default_variant: None,
+            });
+        }
+    }
+    models.sort_by(|a, b| a.id.cmp(&b.id));
+
+    let mut default_model = None;
+    for provider_id in provider_order {
+        if let Some(model_id) = default_map
+            .get(&provider_id)
+            .and_then(Value::as_str)
+        {
+            default_model = Some(format!("{provider_id}/{model_id}"));
+            break;
+        }
+    }
+    if default_model.is_none() {
+        default_model = models.first().map(|model| model.id.clone());
+    }
+
+    Some(AgentModelsResponse {
+        models,
+        default_model,
+    })
 }
 
 fn normalize_agent_mode(agent: AgentId, agent_mode: Option<&str>) -> Result<String, SandboxError> {
@@ -4590,6 +5021,7 @@ struct CodexAppServerState {
     next_id: i64,
     prompt: String,
     model: Option<String>,
+    effort: Option<codex_schema::ReasoningEffort>,
     cwd: Option<String>,
     approval_policy: Option<codex_schema::AskForApproval>,
     sandbox_mode: Option<codex_schema::SandboxMode>,
@@ -4614,6 +5046,7 @@ impl CodexAppServerState {
             next_id: 1,
             prompt,
             model: options.model.clone(),
+            effort: codex_effort_from_variant(options.variant.as_deref()),
             cwd,
             approval_policy: codex_approval_policy(options.permission_mode.as_deref()),
             sandbox_mode: codex_sandbox_mode(options.permission_mode.as_deref()),
@@ -4859,7 +5292,7 @@ impl CodexAppServerState {
             approval_policy: self.approval_policy,
             collaboration_mode: None,
             cwd: self.cwd.clone(),
-            effort: None,
+            effort: self.effort.clone(),
             input: vec![codex_schema::UserInput::Text {
                 text: self.prompt.clone(),
                 text_elements: Vec::new(),
@@ -4900,6 +5333,15 @@ fn codex_prompt_for_mode(prompt: &str, mode: Option<&str>) -> String {
         Some("plan") => format!("Make a plan before acting.\n\n{prompt}"),
         _ => prompt.to_string(),
     }
+}
+
+fn codex_effort_from_variant(variant: Option<&str>) -> Option<codex_schema::ReasoningEffort> {
+    let variant = variant?.trim();
+    if variant.is_empty() {
+        return None;
+    }
+    let normalized = variant.to_lowercase();
+    serde_json::from_value(Value::String(normalized)).ok()
 }
 
 fn codex_approval_policy(mode: Option<&str>) -> Option<codex_schema::AskForApproval> {
@@ -6496,4 +6938,36 @@ pub fn add_token_header(headers: &mut HeaderMap, token: &str) {
     if let Ok(header) = HeaderValue::from_str(&value) {
         headers.insert(axum::http::header::AUTHORIZATION, header);
     }
+}
+
+fn build_anthropic_headers(
+    credentials: &ProviderCredentials,
+) -> Result<reqwest::header::HeaderMap, SandboxError> {
+    let mut headers = reqwest::header::HeaderMap::new();
+    match credentials.auth_type {
+        AuthType::ApiKey => {
+            let value =
+                reqwest::header::HeaderValue::from_str(&credentials.api_key).map_err(|_| {
+                SandboxError::StreamError {
+                    message: "invalid anthropic api key header".to_string(),
+                }
+            })?;
+            headers.insert("x-api-key", value);
+        }
+        AuthType::Oauth => {
+            let value = format!("Bearer {}", credentials.api_key);
+            let header =
+                reqwest::header::HeaderValue::from_str(&value).map_err(|_| {
+                    SandboxError::StreamError {
+                        message: "invalid anthropic oauth header".to_string(),
+                    }
+                })?;
+            headers.insert(reqwest::header::AUTHORIZATION, header);
+        }
+    }
+    headers.insert(
+        "anthropic-version",
+        reqwest::header::HeaderValue::from_static(ANTHROPIC_VERSION),
+    );
+    Ok(headers)
 }

@@ -10,6 +10,8 @@ export type {
   AgentInfo,
   AgentInstallRequest,
   AgentListResponse,
+  AgentModelInfo,
+  AgentModelsResponse,
   AgentModeInfo,
   AgentModesResponse,
   AgentUnparsedData,

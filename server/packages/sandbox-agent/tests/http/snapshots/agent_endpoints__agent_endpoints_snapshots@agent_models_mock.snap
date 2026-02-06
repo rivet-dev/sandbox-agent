@@ -1,0 +1,12 @@
+---
+source: server/packages/sandbox-agent/tests/http_sse_snapshots.rs
+expression: normalize_agent_models(&models, config.agent)
+---
+nonEmpty: true
+hasDefault: true
+defaultInList: true
+hasVariants: false
+modelCount: 1
+ids:
+  - mock
+defaultModel: mock

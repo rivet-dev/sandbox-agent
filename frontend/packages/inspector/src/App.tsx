@@ -3,6 +3,7 @@ import {
   SandboxAgentError,
   SandboxAgent,
   type AgentInfo,
+  type AgentModelInfo,
   type AgentModeInfo,
   type PermissionEventData,
   type QuestionEventData,
@@ -89,6 +90,8 @@ export default function App() {
 
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [modesByAgent, setModesByAgent] = useState<Record<string, AgentModeInfo[]>>({});
+  const [modelsByAgent, setModelsByAgent] = useState<Record<string, AgentModelInfo[]>>({});
+  const [defaultModelByAgent, setDefaultModelByAgent] = useState<Record<string, string>>({});
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [agentsLoading, setAgentsLoading] = useState(false);
   const [agentsError, setAgentsError] = useState<string | null>(null);
@@ -96,6 +99,8 @@ export default function App() {
   const [sessionsError, setSessionsError] = useState<string | null>(null);
   const [modesLoadingByAgent, setModesLoadingByAgent] = useState<Record<string, boolean>>({});
   const [modesErrorByAgent, setModesErrorByAgent] = useState<Record<string, string | null>>({});
+  const [modelsLoadingByAgent, setModelsLoadingByAgent] = useState<Record<string, boolean>>({});
+  const [modelsErrorByAgent, setModelsErrorByAgent] = useState<Record<string, string | null>>({});
 
   const [agentId, setAgentId] = useState("claude");
   const [agentMode, setAgentMode] = useState("");
@@ -252,10 +257,14 @@ export default function App() {
     stopTurnStream();
     setAgents([]);
     setSessions([]);
+    setModelsByAgent({});
+    setDefaultModelByAgent({});
     setAgentsLoading(false);
     setSessionsLoading(false);
     setAgentsError(null);
     setSessionsError(null);
+    setModelsLoadingByAgent({});
+    setModelsErrorByAgent({});
   };
 
   const refreshAgents = async () => {
@@ -268,6 +277,7 @@ export default function App() {
       for (const agent of agentList) {
         if (agent.installed) {
           loadModes(agent.id);
+          loadModels(agent.id);
         }
       }
     } catch (error) {
@@ -311,6 +321,29 @@ export default function App() {
       setModesErrorByAgent((prev) => ({ ...prev, [targetId]: "Unable to load modes." }));
     } finally {
       setModesLoadingByAgent((prev) => ({ ...prev, [targetId]: false }));
+    }
+  };
+
+  const loadModels = async (targetId: string) => {
+    setModelsLoadingByAgent((prev) => ({ ...prev, [targetId]: true }));
+    setModelsErrorByAgent((prev) => ({ ...prev, [targetId]: null }));
+    try {
+      const data = await getClient().getAgentModels(targetId);
+      const models = data.models ?? [];
+      setModelsByAgent((prev) => ({ ...prev, [targetId]: models }));
+      if (data.defaultModel) {
+        setDefaultModelByAgent((prev) => ({ ...prev, [targetId]: data.defaultModel! }));
+      } else {
+        setDefaultModelByAgent((prev) => {
+          const next = { ...prev };
+          delete next[targetId];
+          return next;
+        });
+      }
+    } catch {
+      setModelsErrorByAgent((prev) => ({ ...prev, [targetId]: "Unable to load models." }));
+    } finally {
+      setModelsLoadingByAgent((prev) => ({ ...prev, [targetId]: false }));
     }
   };
 
@@ -826,6 +859,12 @@ export default function App() {
   }, [connected, agentId]);
 
   useEffect(() => {
+    if (connected && agentId && !modelsByAgent[agentId]) {
+      loadModels(agentId);
+    }
+  }, [connected, agentId]);
+
+  useEffect(() => {
     const modes = modesByAgent[agentId];
     if (modes && modes.length > 0 && !agentMode) {
       setAgentMode(modes[0].id);
@@ -836,6 +875,15 @@ export default function App() {
   const activeModes = modesByAgent[agentId] ?? [];
   const modesLoading = modesLoadingByAgent[agentId] ?? false;
   const modesError = modesErrorByAgent[agentId] ?? null;
+  const modelOptions = modelsByAgent[agentId] ?? [];
+  const modelsLoading = modelsLoadingByAgent[agentId] ?? false;
+  const modelsError = modelsErrorByAgent[agentId] ?? null;
+  const defaultModel = defaultModelByAgent[agentId] ?? "";
+  const selectedModelId = model || defaultModel;
+  const selectedModel = modelOptions.find((entry) => entry.id === selectedModelId);
+  const variantOptions = selectedModel?.variants ?? [];
+  const defaultVariant = selectedModel?.defaultVariant ?? "";
+  const supportsVariants = Boolean(currentAgent?.capabilities?.variants);
   const agentDisplayNames: Record<string, string> = {
     claude: "Claude Code",
     codex: "Codex",
@@ -936,6 +984,13 @@ export default function App() {
           permissionMode={permissionMode}
           model={model}
           variant={variant}
+          modelOptions={modelOptions}
+          defaultModel={defaultModel}
+          modelsLoading={modelsLoading}
+          modelsError={modelsError}
+          variantOptions={variantOptions}
+          defaultVariant={defaultVariant}
+          supportsVariants={supportsVariants}
           streamMode={streamMode}
           activeModes={activeModes}
           currentAgentVersion={currentAgent?.version ?? null}

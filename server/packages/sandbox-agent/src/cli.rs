@@ -19,8 +19,8 @@ use crate::router::{
     PermissionReply, PermissionReplyRequest, QuestionReplyRequest,
 };
 use crate::router::{
-    AgentListResponse, AgentModesResponse, CreateSessionResponse, EventsResponse,
-    SessionListResponse,
+    AgentListResponse, AgentModelsResponse, AgentModesResponse, CreateSessionResponse,
+    EventsResponse, SessionListResponse,
 };
 use crate::server_logs::ServerLogs;
 use crate::telemetry;
@@ -228,6 +228,8 @@ pub enum AgentsCommand {
     Install(ApiInstallAgentArgs),
     /// Show available modes for an agent.
     Modes(AgentModesArgs),
+    /// Show available models for an agent.
+    Models(AgentModelsArgs),
 }
 
 #[derive(Subcommand, Debug)]
@@ -289,6 +291,13 @@ pub struct InstallAgentArgs {
 
 #[derive(Args, Debug)]
 pub struct AgentModesArgs {
+    agent: String,
+    #[command(flatten)]
+    client: ClientArgs,
+}
+
+#[derive(Args, Debug)]
+pub struct AgentModelsArgs {
     agent: String,
     #[command(flatten)]
     client: ClientArgs,
@@ -649,6 +658,12 @@ fn run_agents(command: &AgentsCommand, cli: &CliConfig) -> Result<(), CliError> 
             let path = format!("{API_PREFIX}/agents/{}/modes", args.agent);
             let response = ctx.get(&path)?;
             print_json_response::<AgentModesResponse>(response)
+        }
+        AgentsCommand::Models(args) => {
+            let ctx = ClientContext::new(cli, &args.client)?;
+            let path = format!("{API_PREFIX}/agents/{}/models", args.agent);
+            let response = ctx.get(&path)?;
+            print_json_response::<AgentModelsResponse>(response)
         }
     }
 }
