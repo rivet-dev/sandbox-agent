@@ -158,7 +158,7 @@ Items follow a consistent lifecycle: `item.started` → `item.delta` (0 or more)
 | Type | Description | Data |
 |------|-------------|------|
 | `permission.requested` | Permission request pending | `{ permission_id, action, status, metadata? }` |
-| `permission.resolved` | Permission granted or denied | `{ permission_id, action, status, metadata? }` |
+| `permission.resolved` | Permission decision recorded | `{ permission_id, action, status, metadata? }` |
 | `question.requested` | Question pending user input | `{ question_id, prompt, options, status }` |
 | `question.resolved` | Question answered or rejected | `{ question_id, prompt, options, status, response? }` |
 
@@ -168,7 +168,7 @@ Items follow a consistent lifecycle: `item.started` → `item.delta` (0 or more)
 |-------|------|-------------|
 | `permission_id` | string | Identifier for the permission request |
 | `action` | string | What the agent wants to do |
-| `status` | string | `requested`, `approved`, `denied` |
+| `status` | string | `requested`, `accept`, `accept_for_session`, `reject` |
 | `metadata` | any? | Additional context |
 
 **QuestionEventData**

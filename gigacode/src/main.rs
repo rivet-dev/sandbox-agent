@@ -17,9 +17,19 @@ fn run() -> Result<(), CliError> {
         no_token: cli.no_token,
         gigacode: true,
     };
-    let command = cli
-        .command
-        .unwrap_or_else(|| Command::Opencode(OpencodeArgs::default()));
+    let yolo = cli.yolo;
+    let command = match cli.command {
+        Some(Command::Opencode(mut args)) => {
+            args.yolo = args.yolo || yolo;
+            Command::Opencode(args)
+        }
+        Some(other) => other,
+        None => {
+            let mut args = OpencodeArgs::default();
+            args.yolo = yolo;
+            Command::Opencode(args)
+        }
+    };
     if let Err(err) = init_logging(&command) {
         eprintln!("failed to init logging: {err}");
         return Err(err);

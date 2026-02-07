@@ -41,6 +41,10 @@ Events / Message Flow
 | error                  | SDKResultMessage.error       | method=error                               | type=session.error (or message error)   | type=error                        |
 +------------------------+------------------------------+--------------------------------------------+-----------------------------------------+----------------------------------+
 
+Permission status normalization:
+- `permission.requested` uses `status=requested`.
+- `permission.resolved` uses `status=accept`, `accept_for_session`, or `reject`.
+
 Synthetics
 
 +------------------------------+------------------------+--------------------------+--------------------------------------------------------------+

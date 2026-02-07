@@ -1408,8 +1408,9 @@
         "type": "string",
         "enum": [
           "requested",
-          "approved",
-          "denied"
+          "accept",
+          "accept_for_session",
+          "reject"
         ]
       },
       "ProblemDetails": {

@@ -232,7 +232,7 @@ export interface components {
       reply: components["schemas"]["PermissionReply"];
     };
     /** @enum {string} */
-    PermissionStatus: "requested" | "approved" | "denied";
+    PermissionStatus: "requested" | "accept" | "accept_for_session" | "reject";
     ProblemDetails: {
       detail?: string | null;
       instance?: string | null;

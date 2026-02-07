@@ -417,6 +417,7 @@ struct SessionState {
     events: Vec<UniversalEvent>,
     pending_questions: HashMap<String, PendingQuestion>,
     pending_permissions: HashMap<String, PendingPermission>,
+    always_allow_actions: HashSet<String>,
     item_started: HashSet<String>,
     item_delta_seen: HashSet<String>,
     item_map: HashMap<String, String>,
@@ -475,6 +476,7 @@ impl SessionState {
             events: Vec::new(),
             pending_questions: HashMap::new(),
             pending_permissions: HashMap::new(),
+            always_allow_actions: HashSet::new(),
             item_started: HashSet::new(),
             item_delta_seen: HashSet::new(),
             item_map: HashMap::new(),
@@ -794,6 +796,18 @@ impl SessionState {
 
     fn take_permission(&mut self, permission_id: &str) -> Option<PendingPermission> {
         self.pending_permissions.remove(permission_id)
+    }
+
+    fn remember_permission_allow_for_session(&mut self, action: &str, metadata: &Option<Value>) {
+        for key in permission_cache_keys(action, metadata) {
+            self.always_allow_actions.insert(key);
+        }
+    }
+
+    fn should_auto_approve_permission(&self, action: &str, metadata: &Option<Value>) -> bool {
+        permission_cache_keys(action, metadata)
+            .iter()
+            .any(|key| self.always_allow_actions.contains(key))
     }
 
     /// Find and remove a pending permission whose action matches a question tool
@@ -2334,7 +2348,7 @@ impl SessionManager {
                         UniversalEventData::Permission(PermissionEventData {
                             permission_id: perm_id,
                             action: perm.action,
-                            status: PermissionStatus::Approved,
+                            status: PermissionStatus::Accept,
                             metadata: perm.metadata,
                         }),
                     )
@@ -2454,7 +2468,7 @@ impl SessionManager {
                         UniversalEventData::Permission(PermissionEventData {
                             permission_id: perm_id,
                             action: perm.action,
-                            status: PermissionStatus::Denied,
+                            status: PermissionStatus::Reject,
                             metadata: perm.metadata,
                         }),
                     )
@@ -2488,6 +2502,12 @@ impl SessionManager {
                 return Err(SandboxError::InvalidRequest {
                     message: format!("unknown permission id: {permission_id}"),
                 });
+            }
+            if matches!(reply_for_status, PermissionReply::Always) {
+                if let Some(pending) = pending.as_ref() {
+                    session
+                        .remember_permission_allow_for_session(&pending.action, &pending.metadata);
+                }
             }
             if let Some(err) = session.ended_error() {
                 return Err(err);
@@ -2610,8 +2630,9 @@ impl SessionManager {
 
         if let Some(pending) = pending_permission {
             let status = match reply_for_status {
-                PermissionReply::Reject => PermissionStatus::Denied,
-                PermissionReply::Once | PermissionReply::Always => PermissionStatus::Approved,
+                PermissionReply::Reject => PermissionStatus::Reject,
+                PermissionReply::Once => PermissionStatus::Accept,
+                PermissionReply::Always => PermissionStatus::AcceptForSession,
             };
             let resolved = EventConversion::new(
                 UniversalEventType::PermissionResolved,
@@ -2910,13 +2931,127 @@ impl SessionManager {
         session_id: &str,
         conversions: Vec<EventConversion>,
     ) -> Result<Vec<UniversalEvent>, SandboxError> {
-        let mut sessions = self.sessions.lock().await;
-        let session = Self::session_mut(&mut sessions, session_id).ok_or_else(|| {
-            SandboxError::SessionNotFound {
-                session_id: session_id.to_string(),
+        let (events, auto_approvals) = {
+            let mut sessions = self.sessions.lock().await;
+            let session = Self::session_mut(&mut sessions, session_id).ok_or_else(|| {
+                SandboxError::SessionNotFound {
+                    session_id: session_id.to_string(),
+                }
+            })?;
+            let events = session.record_conversions(conversions);
+            let mut auto_approvals = Vec::new();
+            for event in &events {
+                if event.event_type != UniversalEventType::PermissionRequested {
+                    continue;
+                }
+                let UniversalEventData::Permission(data) = &event.data else {
+                    continue;
+                };
+                let cached = session.should_auto_approve_permission(&data.action, &data.metadata);
+                if session.agent == AgentId::Codex
+                    || is_question_tool_action(&data.action)
+                    || !cached
+                {
+                    continue;
+                }
+                if let Some(pending) = session.take_permission(&data.permission_id) {
+                    auto_approvals.push((
+                        session.agent,
+                        session.native_session_id.clone(),
+                        session.claude_sender(),
+                        data.permission_id.clone(),
+                        pending,
+                    ));
+                }
             }
-        })?;
-        Ok(session.record_conversions(conversions))
+            (events, auto_approvals)
+        };
+
+        for (agent, native_session_id, claude_sender, permission_id, pending) in auto_approvals {
+            let reply_result = match agent {
+                AgentId::Opencode => {
+                    let agent_session_id =
+                        native_session_id
+                            .clone()
+                            .ok_or_else(|| SandboxError::InvalidRequest {
+                                message: "missing OpenCode session id".to_string(),
+                            });
+                    match agent_session_id {
+                        Ok(agent_session_id) => {
+                            self.opencode_permission_reply(
+                                &agent_session_id,
+                                &permission_id,
+                                PermissionReply::Always,
+                            )
+                            .await
+                        }
+                        Err(err) => Err(err),
+                    }
+                }
+                AgentId::Claude => {
+                    let sender = claude_sender.ok_or_else(|| SandboxError::InvalidRequest {
+                        message: "Claude session is not active".to_string(),
+                    });
+                    match sender {
+                        Ok(sender) => {
+                            let metadata = pending.metadata.as_ref().and_then(Value::as_object);
+                            let updated_input = metadata
+                                .and_then(|map| map.get("input"))
+                                .cloned()
+                                .unwrap_or(Value::Null);
+                            let mut response_map = serde_json::Map::new();
+                            if !updated_input.is_null() {
+                                response_map.insert("updatedInput".to_string(), updated_input);
+                            }
+                            let line = claude_control_response_line(
+                                &permission_id,
+                                "allow",
+                                Value::Object(response_map),
+                            );
+                            sender.send(line).map_err(|_| SandboxError::InvalidRequest {
+                                message: "Claude session is not active".to_string(),
+                            })
+                        }
+                        Err(err) => Err(err),
+                    }
+                }
+                _ => Ok(()),
+            };
+
+            if let Err(err) = reply_result {
+                tracing::warn!(
+                    session_id,
+                    permission_id,
+                    ?err,
+                    "failed to auto-approve cached permission"
+                );
+                let mut sessions = self.sessions.lock().await;
+                if let Some(session) = Self::session_mut(&mut sessions, session_id) {
+                    session
+                        .pending_permissions
+                        .insert(permission_id.clone(), pending.clone());
+                }
+                continue;
+            }
+
+            let resolved = EventConversion::new(
+                UniversalEventType::PermissionResolved,
+                UniversalEventData::Permission(PermissionEventData {
+                    permission_id: permission_id.clone(),
+                    action: pending.action,
+                    status: PermissionStatus::AcceptForSession,
+                    metadata: pending.metadata,
+                }),
+            )
+            .synthetic()
+            .with_native_session(native_session_id);
+            let mut sessions = self.sessions.lock().await;
+            if let Some(session) = Self::session_mut(&mut sessions, session_id) {
+                session.record_conversions(vec![resolved]);
+            }
+        }
+
+        Ok(events)
     }
 
     async fn parse_claude_line(&self, line: &str, session_id: &str) -> Vec<EventConversion> {
@@ -5410,6 +5545,60 @@ pub(crate) fn is_question_tool_action(action: &str) -> bool {
             | "exitPlanMode"
             | "exit-plan-mode"
     )
+}
+
+fn permission_cache_keys(action: &str, metadata: &Option<Value>) -> Vec<String> {
+    let mut keys = Vec::new();
+    push_permission_cache_key(&mut keys, action);
+    if let Some(metadata) = metadata.as_ref().and_then(Value::as_object) {
+        if let Some(permission) = metadata.get("permission").and_then(Value::as_str) {
+            push_permission_cache_key(&mut keys, permission);
+        }
+        if let Some(kind) = metadata.get("codexRequestKind").and_then(Value::as_str) {
+            push_permission_cache_key(&mut keys, kind);
+        }
+        if let Some(tool_name) = metadata
+            .get("toolName")
+            .or_else(|| metadata.get("tool_name"))
+            .and_then(Value::as_str)
+        {
+            push_permission_cache_key(&mut keys, tool_name);
+        }
+    }
+    keys.sort_unstable();
+    keys.dedup();
+    keys
+}
+
+fn push_permission_cache_key(keys: &mut Vec<String>, raw: &str) {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return;
+    }
+    keys.push(raw.to_string());
+    if let Some(category) = permission_action_category(raw) {
+        keys.push(category);
+    }
+}
+
+fn permission_action_category(action: &str) -> Option<String> {
+    let first = action.split_whitespace().next().unwrap_or(action);
+    let stripped = first
+        .split_once(':')
+        .map(|(prefix, _)| prefix)
+        .unwrap_or(first)
+        .trim();
+    if stripped.is_empty() {
+        return None;
+    }
+    if stripped
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' || ch == '.')
+    {
+        Some(stripped.to_ascii_lowercase())
+    } else {
+        None
+    }
 }
 
 fn read_lines<R: std::io::Read>(reader: R, sender: mpsc::UnboundedSender<String>) {

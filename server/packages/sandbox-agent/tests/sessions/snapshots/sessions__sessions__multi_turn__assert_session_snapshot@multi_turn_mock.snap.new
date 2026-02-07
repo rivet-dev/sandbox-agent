@@ -38,13 +38,36 @@ first:
       status: in_progress
     seq: 5
     type: item.started
-  - item:
-      content_types: []
-      kind: message
-      role: assistant
-      status: completed
+  - delta:
+      delta: "<redacted>"
+      item_id: "<redacted>"
+      native_item_id: "<redacted>"
     seq: 6
-    type: item.completed
+    type: item.delta
+  - delta:
+      delta: "<redacted>"
+      item_id: "<redacted>"
+      native_item_id: "<redacted>"
+    seq: 7
+    type: item.delta
+  - delta:
+      delta: "<redacted>"
+      item_id: "<redacted>"
+      native_item_id: "<redacted>"
+    seq: 8
+    type: item.delta
+  - delta:
+      delta: "<redacted>"
+      item_id: "<redacted>"
+      native_item_id: "<redacted>"
+    seq: 9
+    type: item.delta
+  - delta:
+      delta: "<redacted>"
+      item_id: "<redacted>"
+      native_item_id: "<redacted>"
+    seq: 10
+    type: item.delta
 second:
   - item:
       content_types:

@@ -115,6 +115,7 @@ struct OpenCodeSessionRecord {
     created_at: i64,
     updated_at: i64,
     share_url: Option<String>,
+    permission_mode: Option<String>,
 }
 
 impl OpenCodeSessionRecord {
@@ -370,6 +371,7 @@ impl OpenCodeState {
             created_at: now,
             updated_at: now,
             share_url: None,
+            permission_mode: None,
         };
         let value = record.to_value();
         sessions.insert(session_id.to_string(), record);
@@ -434,13 +436,14 @@ async fn ensure_backing_session(
     agent: &str,
     model: Option<String>,
     variant: Option<String>,
+    permission_mode: Option<String>,
 ) -> Result<(), SandboxError> {
     let model = model.filter(|value| !value.trim().is_empty());
     let variant = variant.filter(|value| !value.trim().is_empty());
     let request = CreateSessionRequest {
         agent: agent.to_string(),
         agent_mode: None,
-        permission_mode: None,
+        permission_mode,
         model: model.clone(),
         variant: variant.clone(),
         agent_version: None,
@@ -520,6 +523,8 @@ struct OpenCodeCreateSessionRequest {
     parent_id: Option<String>,
     #[schema(value_type = String)]
     permission: Option<Value>,
+    #[serde(alias = "permission_mode")]
+    permission_mode: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -1936,10 +1941,13 @@ async fn apply_permission_event(
                 .opencode
                 .emit_event(permission_event("permission.asked", &value));
         }
-        PermissionStatus::Approved | PermissionStatus::Denied => {
+        PermissionStatus::Accept
+        | PermissionStatus::AcceptForSession
+        | PermissionStatus::Reject => {
             let reply = match permission.status {
-                PermissionStatus::Approved => "once",
-                PermissionStatus::Denied => "reject",
+                PermissionStatus::Accept => "once",
+                PermissionStatus::AcceptForSession => "always",
+                PermissionStatus::Reject => "reject",
                 PermissionStatus::Requested => "once",
             };
             let event_value = json!({
@@ -2700,9 +2708,7 @@ async fn apply_item_delta(
             runtime
                 .part_id_by_message
                 .insert(message_id.clone(), part_id.clone());
-            runtime
-                .messages_with_text_deltas
-                .insert(message_id.clone());
+            runtime.messages_with_text_deltas.insert(message_id.clone());
         })
         .await;
 }
@@ -3354,6 +3360,7 @@ async fn oc_session_create(
         title: None,
         parent_id: None,
         permission: None,
+        permission_mode: None,
     });
     let directory = state
         .opencode
@@ -3362,6 +3369,7 @@ async fn oc_session_create(
     let id = next_id("ses_", &SESSION_COUNTER);
     let slug = format!("session-{}", id);
     let title = body.title.unwrap_or_else(|| format!("Session {}", id));
+    let permission_mode = body.permission_mode;
     let record = OpenCodeSessionRecord {
         id: id.clone(),
         slug,
@@ -3373,6 +3381,7 @@ async fn oc_session_create(
         created_at: now,
         updated_at: now,
         share_url: None,
+        permission_mode,
     };
 
     let session_value = record.to_value();
@@ -3541,6 +3550,12 @@ async fn oc_session_fork(
     let id = next_id("ses_", &SESSION_COUNTER);
     let slug = format!("session-{}", id);
     let title = format!("Fork of {}", session_id);
+    let parent_permission_mode = {
+        let sessions = state.opencode.sessions.lock().await;
+        sessions
+            .get(&session_id)
+            .and_then(|s| s.permission_mode.clone())
+    };
     let record = OpenCodeSessionRecord {
         id: id.clone(),
         slug,
@@ -3552,6 +3567,7 @@ async fn oc_session_fork(
         created_at: now,
         updated_at: now,
         share_url: None,
+        permission_mode: parent_permission_mode,
     };
 
     let value = record.to_value();
@@ -3722,12 +3738,20 @@ async fn oc_session_message_create(
         })
         .await;
 
+    let session_permission_mode = {
+        let sessions = state.opencode.sessions.lock().await;
+        sessions
+            .get(&session_id)
+            .and_then(|s| s.permission_mode.clone())
+    };
+
     if let Err(err) = ensure_backing_session(
         &state,
         &session_id,
         &session_agent,
         backing_model,
         backing_variant,
+        session_permission_mode,
     )
     .await
     {

@@ -161,8 +161,9 @@ pub struct PermissionEventData {
 #[serde(rename_all = "snake_case")]
 pub enum PermissionStatus {
     Requested,
-    Approved,
-    Denied,
+    Accept,
+    AcceptForSession,
+    Reject,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]

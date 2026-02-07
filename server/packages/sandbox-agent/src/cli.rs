@@ -68,6 +68,10 @@ pub struct GigacodeCli {
 
     #[arg(long, short = 'n', global = true)]
     pub no_token: bool,
+
+    /// Bypass all permission checks (auto-approve tool calls).
+    #[arg(long, global = true)]
+    pub yolo: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -126,6 +130,10 @@ pub struct OpencodeArgs {
 
     #[arg(long)]
     session_title: Option<String>,
+
+    /// Bypass all permission checks (auto-approve tool calls).
+    #[arg(long)]
+    pub yolo: bool,
 }
 
 impl Default for OpencodeArgs {
@@ -134,6 +142,7 @@ impl Default for OpencodeArgs {
             host: DEFAULT_HOST.to_string(),
             port: DEFAULT_PORT,
             session_title: None,
+            yolo: false,
         }
     }
 }
@@ -592,13 +601,18 @@ fn run_opencode(cli: &CliConfig, args: &OpencodeArgs) -> Result<(), CliError> {
     };
     write_stderr_line(&format!("\nEXPERIMENTAL: Please report bugs to:\n- GitHub: https://github.com/rivet-dev/sandbox-agent/issues\n- Discord: https://rivet.dev/discord\n\n{name} is powered by:\n- OpenCode (TUI): https://opencode.ai/\n- Sandbox Agent SDK (multi-agent compatibility): https://sandboxagent.dev/\n\n"))?;
 
+    let yolo = args.yolo;
     let token = cli.token.clone();
 
     let base_url = format!("http://{}:{}", args.host, args.port);
     crate::daemon::ensure_running(cli, &args.host, args.port, token.as_deref())?;
 
-    let session_id =
-        create_opencode_session(&base_url, token.as_deref(), args.session_title.as_deref())?;
+    let session_id = create_opencode_session(
+        &base_url,
+        token.as_deref(),
+        args.session_title.as_deref(),
+        yolo,
+    )?;
     write_stdout_line(&format!("OpenCode session: {session_id}"))?;
 
     let attach_url = format!("{base_url}/opencode");
@@ -807,14 +821,18 @@ fn create_opencode_session(
     base_url: &str,
     token: Option<&str>,
     title: Option<&str>,
+    yolo: bool,
 ) -> Result<String, CliError> {
     let client = HttpClient::builder().build()?;
     let url = format!("{base_url}/opencode/session");
-    let body = if let Some(title) = title {
+    let mut body = if let Some(title) = title {
         json!({ "title": title })
     } else {
         json!({})
     };
+    if yolo {
+        body["permissionMode"] = json!("bypass");
+    }
     let mut request = client.post(&url).json(&body);
     if let Ok(directory) = std::env::current_dir() {
         request = request.header(

@@ -20,6 +20,29 @@ describe("OpenCode-compatible Session API", () => {
   let handle: SandboxAgentHandle;
   let client: OpencodeClient;
 
+  async function createSessionViaHttp(body: Record<string, unknown>) {
+    const response = await fetch(`${handle.baseUrl}/opencode/session`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${handle.token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+    expect(response.ok).toBe(true);
+    return response.json();
+  }
+
+  async function getBackingSessionPermissionMode(sessionId: string) {
+    const response = await fetch(`${handle.baseUrl}/v1/sessions`, {
+      headers: { Authorization: `Bearer ${handle.token}` },
+    });
+    expect(response.ok).toBe(true);
+    const data = await response.json();
+    const session = (data.sessions ?? []).find((item: any) => item.sessionId === sessionId);
+    return session?.permissionMode;
+  }
+
   beforeAll(async () => {
     // Build the binary if needed
     await buildSandboxAgent();
@@ -62,6 +85,42 @@ describe("OpenCode-compatible Session API", () => {
       const session2 = await client.session.create();
 
       expect(session1.data?.id).not.toBe(session2.data?.id);
+    });
+
+    it("should pass permissionMode bypass to backing session", async () => {
+      const session = await createSessionViaHttp({ permissionMode: "bypass" });
+      const sessionId = session.id as string;
+      expect(sessionId).toBeDefined();
+
+      const prompt = await client.session.prompt({
+        path: { id: sessionId },
+        body: {
+          model: { providerID: "mock", modelID: "mock" },
+          parts: [{ type: "text", text: "hello" }],
+        },
+      });
+      expect(prompt.error).toBeUndefined();
+
+      const permissionMode = await getBackingSessionPermissionMode(sessionId);
+      expect(permissionMode).toBe("bypass");
+    });
+
+    it("should accept permission_mode alias and pass bypass to backing session", async () => {
+      const session = await createSessionViaHttp({ permission_mode: "bypass" });
+      const sessionId = session.id as string;
+      expect(sessionId).toBeDefined();
+
+      const prompt = await client.session.prompt({
+        path: { id: sessionId },
+        body: {
+          model: { providerID: "mock", modelID: "mock" },
+          parts: [{ type: "text", text: "hello" }],
+        },
+      });
+      expect(prompt.error).toBeUndefined();
+
+      const permissionMode = await getBackingSessionPermissionMode(sessionId);
+      expect(permissionMode).toBe("bypass");
     });
   });
 
