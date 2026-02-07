@@ -91,15 +91,9 @@ expression: value
     native_item_id: "<redacted>"
   seq: 14
   type: item.delta
-- delta:
-    delta: "<redacted>"
-    item_id: "<redacted>"
-    native_item_id: "<redacted>"
-  seq: 15
-  type: item.delta
 - question:
     id: "<redacted>"
     options: 4
     status: requested
-  seq: 16
+  seq: 15
   type: question.requested

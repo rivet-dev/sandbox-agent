@@ -23,7 +23,9 @@ use tokio::sync::{broadcast, Mutex};
 use tokio::time::interval;
 use utoipa::{IntoParams, OpenApi, ToSchema};
 
-use crate::router::{AgentModelInfo, AppState, CreateSessionRequest, PermissionReply};
+use crate::router::{
+    is_question_tool_action, AgentModelInfo, AppState, CreateSessionRequest, PermissionReply,
+};
 use sandbox_agent_agent_management::agents::AgentId;
 use sandbox_agent_error::SandboxError;
 use sandbox_agent_universal_agent_schema::{
@@ -1646,6 +1648,11 @@ async fn apply_permission_event(
     event: UniversalEvent,
     permission: PermissionEventData,
 ) {
+    // Suppress question-tool permissions (AskUserQuestion/ExitPlanMode) — these are
+    // handled internally via reply_question/reject_question, not exposed as permissions.
+    if is_question_tool_action(&permission.action) {
+        return;
+    }
     let session_id = event.session_id.clone();
     match permission.status {
         PermissionStatus::Requested => {

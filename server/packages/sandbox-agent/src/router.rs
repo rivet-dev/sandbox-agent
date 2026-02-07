@@ -690,6 +690,21 @@ impl SessionState {
 
         self.update_pending(&event);
         self.update_item_tracking(&event);
+
+        // Suppress question-tool permissions (AskUserQuestion/ExitPlanMode) from frontends.
+        // The permission is still stored in pending_permissions (via update_pending above)
+        // so reply_question/reject_question can find and resolve it internally.
+        if matches!(
+            event.event_type,
+            UniversalEventType::PermissionRequested | UniversalEventType::PermissionResolved
+        ) {
+            if let UniversalEventData::Permission(ref data) = event.data {
+                if is_question_tool_action(&data.action) {
+                    return None;
+                }
+            }
+        }
+
         self.events.push(event.clone());
         let _ = self.broadcaster.send(event.clone());
         if self.native_session_id.is_none() {
@@ -765,6 +780,17 @@ impl SessionState {
 
     fn take_permission(&mut self, permission_id: &str) -> Option<PendingPermission> {
         self.pending_permissions.remove(permission_id)
+    }
+
+    /// Find and remove a pending permission whose action matches a question tool
+    /// (AskUserQuestion or ExitPlanMode variants). Returns (permission_id, PendingPermission).
+    fn take_question_tool_permission(&mut self) -> Option<(String, PendingPermission)> {
+        let key = self
+            .pending_permissions
+            .iter()
+            .find(|(_, p)| is_question_tool_action(&p.action))
+            .map(|(k, _)| k.clone());
+        key.and_then(|k| self.pending_permissions.remove(&k).map(|p| (k, p)))
     }
 
     fn mark_ended(
@@ -2117,7 +2143,7 @@ impl SessionManager {
         question_id: &str,
         answers: Vec<Vec<String>>,
     ) -> Result<(), SandboxError> {
-        let (agent, native_session_id, pending_question, claude_sender) = {
+        let (agent, native_session_id, pending_question, claude_sender, linked_permission) = {
             let mut sessions = self.sessions.lock().await;
             let session = Self::session_mut(&mut sessions, session_id).ok_or_else(|| {
                 SandboxError::SessionNotFound {
@@ -2133,11 +2159,18 @@ impl SessionManager {
             if let Some(err) = session.ended_error() {
                 return Err(err);
             }
+            // For Claude, check if there's a linked AskUserQuestion/ExitPlanMode permission
+            let linked_perm = if session.agent == AgentId::Claude {
+                session.take_question_tool_permission()
+            } else {
+                None
+            };
             (
                 session.agent,
                 session.native_session_id.clone(),
                 pending,
                 session.claude_sender(),
+                linked_perm,
             )
         };
 
@@ -2150,28 +2183,67 @@ impl SessionManager {
                     .ok_or_else(|| SandboxError::InvalidRequest {
                         message: "missing OpenCode session id".to_string(),
                     })?;
-            self.opencode_question_reply(&agent_session_id, question_id, answers)
+            self.opencode_question_reply(&agent_session_id, question_id, answers.clone())
                 .await?;
         } else if agent == AgentId::Claude {
             let sender = claude_sender.ok_or_else(|| SandboxError::InvalidRequest {
                 message: "Claude session is not active".to_string(),
             })?;
-            let session_id = native_session_id
-                .clone()
-                .unwrap_or_else(|| session_id.to_string());
-            let response_text = response.clone().unwrap_or_default();
-            let line = claude_tool_result_line(&session_id, question_id, &response_text, false);
-            sender
-                .send(line)
-                .map_err(|_| SandboxError::InvalidRequest {
-                    message: "Claude session is not active".to_string(),
-                })?;
+            if let Some((perm_id, perm)) = &linked_permission {
+                // Use the permission control response to deliver the answer.
+                // Build updatedInput from the original input with the answers map added.
+                let original_input = perm
+                    .metadata
+                    .as_ref()
+                    .and_then(|m| m.get("input"))
+                    .cloned()
+                    .unwrap_or(Value::Null);
+                let mut updated = match original_input {
+                    Value::Object(map) => map,
+                    _ => serde_json::Map::new(),
+                };
+                // Build answers map: { "0": "selected option", "1": "another option", ... }
+                let answers_map: serde_json::Map<String, Value> = answers
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, inner)| {
+                        inner
+                            .first()
+                            .map(|v| (i.to_string(), Value::String(v.clone())))
+                    })
+                    .collect();
+                updated.insert("answers".to_string(), Value::Object(answers_map));
+
+                let mut response_map = serde_json::Map::new();
+                response_map.insert("updatedInput".to_string(), Value::Object(updated));
+                let line =
+                    claude_control_response_line(perm_id, "allow", Value::Object(response_map));
+                sender
+                    .send(line)
+                    .map_err(|_| SandboxError::InvalidRequest {
+                        message: "Claude session is not active".to_string(),
+                    })?;
+            } else {
+                // No linked permission — fall back to tool_result
+                let native_sid = native_session_id
+                    .clone()
+                    .unwrap_or_else(|| session_id.to_string());
+                let response_text = response.clone().unwrap_or_default();
+                let line =
+                    claude_tool_result_line(&native_sid, question_id, &response_text, false);
+                sender
+                    .send(line)
+                    .map_err(|_| SandboxError::InvalidRequest {
+                        message: "Claude session is not active".to_string(),
+                    })?;
+            }
         } else {
             // TODO: Forward question replies to subprocess agents.
         }
 
+        // Emit QuestionResolved
         if let Some(pending) = pending_question {
-            let resolved = EventConversion::new(
+            let mut conversions = vec![EventConversion::new(
                 UniversalEventType::QuestionResolved,
                 UniversalEventData::Question(QuestionEventData {
                     question_id: question_id.to_string(),
@@ -2182,8 +2254,26 @@ impl SessionManager {
                 }),
             )
             .synthetic()
-            .with_native_session(native_session_id);
-            let _ = self.record_conversions(session_id, vec![resolved]).await;
+            .with_native_session(native_session_id.clone())];
+
+            // Also emit PermissionResolved for the linked permission
+            if let Some((perm_id, perm)) = linked_permission {
+                conversions.push(
+                    EventConversion::new(
+                        UniversalEventType::PermissionResolved,
+                        UniversalEventData::Permission(PermissionEventData {
+                            permission_id: perm_id,
+                            action: perm.action,
+                            status: PermissionStatus::Approved,
+                            metadata: perm.metadata,
+                        }),
+                    )
+                    .synthetic()
+                    .with_native_session(native_session_id),
+                );
+            }
+
+            let _ = self.record_conversions(session_id, conversions).await;
         }
 
         Ok(())
@@ -2194,7 +2284,7 @@ impl SessionManager {
         session_id: &str,
         question_id: &str,
     ) -> Result<(), SandboxError> {
-        let (agent, native_session_id, pending_question, claude_sender) = {
+        let (agent, native_session_id, pending_question, claude_sender, linked_permission) = {
             let mut sessions = self.sessions.lock().await;
             let session = Self::session_mut(&mut sessions, session_id).ok_or_else(|| {
                 SandboxError::SessionNotFound {
@@ -2210,11 +2300,17 @@ impl SessionManager {
             if let Some(err) = session.ended_error() {
                 return Err(err);
             }
+            let linked_perm = if session.agent == AgentId::Claude {
+                session.take_question_tool_permission()
+            } else {
+                None
+            };
             (
                 session.agent,
                 session.native_session_id.clone(),
                 pending,
                 session.claude_sender(),
+                linked_perm,
             )
         };
 
@@ -2231,26 +2327,43 @@ impl SessionManager {
             let sender = claude_sender.ok_or_else(|| SandboxError::InvalidRequest {
                 message: "Claude session is not active".to_string(),
             })?;
-            let session_id = native_session_id
-                .clone()
-                .unwrap_or_else(|| session_id.to_string());
-            let line = claude_tool_result_line(
-                &session_id,
-                question_id,
-                "User rejected the question.",
-                true,
-            );
-            sender
-                .send(line)
-                .map_err(|_| SandboxError::InvalidRequest {
-                    message: "Claude session is not active".to_string(),
-                })?;
+            if let Some((perm_id, _)) = &linked_permission {
+                // Deny via the permission control response
+                let mut response_map = serde_json::Map::new();
+                response_map.insert(
+                    "message".to_string(),
+                    Value::String("Permission denied.".to_string()),
+                );
+                let line =
+                    claude_control_response_line(perm_id, "deny", Value::Object(response_map));
+                sender
+                    .send(line)
+                    .map_err(|_| SandboxError::InvalidRequest {
+                        message: "Claude session is not active".to_string(),
+                    })?;
+            } else {
+                let native_sid = native_session_id
+                    .clone()
+                    .unwrap_or_else(|| session_id.to_string());
+                let line = claude_tool_result_line(
+                    &native_sid,
+                    question_id,
+                    "User rejected the question.",
+                    true,
+                );
+                sender
+                    .send(line)
+                    .map_err(|_| SandboxError::InvalidRequest {
+                        message: "Claude session is not active".to_string(),
+                    })?;
+            }
         } else {
             // TODO: Forward question rejections to subprocess agents.
         }
 
+        // Emit QuestionResolved
         if let Some(pending) = pending_question {
-            let resolved = EventConversion::new(
+            let mut conversions = vec![EventConversion::new(
                 UniversalEventType::QuestionResolved,
                 UniversalEventData::Question(QuestionEventData {
                     question_id: question_id.to_string(),
@@ -2261,8 +2374,26 @@ impl SessionManager {
                 }),
             )
             .synthetic()
-            .with_native_session(native_session_id);
-            let _ = self.record_conversions(session_id, vec![resolved]).await;
+            .with_native_session(native_session_id.clone())];
+
+            // Also emit PermissionResolved for the linked permission
+            if let Some((perm_id, perm)) = linked_permission {
+                conversions.push(
+                    EventConversion::new(
+                        UniversalEventType::PermissionResolved,
+                        UniversalEventData::Permission(PermissionEventData {
+                            permission_id: perm_id,
+                            action: perm.action,
+                            status: PermissionStatus::Denied,
+                            metadata: perm.metadata,
+                        }),
+                    )
+                    .synthetic()
+                    .with_native_session(native_session_id),
+                );
+            }
+
+            let _ = self.record_conversions(session_id, conversions).await;
         }
 
         Ok(())
@@ -5074,6 +5205,22 @@ fn claude_control_response_line(request_id: &str, behavior: &str, response: Valu
         }
     })
     .to_string()
+}
+
+/// Returns true if the given action name corresponds to a question tool
+/// (AskUserQuestion or ExitPlanMode in any casing convention).
+pub(crate) fn is_question_tool_action(action: &str) -> bool {
+    matches!(
+        action,
+        "AskUserQuestion"
+            | "ask_user_question"
+            | "askUserQuestion"
+            | "ask-user-question"
+            | "ExitPlanMode"
+            | "exit_plan_mode"
+            | "exitPlanMode"
+            | "exit-plan-mode"
+    )
 }
 
 fn read_lines<R: std::io::Read>(reader: R, sender: mpsc::UnboundedSender<String>) {

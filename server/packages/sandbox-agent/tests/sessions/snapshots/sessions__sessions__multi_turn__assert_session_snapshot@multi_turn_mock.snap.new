@@ -38,36 +38,13 @@ first:
       status: in_progress
     seq: 5
     type: item.started
-  - delta:
-      delta: "<redacted>"
-      item_id: "<redacted>"
-      native_item_id: "<redacted>"
+  - item:
+      content_types: []
+      kind: message
+      role: assistant
+      status: completed
     seq: 6
-    type: item.delta
-  - delta:
-      delta: "<redacted>"
-      item_id: "<redacted>"
-      native_item_id: "<redacted>"
-    seq: 7
-    type: item.delta
-  - delta:
-      delta: "<redacted>"
-      item_id: "<redacted>"
-      native_item_id: "<redacted>"
-    seq: 8
-    type: item.delta
-  - delta:
-      delta: "<redacted>"
-      item_id: "<redacted>"
-      native_item_id: "<redacted>"
-    seq: 9
-    type: item.delta
-  - delta:
-      delta: "<redacted>"
-      item_id: "<redacted>"
-      native_item_id: "<redacted>"
-    seq: 10
-    type: item.delta
+    type: item.completed
 second:
   - item:
       content_types:
@@ -105,27 +82,11 @@ second:
       native_item_id: "<redacted>"
     seq: 5
     type: item.delta
-  - delta:
-      delta: "<redacted>"
-      item_id: "<redacted>"
-      native_item_id: "<redacted>"
+  - item:
+      content_types:
+        - text
+      kind: message
+      role: assistant
+      status: completed
     seq: 6
-    type: item.delta
-  - delta:
-      delta: "<redacted>"
-      item_id: "<redacted>"
-      native_item_id: "<redacted>"
-    seq: 7
-    type: item.delta
-  - delta:
-      delta: "<redacted>"
-      item_id: "<redacted>"
-      native_item_id: "<redacted>"
-    seq: 8
-    type: item.delta
-  - delta:
-      delta: "<redacted>"
-      item_id: "<redacted>"
-      native_item_id: "<redacted>"
-    seq: 9
-    type: item.delta
+    type: item.completed

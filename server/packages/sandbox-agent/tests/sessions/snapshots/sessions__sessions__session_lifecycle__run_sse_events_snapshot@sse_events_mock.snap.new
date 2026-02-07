@@ -1,6 +1,6 @@
 ---
 source: server/packages/sandbox-agent/tests/sessions/../common/http.rs
-assertion_line: 1001
+assertion_line: 1039
 expression: normalized
 ---
 - metadata: true
