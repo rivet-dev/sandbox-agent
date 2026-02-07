@@ -6,13 +6,10 @@ nonEmpty: true
 hasDefault: true
 defaultInList: true
 hasVariants: true
-modelCount: 4
+modelCount: 1
 ids:
-  - deep
-  - free
-  - rush
-  - smart
-defaultModel: smart
+  - default
+defaultModel: default
 variants:
   - high
   - medium

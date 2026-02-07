@@ -1823,7 +1823,10 @@ impl SessionManager {
         Ok(())
     }
 
-    async fn agent_modes(&self, agent: AgentId) -> Result<Vec<AgentModeInfo>, SandboxError> {
+    pub(crate) async fn agent_modes(
+        &self,
+        agent: AgentId,
+    ) -> Result<Vec<AgentModeInfo>, SandboxError> {
         if agent != AgentId::Opencode {
             return Ok(agent_modes_for(agent));
         }
@@ -4986,11 +4989,28 @@ fn agent_modes_for(agent: AgentId) -> Vec<AgentModeInfo> {
                 description: "Plan mode (prompt-only)".to_string(),
             },
         ],
-        AgentId::Amp => vec![AgentModeInfo {
-            id: "build".to_string(),
-            name: "Build".to_string(),
-            description: "Default build mode".to_string(),
-        }],
+        AgentId::Amp => vec![
+            AgentModeInfo {
+                id: "smart".to_string(),
+                name: "Smart".to_string(),
+                description: "Default Amp mode".to_string(),
+            },
+            AgentModeInfo {
+                id: "rush".to_string(),
+                name: "Rush".to_string(),
+                description: "Fast mode with smaller context".to_string(),
+            },
+            AgentModeInfo {
+                id: "deep".to_string(),
+                name: "Deep".to_string(),
+                description: "Deep reasoning mode".to_string(),
+            },
+            AgentModeInfo {
+                id: "free".to_string(),
+                name: "Free".to_string(),
+                description: "Free/experimental mode".to_string(),
+            },
+        ],
         AgentId::Mock => vec![
             AgentModeInfo {
                 id: "build".to_string(),
@@ -5007,23 +5027,14 @@ fn agent_modes_for(agent: AgentId) -> Vec<AgentModeInfo> {
 }
 
 fn amp_models_response() -> AgentModelsResponse {
-    // NOTE: Amp models are hardcoded based on ampcode.com manual:
-    // - smart
-    // - rush
-    // - deep
-    // - free
-    let models = ["smart", "rush", "deep", "free"]
-        .into_iter()
-        .map(|id| AgentModelInfo {
-            id: id.to_string(),
-            name: None,
+    AgentModelsResponse {
+        models: vec![AgentModelInfo {
+            id: "default".to_string(),
+            name: Some("Default".to_string()),
             variants: Some(amp_variants()),
             default_variant: Some("medium".to_string()),
-        })
-        .collect();
-    AgentModelsResponse {
-        models,
-        default_model: Some("smart".to_string()),
+        }],
+        default_model: Some("default".to_string()),
     }
 }
 
@@ -5159,7 +5170,8 @@ fn normalize_agent_mode(agent: AgentId, agent_mode: Option<&str>) -> Result<Stri
             .into()),
         },
         AgentId::Amp => match mode {
-            "build" => Ok("build".to_string()),
+            "build" => Ok("smart".to_string()),
+            "smart" | "rush" | "deep" | "free" => Ok(mode.to_string()),
             value => Err(SandboxError::ModeNotSupported {
                 agent: agent.as_str().to_string(),
                 mode: value.to_string(),

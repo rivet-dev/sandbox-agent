@@ -27,7 +27,8 @@ use tracing::{info, warn};
 use utoipa::{IntoParams, OpenApi, ToSchema};
 
 use crate::router::{
-    is_question_tool_action, AgentModelInfo, AppState, CreateSessionRequest, PermissionReply,
+    is_question_tool_action, AgentModeInfo, AgentModelInfo, AppState, CreateSessionRequest,
+    PermissionReply,
 };
 use sandbox_agent_agent_management::agents::AgentId;
 use sandbox_agent_agent_management::credentials::{
@@ -2834,16 +2835,64 @@ pub fn build_opencode_router(state: Arc<OpenCodeAppState>) -> Router {
 )]
 async fn oc_agent_list(State(state): State<Arc<OpenCodeAppState>>) -> impl IntoResponse {
     let name = state.inner.branding.product_name();
-    let agent = json!({
-        "name": name,
-        "description": format!("{name} compatibility layer"),
-        "mode": "all",
-        "native": false,
-        "hidden": false,
-        "permission": [],
-        "options": {},
-    });
-    (StatusCode::OK, Json(json!([agent])))
+    let mut modes = match state
+        .inner
+        .session_manager()
+        .agent_modes(AgentId::Opencode)
+        .await
+    {
+        Ok(modes) if !modes.is_empty() => modes,
+        _ => fallback_opencode_modes(),
+    };
+    if modes.is_empty() {
+        let agent = json!({
+            "name": name,
+            "description": format!("{name} compatibility layer"),
+            "mode": "all",
+            "native": false,
+            "hidden": false,
+            "permission": [],
+            "options": {},
+        });
+        return (StatusCode::OK, Json(json!([agent])));
+    }
+    modes.sort_by(|a, b| a.id.cmp(&b.id));
+    let agents: Vec<Value> = modes
+        .into_iter()
+        .map(|mode| {
+            json!({
+                "id": mode.id,
+                "name": mode.id,
+                "description": mode.description,
+                "mode": "all",
+                "native": false,
+                "hidden": false,
+                "permission": [],
+                "options": {},
+            })
+        })
+        .collect();
+    (StatusCode::OK, Json(json!(agents)))
+}
+
+fn fallback_opencode_modes() -> Vec<AgentModeInfo> {
+    vec![
+        AgentModeInfo {
+            id: "build".to_string(),
+            name: "Build".to_string(),
+            description: "Default build mode".to_string(),
+        },
+        AgentModeInfo {
+            id: "plan".to_string(),
+            name: "Plan".to_string(),
+            description: "Planning mode".to_string(),
+        },
+        AgentModeInfo {
+            id: "custom".to_string(),
+            name: "Custom".to_string(),
+            description: "Any user-defined OpenCode agent name".to_string(),
+        },
+    ]
 }
 
 #[utoipa::path(

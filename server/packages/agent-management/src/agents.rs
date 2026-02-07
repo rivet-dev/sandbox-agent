@@ -1020,12 +1020,28 @@ fn extract_result_text(agent: AgentId, events: &[Value]) -> Option<String> {
     }
 }
 
+fn amp_mode_from_agent_mode(agent_mode: Option<&str>) -> Option<String> {
+    let mode = agent_mode
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())?;
+    let normalized = match mode {
+        "build" | "default" => "smart",
+        other => other,
+    };
+    Some(normalized.to_string())
+}
+
 fn spawn_amp(
     path: &Path,
     working_dir: &Path,
     options: &SpawnOptions,
 ) -> Result<std::process::Output, AgentError> {
     let flags = detect_amp_flags(path, working_dir).unwrap_or_default();
+    let mode = if flags.mode {
+        amp_mode_from_agent_mode(options.agent_mode.as_deref())
+    } else {
+        None
+    };
     let mut args: Vec<&str> = Vec::new();
     if flags.execute {
         args.push("--execute");
@@ -1042,8 +1058,8 @@ fn spawn_amp(
 
     let mut command = Command::new(path);
     command.current_dir(working_dir);
-    if let Some(model) = options.model.as_deref() {
-        command.arg("--model").arg(model);
+    if let Some(mode) = mode.as_deref() {
+        command.arg("--mode").arg(mode);
     }
     if let Some(session_id) = options.session_id.as_deref() {
         command.arg("--continue").arg(session_id);
@@ -1070,10 +1086,15 @@ fn spawn_amp(
 
 fn build_amp_command(path: &Path, working_dir: &Path, options: &SpawnOptions) -> Command {
     let flags = detect_amp_flags(path, working_dir).unwrap_or_default();
+    let mode = if flags.mode {
+        amp_mode_from_agent_mode(options.agent_mode.as_deref())
+    } else {
+        None
+    };
     let mut command = Command::new(path);
     command.current_dir(working_dir);
-    if let Some(model) = options.model.as_deref() {
-        command.arg("--model").arg(model);
+    if let Some(mode) = mode.as_deref() {
+        command.arg("--mode").arg(mode);
     }
     if let Some(session_id) = options.session_id.as_deref() {
         command.arg("--continue").arg(session_id);
@@ -1102,6 +1123,7 @@ struct AmpFlags {
     print: bool,
     output_format: bool,
     dangerously_skip_permissions: bool,
+    mode: bool,
 }
 
 fn detect_amp_flags(path: &Path, working_dir: &Path) -> Option<AmpFlags> {
@@ -1120,6 +1142,7 @@ fn detect_amp_flags(path: &Path, working_dir: &Path) -> Option<AmpFlags> {
         print: text.contains("--print"),
         output_format: text.contains("--output-format"),
         dangerously_skip_permissions: text.contains("--dangerously-skip-permissions"),
+        mode: text.contains("--mode"),
     })
 }
 
@@ -1128,6 +1151,12 @@ fn spawn_amp_fallback(
     working_dir: &Path,
     options: &SpawnOptions,
 ) -> Result<std::process::Output, AgentError> {
+    let flags = detect_amp_flags(path, working_dir).unwrap_or_default();
+    let mode = if flags.mode {
+        amp_mode_from_agent_mode(options.agent_mode.as_deref())
+    } else {
+        None
+    };
     let mut attempts = vec![
         vec!["--execute"],
         vec!["--print", "--output-format", "stream-json"],
@@ -1142,8 +1171,8 @@ fn spawn_amp_fallback(
     for args in attempts {
         let mut command = Command::new(path);
         command.current_dir(working_dir);
-        if let Some(model) = options.model.as_deref() {
-            command.arg("--model").arg(model);
+        if let Some(mode) = mode.as_deref() {
+            command.arg("--mode").arg(mode);
         }
         if let Some(session_id) = options.session_id.as_deref() {
             command.arg("--continue").arg(session_id);
