@@ -20,17 +20,25 @@ jobs:
 
       - name: Sync to skills repo
         env:
-          SKILLS_REPO_TOKEN: ${{ secrets.RIVET_GITHUB_PAT }}
+          GH_TOKEN: ${{ secrets.RIVET_GITHUB_PAT }}
         run: |
-          if [ -z "$SKILLS_REPO_TOKEN" ]; then
-            echo "SKILLS_REPO_TOKEN is not set" >&2
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::RIVET_GITHUB_PAT secret is not set"
+            exit 1
+          fi
+
+          # Validate token before proceeding
+          if ! gh auth status 2>/dev/null; then
+            echo "::error::RIVET_GITHUB_PAT is invalid or expired. Rotate the token at https://github.com/settings/tokens"
             exit 1
           fi
 
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-          git clone "https://x-access-token:${SKILLS_REPO_TOKEN}@github.com/rivet-dev/skills.git" /tmp/rivet-skills
+          # Clone public repo, configure auth via gh credential helper
+          gh auth setup-git
+          git clone https://github.com/rivet-dev/skills.git /tmp/rivet-skills
 
           mkdir -p /tmp/rivet-skills/skills/sandbox-agent
           rm -rf /tmp/rivet-skills/skills/sandbox-agent/*
