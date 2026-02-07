@@ -10,13 +10,15 @@ use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
+use axum::body::Body;
 use axum::extract::{Path, Query, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::{header, HeaderMap, HeaderName, HeaderValue, StatusCode};
 use axum::response::sse::{Event, KeepAlive};
-use axum::response::{IntoResponse, Sse};
+use axum::response::{IntoResponse, Response, Sse};
 use axum::routing::{get, patch, post, put};
 use axum::{Json, Router};
 use futures::stream;
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::sync::{broadcast, Mutex};
@@ -56,6 +58,7 @@ struct OpenCodeCompatConfig {
     fixed_state: Option<String>,
     fixed_config: Option<String>,
     fixed_branch: Option<String>,
+    proxy_base_url: Option<String>,
 }
 
 impl OpenCodeCompatConfig {
@@ -70,6 +73,9 @@ impl OpenCodeCompatConfig {
             fixed_state: std::env::var("OPENCODE_COMPAT_STATE").ok(),
             fixed_config: std::env::var("OPENCODE_COMPAT_CONFIG").ok(),
             fixed_branch: std::env::var("OPENCODE_COMPAT_BRANCH").ok(),
+            proxy_base_url: std::env::var("OPENCODE_COMPAT_PROXY_URL")
+                .ok()
+                .and_then(normalize_proxy_base_url),
         }
     }
 
@@ -81,6 +87,19 @@ impl OpenCodeCompatConfig {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as i64)
             .unwrap_or(0)
+    }
+}
+
+fn normalize_proxy_base_url(value: String) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let normalized = trimmed.trim_end_matches('/').to_string();
+    if normalized.starts_with("http://") || normalized.starts_with("https://") {
+        Some(normalized)
+    } else {
+        None
     }
 }
 
@@ -369,6 +388,10 @@ impl OpenCodeState {
             .unwrap_or_else(|| "main".to_string())
     }
 
+    fn proxy_base_url(&self) -> Option<&str> {
+        self.config.proxy_base_url.as_deref()
+    }
+
     async fn update_runtime(
         &self,
         session_id: &str,
@@ -387,6 +410,7 @@ impl OpenCodeState {
 pub struct OpenCodeAppState {
     pub inner: Arc<AppState>,
     pub opencode: Arc<OpenCodeState>,
+    proxy_http_client: Client,
 }
 
 impl OpenCodeAppState {
@@ -394,6 +418,7 @@ impl OpenCodeAppState {
         Arc::new(Self {
             inner,
             opencode: Arc::new(OpenCodeState::new()),
+            proxy_http_client: Client::new(),
         })
     }
 }
@@ -1089,6 +1114,91 @@ fn parse_permission_reply_value(value: Option<&str>) -> Result<PermissionReply, 
 
 fn bool_ok(value: bool) -> (StatusCode, Json<Value>) {
     (StatusCode::OK, Json(json!(value)))
+}
+
+async fn proxy_native_opencode(
+    state: &Arc<OpenCodeAppState>,
+    method: reqwest::Method,
+    path: &str,
+    headers: &HeaderMap,
+    body: Option<Value>,
+) -> Option<Response> {
+    let Some(base_url) = state.opencode.proxy_base_url() else {
+        return None;
+    };
+
+    let mut request = state
+        .proxy_http_client
+        .request(method, format!("{base_url}{path}"));
+
+    for header_name in [
+        header::AUTHORIZATION,
+        header::ACCEPT,
+        HeaderName::from_static("x-opencode-directory"),
+    ] {
+        if let Some(value) = headers.get(&header_name) {
+            request = request.header(header_name.as_str(), value.as_bytes());
+        }
+    }
+
+    if let Some(body) = body {
+        request = request.json(&body);
+    }
+
+    let response = match request.send().await {
+        Ok(response) => response,
+        Err(err) => {
+            warn!(path, ?err, "failed proxy request to native opencode");
+            return Some(
+                (
+                    StatusCode::BAD_GATEWAY,
+                    Json(json!({
+                        "data": {},
+                        "errors": [{"message": format!("failed to proxy to native opencode: {err}")}],
+                        "success": false,
+                    })),
+                )
+                    .into_response(),
+            );
+        }
+    };
+
+    let status =
+        StatusCode::from_u16(response.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.to_string());
+    let body_bytes = match response.bytes().await {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            warn!(path, ?err, "failed to read proxied response body");
+            return Some(
+                (
+                    StatusCode::BAD_GATEWAY,
+                    Json(json!({
+                        "data": {},
+                        "errors": [{"message": format!("failed to read proxied response: {err}")}],
+                        "success": false,
+                    })),
+                )
+                    .into_response(),
+            );
+        }
+    };
+
+    let mut proxied = Response::new(Body::from(body_bytes));
+    *proxied.status_mut() = status;
+    if let Some(content_type) = content_type {
+        if let Ok(header_value) = HeaderValue::from_str(&content_type) {
+            proxied
+                .headers_mut()
+                .insert(header::CONTENT_TYPE, header_value);
+        }
+    }
+
+    Some(proxied)
 }
 
 fn build_user_message(
@@ -2676,8 +2786,16 @@ async fn oc_agent_list(State(state): State<Arc<OpenCodeAppState>>) -> impl IntoR
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_command_list() -> impl IntoResponse {
-    (StatusCode::OK, Json(json!([])))
+async fn oc_command_list(
+    State(state): State<Arc<OpenCodeAppState>>,
+    headers: HeaderMap,
+) -> Response {
+    if let Some(response) =
+        proxy_native_opencode(&state, reqwest::Method::GET, "/command", &headers, None).await
+    {
+        return response;
+    }
+    (StatusCode::OK, Json(json!([]))).into_response()
 }
 
 #[utoipa::path(
@@ -2686,8 +2804,13 @@ async fn oc_command_list() -> impl IntoResponse {
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_config_get() -> impl IntoResponse {
-    (StatusCode::OK, Json(json!({})))
+async fn oc_config_get(State(state): State<Arc<OpenCodeAppState>>, headers: HeaderMap) -> Response {
+    if let Some(response) =
+        proxy_native_opencode(&state, reqwest::Method::GET, "/config", &headers, None).await
+    {
+        return response;
+    }
+    (StatusCode::OK, Json(json!({}))).into_response()
 }
 
 #[utoipa::path(
@@ -2697,8 +2820,23 @@ async fn oc_config_get() -> impl IntoResponse {
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_config_patch(Json(body): Json<Value>) -> impl IntoResponse {
-    (StatusCode::OK, Json(body))
+async fn oc_config_patch(
+    State(state): State<Arc<OpenCodeAppState>>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    if let Some(response) = proxy_native_opencode(
+        &state,
+        reqwest::Method::PATCH,
+        "/config",
+        &headers,
+        Some(body.clone()),
+    )
+    .await
+    {
+        return response;
+    }
+    (StatusCode::OK, Json(body)).into_response()
 }
 
 #[utoipa::path(
@@ -2906,8 +3044,22 @@ async fn oc_global_health() -> impl IntoResponse {
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_global_config_get() -> impl IntoResponse {
-    (StatusCode::OK, Json(json!({})))
+async fn oc_global_config_get(
+    State(state): State<Arc<OpenCodeAppState>>,
+    headers: HeaderMap,
+) -> Response {
+    if let Some(response) = proxy_native_opencode(
+        &state,
+        reqwest::Method::GET,
+        "/global/config",
+        &headers,
+        None,
+    )
+    .await
+    {
+        return response;
+    }
+    (StatusCode::OK, Json(json!({}))).into_response()
 }
 
 #[utoipa::path(
@@ -2917,8 +3069,23 @@ async fn oc_global_config_get() -> impl IntoResponse {
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_global_config_patch(Json(body): Json<Value>) -> impl IntoResponse {
-    (StatusCode::OK, Json(body))
+async fn oc_global_config_patch(
+    State(state): State<Arc<OpenCodeAppState>>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    if let Some(response) = proxy_native_opencode(
+        &state,
+        reqwest::Method::PATCH,
+        "/global/config",
+        &headers,
+        Some(body.clone()),
+    )
+    .await
+    {
+        return response;
+    }
+    (StatusCode::OK, Json(body)).into_response()
 }
 
 #[utoipa::path(
@@ -4563,8 +4730,19 @@ async fn oc_skill_list() -> impl IntoResponse {
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_tui_next() -> impl IntoResponse {
-    (StatusCode::OK, Json(json!({"path": "", "body": {}})))
+async fn oc_tui_next(State(state): State<Arc<OpenCodeAppState>>, headers: HeaderMap) -> Response {
+    if let Some(response) = proxy_native_opencode(
+        &state,
+        reqwest::Method::GET,
+        "/tui/control/next",
+        &headers,
+        None,
+    )
+    .await
+    {
+        return response;
+    }
+    (StatusCode::OK, Json(json!({"path": "", "body": {}}))).into_response()
 }
 
 #[utoipa::path(
@@ -4574,8 +4752,23 @@ async fn oc_tui_next() -> impl IntoResponse {
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_tui_response() -> impl IntoResponse {
-    bool_ok(true)
+async fn oc_tui_response(
+    State(state): State<Arc<OpenCodeAppState>>,
+    headers: HeaderMap,
+    body: Option<Json<Value>>,
+) -> Response {
+    if let Some(response) = proxy_native_opencode(
+        &state,
+        reqwest::Method::POST,
+        "/tui/control/response",
+        &headers,
+        body.map(|json| json.0),
+    )
+    .await
+    {
+        return response;
+    }
+    bool_ok(true).into_response()
 }
 
 #[utoipa::path(
@@ -4585,8 +4778,23 @@ async fn oc_tui_response() -> impl IntoResponse {
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_tui_append_prompt() -> impl IntoResponse {
-    bool_ok(true)
+async fn oc_tui_append_prompt(
+    State(state): State<Arc<OpenCodeAppState>>,
+    headers: HeaderMap,
+    body: Option<Json<Value>>,
+) -> Response {
+    if let Some(response) = proxy_native_opencode(
+        &state,
+        reqwest::Method::POST,
+        "/tui/append-prompt",
+        &headers,
+        body.map(|json| json.0),
+    )
+    .await
+    {
+        return response;
+    }
+    bool_ok(true).into_response()
 }
 
 #[utoipa::path(
@@ -4595,8 +4803,22 @@ async fn oc_tui_append_prompt() -> impl IntoResponse {
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_tui_open_help() -> impl IntoResponse {
-    bool_ok(true)
+async fn oc_tui_open_help(
+    State(state): State<Arc<OpenCodeAppState>>,
+    headers: HeaderMap,
+) -> Response {
+    if let Some(response) = proxy_native_opencode(
+        &state,
+        reqwest::Method::POST,
+        "/tui/open-help",
+        &headers,
+        None,
+    )
+    .await
+    {
+        return response;
+    }
+    bool_ok(true).into_response()
 }
 
 #[utoipa::path(
@@ -4605,8 +4827,22 @@ async fn oc_tui_open_help() -> impl IntoResponse {
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_tui_open_sessions() -> impl IntoResponse {
-    bool_ok(true)
+async fn oc_tui_open_sessions(
+    State(state): State<Arc<OpenCodeAppState>>,
+    headers: HeaderMap,
+) -> Response {
+    if let Some(response) = proxy_native_opencode(
+        &state,
+        reqwest::Method::POST,
+        "/tui/open-sessions",
+        &headers,
+        None,
+    )
+    .await
+    {
+        return response;
+    }
+    bool_ok(true).into_response()
 }
 
 #[utoipa::path(
@@ -4615,8 +4851,22 @@ async fn oc_tui_open_sessions() -> impl IntoResponse {
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_tui_open_themes() -> impl IntoResponse {
-    bool_ok(true)
+async fn oc_tui_open_themes(
+    State(state): State<Arc<OpenCodeAppState>>,
+    headers: HeaderMap,
+) -> Response {
+    if let Some(response) = proxy_native_opencode(
+        &state,
+        reqwest::Method::POST,
+        "/tui/open-themes",
+        &headers,
+        None,
+    )
+    .await
+    {
+        return response;
+    }
+    bool_ok(true).into_response()
 }
 
 #[utoipa::path(
@@ -4625,8 +4875,22 @@ async fn oc_tui_open_themes() -> impl IntoResponse {
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_tui_open_models() -> impl IntoResponse {
-    bool_ok(true)
+async fn oc_tui_open_models(
+    State(state): State<Arc<OpenCodeAppState>>,
+    headers: HeaderMap,
+) -> Response {
+    if let Some(response) = proxy_native_opencode(
+        &state,
+        reqwest::Method::POST,
+        "/tui/open-models",
+        &headers,
+        None,
+    )
+    .await
+    {
+        return response;
+    }
+    bool_ok(true).into_response()
 }
 
 #[utoipa::path(
@@ -4636,8 +4900,23 @@ async fn oc_tui_open_models() -> impl IntoResponse {
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_tui_submit_prompt() -> impl IntoResponse {
-    bool_ok(true)
+async fn oc_tui_submit_prompt(
+    State(state): State<Arc<OpenCodeAppState>>,
+    headers: HeaderMap,
+    body: Option<Json<Value>>,
+) -> Response {
+    if let Some(response) = proxy_native_opencode(
+        &state,
+        reqwest::Method::POST,
+        "/tui/submit-prompt",
+        &headers,
+        body.map(|json| json.0),
+    )
+    .await
+    {
+        return response;
+    }
+    bool_ok(true).into_response()
 }
 
 #[utoipa::path(
@@ -4646,8 +4925,22 @@ async fn oc_tui_submit_prompt() -> impl IntoResponse {
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_tui_clear_prompt() -> impl IntoResponse {
-    bool_ok(true)
+async fn oc_tui_clear_prompt(
+    State(state): State<Arc<OpenCodeAppState>>,
+    headers: HeaderMap,
+) -> Response {
+    if let Some(response) = proxy_native_opencode(
+        &state,
+        reqwest::Method::POST,
+        "/tui/clear-prompt",
+        &headers,
+        None,
+    )
+    .await
+    {
+        return response;
+    }
+    bool_ok(true).into_response()
 }
 
 #[utoipa::path(
@@ -4657,8 +4950,23 @@ async fn oc_tui_clear_prompt() -> impl IntoResponse {
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_tui_execute_command() -> impl IntoResponse {
-    bool_ok(true)
+async fn oc_tui_execute_command(
+    State(state): State<Arc<OpenCodeAppState>>,
+    headers: HeaderMap,
+    body: Option<Json<Value>>,
+) -> Response {
+    if let Some(response) = proxy_native_opencode(
+        &state,
+        reqwest::Method::POST,
+        "/tui/execute-command",
+        &headers,
+        body.map(|json| json.0),
+    )
+    .await
+    {
+        return response;
+    }
+    bool_ok(true).into_response()
 }
 
 #[utoipa::path(
@@ -4668,8 +4976,23 @@ async fn oc_tui_execute_command() -> impl IntoResponse {
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_tui_show_toast() -> impl IntoResponse {
-    bool_ok(true)
+async fn oc_tui_show_toast(
+    State(state): State<Arc<OpenCodeAppState>>,
+    headers: HeaderMap,
+    body: Option<Json<Value>>,
+) -> Response {
+    if let Some(response) = proxy_native_opencode(
+        &state,
+        reqwest::Method::POST,
+        "/tui/show-toast",
+        &headers,
+        body.map(|json| json.0),
+    )
+    .await
+    {
+        return response;
+    }
+    bool_ok(true).into_response()
 }
 
 #[utoipa::path(
@@ -4679,8 +5002,23 @@ async fn oc_tui_show_toast() -> impl IntoResponse {
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_tui_publish() -> impl IntoResponse {
-    bool_ok(true)
+async fn oc_tui_publish(
+    State(state): State<Arc<OpenCodeAppState>>,
+    headers: HeaderMap,
+    body: Option<Json<Value>>,
+) -> Response {
+    if let Some(response) = proxy_native_opencode(
+        &state,
+        reqwest::Method::POST,
+        "/tui/publish",
+        &headers,
+        body.map(|json| json.0),
+    )
+    .await
+    {
+        return response;
+    }
+    bool_ok(true).into_response()
 }
 
 #[utoipa::path(
@@ -4690,8 +5028,23 @@ async fn oc_tui_publish() -> impl IntoResponse {
     responses((status = 200)),
     tag = "opencode"
 )]
-async fn oc_tui_select_session() -> impl IntoResponse {
-    bool_ok(true)
+async fn oc_tui_select_session(
+    State(state): State<Arc<OpenCodeAppState>>,
+    headers: HeaderMap,
+    body: Option<Json<Value>>,
+) -> Response {
+    if let Some(response) = proxy_native_opencode(
+        &state,
+        reqwest::Method::POST,
+        "/tui/select-session",
+        &headers,
+        body.map(|json| json.0),
+    )
+    .await
+    {
+        return response;
+    }
+    bool_ok(true).into_response()
 }
 
 #[derive(OpenApi)]

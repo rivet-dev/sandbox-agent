@@ -113,6 +113,7 @@ for await (const event of events.stream) {
 - **CORS**: When using the web UI from a different origin, configure `--cors-allow-origin`
 - **Provider Selection**: Use the provider/model selector in the UI to choose which backing agent to use (claude, codex, opencode, amp)
 - **Models & Variants**: Providers are grouped by backing agent (e.g. Claude Code, Codex, Amp). OpenCode models are grouped by `OpenCode (<provider>)` to preserve their native provider grouping. Each model keeps its real model ID, and variants are exposed when available (Codex/OpenCode/Amp).
+- **Optional Native Proxy for TUI/Config Endpoints**: Set `OPENCODE_COMPAT_PROXY_URL` (for example `http://127.0.0.1:4096`) to proxy select OpenCode-native endpoints to a real OpenCode server. This currently applies to `/command`, `/config`, `/global/config`, and `/tui/*`. If not set, sandbox-agent uses its built-in compatibility handlers.
 
 ## Endpoint Coverage
 
@@ -134,10 +135,15 @@ See the full endpoint compatibility table below. Most endpoints are functional f
 | `GET /question` | ✓ | List pending questions |
 | `POST /question/{id}/reply` | ✓ | Answer agent questions |
 | `GET /provider` | ✓ | Returns provider metadata |
+| `GET /command` | ↔ | Proxied to native OpenCode when `OPENCODE_COMPAT_PROXY_URL` is set; otherwise stub response |
+| `GET /config` | ↔ | Proxied to native OpenCode when `OPENCODE_COMPAT_PROXY_URL` is set; otherwise stub response |
+| `PATCH /config` | ↔ | Proxied to native OpenCode when `OPENCODE_COMPAT_PROXY_URL` is set; otherwise local compatibility behavior |
+| `GET /global/config` | ↔ | Proxied to native OpenCode when `OPENCODE_COMPAT_PROXY_URL` is set; otherwise stub response |
+| `PATCH /global/config` | ↔ | Proxied to native OpenCode when `OPENCODE_COMPAT_PROXY_URL` is set; otherwise local compatibility behavior |
+| `/tui/*` | ↔ | Proxied to native OpenCode when `OPENCODE_COMPAT_PROXY_URL` is set; otherwise local compatibility behavior |
 | `GET /agent` | − | Returns agent list |
-| `GET /config` | − | Returns config |
 | *other endpoints* | − | Return empty/stub responses |
 
-✓ Functional &nbsp;&nbsp; − Stubbed
+✓ Functional &nbsp;&nbsp; ↔ Proxied (optional) &nbsp;&nbsp; − Stubbed
 
 </Accordion>

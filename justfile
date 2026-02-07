@@ -50,13 +50,19 @@ fmt:
 
 [group('dev')]
 install-fast-sa:
-	cargo build --release -p sandbox-agent
+	SANDBOX_AGENT_SKIP_INSPECTOR=1 cargo build --release -p sandbox-agent
+	rm -f ~/.cargo/bin/sandbox-agent
 	cp target/release/sandbox-agent ~/.cargo/bin/sandbox-agent
 
 [group('dev')]
-install-fast-gigacode:
-	cargo build --release -p gigacode
+install-gigacode:
+	SANDBOX_AGENT_SKIP_INSPECTOR=1 cargo build --release -p gigacode
+	rm -f ~/.cargo/bin/gigacode
 	cp target/release/gigacode ~/.cargo/bin/gigacode
+
+[group('dev')]
+run-gigacode *ARGS:
+	SANDBOX_AGENT_SKIP_INSPECTOR=1 cargo run -p gigacode -- {{ ARGS }}
 
 [group('dev')]
 dev-docs:
@@ -77,4 +83,3 @@ install-release:
     pnpm build --filter @sandbox-agent/inspector...
     cargo install --path server/packages/sandbox-agent
     cargo install --path gigacode
-
