@@ -15,12 +15,27 @@ pub fn is_enabled() -> bool {
 
 pub fn router() -> Router {
     if !INSPECTOR_ENABLED {
-        return Router::new();
+        return Router::new()
+            .route("/ui", get(handle_not_built))
+            .route("/ui/", get(handle_not_built))
+            .route("/ui/*path", get(handle_not_built));
     }
     Router::new()
         .route("/ui", get(handle_index))
         .route("/ui/", get(handle_index))
         .route("/ui/*path", get(handle_path))
+}
+
+async fn handle_not_built() -> Response {
+    let body = "Inspector UI was not included in this build.\n\n\
+                To enable it, build the frontend first:\n\n\
+                  cd frontend/packages/inspector && pnpm install && pnpm build\n\n\
+                Then rebuild sandbox-agent without SANDBOX_AGENT_SKIP_INSPECTOR.\n";
+    Response::builder()
+        .status(StatusCode::NOT_FOUND)
+        .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
+        .body(Body::from(body))
+        .unwrap()
 }
 
 async fn handle_index() -> Response {

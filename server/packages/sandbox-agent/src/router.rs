@@ -235,9 +235,7 @@ pub fn build_router_with_state(shared: Arc<AppState>) -> (Router, Arc<AppState>)
         .nest("/opencode", opencode_router)
         .merge(opencode_root_router);
 
-    if ui::is_enabled() {
-        router = router.merge(ui::router());
-    }
+    router = router.merge(ui::router());
 
     let http_logging = match std::env::var("SANDBOX_AGENT_LOG_HTTP") {
         Ok(value) if value == "0" || value.eq_ignore_ascii_case("false") => false,
