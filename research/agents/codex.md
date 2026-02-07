@@ -347,6 +347,68 @@ Requires a running Codex app-server process. Send the JSON-RPC request to the ap
 - Requires an active app-server process (cannot query models without starting one)
 - No standalone CLI command like `codex models`
 
+## Command Execution & Process Management
+
+### Agent Tool Execution
+
+Codex executes commands via `LocalShellAction`. The agent proposes a command, and external clients approve/deny via JSON-RPC (`item/commandExecution/requestApproval`).
+
+### Command Source Tracking (`ExecCommandSource`)
+
+Codex is the only agent that explicitly tracks **who initiated a command** at the protocol level:
+
+```json
+{
+  "ExecCommandSource": {
+    "enum": ["agent", "user_shell", "unified_exec_startup", "unified_exec_interaction"]
+  }
+}
+```
+
+| Source | Meaning |
+|--------|---------|
+| `agent` | Agent decided to run this command via tool call |
+| `user_shell` | User ran a command in a shell (equivalent to Claude Code's `!` prefix) |
+| `unified_exec_startup` | Startup script ran this command |
+| `unified_exec_interaction` | Interactive execution |
+
+This means user-initiated shell commands are **first-class protocol events** in Codex, not a client-side hack like Claude Code's `!` prefix.
+
+### Command Execution Events
+
+Codex emits structured events for command execution:
+
+- `exec_command_begin` - Command started (includes `source`, `command`, `cwd`, `turn_id`)
+- `exec_command_output_delta` - Streaming output chunk (includes `stream: stdout|stderr`)
+- `exec_command_end` - Command completed (includes `exit_code`, `source`)
+
+### Parsed Command Analysis (`CommandAction`)
+
+Codex provides semantic analysis of what a command does:
+
+```json
+{
+  "commandActions": [
+    { "type": "read", "path": "/src/main.ts" },
+    { "type": "write", "path": "/src/utils.ts" },
+    { "type": "install", "package": "lodash" }
+  ]
+}
+```
+
+Action types: `read`, `write`, `listFiles`, `search`, `install`, `remove`, `other`.
+
+### Comparison
+
+| Capability | Supported? | Notes |
+|-----------|-----------|-------|
+| Agent runs commands | Yes (`LocalShellAction`) | With approval workflow |
+| User runs commands → agent sees output | Yes (`user_shell` source) | First-class protocol event |
+| External API for command injection | Yes (JSON-RPC approval) | Can approve/deny before execution |
+| Command source tracking | Yes (`ExecCommandSource` enum) | Distinguishes agent vs user vs startup |
+| Background process management | No | |
+| PTY / interactive terminal | No | |
+
 ## Notes
 
 - SDK is dynamically imported to reduce bundle size

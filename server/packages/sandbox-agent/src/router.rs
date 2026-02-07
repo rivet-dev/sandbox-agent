@@ -1798,8 +1798,14 @@ impl SessionManager {
         agent: AgentId,
     ) -> Result<AgentModelsResponse, SandboxError> {
         match agent {
-            AgentId::Claude => self.fetch_claude_models().await,
-            AgentId::Codex => self.fetch_codex_models().await,
+            AgentId::Claude => match self.fetch_claude_models().await {
+                Ok(response) if !response.models.is_empty() => Ok(response),
+                _ => Ok(claude_fallback_models()),
+            },
+            AgentId::Codex => match self.fetch_codex_models().await {
+                Ok(response) if !response.models.is_empty() => Ok(response),
+                _ => Ok(codex_fallback_models()),
+            },
             AgentId::Opencode => match self.fetch_opencode_models().await {
                 Ok(models) => Ok(models),
                 Err(_) => Ok(AgentModelsResponse {
@@ -3927,6 +3933,8 @@ pub struct ServerStatusInfo {
 pub struct AgentInfo {
     pub id: String,
     pub installed: bool,
+    /// Whether the agent's required provider credentials are available
+    pub credentials_available: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -4194,6 +4202,10 @@ async fn list_agents(
 
     let agents =
         tokio::task::spawn_blocking(move || {
+            let credentials = extract_all_credentials(&CredentialExtractionOptions::new());
+            let has_anthropic = credentials.anthropic.is_some();
+            let has_openai = credentials.openai.is_some();
+
             all_agents()
                 .into_iter()
                 .map(|agent_id| {
@@ -4201,6 +4213,13 @@ async fn list_agents(
                     let version = manager.version(agent_id).ok().flatten();
                     let path = manager.resolve_binary(agent_id).ok();
                     let capabilities = agent_capabilities_for(agent_id);
+
+                    let credentials_available = match agent_id {
+                        AgentId::Claude | AgentId::Amp => has_anthropic,
+                        AgentId::Codex => has_openai,
+                        AgentId::Opencode => has_anthropic || has_openai,
+                        AgentId::Mock => true,
+                    };
 
                     // Add server_status for agents with shared processes
                     let server_status =
@@ -4221,6 +4240,7 @@ async fn list_agents(
                     AgentInfo {
                         id: agent_id.as_str().to_string(),
                         installed,
+                        credentials_available,
                         version,
                         path: path.map(|path| path.to_string_lossy().to_string()),
                         capabilities,
@@ -4739,6 +4759,38 @@ fn mock_models_response() -> AgentModelsResponse {
             default_variant: None,
         }],
         default_model: Some("mock".to_string()),
+    }
+}
+
+fn claude_fallback_models() -> AgentModelsResponse {
+    let models = ["claude-sonnet-4-20250514", "claude-opus-4-20250514"]
+        .into_iter()
+        .map(|id| AgentModelInfo {
+            id: id.to_string(),
+            name: None,
+            variants: None,
+            default_variant: None,
+        })
+        .collect();
+    AgentModelsResponse {
+        models,
+        default_model: Some("claude-sonnet-4-20250514".to_string()),
+    }
+}
+
+fn codex_fallback_models() -> AgentModelsResponse {
+    let models = ["gpt-4o", "o3", "o4-mini"]
+        .into_iter()
+        .map(|id| AgentModelInfo {
+            id: id.to_string(),
+            name: None,
+            variants: Some(codex_variants()),
+            default_variant: Some("medium".to_string()),
+        })
+        .collect();
+    AgentModelsResponse {
+        models,
+        default_model: Some("gpt-4o".to_string()),
     }
 }
 

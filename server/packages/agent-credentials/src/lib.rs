@@ -63,7 +63,9 @@ pub fn extract_claude_credentials(
     ];
 
     for path in config_paths {
-        let data = read_json_file(&path)?;
+        let Some(data) = read_json_file(&path) else {
+            continue;
+        };
         for key_path in &key_paths {
             if let Some(key) = read_string_field(&data, key_path) {
                 if key.starts_with("sk-ant-") {

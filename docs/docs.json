@@ -70,6 +70,7 @@
 					"cli",
 					"inspector",
 					"session-transcript-schema",
+					"credentials",
 					"gigacode",
 					{
 						"group": "AI",

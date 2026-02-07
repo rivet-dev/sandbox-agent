@@ -39,6 +39,7 @@ const AgentsTab = ({
         : defaultAgents.map((id) => ({
             id,
             installed: false,
+            credentialsAvailable: false,
             version: undefined,
             path: undefined,
             capabilities: emptyFeatureCoverage
@@ -48,6 +49,9 @@ const AgentsTab = ({
             <span className="card-title">{agent.id}</span>
             <span className={`pill ${agent.installed ? "success" : "danger"}`}>
               {agent.installed ? "Installed" : "Missing"}
+            </span>
+            <span className={`pill ${agent.credentialsAvailable ? "success" : "warning"}`}>
+              {agent.credentialsAvailable ? "Authenticated" : "No Credentials"}
             </span>
           </div>
           <div className="card-meta">

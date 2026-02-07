@@ -415,6 +415,31 @@ if let Some(model) = options.model.as_deref() {
 3. **Wait for Amp API** — Amp may add model/mode discovery in a future release
 4. **Scrape ampcode.com** — Check if the web UI exposes available modes/models
 
+## Command Execution & Process Management
+
+### Agent Tool Execution
+
+Amp executes commands via the `Bash` tool, similar to Claude Code. Synchronous execution, blocks the agent turn. Permission rules can pre-authorize specific commands:
+
+```typescript
+{ tool: "Bash", matches: { command: "git *" }, action: "allow" }
+```
+
+### No User-Initiated Command Injection
+
+Amp does not expose any mechanism for external clients to inject command results into the agent's context. No `!` prefix equivalent, no command injection API.
+
+### Comparison
+
+| Capability | Supported? | Notes |
+|-----------|-----------|-------|
+| Agent runs commands | Yes (`Bash` tool) | Synchronous, blocks agent turn |
+| User runs commands → agent sees output | No | |
+| External API for command injection | No | |
+| Command source tracking | No | |
+| Background process management | No | Shell `&` only |
+| PTY / interactive terminal | No | |
+
 ## Notes
 
 - Amp is similar to Claude Code (same streaming format)

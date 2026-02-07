@@ -805,11 +805,16 @@
         "required": [
           "id",
           "installed",
+          "credentialsAvailable",
           "capabilities"
         ],
         "properties": {
           "capabilities": {
             "$ref": "#/components/schemas/AgentCapabilities"
+          },
+          "credentialsAvailable": {
+            "type": "boolean",
+            "description": "Whether the agent's required provider credentials are available"
           },
           "id": {
             "type": "string"

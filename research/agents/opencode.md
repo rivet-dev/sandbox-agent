@@ -585,6 +585,60 @@ const response = await client.provider.list();
 
 When an OpenCode server is running, call `GET /provider` on its HTTP port. Returns full model metadata including capabilities, costs, context limits, and modalities.
 
+## Command Execution & Process Management
+
+### Agent Tool Execution
+
+The agent executes commands via internal tools (not exposed in the HTTP API). The agent's tool calls are synchronous within its turn. Tool parts have states: `pending`, `running`, `completed`, `error`.
+
+### PTY System (`/pty/*`) - User-Facing Terminals
+
+Separate from the agent's command execution. PTYs are server-scoped interactive terminals for the user:
+
+- `POST /pty` - Create PTY (command, args, cwd, title, env)
+- `GET /pty` - List all PTYs
+- `GET /pty/{ptyID}` - Get PTY info
+- `PUT /pty/{ptyID}` - Update PTY (title, resize via `size: {rows, cols}`)
+- `DELETE /pty/{ptyID}` - Kill and remove PTY
+- `GET /pty/{ptyID}/connect` - WebSocket for bidirectional I/O
+
+PTY events (globally broadcast via SSE): `pty.created`, `pty.updated`, `pty.exited`, `pty.deleted`.
+
+The agent does NOT use the PTY system. PTYs are for the user's interactive terminal panel, independent of any AI session.
+
+### Session Commands (`/session/{id}/command`, `/session/{id}/shell`) - Context Injection
+
+External clients can inject command results into an AI session's conversation context:
+
+- `POST /session/{sessionID}/command` - Executes a command and records the result as an `AssistantMessage` in the session. Required fields: `command`, `arguments`. The output becomes part of the AI's context for subsequent turns.
+- `POST /session/{sessionID}/shell` - Similar but wraps in `sh -c`. Required fields: `command`, `agent`.
+- `GET /command` - Lists available command definitions (metadata, not execution).
+
+Session commands emit `command.executed` events with `sessionID` + `messageID`.
+
+**Key distinction**: These endpoints execute commands directly (not via the AI), then inject the output into the session as if the AI produced it. The AI doesn't actively run the command - it just finds the output in its conversation history on the next turn.
+
+### Three Separate Execution Mechanisms
+
+| Mechanism | Who uses it | Scoped to | AI sees output? |
+|-----------|-------------|-----------|----------------|
+| Agent tools (internal) | AI agent | Session turn | Yes (immediate) |
+| PTY (`/pty/*`) | User/frontend | Server (global) | No |
+| Session commands (`/session/{id}/*`) | Frontend/SDK client | Session | Yes (next turn) |
+
+The agent has no tool to interact with PTYs and cannot access the session command endpoints. When the agent needs to run a background process, it uses its internal bash-equivalent tool with shell backgrounding (`&`).
+
+### Comparison
+
+| Capability | Supported? | Notes |
+|-----------|-----------|-------|
+| Agent runs commands | Yes (internal tools) | Synchronous, blocks agent turn |
+| User runs commands → agent sees output | Yes (`/session/{id}/command`) | HTTP API, first-class |
+| External API for command injection | Yes | Session-scoped endpoints |
+| Command source tracking | Implicit | Endpoint implies source (no enum) |
+| Background process management | No | Shell `&` only for agent |
+| PTY / interactive terminal | Yes (`/pty/*`) | Server-scoped, WebSocket I/O |
+
 ## Notes
 
 - OpenCode is the most feature-rich runtime (streaming, questions, permissions)

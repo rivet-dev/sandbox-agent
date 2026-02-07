@@ -87,6 +87,8 @@ export interface components {
     };
     AgentInfo: {
       capabilities: components["schemas"]["AgentCapabilities"];
+      /** @description Whether the agent's required provider credentials are available */
+      credentialsAvailable: boolean;
       id: string;
       installed: boolean;
       path?: string | null;

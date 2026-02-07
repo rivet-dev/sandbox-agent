@@ -21,10 +21,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::sync::{broadcast, Mutex};
 use tokio::time::interval;
+use tracing::warn;
 use utoipa::{IntoParams, OpenApi, ToSchema};
 
 use crate::router::{AgentModelInfo, AppState, CreateSessionRequest, PermissionReply};
 use sandbox_agent_agent_management::agents::AgentId;
+use sandbox_agent_agent_management::credentials::{
+    extract_all_credentials, CredentialExtractionOptions, ExtractedCredentials,
+};
 use sandbox_agent_error::SandboxError;
 use sandbox_agent_universal_agent_schema::{
     ContentPart, FileAction, ItemDeltaData, ItemEventData, ItemKind, ItemRole, ItemStatus,
@@ -233,6 +237,8 @@ struct OpenCodeModelCache {
     group_names: HashMap<String, String>,
     default_group: String,
     default_model: String,
+    /// Group IDs that have valid credentials available
+    connected: Vec<String>,
 }
 
 pub struct OpenCodeState {
@@ -637,6 +643,21 @@ async fn opencode_model_cache(state: &OpenCodeAppState) -> OpenCodeModelCache {
 }
 
 async fn build_opencode_model_cache(state: &OpenCodeAppState) -> OpenCodeModelCache {
+    // Check credentials upfront
+    let credentials = match tokio::task::spawn_blocking(|| {
+        extract_all_credentials(&CredentialExtractionOptions::new())
+    })
+    .await
+    {
+        Ok(creds) => creds,
+        Err(err) => {
+            warn!("Failed to extract credentials for model cache: {err}");
+            ExtractedCredentials::default()
+        }
+    };
+    let has_anthropic = credentials.anthropic.is_some();
+    let has_openai = credentials.openai.is_some();
+
     let mut entries = Vec::new();
     let mut model_lookup = HashMap::new();
     let mut ambiguous_models = HashSet::new();
@@ -735,6 +756,28 @@ async fn build_opencode_model_cache(state: &OpenCodeAppState) -> OpenCodeModelCa
         }
     }
 
+    // Build connected list based on credential availability
+    let mut connected = Vec::new();
+    for group_id in group_names.keys() {
+        let is_connected = match group_agents.get(group_id) {
+            Some(AgentId::Claude) | Some(AgentId::Amp) => has_anthropic,
+            Some(AgentId::Codex) => has_openai,
+            Some(AgentId::Opencode) => {
+                // Check the specific provider for opencode groups (e.g., "opencode:anthropic")
+                match opencode_group_provider(group_id) {
+                    Some("anthropic") => has_anthropic,
+                    Some("openai") => has_openai,
+                    _ => has_anthropic || has_openai,
+                }
+            }
+            Some(AgentId::Mock) => true,
+            None => false,
+        };
+        if is_connected {
+            connected.push(group_id.clone());
+        }
+    }
+
     OpenCodeModelCache {
         entries,
         model_lookup,
@@ -743,6 +786,7 @@ async fn build_opencode_model_cache(state: &OpenCodeAppState) -> OpenCodeModelCa
         group_names,
         default_group,
         default_model,
+        connected,
     }
 }
 
@@ -3962,7 +4006,6 @@ async fn oc_provider_list(State(state): State<Arc<OpenCodeAppState>>) -> impl In
     }
     let mut providers = Vec::new();
     let mut defaults = serde_json::Map::new();
-    let mut connected = Vec::new();
     for (group_id, entries) in grouped {
         let mut models = serde_json::Map::new();
         for entry in entries {
@@ -3982,12 +4025,12 @@ async fn oc_provider_list(State(state): State<Arc<OpenCodeAppState>>) -> impl In
         if let Some(default_model) = cache.group_defaults.get(&group_id) {
             defaults.insert(group_id.clone(), Value::String(default_model.clone()));
         }
-        connected.push(group_id);
     }
+    // Use the connected list from cache (based on credential availability)
     let providers = json!({
         "all": providers,
         "default": Value::Object(defaults),
-        "connected": connected
+        "connected": cache.connected
     });
     (StatusCode::OK, Json(providers))
 }

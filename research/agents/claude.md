@@ -279,6 +279,44 @@ x-api-key: <ANTHROPIC_API_KEY>
 anthropic-version: 2023-06-01
 ```
 
+## Command Execution & Process Management
+
+### Agent Tool Execution
+
+The agent executes commands via the `Bash` tool. This is synchronous - the agent blocks until the command exits. Tool schema:
+
+```json
+{
+  "command": "string",
+  "timeout": "number",
+  "workingDirectory": "string"
+}
+```
+
+There is no background process support. If the agent needs a long-running process (e.g., dev server), it uses shell backgrounding (`&`) within a single `Bash` tool call.
+
+### User-Initiated Command Execution (`!` prefix)
+
+Claude Code's TUI supports `!command` syntax where the user types `!npm test` to run a command directly. The output is injected into the conversation as a user message so the agent can see it on the next turn.
+
+**This is a client-side TUI feature only.** It is not exposed in the API schema or streaming protocol. The CLI runs the command locally and stuffs the output into the next user message. There is no protocol-level concept of "user ran a command" vs "agent ran a command."
+
+### No External Command Injection API
+
+External clients (SDKs, frontends) cannot programmatically inject command results into Claude's conversation context. The only way to provide command output to the agent is:
+- Include it in the user prompt text
+- Use the `!` prefix in the interactive TUI
+
+### Comparison
+
+| Capability | Supported? | Notes |
+|-----------|-----------|-------|
+| Agent runs commands | Yes (`Bash` tool) | Synchronous, blocks agent turn |
+| User runs commands → agent sees output | Yes (`!cmd` in TUI) | Client-side only, not in protocol |
+| External API for command injection | No | |
+| Background process management | No | Shell `&` only |
+| PTY / interactive terminal | No | |
+
 ## Notes
 
 - Claude CLI manages its own OAuth refresh internally
