@@ -178,7 +178,7 @@ async fn install_agent(app: &Router, agent: AgentId) {
 /// while other agents support "bypass" which skips tool approval.
 fn test_permission_mode(agent: AgentId) -> &'static str {
     match agent {
-        AgentId::Opencode => "default",
+        AgentId::Opencode | AgentId::Pi => "default",
         _ => "bypass",
     }
 }

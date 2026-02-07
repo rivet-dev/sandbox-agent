@@ -5,6 +5,7 @@
 //! - Claude Code SDK
 //! - Codex SDK
 //! - AMP Code SDK
+//! - Pi RPC
 
 pub mod opencode {
     //! OpenCode SDK types extracted from OpenAPI 3.1.1 spec.
@@ -24,4 +25,9 @@ pub mod codex {
 pub mod amp {
     //! AMP Code SDK types.
     include!(concat!(env!("OUT_DIR"), "/amp.rs"));
+}
+
+pub mod pi {
+    //! Pi RPC types.
+    include!(concat!(env!("OUT_DIR"), "/pi.rs"));
 }

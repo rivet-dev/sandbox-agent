@@ -1,0 +1,6 @@
+---
+source: server/packages/sandbox-agent/tests/http/agent_endpoints.rs
+assertion_line: 145
+expression: snapshot_status(status)
+---
+status: 204

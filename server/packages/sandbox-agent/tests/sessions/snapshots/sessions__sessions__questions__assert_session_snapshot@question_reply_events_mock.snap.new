@@ -97,9 +97,41 @@ expression: value
     native_item_id: "<redacted>"
   seq: 15
   type: item.delta
-- question:
-    id: "<redacted>"
-    options: 4
-    status: requested
+- delta:
+    delta: "<redacted>"
+    item_id: "<redacted>"
+    native_item_id: "<redacted>"
   seq: 16
-  type: question.requested
+  type: item.delta
+- delta:
+    delta: "<redacted>"
+    item_id: "<redacted>"
+    native_item_id: "<redacted>"
+  seq: 17
+  type: item.delta
+- delta:
+    delta: "<redacted>"
+    item_id: "<redacted>"
+    native_item_id: "<redacted>"
+  seq: 18
+  type: item.delta
+- delta:
+    delta: "<redacted>"
+    item_id: "<redacted>"
+    native_item_id: "<redacted>"
+  seq: 19
+  type: item.delta
+- delta:
+    delta: "<redacted>"
+    item_id: "<redacted>"
+    native_item_id: "<redacted>"
+  seq: 20
+  type: item.delta
+- item:
+    content_types:
+      - text
+    kind: message
+    role: assistant
+    status: completed
+  seq: 21
+  type: item.completed

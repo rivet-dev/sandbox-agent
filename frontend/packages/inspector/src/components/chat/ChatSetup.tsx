@@ -41,11 +41,10 @@ const ChatSetup = ({
   onModelChange: (value: string) => void;
   onVariantChange: (value: string) => void;
 }) => {
-  const showModelSelect = modelsLoading || Boolean(modelsError) || modelOptions.length > 0;
   const hasModelOptions = modelOptions.length > 0;
-  const showVariantSelect =
-    supportsVariants && (modelsLoading || Boolean(modelsError) || variantOptions.length > 0);
+  const showModelSelect = hasModelOptions && !modelsError;
   const hasVariantOptions = variantOptions.length > 0;
+  const showVariantSelect = supportsVariants && hasVariantOptions && !modelsError;
   const modelCustom =
     model && hasModelOptions && !modelOptions.some((entry) => entry.id === model);
   const variantCustom =

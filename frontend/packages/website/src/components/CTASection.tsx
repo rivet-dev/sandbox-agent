@@ -7,7 +7,7 @@ import { ArrowRight, Terminal, Check } from 'lucide-react';
 const CTA_TITLES = [
   'Run coding agents in sandboxes. Control them over HTTP.',
   'A server inside your sandbox. An API for your app.',
-  'Claude Code, Codex, OpenCode, Amp — one HTTP API.',
+  'Claude Code, Codex, OpenCode, Amp, Pi — one HTTP API.',
   'Your app connects remotely. The coding agent runs isolated.',
   'Streaming events. Handling permissions. Managing sessions.',
   'Install with curl. Connect over HTTP. Control any coding agent.',

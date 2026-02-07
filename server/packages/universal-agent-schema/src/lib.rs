@@ -3,13 +3,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use utoipa::ToSchema;
 
-pub use sandbox_agent_extracted_agent_schemas::{amp, claude, codex, opencode};
+pub use sandbox_agent_extracted_agent_schemas::{amp, claude, codex, opencode, pi};
 
 pub mod agents;
 
 pub use agents::{
     amp as convert_amp, claude as convert_claude, codex as convert_codex,
-    opencode as convert_opencode,
+    opencode as convert_opencode, pi as convert_pi,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
@@ -204,7 +204,7 @@ pub enum ItemKind {
     Unknown,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ItemRole {
     User,
@@ -213,7 +213,7 @@ pub enum ItemRole {
     Tool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ItemStatus {
     InProgress,

@@ -182,7 +182,7 @@ pub async fn create_session_with_mode(
 
 pub fn test_permission_mode(agent: AgentId) -> &'static str {
     match agent {
-        AgentId::Opencode => "default",
+        AgentId::Opencode | AgentId::Pi => "default",
         _ => "bypass",
     }
 }

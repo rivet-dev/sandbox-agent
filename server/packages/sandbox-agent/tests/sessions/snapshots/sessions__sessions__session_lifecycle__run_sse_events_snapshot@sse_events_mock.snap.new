@@ -1,6 +1,6 @@
 ---
 source: server/packages/sandbox-agent/tests/sessions/../common/http.rs
-assertion_line: 1001
+assertion_line: 1039
 expression: normalized
 ---
 - metadata: true
@@ -66,4 +66,10 @@ expression: normalized
     item_id: "<redacted>"
     native_item_id: "<redacted>"
   seq: 10
+  type: item.delta
+- delta:
+    delta: "<redacted>"
+    item_id: "<redacted>"
+    native_item_id: "<redacted>"
+  seq: 11
   type: item.delta

@@ -44,24 +44,6 @@ session_a:
       native_item_id: "<redacted>"
     seq: 6
     type: item.delta
-  - delta:
-      delta: "<redacted>"
-      item_id: "<redacted>"
-      native_item_id: "<redacted>"
-    seq: 7
-    type: item.delta
-  - delta:
-      delta: "<redacted>"
-      item_id: "<redacted>"
-      native_item_id: "<redacted>"
-    seq: 8
-    type: item.delta
-  - delta:
-      delta: "<redacted>"
-      item_id: "<redacted>"
-      native_item_id: "<redacted>"
-    seq: 9
-    type: item.delta
 session_b:
   - metadata: true
     seq: 1
@@ -102,4 +84,34 @@ session_b:
       item_id: "<redacted>"
       native_item_id: "<redacted>"
     seq: 6
+    type: item.delta
+  - delta:
+      delta: "<redacted>"
+      item_id: "<redacted>"
+      native_item_id: "<redacted>"
+    seq: 7
+    type: item.delta
+  - delta:
+      delta: "<redacted>"
+      item_id: "<redacted>"
+      native_item_id: "<redacted>"
+    seq: 8
+    type: item.delta
+  - delta:
+      delta: "<redacted>"
+      item_id: "<redacted>"
+      native_item_id: "<redacted>"
+    seq: 9
+    type: item.delta
+  - delta:
+      delta: "<redacted>"
+      item_id: "<redacted>"
+      native_item_id: "<redacted>"
+    seq: 10
+    type: item.delta
+  - delta:
+      delta: "<redacted>"
+      item_id: "<redacted>"
+      native_item_id: "<redacted>"
+    seq: 11
     type: item.delta

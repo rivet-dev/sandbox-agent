@@ -16,7 +16,7 @@ const frictions = [
     number: '02',
     title: 'Every Coding Agent is Different',
     problem:
-      'Claude Code, Codex, OpenCode, and Amp each have proprietary APIs, event formats, and behaviors. Swapping coding agents means rewriting your entire integration.',
+      'Claude Code, Codex, OpenCode, Amp, and Pi each have proprietary APIs, event formats, and behaviors. Swapping coding agents means rewriting your entire integration.',
     solution: 'One HTTP API. Write your code once, swap coding agents with a config change.',
     accentColor: 'purple',
   },

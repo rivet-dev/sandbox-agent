@@ -13,7 +13,7 @@ const faqs = [
   {
     question: 'Which coding agents are supported?',
     answer:
-      'Claude Code, Codex, OpenCode, and Amp. The SDK normalizes their APIs so you can swap between them without changing your code.',
+      'Claude Code, Codex, OpenCode, Amp, and Pi. The SDK normalizes their APIs so you can swap between them without changing your code.',
   },
   {
     question: 'How is session data persisted?',
@@ -33,7 +33,7 @@ const faqs = [
   {
     question: 'Can I use this with my personal API keys?',
     answer:
-      "Yes. Use <code>sandbox-agent credentials extract-env</code> to extract API keys from your local agent configs (Claude Code, Codex, OpenCode, Amp) and pass them to the sandbox environment.",
+      "Yes. Use <code>sandbox-agent credentials extract-env</code> to extract API keys from your local agent configs (Claude Code, Codex, OpenCode, Amp, Pi) and pass them to the sandbox environment.",
   },
   {
     question: 'Why Rust and not [language]?',

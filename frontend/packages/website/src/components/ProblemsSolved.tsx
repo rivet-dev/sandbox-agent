@@ -6,7 +6,7 @@ import { FeatureIcon } from './ui/FeatureIcon';
 const problems = [
   {
     title: 'Universal Agent API',
-    desc: 'Claude Code, Codex, OpenCode, and Amp each have different APIs. We provide a single interface to control them all.',
+    desc: 'Claude Code, Codex, OpenCode, Amp, and Pi each have different APIs. We provide a single interface to control them all.',
     icon: Workflow,
     color: 'text-accent',
   },

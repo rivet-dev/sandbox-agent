@@ -5,7 +5,7 @@
 <h3 align="center">Run Coding Agents in Sandboxes. Control Them Over HTTP.</h3>
 
 <p align="center">
-  A server that runs inside your sandbox. Your app connects remotely to control Claude Code, Codex, OpenCode, or Amp — streaming events, handling permissions, managing sessions.
+  A server that runs inside your sandbox. Your app connects remotely to control Claude Code, Codex, OpenCode, Amp, or Pi — streaming events, handling permissions, managing sessions.
 </p>
 
 <p align="center">
@@ -24,13 +24,13 @@ Sandbox Agent solves three problems:
 
 1. **Coding agents need sandboxes** — You can't let AI execute arbitrary code on your production servers. Coding agents need isolated environments, but existing SDKs assume local execution. Sandbox Agent is a server that runs inside the sandbox and exposes HTTP/SSE.
 
-2. **Every coding agent is different** — Claude Code, Codex, OpenCode, and Amp each have proprietary APIs, event formats, and behaviors. Swapping agents means rewriting your integration. Sandbox Agent provides one HTTP API — write your code once, swap agents with a config change.
+2. **Every coding agent is different** — Claude Code, Codex, OpenCode, Amp, and Pi each have proprietary APIs, event formats, and behaviors. Swapping agents means rewriting your integration. Sandbox Agent provides one HTTP API — write your code once, swap agents with a config change.
 
 3. **Sessions are ephemeral** — Agent transcripts live in the sandbox. When the process ends, you lose everything. Sandbox Agent streams events in a universal schema to your storage. Persist to Postgres, ClickHouse, or [Rivet](https://rivet.dev). Replay later, audit everything.
 
 ## Features
 
-- **Universal Agent API**: Single interface to control Claude Code, Codex, OpenCode, and Amp with full feature coverage
+- **Universal Agent API**: Single interface to control Claude Code, Codex, OpenCode, Amp, and Pi with full feature coverage
 - **Streaming Events**: Real-time SSE stream of everything the agent does — tool calls, permission requests, file edits, and more
 - **Universal Session Schema**: [Standardized schema](https://sandboxagent.dev/docs/session-transcript-schema) that normalizes all agent event formats for storage and replay
 - **Human-in-the-Loop**: Approve or deny tool executions and answer agent questions remotely over HTTP
@@ -232,7 +232,7 @@ No, they're complementary. AI SDK is for building chat interfaces and calling LL
 <details>
 <summary><strong>Which coding agents are supported?</strong></summary>
 
-Claude Code, Codex, OpenCode, and Amp. The SDK normalizes their APIs so you can swap between them without changing your code.
+Claude Code, Codex, OpenCode, Amp, and Pi. The SDK normalizes their APIs so you can swap between them without changing your code.
 </details>
 
 <details>
@@ -256,7 +256,7 @@ The server is a single Rust binary that runs anywhere with a curl install. If yo
 <details>
 <summary><strong>Can I use this with my personal API keys?</strong></summary>
 
-Yes. Use `sandbox-agent credentials extract-env` to extract API keys from your local agent configs (Claude Code, Codex, OpenCode, Amp) and pass them to the sandbox environment.
+Yes. Use `sandbox-agent credentials extract-env` to extract API keys from your local agent configs (Claude Code, Codex, OpenCode, Amp, Pi) and pass them to the sandbox environment.
 </details>
 
 <details>

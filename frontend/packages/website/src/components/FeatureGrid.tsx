@@ -38,7 +38,7 @@ export function FeatureGrid() {
                 <h4 className="text-sm font-medium uppercase tracking-wider text-white">Universal Agent API</h4>
               </div>
               <p className="text-zinc-400 leading-relaxed text-lg max-w-2xl">
-                Claude Code, Codex, OpenCode, and Amp each have different APIs. We provide a single,
+                Claude Code, Codex, OpenCode, Amp, and Pi each have different APIs. We provide a single,
                 unified interface to control them all.
               </p>
             </div>

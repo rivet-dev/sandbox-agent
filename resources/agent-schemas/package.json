@@ -9,6 +9,7 @@
     "extract:claude": "tsx src/index.ts --agent=claude",
     "extract:codex": "tsx src/index.ts --agent=codex",
     "extract:amp": "tsx src/index.ts --agent=amp",
+    "extract:pi": "tsx src/index.ts --agent=pi",
     "extract:claude-events": "tsx src/claude-event-types.ts",
     "extract:claude-events:sdk": "tsx src/claude-event-types-sdk.ts",
     "extract:claude-events:cli": "tsx src/claude-event-types-cli.ts",

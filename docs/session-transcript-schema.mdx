@@ -12,30 +12,31 @@ The schema is defined in [OpenAPI format](https://github.com/rivet-dev/sandbox-a
 
 This table shows which agent feature coverage appears in the universal event stream. All agents retain their full native feature coverage—this only reflects what's normalized into the schema.
 
-| Feature            | Claude | Codex | OpenCode     | Amp          |
-|--------------------|:------:|:-----:|:------------:|:------------:|
-| Stability          | Stable | Stable| Experimental | Experimental |
-| Text Messages      |   ✓    |   ✓   |      ✓       |      ✓       |
-| Tool Calls         |   ✓    |   ✓   |      ✓       |      ✓       |
-| Tool Results       |   ✓    |   ✓   |      ✓       |      ✓       |
-| Questions (HITL)   |   ✓    |       |      ✓       |              |
-| Permissions (HITL) |   ✓    |   ✓   |      ✓       |      -       |
-| Images             |   -    |   ✓   |      ✓       |      -       |
-| File Attachments   |   -    |   ✓   |      ✓       |      -       |
-| Session Lifecycle  |   -    |   ✓   |      ✓       |      -       |
-| Error Events       |   -    |   ✓   |      ✓       |      ✓       |
-| Reasoning/Thinking |   -    |   ✓   |      -       |      -       |
-| Command Execution  |   -    |   ✓   |      -       |      -       |
-| File Changes       |   -    |   ✓   |      -       |      -       |
-| MCP Tools          |   -    |   ✓   |      -       |      -       |
-| Streaming Deltas   |   ✓    |   ✓   |      ✓       |      -       |
-| Variants           |        |   ✓   |      ✓       |      ✓       |
+| Feature            | Claude | Codex | OpenCode     | Amp          | Pi (RPC)     |
+|--------------------|:------:|:-----:|:------------:|:------------:|:------------:|
+| Stability          | Stable | Stable| Experimental | Experimental | Experimental |
+| Text Messages      |   ✓    |   ✓   |      ✓       |      ✓       |      ✓       |
+| Tool Calls         |   ✓    |   ✓   |      ✓       |      ✓       |      ✓       |
+| Tool Results       |   ✓    |   ✓   |      ✓       |      ✓       |      ✓       |
+| Questions (HITL)   |   ✓    |       |      ✓       |              |              |
+| Permissions (HITL) |   ✓    |   ✓   |      ✓       |      -       |              |
+| Images             |   -    |   ✓   |      ✓       |      -       |      ✓       |
+| File Attachments   |   -    |   ✓   |      ✓       |      -       |              |
+| Session Lifecycle  |   -    |   ✓   |      ✓       |      -       |              |
+| Error Events       |   -    |   ✓   |      ✓       |      ✓       |      ✓       |
+| Reasoning/Thinking |   -    |   ✓   |      -       |      -       |      ✓       |
+| Command Execution  |   -    |   ✓   |      -       |      -       |              |
+| File Changes       |   -    |   ✓   |      -       |      -       |              |
+| MCP Tools          |   -    |   ✓   |      -       |      -       |              |
+| Streaming Deltas   |   ✓    |   ✓   |      ✓       |      -       |      ✓       |
+| Variants           |        |   ✓   |      ✓       |      ✓       |      ✓       |
 
-Agents: [Claude Code](https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview) · [Codex](https://github.com/openai/codex) · [OpenCode](https://github.com/opencode-ai/opencode) · [Amp](https://ampcode.com)
+Agents: [Claude Code](https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview) · [Codex](https://github.com/openai/codex) · [OpenCode](https://github.com/opencode-ai/opencode) · [Amp](https://ampcode.com) · [Pi](https://buildwithpi.ai/pi-cli)
 
 - ✓ = Appears in session events
 - \- = Agent supports natively, schema conversion coming soon
 - (blank) = Not supported by agent
+- Pi runtime model is router-managed per-session RPC (`pi --mode rpc`); it does not use generic subprocess streaming.
 
 <AccordionGroup>
   <Accordion title="Text Messages">

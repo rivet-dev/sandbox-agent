@@ -4,14 +4,14 @@ Source of truth: generated agent schemas in `resources/agent-schemas/artifacts/j
 
 Identifiers
 
-+----------------------+------------------------+------------------------------------------+-----------------------------+------------------------+
-| Universal term       | Claude                 | Codex (app-server)                       | OpenCode                    | Amp                    |
-+----------------------+------------------------+------------------------------------------+-----------------------------+------------------------+
-| session_id           | n/a (daemon-only)      | n/a (daemon-only)                        | n/a (daemon-only)           | n/a (daemon-only)      |
-| native_session_id    | none                   | threadId                                 | sessionID                   | none                   |
-| item_id              | synthetic              | ThreadItem.id                            | Message.id                  | StreamJSONMessage.id   |
-| native_item_id       | none                   | ThreadItem.id                            | Message.id                  | StreamJSONMessage.id   |
-+----------------------+------------------------+------------------------------------------+-----------------------------+------------------------+
++----------------------+------------------------+------------------------------------------+-----------------------------+------------------------+----------------------+
+| Universal term       | Claude                 | Codex (app-server)                       | OpenCode                    | Amp                    | Pi (RPC)             |
++----------------------+------------------------+------------------------------------------+-----------------------------+------------------------+----------------------+
+| session_id           | n/a (daemon-only)      | n/a (daemon-only)                        | n/a (daemon-only)           | n/a (daemon-only)      | n/a (daemon-only)    |
+| native_session_id    | none                   | threadId                                 | sessionID                   | none                   | sessionId            |
+| item_id              | synthetic              | ThreadItem.id                            | Message.id                  | StreamJSONMessage.id   | messageId/toolCallId |
+| native_item_id       | none                   | ThreadItem.id                            | Message.id                  | StreamJSONMessage.id   | messageId/toolCallId |
++----------------------+------------------------+------------------------------------------+-----------------------------+------------------------+----------------------+
 
 Notes:
 - When a provider does not supply IDs (Claude), we synthesize item_id values and keep native_item_id null.
@@ -22,24 +22,39 @@ Notes:
 - opt-in via `include_raw=true` on events endpoints (HTTP + SSE).
 - If parsing fails, emit agent.unparsed (source=daemon, synthetic=true). Tests must assert zero unparsed events.
 
+Runtime model by agent
+
+| Agent | Runtime model | Notes |
+|---|---|---|
+| Claude | Per-message subprocess streaming | Routed through `AgentManager::spawn_streaming` with Claude stream-json stdin. |
+| Amp | Per-message subprocess streaming | Routed through `AgentManager::spawn_streaming` with parsed JSONL output. |
+| Codex | Shared app-server (stdio JSON-RPC) | One shared server process, daemon sessions map to Codex thread IDs. |
+| OpenCode | Shared HTTP server + SSE | One shared HTTP server, daemon sessions map to OpenCode session IDs. |
+| Pi | Dedicated per-session RPC process | Canonical path is router-managed Pi runtime (`pi --mode rpc`), one process per daemon session. |
+
+Pi runtime contract:
+- Session/message lifecycle for Pi must stay on router-managed per-session RPC runtime.
+- `AgentManager::spawn(Pi)` is kept for one-shot utility/testing flows.
+- `AgentManager::spawn_streaming(Pi)` is intentionally unsupported.
+
 Events / Message Flow
 
-+------------------------+------------------------------+--------------------------------------------+-----------------------------------------+----------------------------------+
-| Universal term         | Claude                       | Codex (app-server)                         | OpenCode                                | Amp                              |
-+------------------------+------------------------------+--------------------------------------------+-----------------------------------------+----------------------------------+
-| session.started        | none                         | method=thread/started                      | type=session.created                    | none                             |
-| session.ended          | SDKMessage.type=result       | no explicit session end (turn/completed)   | no explicit session end (session.deleted)| type=done                        |
-| message (user)         | SDKMessage.type=user         | item/completed (ThreadItem.type=userMessage)| message.updated (Message.role=user)    | type=message                     |
-| message (assistant)    | SDKMessage.type=assistant    | item/completed (ThreadItem.type=agentMessage)| message.updated (Message.role=assistant)| type=message                  |
-| message.delta          | stream_event (partial) or synthetic | method=item/agentMessage/delta      | type=message.part.updated (delta)       | synthetic                        |
-| tool call              | type=tool_use               | method=item/mcpToolCall/progress           | message.part.updated (part.type=tool)   | type=tool_call                   |
-| tool result            | user.message.content.tool_result | item/completed (tool result ThreadItem variants) | message.part.updated (part.type=tool, state=completed) | type=tool_result     |
-| permission.requested   | control_request.can_use_tool | none                                      | type=permission.asked                   | none                             |
-| permission.resolved    | daemon reply to can_use_tool | none                                      | type=permission.replied                 | none                             |
-| question.requested     | tool_use (AskUserQuestion)  | experimental request_user_input (payload) | type=question.asked                     | none                             |
-| question.resolved      | tool_result (AskUserQuestion) | experimental request_user_input (payload) | type=question.replied / question.rejected | none                          |
-| error                  | SDKResultMessage.error       | method=error                               | type=session.error (or message error)   | type=error                        |
-+------------------------+------------------------------+--------------------------------------------+-----------------------------------------+----------------------------------+
++------------------------+------------------------------+--------------------------------------------+-----------------------------------------+----------------------------------+----------------------------+
+| Universal term         | Claude                       | Codex (app-server)                         | OpenCode                                | Amp                              | Pi (RPC)                   |
++------------------------+------------------------------+--------------------------------------------+-----------------------------------------+----------------------------------+----------------------------+
+| session.started        | none                         | method=thread/started                      | type=session.created                    | none                             | none                       |
+| session.ended          | SDKMessage.type=result       | no explicit session end (turn/completed)   | no explicit session end (session.deleted)| type=done                        | none (daemon synthetic)    |
+| message (user)         | SDKMessage.type=user         | item/completed (ThreadItem.type=userMessage)| message.updated (Message.role=user)    | type=message                     | none (daemon synthetic)    |
+| message (assistant)    | SDKMessage.type=assistant    | item/completed (ThreadItem.type=agentMessage)| message.updated (Message.role=assistant)| type=message                  | message_start/message_end  |
+| message.delta          | stream_event (partial) or synthetic | method=item/agentMessage/delta      | type=message.part.updated (delta)       | synthetic                        | message_update (text_delta/thinking_delta) |
+| tool call              | type=tool_use               | method=item/mcpToolCall/progress           | message.part.updated (part.type=tool)   | type=tool_call                   | tool_execution_start       |
+| tool result            | user.message.content.tool_result | item/completed (tool result ThreadItem variants) | message.part.updated (part.type=tool, state=completed) | type=tool_result     | tool_execution_end        |
+| permission.requested   | control_request.can_use_tool | none                                      | type=permission.asked                   | none                             | none                       |
+| permission.resolved    | daemon reply to can_use_tool | none                                      | type=permission.replied                 | none                             | none                       |
+| question.requested     | tool_use (AskUserQuestion)  | experimental request_user_input (payload) | type=question.asked                     | none                             | none                       |
+| question.resolved      | tool_result (AskUserQuestion) | experimental request_user_input (payload) | type=question.replied / question.rejected | none                          | none                       |
+| error                  | SDKResultMessage.error       | method=error                               | type=session.error (or message error)   | type=error                        | hook_error (status item)   |
++------------------------+------------------------------+--------------------------------------------+-----------------------------------------+----------------------------------+----------------------------+
 
 Synthetics
 
@@ -64,6 +79,7 @@ Delta handling
 - Codex emits agent message and other deltas (e.g., item/agentMessage/delta).
 - OpenCode emits part deltas via message.part.updated with a delta string.
 - Claude can emit stream_event deltas when partial streaming is enabled; Amp does not emit deltas.
+- Pi emits message_update deltas and cumulative tool_execution_update partialResult values (we diff to produce deltas).
 
 Policy:
 - Always emit item.delta across all providers.
@@ -80,3 +96,9 @@ Message normalization notes
 - OpenCode unrolling: message.updated creates/updates the parent message item; tool-related parts emit separate tool item events (item.started/ item.completed) with parent_id pointing to the message item.
 - If a message.part.updated arrives before message.updated, we create a stub item.started (source=daemon) so deltas have a parent.
 - Tool calls/results are always emitted as separate tool items to keep behavior consistent across agents.
+- If Pi message_update events omit messageId, we synthesize a stable message id and emit a synthetic item.started before the first delta so streaming text stays grouped.
+- Pi auto_compaction_start/auto_compaction_end and auto_retry_start/auto_retry_end events are mapped to status items (label `pi.*`).
+- Pi extension_ui_request/extension_error events are mapped to status items.
+- Pi RPC from pi-coding-agent does not include sessionId in events; each daemon session owns a dedicated Pi RPC process, so events are routed by runtime ownership (parallel sessions supported).
+- PI `variant` maps directly to PI RPC `set_thinking_level.level` before prompts are sent.
+- PI remains source of truth for thinking-level constraints: unsupported levels (including non-reasoning models and model-specific limits such as `xhigh`) are PI-native clamped or rejected.

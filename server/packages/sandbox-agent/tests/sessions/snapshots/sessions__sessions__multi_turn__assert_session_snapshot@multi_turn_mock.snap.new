@@ -99,33 +99,10 @@ second:
       status: in_progress
     seq: 4
     type: item.started
-  - delta:
-      delta: "<redacted>"
-      item_id: "<redacted>"
-      native_item_id: "<redacted>"
+  - item:
+      content_types: []
+      kind: message
+      role: assistant
+      status: completed
     seq: 5
-    type: item.delta
-  - delta:
-      delta: "<redacted>"
-      item_id: "<redacted>"
-      native_item_id: "<redacted>"
-    seq: 6
-    type: item.delta
-  - delta:
-      delta: "<redacted>"
-      item_id: "<redacted>"
-      native_item_id: "<redacted>"
-    seq: 7
-    type: item.delta
-  - delta:
-      delta: "<redacted>"
-      item_id: "<redacted>"
-      native_item_id: "<redacted>"
-    seq: 8
-    type: item.delta
-  - delta:
-      delta: "<redacted>"
-      item_id: "<redacted>"
-      native_item_id: "<redacted>"
-    seq: 9
-    type: item.delta
+    type: item.completed

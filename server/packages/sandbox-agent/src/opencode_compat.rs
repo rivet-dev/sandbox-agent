@@ -9,6 +9,7 @@ use std::convert::Infallible;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
@@ -40,6 +41,7 @@ static PROJECT_COUNTER: AtomicU64 = AtomicU64::new(1);
 const OPENCODE_DEFAULT_MODEL_ID: &str = "mock";
 const OPENCODE_DEFAULT_PROVIDER_ID: &str = "mock";
 const OPENCODE_DEFAULT_AGENT_MODE: &str = "build";
+const OPENCODE_MODEL_CACHE_TTL: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Debug)]
 struct OpenCodeCompatConfig {
@@ -233,6 +235,8 @@ struct OpenCodeModelCache {
     group_names: HashMap<String, String>,
     default_group: String,
     default_model: String,
+    cached_at: Instant,
+    had_discovery_errors: bool,
 }
 
 pub struct OpenCodeState {
@@ -610,6 +614,7 @@ fn available_agent_ids() -> Vec<AgentId> {
         AgentId::Codex,
         AgentId::Opencode,
         AgentId::Amp,
+        AgentId::Pi,
         AgentId::Mock,
     ]
 }
@@ -623,14 +628,28 @@ fn default_agent_mode() -> &'static str {
 }
 
 async fn opencode_model_cache(state: &OpenCodeAppState) -> OpenCodeModelCache {
-    {
+    let previous_cache = {
         let cache = state.opencode.model_cache.lock().await;
         if let Some(cache) = cache.as_ref() {
-            return cache.clone();
+            if cache.cached_at.elapsed() < OPENCODE_MODEL_CACHE_TTL {
+                return cache.clone();
+            }
+            Some(cache.clone())
+        } else {
+            None
+        }
+    };
+
+    let mut cache = build_opencode_model_cache(state).await;
+    if let Some(previous_cache) = previous_cache {
+        if cache.had_discovery_errors
+            && cache.entries.is_empty()
+            && !previous_cache.entries.is_empty()
+        {
+            cache = previous_cache;
+            cache.cached_at = Instant::now();
         }
     }
-
-    let cache = build_opencode_model_cache(state).await;
     let mut slot = state.opencode.model_cache.lock().await;
     *slot = Some(cache.clone());
     cache
@@ -644,12 +663,31 @@ async fn build_opencode_model_cache(state: &OpenCodeAppState) -> OpenCodeModelCa
     let mut group_agents: HashMap<String, AgentId> = HashMap::new();
     let mut group_names: HashMap<String, String> = HashMap::new();
     let mut default_model: Option<String> = None;
+    let mut had_discovery_errors = false;
 
     for agent in available_agent_ids() {
         let response = match state.inner.session_manager().agent_models(agent).await {
             Ok(response) => response,
-            Err(_) => continue,
+            Err(err) => {
+                had_discovery_errors = true;
+                let (group_id, group_name) = fallback_group_for_agent(agent);
+                group_agents.entry(group_id.clone()).or_insert(agent);
+                group_names.entry(group_id).or_insert(group_name);
+                tracing::warn!(
+                    target = "sandbox_agent::opencode",
+                    ?agent,
+                    ?err,
+                    "failed to discover models for OpenCode provider"
+                );
+                continue;
+            }
         };
+
+        if response.models.is_empty() {
+            let (group_id, group_name) = fallback_group_for_agent(agent);
+            group_agents.entry(group_id.clone()).or_insert(agent);
+            group_names.entry(group_id).or_insert(group_name);
+        }
 
         let first_model_id = response.models.first().map(|model| model.id.clone());
         for model in response.models {
@@ -743,7 +781,22 @@ async fn build_opencode_model_cache(state: &OpenCodeAppState) -> OpenCodeModelCa
         group_names,
         default_group,
         default_model,
+        cached_at: Instant::now(),
+        had_discovery_errors,
     }
+}
+
+fn fallback_group_for_agent(agent: AgentId) -> (String, String) {
+    if agent == AgentId::Opencode {
+        return (
+            "opencode".to_string(),
+            agent_display_name(agent).to_string(),
+        );
+    }
+    (
+        agent.as_str().to_string(),
+        agent_display_name(agent).to_string(),
+    )
 }
 
 fn resolve_agent_from_model(
@@ -857,6 +910,7 @@ fn agent_display_name(agent: AgentId) -> &'static str {
         AgentId::Opencode => "OpenCode",
         AgentId::Amp => "Amp",
         AgentId::Mock => "Mock",
+        AgentId::Pi => "Pi",
     }
 }
 
@@ -2635,6 +2689,9 @@ async fn oc_config_providers(State(state): State<Arc<OpenCodeAppState>>) -> impl
             .or_default()
             .push(entry);
     }
+    for group_id in cache.group_names.keys() {
+        grouped.entry(group_id.clone()).or_default();
+    }
     let mut providers = Vec::new();
     let mut defaults = serde_json::Map::new();
     for (group_id, entries) in grouped {
@@ -3959,6 +4016,9 @@ async fn oc_provider_list(State(state): State<Arc<OpenCodeAppState>>) -> impl In
             .entry(entry.group_id.clone())
             .or_default()
             .push(entry);
+    }
+    for group_id in cache.group_names.keys() {
+        grouped.entry(group_id.clone()).or_default();
     }
     let mut providers = Vec::new();
     let mut defaults = serde_json::Map::new();

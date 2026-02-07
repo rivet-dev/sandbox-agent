@@ -2,7 +2,7 @@
   <img src="../.github/media/gigacode-header.jpeg" alt="Gigacode. Use OpenCode's UI with any coding agent." />
 </p>
 
-<h3 align="center">Supports Claude Code, Codex, and Amp.</h3>
+<h3 align="center">Supports Claude Code, Codex, Pi, and Amp.</h3>
 
 <p align="center">
     <i>This is <u>not</u> a fork (and never will be).<br/>It's powered by <a href="https://sandboxagent.dev">Sandbox Agent SDK</a>'s wizardry.<br/>Experimental & just for fun.</i>
@@ -19,23 +19,23 @@
 ┌─ Gigacode ────────────────────────────────────────────────────────┐
 │ ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐ │
 │ │  OpenCode TUI   │───▶│  Sandbox Agent  │───▶│  Claude Code /  │ │
-│ │                 │    │                 │    │   Codex / Amp   │ │
+│ │                 │    │                 │    │ Codex / Pi / Amp │ │
 │ └─────────────────┘    └─────────────────┘    └─────────────────┘ │
 └───────────────────────────────────────────────────────────────────┘
 ```
 
-- [Sandbox Agent SDK](https://sandboxagent.dev) provides a universal HTTP API for controlling Claude Code, Codex, and Amp
+- [Sandbox Agent SDK](https://sandboxagent.dev) provides a universal HTTP API for controlling Claude Code, Codex, Pi, and Amp
 - Sandbox Agent SDK exposes an [OpenCode-compatible endpoint](https://sandboxagent.dev/docs/opencode-compatibility) so OpenCode can talk to any agent
 - OpenCode connects to Sandbox Agent SDK via [`attach`](https://opencode.ai/docs/cli/#attach)
 
 ## OpenCode Models vs Gigacode Agents
 
 - **OpenCode** supports **switching between inference providers** (Anthropic, OpenAI, etc.). This is OpenCode talking directly to the models with its own tools, system prompts, and agentic loop.
-- **Gigacode** automates other coding agent harnesses, so it's using the **exact same logic that you would if you ran Claude Code**, Codex, or Amp natively.
+- **Gigacode** automates other coding agent harnesses, so it's using the **exact same logic that you would if you ran Claude Code**, Codex, Pi, or Amp natively.
 
 ```
 OpenCode (native):   Model → OpenCode's tool loop → result
-Gigacode:            Model → Claude Code / Codex / Amp CLI → result
+Gigacode:            Model → Claude Code / Codex / Pi / Amp CLI → result
 ```
 
 This means you get each agent's specialized capabilities (such as Claude Code's `Read`/`Write`/`Bash` tools, Codex's sandboxed execution, and Amp's permission rules) rather than a single tool loop with different models behind it.

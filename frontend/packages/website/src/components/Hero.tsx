@@ -4,10 +4,11 @@ import { useState, useEffect } from 'react';
 import { Terminal, Check, ArrowRight } from 'lucide-react';
 
 const ADAPTERS = [
-  { label: 'Claude Code', color: '#D97757', x: 35, y: 70, logo: '/logos/claude.svg' },
-  { label: 'Codex', color: '#10A37F', x: 185, y: 70, logo: 'openai' },
-  { label: 'Amp', color: '#F59E0B', x: 35, y: 155, logo: '/logos/amp.svg' },
-  { label: 'OpenCode', color: '#8B5CF6', x: 185, y: 155, logo: 'opencode' },
+  { label: 'Claude Code', color: '#D97757', x: 35, y: 30, logo: '/logos/claude.svg' },
+  { label: 'Codex', color: '#10A37F', x: 185, y: 30, logo: 'openai' },
+  { label: 'Amp', color: '#F59E0B', x: 35, y: 115, logo: '/logos/amp.svg' },
+  { label: 'OpenCode', color: '#8B5CF6', x: 185, y: 115, logo: 'opencode' },
+  { label: 'Pi', color: '#38BDF8', x: 110, y: 200, logo: '/logos/pi.svg' },
 ];
 
 function UniversalAPIDiagram() {
@@ -187,7 +188,7 @@ export function Hero() {
               <span className="text-zinc-400">Control Them Over HTTP.</span>
             </h1>
             <p className="mt-6 text-lg text-zinc-500 leading-relaxed max-w-xl mx-auto lg:mx-0">
-              The Sandbox Agent SDK is a server that runs inside your sandbox. Your app connects remotely to control Claude Code, Codex, OpenCode, or Amp — streaming events, handling permissions, managing sessions.
+              The Sandbox Agent SDK is a server that runs inside your sandbox. Your app connects remotely to control Claude Code, Codex, OpenCode, Amp, or Pi — streaming events, handling permissions, managing sessions.
             </p>
 
             <div className="mt-10 flex flex-col items-center gap-4 sm:flex-row sm:justify-center lg:justify-start">

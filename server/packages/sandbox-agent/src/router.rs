@@ -4,7 +4,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
@@ -22,11 +22,11 @@ use reqwest::Client;
 use sandbox_agent_error::{AgentError, ErrorType, ProblemDetails, SandboxError};
 use sandbox_agent_universal_agent_schema::{
     codex as codex_schema, convert_amp, convert_claude, convert_codex, convert_opencode,
-    turn_completed_event, AgentUnparsedData, ContentPart, ErrorData, EventConversion, EventSource,
-    FileAction, ItemDeltaData, ItemEventData, ItemKind, ItemRole, ItemStatus, PermissionEventData,
-    PermissionStatus, QuestionEventData, QuestionStatus, ReasoningVisibility, SessionEndReason,
-    SessionEndedData, SessionStartedData, StderrOutput, TerminatedBy, UniversalEvent,
-    UniversalEventData, UniversalEventType, UniversalItem,
+    convert_pi, pi as pi_schema, turn_completed_event, AgentUnparsedData, ContentPart, ErrorData,
+    EventConversion, EventSource, FileAction, ItemDeltaData, ItemEventData, ItemKind, ItemRole,
+    ItemStatus, PermissionEventData, PermissionStatus, QuestionEventData, QuestionStatus,
+    ReasoningVisibility, SessionEndReason, SessionEndedData, SessionStartedData, StderrOutput,
+    TerminatedBy, UniversalEvent, UniversalEventData, UniversalEventType, UniversalItem,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -39,6 +39,7 @@ use tracing::Span;
 use utoipa::{Modify, OpenApi, ToSchema};
 
 use crate::agent_server_logs::AgentServerLogs;
+use crate::http_client;
 use crate::opencode_compat::{build_opencode_router, OpenCodeAppState};
 use crate::telemetry;
 use crate::ui;
@@ -275,7 +276,7 @@ pub fn build_router_with_state(shared: Arc<AppState>) -> (Router, Arc<AppState>)
 }
 
 pub async fn shutdown_servers(state: &Arc<AppState>) {
-    state.session_manager.server_manager.shutdown().await;
+    state.session_manager.shutdown().await;
 }
 
 #[derive(OpenApi)]
@@ -393,6 +394,7 @@ struct SessionState {
     model: Option<String>,
     variant: Option<String>,
     native_session_id: Option<String>,
+    pi_runtime: Option<Arc<PiSessionRuntime>>,
     ended: bool,
     ended_exit_code: Option<i32>,
     ended_message: Option<String>,
@@ -451,6 +453,7 @@ impl SessionState {
             model: request.model.clone(),
             variant: request.variant.clone(),
             native_session_id: None,
+            pi_runtime: None,
             ended: false,
             ended_exit_code: None,
             ended_message: None,
@@ -853,7 +856,7 @@ impl SessionState {
 #[derive(Debug)]
 enum ManagedServerKind {
     Http { base_url: String },
-    Stdio { server: Arc<CodexServer> },
+    StdioCodex { server: Arc<CodexServer> },
 }
 
 #[derive(Debug)]
@@ -986,6 +989,109 @@ impl CodexServer {
     }
 }
 
+/// Long-lived Pi RPC process dedicated to exactly one daemon session.
+struct PiSessionRuntime {
+    /// Sender for writing to the process stdin.
+    stdin_sender: mpsc::UnboundedSender<String>,
+    /// Pending RPC requests awaiting responses, keyed by request ID.
+    pending_requests: std::sync::Mutex<HashMap<i64, oneshot::Sender<Value>>>,
+    /// Next request ID for RPC.
+    next_id: AtomicI64,
+    /// Per-session conversion state (partial tool results, reasoning buffers).
+    converter: std::sync::Mutex<convert_pi::PiEventConverter>,
+    /// Child process handle for lifecycle management.
+    child: Arc<std::sync::Mutex<Option<std::process::Child>>>,
+    /// True when daemon-initiated shutdown/terminate requested.
+    shutdown_requested: AtomicBool,
+}
+
+impl std::fmt::Debug for PiSessionRuntime {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PiSessionRuntime")
+            .field("next_id", &self.next_id.load(Ordering::SeqCst))
+            .field(
+                "shutdown_requested",
+                &self.shutdown_requested.load(Ordering::SeqCst),
+            )
+            .finish()
+    }
+}
+
+impl PiSessionRuntime {
+    fn new(
+        stdin_sender: mpsc::UnboundedSender<String>,
+        child: Arc<std::sync::Mutex<Option<std::process::Child>>>,
+    ) -> Self {
+        Self {
+            stdin_sender,
+            pending_requests: std::sync::Mutex::new(HashMap::new()),
+            next_id: AtomicI64::new(1),
+            converter: std::sync::Mutex::new(convert_pi::PiEventConverter::default()),
+            child,
+            shutdown_requested: AtomicBool::new(false),
+        }
+    }
+
+    fn next_request_id(&self) -> i64 {
+        self.next_id.fetch_add(1, Ordering::SeqCst)
+    }
+
+    fn send_request(&self, id: i64, request: &impl Serialize) -> Option<oneshot::Receiver<Value>> {
+        let (tx, rx) = oneshot::channel();
+        {
+            let mut pending = self.pending_requests.lock().unwrap();
+            pending.insert(id, tx);
+        }
+        let line = serde_json::to_string(request).ok()?;
+        self.stdin_sender.send(line).ok()?;
+        Some(rx)
+    }
+
+    fn complete_request(&self, id: i64, result: Value) {
+        let tx = {
+            let mut pending = self.pending_requests.lock().unwrap();
+            pending.remove(&id)
+        };
+        if let Some(tx) = tx {
+            let _ = tx.send(result);
+        }
+    }
+
+    fn clear_pending(&self) {
+        let mut pending = self.pending_requests.lock().unwrap();
+        pending.clear();
+    }
+
+    fn mark_shutdown_requested(&self) {
+        self.shutdown_requested.store(true, Ordering::SeqCst);
+    }
+
+    fn shutdown_requested(&self) -> bool {
+        self.shutdown_requested.load(Ordering::SeqCst)
+    }
+
+    fn kill_process(&self) {
+        if let Ok(mut guard) = self.child.lock() {
+            if let Some(child) = guard.as_mut() {
+                let _ = child.kill();
+            }
+        }
+    }
+
+    fn shutdown(&self) {
+        self.mark_shutdown_requested();
+        self.clear_pending();
+        self.kill_process();
+    }
+}
+
+#[derive(Debug)]
+struct PiSessionBootstrap {
+    runtime: Arc<PiSessionRuntime>,
+    native_session_id: String,
+    _session_file: Option<String>,
+}
+
 pub(crate) struct SessionSubscription {
     pub(crate) initial_events: Vec<UniversalEvent>,
     pub(crate) receiver: broadcast::Receiver<UniversalEvent>,
@@ -1011,7 +1117,7 @@ impl ManagedServer {
     fn base_url(&self) -> Option<String> {
         match &self.kind {
             ManagedServerKind::Http { base_url } => Some(base_url.clone()),
-            ManagedServerKind::Stdio { .. } => None,
+            ManagedServerKind::StdioCodex { .. } => None,
         }
     }
 
@@ -1205,7 +1311,7 @@ impl AgentServerManager {
             let servers = self.servers.lock().await;
             if let Some(server) = servers.get(&agent) {
                 if matches!(server.status, ServerStatus::Running) {
-                    if let ManagedServerKind::Stdio { server } = &server.kind {
+                    if let ManagedServerKind::StdioCodex { server } = &server.kind {
                         return Ok((server.clone(), None));
                     }
                 }
@@ -1230,7 +1336,7 @@ impl AgentServerManager {
                             let _ = child.kill();
                         }
                     }
-                    if let ManagedServerKind::Stdio { server } = &existing.kind {
+                    if let ManagedServerKind::StdioCodex { server } = &existing.kind {
                         return Ok((server.clone(), None));
                     }
                 }
@@ -1238,7 +1344,7 @@ impl AgentServerManager {
             servers.insert(
                 agent,
                 ManagedServer {
-                    kind: ManagedServerKind::Stdio {
+                    kind: ManagedServerKind::StdioCodex {
                         server: server.clone(),
                     },
                     child: child.clone(),
@@ -1268,7 +1374,7 @@ impl AgentServerManager {
                     let _ = child.kill();
                 }
             }
-            if let ManagedServerKind::Stdio { server } = &server.kind {
+            if let ManagedServerKind::StdioCodex { server } = &server.kind {
                 server.clear_pending();
                 server.clear_threads();
             }
@@ -1477,7 +1583,7 @@ impl AgentServerManager {
                 if let Ok(mut guard) = server.child.lock() {
                     *guard = None;
                 }
-                if let ManagedServerKind::Stdio { server } = &server.kind {
+                if let ManagedServerKind::StdioCodex { server } = &server.kind {
                     codex_server = Some(server.clone());
                 }
             }
@@ -1597,9 +1703,12 @@ impl AgentServerManager {
 impl SessionManager {
     fn new(agent_manager: Arc<AgentManager>) -> Self {
         let log_base_dir = default_log_dir();
+        let http_client = http_client::client_builder()
+            .build()
+            .expect("failed to build http client");
         let server_manager = Arc::new(AgentServerManager::new(
             agent_manager.clone(),
-            Client::new(),
+            http_client.clone(),
             log_base_dir,
             true,
         ));
@@ -1607,7 +1716,7 @@ impl SessionManager {
             agent_manager,
             sessions: Mutex::new(Vec::new()),
             server_manager,
-            http_client: Client::new(),
+            http_client,
         }
     }
 
@@ -1630,6 +1739,20 @@ impl SessionManager {
     fn read_agent_stderr(&self, agent: AgentId) -> Option<StderrOutput> {
         let logs = AgentServerLogs::new(self.server_manager.log_base_dir.clone(), agent.as_str());
         logs.read_stderr()
+    }
+
+    async fn shutdown(&self) {
+        let runtimes = {
+            let mut sessions = self.sessions.lock().await;
+            sessions
+                .iter_mut()
+                .filter_map(|session| session.pi_runtime.take())
+                .collect::<Vec<_>>()
+        };
+        for runtime in runtimes {
+            runtime.shutdown();
+        }
+        self.server_manager.shutdown().await;
     }
 
     pub(crate) async fn create_session(
@@ -1687,6 +1810,21 @@ impl SessionManager {
             };
             let thread_id = self.create_codex_thread(&session_id, &snapshot).await?;
             session.native_session_id = Some(thread_id);
+        }
+        if agent_id == AgentId::Pi {
+            // Pi uses one dedicated RPC process per daemon session.
+            // This is the canonical runtime path for Pi sessions.
+            let pi = self
+                .create_pi_session(&session_id, session.model.as_deref())
+                .await?;
+            session.native_session_id = Some(pi.native_session_id);
+            session.pi_runtime = Some(pi.runtime.clone());
+            if let Some(variant) = session.variant.as_deref() {
+                if let Err(err) = self.set_pi_thinking_level(&pi.runtime, variant).await {
+                    pi.runtime.shutdown();
+                    return Err(err);
+                }
+            }
         }
         if agent_id == AgentId::Mock {
             session.native_session_id = Some(format!("mock-{session_id}"));
@@ -1808,6 +1946,13 @@ impl SessionManager {
                 }),
             },
             AgentId::Amp => Ok(amp_models_response()),
+            AgentId::Pi => match self.fetch_pi_models().await {
+                Ok(models) => Ok(models),
+                Err(_) => Ok(AgentModelsResponse {
+                    models: Vec::new(),
+                    default_model: None,
+                }),
+            },
             AgentId::Mock => Ok(mock_models_response()),
         }
     }
@@ -1823,7 +1968,10 @@ impl SessionManager {
             self.send_mock_message(session_id, message).await?;
             return Ok(());
         }
-        if matches!(session_snapshot.agent, AgentId::Claude | AgentId::Amp) {
+        if matches!(
+            session_snapshot.agent,
+            AgentId::Claude | AgentId::Amp | AgentId::Pi
+        ) {
             let _ = self
                 .record_conversions(&session_id, user_message_conversions(&message))
                 .await;
@@ -1842,6 +1990,17 @@ impl SessionManager {
         if session_snapshot.agent == AgentId::Codex {
             // Use the shared Codex app-server
             self.send_codex_turn(&session_snapshot, &message).await?;
+            if !agent_supports_item_started(session_snapshot.agent) {
+                let _ = self
+                    .emit_synthetic_assistant_start(&session_snapshot.session_id)
+                    .await;
+            }
+            return Ok(());
+        }
+        if session_snapshot.agent == AgentId::Pi {
+            // Pi bypasses generic AgentManager::spawn_streaming and stays on
+            // router-managed per-session RPC runtime for lifecycle isolation.
+            self.send_pi_prompt(&session_snapshot, &message).await?;
             if !agent_supports_item_started(session_snapshot.agent) {
                 let _ = self
                     .emit_synthetic_assistant_start(&session_snapshot.session_id)
@@ -1957,7 +2116,11 @@ impl SessionManager {
         session.record_conversions(vec![ended]);
         let agent = session.agent;
         let native_session_id = session.native_session_id.clone();
+        let pi_runtime = session.pi_runtime.take();
         drop(sessions);
+        if let Some(runtime) = pi_runtime {
+            runtime.shutdown();
+        }
         if agent == AgentId::Opencode || agent == AgentId::Codex {
             self.server_manager
                 .unregister_session(agent, &session_id, native_session_id.as_deref())
@@ -3291,6 +3454,532 @@ impl SessionManager {
         Ok(())
     }
 
+    fn apply_pi_model_args(command: &mut std::process::Command, model: Option<&str>) {
+        let Some(model) = model else {
+            return;
+        };
+        if let Some((provider, model_id)) = model.split_once('/') {
+            command
+                .arg("--provider")
+                .arg(provider)
+                .arg("--model")
+                .arg(model_id);
+            return;
+        }
+        command.arg("--model").arg(model);
+    }
+
+    async fn spawn_pi_runtime(
+        self: &Arc<Self>,
+        model: Option<&str>,
+    ) -> Result<(Arc<PiSessionRuntime>, mpsc::UnboundedReceiver<String>), SandboxError> {
+        let manager = self.agent_manager.clone();
+        let log_dir = self.server_manager.log_base_dir.clone();
+        let model = model.map(str::to_string);
+        let (stdin_tx, stdin_rx) = mpsc::unbounded_channel::<String>();
+        let (stdout_tx, stdout_rx) = mpsc::unbounded_channel::<String>();
+
+        let child =
+            tokio::task::spawn_blocking(move || -> Result<std::process::Child, SandboxError> {
+                let path = manager
+                    .resolve_binary(AgentId::Pi)
+                    .map_err(|err| map_spawn_error(AgentId::Pi, err))?;
+                let mut command = std::process::Command::new(path);
+                let stderr = AgentServerLogs::new(log_dir, AgentId::Pi.as_str()).open()?;
+                command.arg("--mode").arg("rpc");
+                Self::apply_pi_model_args(&mut command, model.as_deref());
+                command
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::piped())
+                    .stderr(stderr);
+
+                let mut child = command.spawn().map_err(|err| SandboxError::StreamError {
+                    message: err.to_string(),
+                })?;
+
+                let stdin = child
+                    .stdin
+                    .take()
+                    .ok_or_else(|| SandboxError::StreamError {
+                        message: "pi stdin unavailable".to_string(),
+                    })?;
+                let stdout = child
+                    .stdout
+                    .take()
+                    .ok_or_else(|| SandboxError::StreamError {
+                        message: "pi stdout unavailable".to_string(),
+                    })?;
+
+                let stdin_rx_mut = std::sync::Mutex::new(stdin_rx);
+                std::thread::spawn(move || {
+                    let mut stdin = stdin;
+                    let mut rx = stdin_rx_mut.lock().unwrap();
+                    while let Some(line) = rx.blocking_recv() {
+                        if writeln!(stdin, "{line}").is_err() {
+                            break;
+                        }
+                        if stdin.flush().is_err() {
+                            break;
+                        }
+                    }
+                });
+
+                std::thread::spawn(move || {
+                    let reader = BufReader::new(stdout);
+                    for line in reader.lines() {
+                        let Ok(line) = line else { break };
+                        if stdout_tx.send(line).is_err() {
+                            break;
+                        }
+                    }
+                });
+
+                Ok(child)
+            })
+            .await
+            .map_err(|err| SandboxError::StreamError {
+                message: err.to_string(),
+            })??;
+
+        let child = Arc::new(std::sync::Mutex::new(Some(child)));
+        let runtime = Arc::new(PiSessionRuntime::new(stdin_tx, child));
+        Ok((runtime, stdout_rx))
+    }
+
+    fn spawn_pi_runtime_tasks(
+        self: &Arc<Self>,
+        session_id: String,
+        runtime: Arc<PiSessionRuntime>,
+        stdout_rx: mpsc::UnboundedReceiver<String>,
+    ) {
+        let output_manager = Arc::clone(self);
+        let output_session_id = session_id.clone();
+        let output_runtime = runtime.clone();
+        tokio::spawn(async move {
+            output_manager
+                .handle_pi_runtime_output(output_session_id, output_runtime, stdout_rx)
+                .await;
+        });
+
+        let exit_manager = Arc::clone(self);
+        tokio::spawn(async move {
+            loop {
+                let status = {
+                    let mut guard = match runtime.child.lock() {
+                        Ok(guard) => guard,
+                        Err(_) => return,
+                    };
+                    match guard.as_mut() {
+                        Some(child) => match child.try_wait() {
+                            Ok(status) => status,
+                            Err(_) => None,
+                        },
+                        None => return,
+                    }
+                };
+
+                if let Some(status) = status {
+                    if let Ok(mut guard) = runtime.child.lock() {
+                        *guard = None;
+                    }
+                    exit_manager
+                        .handle_pi_runtime_exit(&session_id, runtime.clone(), status)
+                        .await;
+                    break;
+                }
+
+                sleep(Duration::from_millis(250)).await;
+            }
+        });
+    }
+
+    async fn is_active_pi_runtime(
+        &self,
+        session_id: &str,
+        runtime: &Arc<PiSessionRuntime>,
+    ) -> bool {
+        let sessions = self.sessions.lock().await;
+        let Some(session) = Self::session_ref(&sessions, session_id) else {
+            return false;
+        };
+        session
+            .pi_runtime
+            .as_ref()
+            .is_some_and(|active| Arc::ptr_eq(active, runtime))
+    }
+
+    async fn session_native_session_id(&self, session_id: &str) -> Option<String> {
+        let sessions = self.sessions.lock().await;
+        Self::session_ref(&sessions, session_id)
+            .and_then(|session| session.native_session_id.clone())
+    }
+
+    /// Handles output from one Pi runtime process and routes events to exactly one daemon session.
+    async fn handle_pi_runtime_output(
+        self: Arc<Self>,
+        session_id: String,
+        runtime: Arc<PiSessionRuntime>,
+        mut stdout_rx: mpsc::UnboundedReceiver<String>,
+    ) {
+        while let Some(line) = stdout_rx.recv().await {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+
+            let value: Value = match serde_json::from_str(trimmed) {
+                Ok(v) => v,
+                Err(err) => {
+                    if self.is_active_pi_runtime(&session_id, &runtime).await {
+                        self.record_pi_unparsed(
+                            &session_id,
+                            &err.to_string(),
+                            Value::String(trimmed.to_string()),
+                        )
+                        .await;
+                    }
+                    continue;
+                }
+            };
+
+            let message_type = value.get("type").and_then(Value::as_str).unwrap_or("");
+            if message_type == "response" {
+                let id = value
+                    .get("id")
+                    .and_then(Value::as_i64)
+                    .or_else(|| value.get("id").and_then(Value::as_str)?.parse::<i64>().ok());
+                if let Some(id) = id {
+                    runtime.complete_request(id, value.clone());
+                }
+                continue;
+            }
+
+            if !self.is_active_pi_runtime(&session_id, &runtime).await {
+                continue;
+            }
+
+            let event: pi_schema::RpcEvent = match serde_json::from_value(value.clone()) {
+                Ok(event) => event,
+                Err(err) => {
+                    self.record_pi_unparsed(&session_id, &err.to_string(), value.clone())
+                        .await;
+                    continue;
+                }
+            };
+
+            let conversions = {
+                let mut converter = runtime.converter.lock().unwrap();
+                converter.event_to_universal(&event)
+            };
+
+            let mut conversions = match conversions {
+                Ok(conversions) => conversions,
+                Err(err) => {
+                    self.record_pi_unparsed(&session_id, &err, value.clone())
+                        .await;
+                    continue;
+                }
+            };
+
+            let native_session_id = self.session_native_session_id(&session_id).await;
+            for conversion in &mut conversions {
+                if conversion.native_session_id.is_none() {
+                    conversion.native_session_id = native_session_id.clone();
+                }
+                conversion.raw = Some(value.clone());
+            }
+
+            let _ = self.record_conversions(&session_id, conversions).await;
+        }
+    }
+
+    async fn handle_pi_runtime_exit(
+        &self,
+        session_id: &str,
+        runtime: Arc<PiSessionRuntime>,
+        status: std::process::ExitStatus,
+    ) {
+        runtime.clear_pending();
+
+        let should_emit_error = {
+            let mut sessions = self.sessions.lock().await;
+            let Some(session) = Self::session_mut(&mut sessions, session_id) else {
+                return;
+            };
+            let Some(active_runtime) = session.pi_runtime.as_ref() else {
+                return;
+            };
+            if !Arc::ptr_eq(active_runtime, &runtime) {
+                return;
+            }
+            session.pi_runtime = None;
+            !runtime.shutdown_requested() && !session.ended
+        };
+
+        if !should_emit_error {
+            return;
+        }
+
+        let message = format!("pi rpc process exited with status {:?}", status);
+        self.record_error(
+            session_id,
+            message.clone(),
+            Some("server_exit".to_string()),
+            None,
+        )
+        .await;
+        let logs = self.read_agent_stderr(AgentId::Pi);
+        self.mark_session_ended(
+            session_id,
+            status.code(),
+            &message,
+            SessionEndReason::Error,
+            TerminatedBy::Daemon,
+            logs,
+        )
+        .await;
+    }
+
+    async fn create_pi_session(
+        self: &Arc<Self>,
+        session_id: &str,
+        model: Option<&str>,
+    ) -> Result<PiSessionBootstrap, SandboxError> {
+        let (runtime, stdout_rx) = self.spawn_pi_runtime(model).await?;
+        self.spawn_pi_runtime_tasks(session_id.to_string(), runtime.clone(), stdout_rx);
+
+        let result: Result<PiSessionBootstrap, SandboxError> = async {
+            let new_id = runtime.next_request_id();
+            let new_request = json!({
+                "type": "new_session",
+                "id": new_id
+            });
+            let new_rx = runtime.send_request(new_id, &new_request).ok_or_else(|| {
+                SandboxError::StreamError {
+                    message: "failed to send pi new_session request".to_string(),
+                }
+            })?;
+            let new_response = tokio::time::timeout(Duration::from_secs(30), new_rx).await;
+            let new_response = match new_response {
+                Ok(Ok(response)) => response,
+                Ok(Err(_)) => {
+                    return Err(SandboxError::StreamError {
+                        message: "pi new_session request cancelled".to_string(),
+                    })
+                }
+                Err(_) => {
+                    return Err(SandboxError::StreamError {
+                        message: "pi new_session request timed out".to_string(),
+                    })
+                }
+            };
+            if new_response
+                .get("success")
+                .and_then(Value::as_bool)
+                .is_some_and(|success| !success)
+            {
+                return Err(SandboxError::StreamError {
+                    message: format!("pi new_session failed: {new_response}"),
+                });
+            }
+            if new_response
+                .get("data")
+                .and_then(|value| value.get("cancelled"))
+                .and_then(Value::as_bool)
+                .is_some_and(|cancelled| cancelled)
+            {
+                return Err(SandboxError::StreamError {
+                    message: "pi new_session request cancelled".to_string(),
+                });
+            }
+
+            let state_id = runtime.next_request_id();
+            let state_request = json!({
+                "type": "get_state",
+                "id": state_id
+            });
+            let state_rx = runtime
+                .send_request(state_id, &state_request)
+                .ok_or_else(|| SandboxError::StreamError {
+                    message: "failed to send pi get_state request".to_string(),
+                })?;
+            let state_response = tokio::time::timeout(Duration::from_secs(30), state_rx).await;
+            let state_response = match state_response {
+                Ok(Ok(response)) => response,
+                Ok(Err(_)) => {
+                    return Err(SandboxError::StreamError {
+                        message: "pi get_state request cancelled".to_string(),
+                    })
+                }
+                Err(_) => {
+                    return Err(SandboxError::StreamError {
+                        message: "pi get_state request timed out".to_string(),
+                    })
+                }
+            };
+            if state_response
+                .get("success")
+                .and_then(Value::as_bool)
+                .is_some_and(|success| !success)
+            {
+                return Err(SandboxError::StreamError {
+                    message: format!("pi get_state failed: {state_response}"),
+                });
+            }
+
+            let state = state_response.get("data").unwrap_or(&state_response);
+            let native_session_id = state
+                .get("sessionId")
+                .or_else(|| state.get("session_id"))
+                .and_then(Value::as_str)
+                .ok_or_else(|| SandboxError::StreamError {
+                    message: "pi get_state response missing session id".to_string(),
+                })?
+                .to_string();
+            let session_file = state
+                .get("sessionFile")
+                .or_else(|| state.get("session_file"))
+                .and_then(Value::as_str)
+                .map(|value| value.to_string());
+
+            Ok(PiSessionBootstrap {
+                runtime: runtime.clone(),
+                native_session_id,
+                _session_file: session_file,
+            })
+        }
+        .await;
+
+        if result.is_err() {
+            runtime.shutdown();
+        }
+
+        result
+    }
+
+    async fn send_pi_prompt(
+        self: &Arc<Self>,
+        session: &SessionSnapshot,
+        prompt: &str,
+    ) -> Result<(), SandboxError> {
+        let runtime = {
+            let sessions = self.sessions.lock().await;
+            let session_state =
+                Self::session_ref(&sessions, &session.session_id).ok_or_else(|| {
+                    SandboxError::SessionNotFound {
+                        session_id: session.session_id.clone(),
+                    }
+                })?;
+            session_state
+                .pi_runtime
+                .clone()
+                .ok_or_else(|| SandboxError::InvalidRequest {
+                    message: "Pi session runtime is not active".to_string(),
+                })?
+        };
+
+        if let Some(level) = session.variant.as_deref() {
+            self.set_pi_thinking_level(&runtime, level).await?;
+        }
+
+        let id = runtime.next_request_id();
+        let request = json!({
+            "type": "prompt",
+            "id": id,
+            "message": prompt
+        });
+
+        let response_rx =
+            runtime
+                .send_request(id, &request)
+                .ok_or_else(|| SandboxError::StreamError {
+                    message: "failed to send pi prompt request".to_string(),
+                })?;
+        let response = tokio::time::timeout(Duration::from_secs(30), response_rx)
+            .await
+            .map_err(|_| SandboxError::StreamError {
+                message: "pi prompt request timed out".to_string(),
+            })?
+            .map_err(|_| SandboxError::StreamError {
+                message: "pi prompt request cancelled".to_string(),
+            })?;
+        if response
+            .get("success")
+            .and_then(Value::as_bool)
+            .is_some_and(|success| !success)
+        {
+            let detail = response
+                .get("error")
+                .cloned()
+                .or_else(|| {
+                    response
+                        .get("data")
+                        .and_then(|data| data.get("error"))
+                        .cloned()
+                })
+                .unwrap_or_else(|| response.clone());
+            return Err(SandboxError::InvalidRequest {
+                message: format!("pi prompt failed: {detail}"),
+            });
+        }
+
+        Ok(())
+    }
+
+    async fn set_pi_thinking_level(
+        &self,
+        runtime: &Arc<PiSessionRuntime>,
+        level: &str,
+    ) -> Result<(), SandboxError> {
+        let id = runtime.next_request_id();
+        let request = json!({
+            "type": "set_thinking_level",
+            "id": id,
+            "level": level
+        });
+        let response_rx =
+            runtime
+                .send_request(id, &request)
+                .ok_or_else(|| SandboxError::StreamError {
+                    message: "failed to send pi set_thinking_level request".to_string(),
+                })?;
+        let response = tokio::time::timeout(Duration::from_secs(30), response_rx)
+            .await
+            .map_err(|_| SandboxError::StreamError {
+                message: "pi set_thinking_level request timed out".to_string(),
+            })?
+            .map_err(|_| SandboxError::StreamError {
+                message: "pi set_thinking_level request cancelled".to_string(),
+            })?;
+        if response
+            .get("success")
+            .and_then(Value::as_bool)
+            .is_some_and(|success| !success)
+        {
+            let detail = response
+                .get("error")
+                .cloned()
+                .or_else(|| {
+                    response
+                        .get("data")
+                        .and_then(|data| data.get("error"))
+                        .cloned()
+                })
+                .unwrap_or_else(|| response.clone());
+            return Err(SandboxError::InvalidRequest {
+                message: format!("pi set_thinking_level failed for '{level}': {detail}"),
+            });
+        }
+
+        Ok(())
+    }
+
+    async fn record_pi_unparsed(&self, session_id: &str, error: &str, raw: Value) {
+        let _ = self
+            .record_conversions(session_id, vec![agent_unparsed("pi", error, raw)])
+            .await;
+    }
+
     async fn fetch_opencode_modes(&self) -> Result<Vec<AgentModeInfo>, SandboxError> {
         let base_url = self.ensure_opencode_server().await?;
         let endpoints = [
@@ -3572,6 +4261,47 @@ impl SessionManager {
         Err(SandboxError::StreamError {
             message: "OpenCode models unavailable".to_string(),
         })
+    }
+
+    async fn fetch_pi_models(&self) -> Result<AgentModelsResponse, SandboxError> {
+        let binary = self
+            .agent_manager
+            .resolve_binary(AgentId::Pi)
+            .map_err(|err| map_spawn_error(AgentId::Pi, err))?;
+        let output = tokio::time::timeout(
+            Duration::from_secs(10),
+            tokio::task::spawn_blocking(move || {
+                std::process::Command::new(binary)
+                    .arg("--list-models")
+                    .output()
+            }),
+        )
+        .await
+        .map_err(|_| SandboxError::StreamError {
+            message: "pi --list-models timed out".to_string(),
+        })?
+        .map_err(|err| SandboxError::StreamError {
+            message: err.to_string(),
+        })?
+        .map_err(|err| SandboxError::StreamError {
+            message: err.to_string(),
+        })?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            let message = if stderr.is_empty() {
+                format!("pi --list-models failed with status {}", output.status)
+            } else {
+                format!(
+                    "pi --list-models failed with status {}: {stderr}",
+                    output.status
+                )
+            };
+            return Err(SandboxError::StreamError { message });
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        Ok(parse_pi_models_output(&stdout))
     }
 
     async fn extract_credentials(&self) -> Result<ExtractedCredentials, SandboxError> {
@@ -4505,12 +5235,13 @@ async fn reply_permission(
     Ok(StatusCode::NO_CONTENT)
 }
 
-fn all_agents() -> [AgentId; 5] {
+fn all_agents() -> [AgentId; 6] {
     [
         AgentId::Claude,
         AgentId::Codex,
         AgentId::Opencode,
         AgentId::Amp,
+        AgentId::Pi,
         AgentId::Mock,
     ]
 }
@@ -4520,7 +5251,7 @@ fn all_agents() -> [AgentId; 5] {
 fn agent_supports_resume(agent: AgentId) -> bool {
     matches!(
         agent,
-        AgentId::Claude | AgentId::Amp | AgentId::Opencode | AgentId::Codex
+        AgentId::Claude | AgentId::Amp | AgentId::Opencode | AgentId::Codex | AgentId::Pi
     )
 }
 
@@ -4616,6 +5347,27 @@ fn agent_capabilities_for(agent: AgentId) -> AgentCapabilities {
             variants: true,
             shared_process: false, // per-turn subprocess with --continue
         },
+        AgentId::Pi => AgentCapabilities {
+            plan_mode: false,
+            permissions: false,
+            questions: false,
+            tool_calls: true,
+            tool_results: true,
+            text_messages: true,
+            images: true,
+            file_attachments: false,
+            session_lifecycle: false,
+            error_events: true,
+            reasoning: true,
+            status: true,
+            command_execution: false,
+            file_changes: false,
+            mcp_tools: false,
+            streaming_deltas: true,
+            item_started: true,
+            variants: true,
+            shared_process: false, // one dedicated rpc process per session
+        },
         AgentId::Mock => AgentCapabilities {
             plan_mode: true,
             permissions: true,
@@ -4694,6 +5446,11 @@ fn agent_modes_for(agent: AgentId) -> Vec<AgentModeInfo> {
             name: "Build".to_string(),
             description: "Default build mode".to_string(),
         }],
+        AgentId::Pi => vec![AgentModeInfo {
+            id: "build".to_string(),
+            name: "Build".to_string(),
+            description: "Default build mode".to_string(),
+        }],
         AgentId::Mock => vec![
             AgentModeInfo {
                 id: "build".to_string(),
@@ -4754,6 +5511,102 @@ fn codex_variants() -> Vec<String> {
         .into_iter()
         .map(|value| value.to_string())
         .collect()
+}
+
+fn pi_variants() -> Vec<String> {
+    vec!["off", "minimal", "low", "medium", "high", "xhigh"]
+        .into_iter()
+        .map(|value| value.to_string())
+        .collect()
+}
+
+fn parse_pi_models_output(output: &str) -> AgentModelsResponse {
+    let mut models = Vec::new();
+    let mut seen = HashSet::new();
+    let mut provider_col: Option<usize> = None;
+    let mut model_col: Option<usize> = None;
+    let mut thinking_col: Option<usize> = None;
+
+    for line in output.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let parts = trimmed.split_whitespace().collect::<Vec<_>>();
+        if parts.len() < 2 {
+            continue;
+        }
+        if parts.iter().all(|part| {
+            part.chars()
+                .all(|ch| matches!(ch, '-' | '=' | '+' | '|' | ':'))
+        }) {
+            continue;
+        }
+
+        let lower = parts
+            .iter()
+            .map(|part| part.to_ascii_lowercase())
+            .collect::<Vec<_>>();
+        if let (Some(provider_idx), Some(model_idx)) = (
+            lower.iter().position(|part| part == "provider"),
+            lower.iter().position(|part| part == "model"),
+        ) {
+            provider_col = Some(provider_idx);
+            model_col = Some(model_idx);
+            thinking_col = lower.iter().position(|part| part == "thinking");
+            continue;
+        }
+
+        let provider_idx = provider_col.unwrap_or(0);
+        let model_idx = model_col.unwrap_or(1);
+        let Some(provider) = parts.get(provider_idx).copied() else {
+            continue;
+        };
+        let Some(model) = parts.get(model_idx).copied() else {
+            continue;
+        };
+
+        if provider.chars().all(|ch| ch == '-' || ch == '=')
+            && model.chars().all(|ch| ch == '-' || ch == '=')
+        {
+            continue;
+        }
+
+        let thinking_value = thinking_col
+            .and_then(|idx| parts.get(idx).copied())
+            .or_else(|| {
+                parts.iter().rev().copied().find(|value| {
+                    value.eq_ignore_ascii_case("yes") || value.eq_ignore_ascii_case("no")
+                })
+            });
+        let supports_thinking =
+            thinking_value.is_some_and(|value| value.eq_ignore_ascii_case("yes"));
+        let (variants, default_variant) = if supports_thinking {
+            (Some(pi_variants()), Some("medium".to_string()))
+        } else {
+            (Some(vec!["off".to_string()]), Some("off".to_string()))
+        };
+
+        let id = format!("{provider}/{model}");
+        if !seen.insert(id.clone()) {
+            continue;
+        }
+
+        models.push(AgentModelInfo {
+            id,
+            name: None,
+            variants,
+            default_variant,
+        });
+    }
+
+    models.sort_by(|a, b| a.id.cmp(&b.id));
+
+    AgentModelsResponse {
+        models,
+        default_model: None,
+    }
 }
 
 fn parse_opencode_models(value: &Value) -> Option<AgentModelsResponse> {
@@ -4846,6 +5699,14 @@ fn normalize_agent_mode(agent: AgentId, agent_mode: Option<&str>) -> Result<Stri
             }
             .into()),
         },
+        AgentId::Pi => match mode {
+            "build" => Ok("build".to_string()),
+            value => Err(SandboxError::ModeNotSupported {
+                agent: agent.as_str().to_string(),
+                mode: value.to_string(),
+            }
+            .into()),
+        },
         AgentId::Mock => match mode {
             "build" | "plan" => Ok(mode.to_string()),
             value => Err(SandboxError::ModeNotSupported {
@@ -4903,6 +5764,7 @@ fn normalize_permission_mode(
         AgentId::Codex => matches!(mode, "default" | "plan" | "bypass"),
         AgentId::Amp => matches!(mode, "default" | "bypass"),
         AgentId::Opencode => matches!(mode, "default"),
+        AgentId::Pi => matches!(mode, "default"),
         AgentId::Mock => matches!(mode, "default" | "plan" | "bypass"),
     };
     if !supported {
@@ -4934,6 +5796,9 @@ fn map_install_error(agent: AgentId, err: ManagerError) -> SandboxError {
         ManagerError::ResumeUnsupported { agent } => SandboxError::InvalidRequest {
             message: format!("resume unsupported for {agent}"),
         },
+        ManagerError::UnsupportedRuntimePath { .. } => SandboxError::InvalidRequest {
+            message: err.to_string(),
+        },
         ManagerError::UnsupportedPlatform { .. }
         | ManagerError::DownloadFailed { .. }
         | ManagerError::Http(_)
@@ -4953,6 +5818,9 @@ fn map_spawn_error(agent: AgentId, err: ManagerError) -> SandboxError {
         },
         ManagerError::ResumeUnsupported { agent } => SandboxError::InvalidRequest {
             message: format!("resume unsupported for {agent}"),
+        },
+        ManagerError::UnsupportedRuntimePath { .. } => SandboxError::InvalidRequest {
+            message: err.to_string(),
         },
         _ => SandboxError::AgentProcessExited {
             agent: agent.as_str().to_string(),
@@ -5699,6 +6567,11 @@ fn parse_agent_line(agent: AgentId, line: &str, session_id: &str) -> Vec<EventCo
                 .unwrap_or_else(|err| vec![agent_unparsed("amp", &err, value)]),
             Err(err) => vec![agent_unparsed("amp", &err.to_string(), value)],
         },
+        AgentId::Pi => match serde_json::from_value(value.clone()) {
+            Ok(event) => convert_pi::event_to_universal(&event)
+                .unwrap_or_else(|err| vec![agent_unparsed("pi", &err, value)]),
+            Err(err) => vec![agent_unparsed("pi", &err.to_string(), value)],
+        },
         AgentId::Mock => vec![agent_unparsed(
             "mock",
             "mock agent does not parse streaming output",
@@ -5749,6 +6622,618 @@ fn extract_nested_string(value: &Value, path: &[&str]) -> Option<String> {
         }
     }
     current.as_str().map(|s| s.to_string())
+}
+
+#[cfg(test)]
+mod pi_model_parser_tests {
+    use super::*;
+
+    #[test]
+    fn parse_pi_models_output_parses_variants_from_thinking_column() {
+        let output = r#"
+provider    model                          aliases         thinking
+openai      gpt-4.1                        gpt-4.1-latest  yes
+anthropic   claude-sonnet-4-5-20250929    sonnet          no
+"#;
+
+        let parsed = parse_pi_models_output(output);
+        let anthropic = parsed
+            .models
+            .iter()
+            .find(|model| model.id == "anthropic/claude-sonnet-4-5-20250929")
+            .expect("anthropic model");
+        assert_eq!(
+            anthropic.variants.as_deref(),
+            Some(&["off".to_string()][..])
+        );
+        assert_eq!(anthropic.default_variant.as_deref(), Some("off"));
+
+        let openai = parsed
+            .models
+            .iter()
+            .find(|model| model.id == "openai/gpt-4.1")
+            .expect("openai model");
+        assert_eq!(openai.variants.as_ref(), Some(&pi_variants()));
+        assert_eq!(openai.default_variant.as_deref(), Some("medium"));
+        assert_eq!(parsed.default_model, None);
+    }
+
+    #[test]
+    fn parse_pi_models_output_skips_blank_header_separator_and_malformed_rows() {
+        let output = r#"
+provider model aliases thinking
+-------- ----- ------- --------
+
+openai
+malformed-row
+groq llama-3.3-70b-versatile alias no
+"#;
+
+        let parsed = parse_pi_models_output(output);
+        let models = parsed
+            .models
+            .iter()
+            .map(|model| (model.id.as_str(), model.default_variant.as_deref()))
+            .collect::<Vec<_>>();
+
+        assert_eq!(models, vec![("groq/llama-3.3-70b-versatile", Some("off"))]);
+    }
+
+    #[test]
+    fn parse_pi_models_output_handles_model_ids_with_slashes() {
+        let output = "openrouter qwen/qwen3-32b alias yes";
+
+        let parsed = parse_pi_models_output(output);
+        let models = parsed
+            .models
+            .iter()
+            .map(|model| {
+                (
+                    model.id.as_str(),
+                    model.variants.clone().unwrap_or_default(),
+                    model.default_variant.as_deref(),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            models,
+            vec![("openrouter/qwen/qwen3-32b", pi_variants(), Some("medium"))]
+        );
+    }
+
+    #[test]
+    fn parse_pi_models_output_deduplicates_and_sorts_stably() {
+        let output = r#"
+zeta z-model yes
+alpha a-model no
+zeta z-model no
+beta b-model yes
+alpha a-model yes
+"#;
+
+        let parsed = parse_pi_models_output(output);
+        let ids = parsed
+            .models
+            .iter()
+            .map(|model| model.id.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(ids, vec!["alpha/a-model", "beta/b-model", "zeta/z-model"]);
+        assert_eq!(parsed.default_model, None);
+    }
+
+    #[test]
+    fn parse_pi_models_output_defaults_to_off_when_thinking_column_missing() {
+        let output = r#"
+provider model aliases
+openai gpt-4.1 gpt-4.1-latest
+"#;
+
+        let parsed = parse_pi_models_output(output);
+        assert_eq!(parsed.models.len(), 1);
+        assert_eq!(
+            parsed.models[0].variants.as_deref(),
+            Some(&["off".to_string()][..])
+        );
+        assert_eq!(parsed.models[0].default_variant.as_deref(), Some("off"));
+    }
+}
+
+#[cfg(test)]
+mod agent_capabilities_tests {
+    use super::*;
+
+    #[test]
+    fn pi_capabilities_enable_variants() {
+        assert!(agent_capabilities_for(AgentId::Pi).variants);
+    }
+}
+
+#[cfg(test)]
+mod runtime_contract_tests {
+    use super::*;
+
+    #[test]
+    fn map_spawn_error_maps_unsupported_runtime_path_to_invalid_request() {
+        let error = map_spawn_error(
+            AgentId::Pi,
+            ManagerError::UnsupportedRuntimePath {
+                agent: AgentId::Pi,
+                operation: "spawn_streaming",
+                recommended_path: "router-managed per-session RPC runtime",
+            },
+        );
+        match error {
+            SandboxError::InvalidRequest { message } => {
+                assert!(message.contains("spawn_streaming"), "{message}");
+                assert!(
+                    message.contains("router-managed per-session RPC runtime"),
+                    "{message}"
+                );
+            }
+            other => panic!("expected InvalidRequest, got {other:?}"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod pi_runtime_tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn test_request(agent: AgentId) -> CreateSessionRequest {
+        CreateSessionRequest {
+            agent: agent.as_str().to_string(),
+            agent_mode: None,
+            permission_mode: Some("default".to_string()),
+            model: None,
+            variant: None,
+            agent_version: None,
+        }
+    }
+
+    #[test]
+    fn pi_model_args_with_provider_and_model() {
+        let mut command = std::process::Command::new("pi");
+        SessionManager::apply_pi_model_args(&mut command, Some("openai/gpt-5.2-codex"));
+        let args = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            args,
+            vec!["--provider", "openai", "--model", "gpt-5.2-codex"]
+        );
+    }
+
+    #[test]
+    fn pi_model_args_with_slashes_in_model_id() {
+        let mut command = std::process::Command::new("pi");
+        SessionManager::apply_pi_model_args(
+            &mut command,
+            Some("openrouter/meta-llama/llama-3.1-8b-instruct"),
+        );
+        let args = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            args,
+            vec![
+                "--provider",
+                "openrouter",
+                "--model",
+                "meta-llama/llama-3.1-8b-instruct"
+            ]
+        );
+    }
+
+    #[test]
+    fn pi_model_args_with_model_only() {
+        let mut command = std::process::Command::new("pi");
+        SessionManager::apply_pi_model_args(&mut command, Some("gpt-5.2-codex"));
+        let args = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(args, vec!["--model", "gpt-5.2-codex"]);
+    }
+
+    async fn setup_pi_session_with_stdin(
+        session_id: &str,
+    ) -> (
+        Arc<SessionManager>,
+        Arc<PiSessionRuntime>,
+        mpsc::UnboundedReceiver<String>,
+        TempDir,
+    ) {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let agent_manager = Arc::new(AgentManager::new(temp_dir.path()).expect("agent manager"));
+        let http_client = Client::builder().no_proxy().build().expect("http client");
+        let server_manager = Arc::new(AgentServerManager::new(
+            agent_manager.clone(),
+            http_client.clone(),
+            temp_dir.path().join("logs"),
+            false,
+        ));
+        let session_manager = Arc::new(SessionManager {
+            agent_manager,
+            sessions: Mutex::new(Vec::new()),
+            server_manager,
+            http_client,
+        });
+        session_manager
+            .server_manager
+            .set_owner(Arc::downgrade(&session_manager));
+
+        let (stdin_tx, stdin_rx) = mpsc::unbounded_channel::<String>();
+        let runtime = Arc::new(PiSessionRuntime::new(
+            stdin_tx,
+            Arc::new(std::sync::Mutex::new(None)),
+        ));
+
+        let mut session = SessionState::new(
+            session_id.to_string(),
+            AgentId::Pi,
+            &test_request(AgentId::Pi),
+        )
+        .expect("session");
+        session.native_session_id = Some(format!("native-{session_id}"));
+        session.pi_runtime = Some(runtime.clone());
+        session_manager.sessions.lock().await.push(session);
+
+        (session_manager, runtime, stdin_rx, temp_dir)
+    }
+
+    async fn setup_pi_session(
+        session_id: &str,
+    ) -> (Arc<SessionManager>, Arc<PiSessionRuntime>, TempDir) {
+        let (session_manager, runtime, _stdin_rx, temp_dir) =
+            setup_pi_session_with_stdin(session_id).await;
+        (session_manager, runtime, temp_dir)
+    }
+
+    #[tokio::test]
+    async fn pi_runtime_correlates_multiple_inflight_requests() {
+        let (stdin_tx, mut stdin_rx) = mpsc::unbounded_channel::<String>();
+        let runtime = PiSessionRuntime::new(stdin_tx, Arc::new(std::sync::Mutex::new(None)));
+
+        let id1 = runtime.next_request_id();
+        let id2 = runtime.next_request_id();
+        let rx1 = runtime
+            .send_request(id1, &json!({ "type": "one", "id": id1 }))
+            .expect("request 1");
+        let rx2 = runtime
+            .send_request(id2, &json!({ "type": "two", "id": id2 }))
+            .expect("request 2");
+
+        let line1 = stdin_rx.recv().await.expect("line1");
+        let line2 = stdin_rx.recv().await.expect("line2");
+        assert!(line1.contains("\"id\":1") || line2.contains("\"id\":1"));
+        assert!(line1.contains("\"id\":2") || line2.contains("\"id\":2"));
+
+        runtime.complete_request(id2, json!({ "type": "response", "id": id2, "ok": true }));
+        runtime.complete_request(id1, json!({ "type": "response", "id": id1, "ok": true }));
+
+        let result2 = rx2.await.expect("response 2");
+        let result1 = rx1.await.expect("response 1");
+        assert_eq!(result2.get("id").and_then(Value::as_i64), Some(id2));
+        assert_eq!(result1.get("id").and_then(Value::as_i64), Some(id1));
+    }
+
+    #[tokio::test]
+    async fn pi_set_thinking_level_sends_rpc_and_waits_for_success() {
+        let (session_manager, runtime, mut stdin_rx, _temp_dir) =
+            setup_pi_session_with_stdin("pi-thinking-success").await;
+        let runtime_for_task = runtime.clone();
+        let manager_for_task = session_manager.clone();
+        let task = tokio::spawn(async move {
+            manager_for_task
+                .set_pi_thinking_level(&runtime_for_task, "high")
+                .await
+        });
+
+        let line = stdin_rx.recv().await.expect("set_thinking_level request");
+        let request: Value = serde_json::from_str(&line).expect("json request");
+        assert_eq!(
+            request.get("type").and_then(Value::as_str),
+            Some("set_thinking_level")
+        );
+        assert_eq!(request.get("level").and_then(Value::as_str), Some("high"));
+        let request_id = request
+            .get("id")
+            .and_then(Value::as_i64)
+            .expect("request id");
+        runtime.complete_request(
+            request_id,
+            json!({
+                "type": "response",
+                "id": request_id,
+                "success": true
+            }),
+        );
+
+        task.await.expect("join").expect("set_thinking_level ok");
+    }
+
+    #[tokio::test]
+    async fn pi_set_thinking_level_maps_explicit_rpc_error_to_invalid_request() {
+        let (session_manager, runtime, mut stdin_rx, _temp_dir) =
+            setup_pi_session_with_stdin("pi-thinking-error").await;
+        let runtime_for_task = runtime.clone();
+        let manager_for_task = session_manager.clone();
+        let task = tokio::spawn(async move {
+            manager_for_task
+                .set_pi_thinking_level(&runtime_for_task, "invalid-level")
+                .await
+        });
+
+        let line = stdin_rx.recv().await.expect("set_thinking_level request");
+        let request: Value = serde_json::from_str(&line).expect("json request");
+        let request_id = request
+            .get("id")
+            .and_then(Value::as_i64)
+            .expect("request id");
+        runtime.complete_request(
+            request_id,
+            json!({
+                "type": "response",
+                "id": request_id,
+                "success": false,
+                "error": "unsupported level"
+            }),
+        );
+
+        let err = task
+            .await
+            .expect("join")
+            .expect_err("set_thinking_level should fail");
+        match err {
+            SandboxError::InvalidRequest { message } => {
+                assert!(message.contains("unsupported level"), "{message}");
+            }
+            other => panic!("expected InvalidRequest, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn send_pi_prompt_reapplies_variant_before_prompt() {
+        let (session_manager, runtime, mut stdin_rx, _temp_dir) =
+            setup_pi_session_with_stdin("pi-prompt-variant").await;
+        let snapshot = SessionSnapshot {
+            session_id: "pi-prompt-variant".to_string(),
+            agent: AgentId::Pi,
+            agent_mode: "build".to_string(),
+            permission_mode: "default".to_string(),
+            model: None,
+            variant: Some("high".to_string()),
+            native_session_id: Some("native-pi-prompt-variant".to_string()),
+        };
+        let manager_for_task = session_manager.clone();
+        let task =
+            tokio::spawn(async move { manager_for_task.send_pi_prompt(&snapshot, "Hello").await });
+
+        let set_line = stdin_rx.recv().await.expect("set_thinking_level request");
+        let set_request: Value = serde_json::from_str(&set_line).expect("json request");
+        assert_eq!(
+            set_request.get("type").and_then(Value::as_str),
+            Some("set_thinking_level")
+        );
+        let set_id = set_request
+            .get("id")
+            .and_then(Value::as_i64)
+            .expect("set id");
+        runtime.complete_request(
+            set_id,
+            json!({
+                "type": "response",
+                "id": set_id,
+                "success": true
+            }),
+        );
+
+        let prompt_line = stdin_rx.recv().await.expect("prompt request");
+        let prompt_request: Value = serde_json::from_str(&prompt_line).expect("json request");
+        assert_eq!(
+            prompt_request.get("type").and_then(Value::as_str),
+            Some("prompt")
+        );
+        assert_eq!(
+            prompt_request.get("message").and_then(Value::as_str),
+            Some("Hello")
+        );
+        let prompt_id = prompt_request
+            .get("id")
+            .and_then(Value::as_i64)
+            .expect("prompt id");
+        runtime.complete_request(
+            prompt_id,
+            json!({
+                "type": "response",
+                "id": prompt_id,
+                "success": true
+            }),
+        );
+
+        task.await.expect("join").expect("send_pi_prompt ok");
+    }
+
+    #[tokio::test]
+    async fn send_pi_prompt_maps_explicit_rpc_error_to_invalid_request() {
+        let (session_manager, runtime, mut stdin_rx, _temp_dir) =
+            setup_pi_session_with_stdin("pi-prompt-error").await;
+        let snapshot = SessionSnapshot {
+            session_id: "pi-prompt-error".to_string(),
+            agent: AgentId::Pi,
+            agent_mode: "build".to_string(),
+            permission_mode: "default".to_string(),
+            model: None,
+            variant: None,
+            native_session_id: Some("native-pi-prompt-error".to_string()),
+        };
+        let manager_for_task = session_manager.clone();
+        let task =
+            tokio::spawn(async move { manager_for_task.send_pi_prompt(&snapshot, "Hello").await });
+
+        let prompt_line = stdin_rx.recv().await.expect("prompt request");
+        let prompt_request: Value = serde_json::from_str(&prompt_line).expect("json request");
+        assert_eq!(
+            prompt_request.get("type").and_then(Value::as_str),
+            Some("prompt")
+        );
+        let prompt_id = prompt_request
+            .get("id")
+            .and_then(Value::as_i64)
+            .expect("prompt id");
+        runtime.complete_request(
+            prompt_id,
+            json!({
+                "type": "response",
+                "id": prompt_id,
+                "success": false,
+                "error": "turn already in progress"
+            }),
+        );
+
+        let err = task
+            .await
+            .expect("join")
+            .expect_err("send_pi_prompt should fail");
+        match err {
+            SandboxError::InvalidRequest { message } => {
+                assert!(message.contains("turn already in progress"), "{message}");
+            }
+            other => panic!("expected InvalidRequest, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn send_pi_prompt_reports_cancelled_response() {
+        let (session_manager, runtime, mut stdin_rx, _temp_dir) =
+            setup_pi_session_with_stdin("pi-prompt-cancelled").await;
+        let snapshot = SessionSnapshot {
+            session_id: "pi-prompt-cancelled".to_string(),
+            agent: AgentId::Pi,
+            agent_mode: "build".to_string(),
+            permission_mode: "default".to_string(),
+            model: None,
+            variant: None,
+            native_session_id: Some("native-pi-prompt-cancelled".to_string()),
+        };
+        let manager_for_task = session_manager.clone();
+        let task = tokio::spawn(async move {
+            manager_for_task
+                .send_pi_prompt(&snapshot, "This should cancel")
+                .await
+        });
+
+        let _ = stdin_rx.recv().await.expect("prompt request");
+        runtime.clear_pending();
+
+        let err = task
+            .await
+            .expect("join")
+            .expect_err("send_pi_prompt should fail");
+        match err {
+            SandboxError::StreamError { message } => {
+                assert!(message.contains("pi prompt request cancelled"), "{message}");
+            }
+            other => panic!("expected StreamError, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn pi_runtime_output_non_json_emits_agent_unparsed() {
+        let (session_manager, runtime, _temp_dir) = setup_pi_session("pi-unparsed").await;
+        let (tx, rx) = mpsc::unbounded_channel::<String>();
+        tx.send("not-json".to_string()).expect("send malformed");
+        drop(tx);
+
+        session_manager
+            .clone()
+            .handle_pi_runtime_output("pi-unparsed".to_string(), runtime, rx)
+            .await;
+
+        let events = session_manager
+            .events("pi-unparsed", 0, None, true)
+            .await
+            .expect("events")
+            .events;
+        assert!(events.iter().any(|event| {
+            event.event_type == UniversalEventType::AgentUnparsed
+                && matches!(event.source, EventSource::Daemon)
+                && event.synthetic
+        }));
+    }
+
+    #[tokio::test]
+    async fn pi_runtime_converter_continuity_for_incremental_deltas() {
+        let (session_manager, runtime, _temp_dir) = setup_pi_session("pi-delta").await;
+        let (tx, rx) = mpsc::unbounded_channel::<String>();
+        let lines = [
+            json!({
+                "type": "message_update",
+                "assistantMessageEvent": { "type": "text_delta", "delta": "Hel" }
+            }),
+            json!({
+                "type": "message_update",
+                "assistantMessageEvent": { "type": "text_delta", "delta": "lo" }
+            }),
+            json!({
+                "type": "message_update",
+                "assistantMessageEvent": { "type": "done" }
+            }),
+        ];
+        for line in lines {
+            tx.send(line.to_string()).expect("send line");
+        }
+        drop(tx);
+
+        session_manager
+            .clone()
+            .handle_pi_runtime_output("pi-delta".to_string(), runtime, rx)
+            .await;
+
+        let events = session_manager
+            .events("pi-delta", 0, None, true)
+            .await
+            .expect("events")
+            .events;
+        let deltas = events
+            .iter()
+            .filter_map(|event| match &event.data {
+                UniversalEventData::ItemDelta(delta) => {
+                    Some((delta.item_id.clone(), delta.delta.clone()))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(deltas.len(), 2);
+        assert_eq!(deltas[0].0, deltas[1].0, "deltas should share one item");
+        assert_eq!(deltas[0].1, "Hel");
+        assert_eq!(deltas[1].1, "lo");
+
+        let completed = events.iter().find_map(|event| match &event.data {
+            UniversalEventData::Item(item)
+                if event.event_type == UniversalEventType::ItemCompleted =>
+            {
+                Some(item.item.clone())
+            }
+            _ => None,
+        });
+        let completed = completed.expect("completed item");
+        assert_eq!(completed.kind, ItemKind::Message);
+        let text = completed
+            .content
+            .iter()
+            .find_map(|part| match part {
+                ContentPart::Text { text } => Some(text.clone()),
+                _ => None,
+            })
+            .unwrap_or_default();
+        assert_eq!(text, "Hello");
+    }
 }
 
 #[cfg(feature = "test-utils")]
@@ -5864,7 +7349,7 @@ pub mod test_utils {
                 .insert(
                     agent,
                     ManagedServer {
-                        kind: ManagedServerKind::Stdio { server },
+                        kind: ManagedServerKind::StdioCodex { server },
                         child: child.clone(),
                         status: ServerStatus::Running,
                         start_time: Some(Instant::now()),
@@ -5913,7 +7398,7 @@ pub mod test_utils {
         }
 
         pub async fn shutdown(&self) {
-            self.session_manager.server_manager.shutdown().await;
+            self.session_manager.shutdown().await;
         }
 
         pub async fn server_status(&self, agent: AgentId) -> Option<ServerStatus> {
