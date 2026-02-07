@@ -410,7 +410,9 @@ pub fn stop(host: &str, port: u16) -> Result<(), CliError> {
             // No PID file - but check if daemon is actually running via health check
             // This can happen if PID file was deleted but daemon is still running
             if check_health(&base_url, None)? {
-                eprintln!("daemon is running but PID file missing; finding process on port {port}...");
+                eprintln!(
+                    "daemon is running but PID file missing; finding process on port {port}..."
+                );
                 if let Some(pid) = find_process_on_port(port) {
                     eprintln!("found daemon process {pid}");
                     return stop_process(pid, host, port, &pid_path);
