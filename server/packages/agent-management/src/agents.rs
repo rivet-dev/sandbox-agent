@@ -321,6 +321,12 @@ impl AgentManager {
             options.streaming_input = true;
         }
         let mut command = self.build_command(agent, &options)?;
+
+        // Pass environment variables to the agent process (e.g., ANTHROPIC_API_KEY)
+        for (key, value) in &options.env {
+            command.env(key, value);
+        }
+
         if matches!(agent, AgentId::Codex | AgentId::Claude) {
             command.stdin(Stdio::piped());
         }
