@@ -978,7 +978,6 @@ pub(crate) struct SessionManager {
 struct ModelCatalogState {
     models: HashMap<AgentId, AgentModelsResponse>,
     in_flight: HashMap<AgentId, Arc<Notify>>,
-    codex_unavailable_models: HashSet<String>,
 }
 
 /// Shared Codex app-server process that handles multiple sessions via JSON-RPC.
@@ -1928,18 +1927,6 @@ impl SessionManager {
         Ok(())
     }
 
-    async fn mark_codex_model_unavailable(&self, model_id: &str) -> bool {
-        let mut catalog = self.model_catalog.lock().await;
-        let inserted = catalog
-            .codex_unavailable_models
-            .insert(model_id.to_string());
-        if inserted {
-            // Force a fresh fetch so provider/model lists drop unavailable models.
-            catalog.models.remove(&AgentId::Codex);
-        }
-        inserted
-    }
-
     async fn clear_codex_session_model_if_unavailable(
         &self,
         session_id: &str,
@@ -1960,6 +1947,11 @@ impl SessionManager {
         false
     }
 
+    async fn invalidate_codex_model_cache(&self) {
+        let mut catalog = self.model_catalog.lock().await;
+        catalog.models.remove(&AgentId::Codex);
+    }
+
     async fn codex_native_session_id(&self, session_id: &str) -> Option<String> {
         let sessions = self.sessions.lock().await;
         let session = SessionManager::session_ref(&sessions, session_id)?;
@@ -1975,31 +1967,30 @@ impl SessionManager {
         model_id: &str,
         native_session_id: Option<String>,
     ) {
-        let newly_marked = self.mark_codex_model_unavailable(model_id).await;
-        if newly_marked {
-            tracing::warn!(
-                model_id = %model_id,
-                "codex model marked unavailable after runtime error"
-            );
-        }
-        if self
+        tracing::warn!(
+            model_id = %model_id,
+            "codex model rejected at runtime; clearing session model and refreshing model cache"
+        );
+        self.invalidate_codex_model_cache().await;
+        if !self
             .clear_codex_session_model_if_unavailable(session_id, model_id)
             .await
         {
-            let native_session_id = match native_session_id {
-                Some(native_session_id) => Some(native_session_id),
-                None => self.codex_native_session_id(session_id).await,
-            };
-            let _ = self
-                .record_conversions(
-                    session_id,
-                    vec![codex_model_unavailable_status_event(
-                        native_session_id,
-                        model_id,
-                    )],
-                )
-                .await;
+            return;
         }
+        let native_session_id = match native_session_id {
+            Some(native_session_id) => Some(native_session_id),
+            None => self.codex_native_session_id(session_id).await,
+        };
+        let _ = self
+            .record_conversions(
+                session_id,
+                vec![codex_model_unavailable_status_event(
+                    native_session_id,
+                    model_id,
+                )],
+            )
+            .await;
     }
 
     pub(crate) async fn delete_session(&self, session_id: &str) -> Result<(), SandboxError> {
@@ -2096,10 +2087,7 @@ impl SessionManager {
                 Ok(response) if !response.models.is_empty() => Ok(response),
                 _ => Ok(claude_fallback_models()),
             },
-            AgentId::Codex => match self.fetch_codex_models().await {
-                Ok(response) if !response.models.is_empty() => Ok(response),
-                _ => Ok(codex_fallback_models()),
-            },
+            AgentId::Codex => self.fetch_codex_models().await,
             AgentId::Opencode => match self.fetch_opencode_models().await {
                 Ok(models) => Ok(models),
                 Err(_) => Ok(AgentModelsResponse {
@@ -3887,22 +3875,6 @@ impl SessionManager {
 
         let id = server.next_request_id();
         let prompt_text = codex_prompt_for_mode(prompt, Some(&session.agent_mode));
-        let mut model = session.model.clone();
-        if let Some(model_id) = model.clone() {
-            let is_unavailable = {
-                let catalog = self.model_catalog.lock().await;
-                catalog.codex_unavailable_models.contains(&model_id)
-            };
-            if is_unavailable {
-                self.handle_codex_model_unavailable(
-                    &session.session_id,
-                    &model_id,
-                    session.native_session_id.clone(),
-                )
-                .await;
-                model = None;
-            }
-        }
         let params = codex_schema::TurnStartParams {
             approval_policy: codex_approval_policy(Some(&session.permission_mode)),
             collaboration_mode: None,
@@ -3912,7 +3884,7 @@ impl SessionManager {
                 text: prompt_text,
                 text_elements: Vec::new(),
             }],
-            model,
+            model: session.model.clone(),
             output_schema: None,
             sandbox_policy: codex_sandbox_policy(Some(&session.permission_mode)),
             summary: None,
@@ -4076,10 +4048,6 @@ impl SessionManager {
 
     async fn fetch_codex_models(self: &Arc<Self>) -> Result<AgentModelsResponse, SandboxError> {
         let started = Instant::now();
-        let unavailable_models = {
-            let catalog = self.model_catalog.lock().await;
-            catalog.codex_unavailable_models.clone()
-        };
         let server = self.ensure_codex_server().await?;
         tracing::info!(
             elapsed_ms = started.elapsed().as_millis() as u64,
@@ -4170,9 +4138,6 @@ impl SessionManager {
                 let Some(model_id) = model_id else {
                     continue;
                 };
-                if unavailable_models.contains(model_id) {
-                    continue;
-                }
                 if !seen.insert(model_id.to_string()) {
                     continue;
                 }
@@ -4235,12 +4200,6 @@ impl SessionManager {
         }
 
         models.sort_by(|a, b| a.id.cmp(&b.id));
-        if default_model
-            .as_ref()
-            .is_some_and(|model_id| unavailable_models.contains(model_id))
-        {
-            default_model = None;
-        }
         if default_model.is_none() {
             default_model = models.first().map(|model| model.id.clone());
         }
@@ -5518,22 +5477,6 @@ fn mock_models_response() -> AgentModelsResponse {
     }
 }
 
-fn codex_fallback_models() -> AgentModelsResponse {
-    let models = ["gpt-4o", "o3", "o4-mini"]
-        .into_iter()
-        .map(|id| AgentModelInfo {
-            id: id.to_string(),
-            name: None,
-            variants: Some(codex_variants()),
-            default_variant: Some("medium".to_string()),
-        })
-        .collect();
-    AgentModelsResponse {
-        models,
-        default_model: Some("gpt-4o".to_string()),
-    }
-}
-
 fn should_cache_agent_models(agent: AgentId, response: &AgentModelsResponse) -> bool {
     if agent == AgentId::Opencode && response.models.is_empty() {
         return false;
@@ -5954,7 +5897,6 @@ mod tests {
             Some("gpt-5.3-codex-NOTREAL".to_string())
         );
     }
-
 }
 
 fn claude_input_session_id(session: &SessionSnapshot) -> String {
