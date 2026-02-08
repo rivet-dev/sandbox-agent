@@ -52,6 +52,7 @@
 				"group": "Deploy",
 				"pages": [
 					"deploy/index",
+					"deploy/computesdk",
 					"deploy/local",
 					"deploy/e2b",
 					"deploy/daytona",
