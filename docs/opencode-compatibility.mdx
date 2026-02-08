@@ -60,10 +60,11 @@ The OpenCode web UI can connect to Sandbox Agent for a full browser-based experi
   </Step>
   <Step title="Clone and Start the OpenCode Web App">
     ```bash
-    git clone https://github.com/opencode-ai/opencode
+    git clone https://github.com/anomalyco/opencode
     cd opencode/packages/app
     export VITE_OPENCODE_SERVER_HOST=127.0.0.1
     export VITE_OPENCODE_SERVER_PORT=2468
+    bun install
     bun run dev -- --host 127.0.0.1 --port 5173
     ```
   </Step>
