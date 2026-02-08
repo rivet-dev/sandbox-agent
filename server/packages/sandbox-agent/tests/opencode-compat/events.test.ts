@@ -210,8 +210,61 @@ describe("OpenCode-compatible Event Streaming", () => {
       await collectIdle;
 
       expect(statuses).toContain("busy");
+      expect(statuses.filter((status) => status === "busy")).toHaveLength(1);
       const finalStatus = await client.session.status();
       expect(finalStatus.data?.[sessionId]?.type).toBe("idle");
+    });
+
+    it("should report busy via /session/status while turn is in flight", async () => {
+      const sessionId = uniqueSessionId("status-busy-inflight");
+      await initSessionViaHttp(sessionId, { providerID: "mock", modelID: "mock" });
+
+      const eventStream = await client.event.subscribe();
+      let busySnapshot: string | undefined;
+
+      const waitForIdle = new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(
+          () => reject(new Error("Timed out waiting for busy status snapshot + session.idle")),
+          15_000
+        );
+        (async () => {
+          try {
+            for await (const event of (eventStream as any).stream) {
+              if (event?.properties?.sessionID !== sessionId) continue;
+
+              if (event.type === "session.status" && event?.properties?.status?.type === "busy" && !busySnapshot) {
+                for (let attempt = 0; attempt < 5; attempt += 1) {
+                  const status = await client.session.status();
+                  busySnapshot = status.data?.[sessionId]?.type;
+                  if (busySnapshot === "busy") {
+                    break;
+                  }
+                  await new Promise((resolveAttempt) => setTimeout(resolveAttempt, 20));
+                }
+              }
+
+              if (event.type === "session.idle") {
+                clearTimeout(timeout);
+                resolve();
+                break;
+              }
+            }
+          } catch {
+            // Stream ended
+          }
+        })();
+      });
+
+      await client.session.prompt({
+        path: { id: sessionId },
+        body: {
+          model: { providerID: "mock", modelID: "mock" },
+          parts: [{ type: "text", text: "tool" }],
+        },
+      });
+
+      await waitForIdle;
+      expect(busySnapshot).toBe("busy");
     });
 
     it("should emit session.error and return idle for failed turns", async () => {

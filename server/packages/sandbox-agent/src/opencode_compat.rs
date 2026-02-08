@@ -671,10 +671,14 @@ struct OpenCodeUpdateSessionRequest {
     title: Option<String>,
     #[schema(value_type = String)]
     model: Option<Value>,
-    #[serde(rename = "providerID", alias = "provider_id")]
+    #[serde(rename = "providerID", alias = "provider_id", alias = "providerId")]
     provider_id: Option<String>,
-    #[serde(rename = "modelID", alias = "model_id")]
+    #[serde(rename = "modelID", alias = "model_id", alias = "modelId")]
     model_id: Option<String>,
+}
+
+fn update_requests_model_change(update: &OpenCodeUpdateSessionRequest) -> bool {
+    update.model.is_some() || update.provider_id.is_some() || update.model_id.is_some()
 }
 
 #[derive(Debug, Deserialize, IntoParams)]
@@ -2068,23 +2072,16 @@ async fn apply_universal_event(state: Arc<OpenCodeAppState>, event: UniversalEve
                 _ => None,
             };
             let mut should_emit_idle = false;
-            let runtime = state
+            state
                 .opencode
                 .update_runtime(&event.session_id, |runtime| {
                     let was_turn_in_progress = runtime.turn_in_progress;
-                    if runtime.open_tool_calls.is_empty() {
-                        runtime.active_assistant_message_id = None;
-                        runtime.turn_in_progress = false;
-                        should_emit_idle = was_turn_in_progress;
-                    } else {
-                        runtime.turn_in_progress = true;
-                        should_emit_idle = false;
-                    }
+                    runtime.active_assistant_message_id = None;
+                    runtime.turn_in_progress = false;
+                    runtime.open_tool_calls.clear();
+                    should_emit_idle = was_turn_in_progress;
                 })
                 .await;
-            if !runtime.open_tool_calls.is_empty() {
-                return;
-            }
             if let Some(turn_data) = turn_data {
                 if let Some((message, details)) = turn_error_from_metadata(&turn_data.metadata) {
                     emit_session_error(&state.opencode, &event.session_id, &message, None, details);
@@ -2093,15 +2090,7 @@ async fn apply_universal_event(state: Arc<OpenCodeAppState>, event: UniversalEve
             if !should_emit_idle {
                 return;
             }
-            let session_id = event.session_id.clone();
-            state.opencode.emit_event(json!({
-                "type": "session.status",
-                "properties": {"sessionID": session_id, "status": {"type": "idle"}}
-            }));
-            state.opencode.emit_event(json!({
-                "type": "session.idle",
-                "properties": {"sessionID": session_id}
-            }));
+            emit_session_idle(&state.opencode, &event.session_id);
         }
         UniversalEventType::ItemDelta => {
             if let UniversalEventData::ItemDelta(ItemDeltaData {
@@ -2121,22 +2110,19 @@ async fn apply_universal_event(state: Arc<OpenCodeAppState>, event: UniversalEve
             }
         }
         UniversalEventType::SessionEnded => {
+            let mut should_emit_idle = false;
             state
                 .opencode
                 .update_runtime(&event.session_id, |runtime| {
+                    should_emit_idle = runtime.turn_in_progress;
                     runtime.turn_in_progress = false;
                     runtime.active_assistant_message_id = None;
+                    runtime.open_tool_calls.clear();
                 })
                 .await;
-            let session_id = event.session_id.clone();
-            state.opencode.emit_event(json!({
-                "type": "session.status",
-                "properties": {"sessionID": session_id, "status": {"type": "idle"}}
-            }));
-            state.opencode.emit_event(json!({
-                "type": "session.idle",
-                "properties": {"sessionID": event.session_id}
-            }));
+            if should_emit_idle {
+                emit_session_idle(&state.opencode, &event.session_id);
+            }
         }
         UniversalEventType::PermissionRequested | UniversalEventType::PermissionResolved => {
             if let UniversalEventData::Permission(permission) = &event.data {
@@ -3857,30 +3843,14 @@ async fn oc_session_get(
 async fn oc_session_update(
     State(state): State<Arc<OpenCodeAppState>>,
     Path(session_id): Path<String>,
-    Json(body): Json<Value>,
+    Json(body): Json<OpenCodeUpdateSessionRequest>,
 ) -> impl IntoResponse {
     let mut sessions = state.opencode.sessions.lock().await;
     if let Some(session) = sessions.get_mut(&session_id) {
-        let requests_model_change = body
-            .as_object()
-            .map(|obj| {
-                obj.contains_key("model")
-                    || obj.contains_key("providerID")
-                    || obj.contains_key("modelID")
-                    || obj.contains_key("provider_id")
-                    || obj.contains_key("model_id")
-                    || obj.contains_key("providerId")
-                    || obj.contains_key("modelId")
-            })
-            .unwrap_or(false);
-        if requests_model_change {
+        if update_requests_model_change(&body) {
             return bad_request(OPENCODE_MODEL_CHANGE_AFTER_SESSION_CREATE_ERROR).into_response();
         }
-        if let Some(title) = body
-            .get("title")
-            .and_then(|value| value.as_str())
-            .map(|value| value.to_string())
-        {
+        if let Some(title) = body.title {
             if let Err(err) = state
                 .inner
                 .session_manager()
@@ -4199,14 +4169,6 @@ async fn oc_session_message_create(
         .clone()
         .unwrap_or_else(|| next_id("msg_", &MESSAGE_COUNTER));
 
-    state.opencode.emit_event(json!({
-        "type": "session.status",
-        "properties": {
-            "sessionID": session_id,
-            "status": {"type": "busy"}
-        }
-    }));
-
     let mut user_message = build_user_message(
         &session_id,
         &user_message_id,
@@ -4243,7 +4205,6 @@ async fn oc_session_message_create(
     let _ = state
         .opencode
         .update_runtime(&session_id, |runtime| {
-            runtime.turn_in_progress = true;
             runtime.last_user_message_id = Some(user_message_id.clone());
             runtime.active_assistant_message_id = None;
             runtime.last_agent = Some(agent_mode.clone());
@@ -4269,20 +4230,12 @@ async fn oc_session_message_create(
     )
     .await
     {
-        let _ = state
-            .opencode
-            .update_runtime(&session_id, |runtime| {
-                runtime.turn_in_progress = false;
-                runtime.active_assistant_message_id = None;
-            })
-            .await;
         tracing::warn!(
             target = "sandbox_agent::opencode",
             ?err,
             "failed to ensure backing session"
         );
         emit_session_error(&state.opencode, &session_id, &err.to_string(), None, None);
-        emit_session_idle(&state.opencode, &session_id);
         return sandbox_error_response(err).into_response();
     } else {
         ensure_session_stream(state.clone(), session_id.clone()).await;
@@ -4300,11 +4253,14 @@ async fn oc_session_message_create(
             .send_message(session_id.clone(), prompt_text)
             .await
         {
+            let mut should_emit_idle = false;
             let _ = state
                 .opencode
                 .update_runtime(&session_id, |runtime| {
+                    should_emit_idle = runtime.turn_in_progress;
                     runtime.turn_in_progress = false;
                     runtime.active_assistant_message_id = None;
+                    runtime.open_tool_calls.clear();
                 })
                 .await;
             tracing::warn!(
@@ -4313,7 +4269,9 @@ async fn oc_session_message_create(
                 "failed to send message to backing agent"
             );
             emit_session_error(&state.opencode, &session_id, &err.to_string(), None, None);
-            emit_session_idle(&state.opencode, &session_id);
+            if should_emit_idle {
+                emit_session_idle(&state.opencode, &session_id);
+            }
             return sandbox_error_response(err).into_response();
         }
     }

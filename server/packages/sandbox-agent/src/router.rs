@@ -5321,7 +5321,7 @@ fn agent_capabilities_for(agent: AgentId) -> AgentCapabilities {
             session_lifecycle: true,
             error_events: true,
             reasoning: false,
-            status: true,
+            status: false,
             command_execution: false,
             file_changes: false,
             mcp_tools: false,
