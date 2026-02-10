@@ -5,7 +5,6 @@ packages:
   - "sdks/cli/platforms/*"
   - "sdks/gigacode"
   - "sdks/gigacode/platforms/*"
-  - "resources/agent-schemas"
   - "resources/vercel-ai-sdk-schemas"
   - "scripts/release"
   - "scripts/sandbox-testing"

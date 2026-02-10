@@ -5,164 +5,36 @@
 
 
 export interface paths {
-  "/v1/agents": {
-    /**
-     * List Agents
-     * @description Returns all available coding agents and their installation status.
-     */
-    get: operations["list_agents"];
+  "/v2/fs/file": {
+    get: operations["get_v2_fs_file"];
+    put: operations["put_v2_fs_file"];
   };
-  "/v1/agents/{agent}/install": {
-    /**
-     * Install Agent
-     * @description Installs or updates a coding agent (e.g. claude, codex, opencode, amp).
-     */
-    post: operations["install_agent"];
+  "/v2/fs/upload-batch": {
+    post: operations["post_v2_fs_upload_batch"];
   };
-  "/v1/agents/{agent}/models": {
+  "/v2/health": {
     /**
-     * List Agent Models
-     * @description Returns the available LLM models for an agent.
+     * v2 Health
+     * @description Returns server health for the v2 ACP surface.
      */
-    get: operations["get_agent_models"];
+    get: operations["get_v2_health"];
   };
-  "/v1/agents/{agent}/modes": {
+  "/v2/rpc": {
     /**
-     * List Agent Modes
-     * @description Returns the available interaction modes for an agent.
+     * ACP SSE
+     * @description Streams ACP JSON-RPC envelopes for an ACP client over SSE.
      */
-    get: operations["get_agent_modes"];
-  };
-  "/v1/fs/entries": {
+    get: operations["get_v2_acp"];
     /**
-     * List Directory
-     * @description Lists files and directories at the given path.
+     * ACP POST
+     * @description Sends ACP JSON-RPC envelopes to an ACP client and returns request responses.
      */
-    get: operations["fs_entries"];
-  };
-  "/v1/fs/entry": {
+    post: operations["post_v2_acp"];
     /**
-     * Delete Entry
-     * @description Deletes a file or directory.
+     * ACP Close
+     * @description Closes an ACP client and releases agent process resources.
      */
-    delete: operations["fs_delete_entry"];
-  };
-  "/v1/fs/file": {
-    /**
-     * Read File
-     * @description Reads the raw bytes of a file.
-     */
-    get: operations["fs_read_file"];
-    /**
-     * Write File
-     * @description Writes raw bytes to a file, creating it if it doesn't exist.
-     */
-    put: operations["fs_write_file"];
-  };
-  "/v1/fs/mkdir": {
-    /**
-     * Create Directory
-     * @description Creates a directory, including any missing parent directories.
-     */
-    post: operations["fs_mkdir"];
-  };
-  "/v1/fs/move": {
-    /**
-     * Move Entry
-     * @description Moves or renames a file or directory.
-     */
-    post: operations["fs_move"];
-  };
-  "/v1/fs/stat": {
-    /**
-     * Get File Info
-     * @description Returns metadata (size, timestamps, type) for a path.
-     */
-    get: operations["fs_stat"];
-  };
-  "/v1/fs/upload-batch": {
-    /**
-     * Upload Files
-     * @description Uploads a tar.gz archive and extracts it to the destination directory.
-     */
-    post: operations["fs_upload_batch"];
-  };
-  "/v1/health": {
-    /**
-     * Health Check
-     * @description Returns the server health status.
-     */
-    get: operations["get_health"];
-  };
-  "/v1/sessions": {
-    /**
-     * List Sessions
-     * @description Returns all active sessions.
-     */
-    get: operations["list_sessions"];
-  };
-  "/v1/sessions/{session_id}": {
-    /**
-     * Create Session
-     * @description Creates a new agent session with the given configuration.
-     */
-    post: operations["create_session"];
-  };
-  "/v1/sessions/{session_id}/events": {
-    /**
-     * Get Events
-     * @description Returns session events with optional offset-based pagination.
-     */
-    get: operations["get_events"];
-  };
-  "/v1/sessions/{session_id}/events/sse": {
-    /**
-     * Subscribe to Events (SSE)
-     * @description Opens an SSE stream for real-time session events.
-     */
-    get: operations["get_events_sse"];
-  };
-  "/v1/sessions/{session_id}/messages": {
-    /**
-     * Send Message
-     * @description Sends a message to a session and returns immediately.
-     */
-    post: operations["post_message"];
-  };
-  "/v1/sessions/{session_id}/messages/stream": {
-    /**
-     * Send Message (Streaming)
-     * @description Sends a message and returns an SSE event stream of the agent's response.
-     */
-    post: operations["post_message_stream"];
-  };
-  "/v1/sessions/{session_id}/permissions/{permission_id}/reply": {
-    /**
-     * Reply to Permission
-     * @description Approves or denies a permission request from the agent.
-     */
-    post: operations["reply_permission"];
-  };
-  "/v1/sessions/{session_id}/questions/{question_id}/reject": {
-    /**
-     * Reject Question
-     * @description Rejects a human-in-the-loop question from the agent.
-     */
-    post: operations["reject_question"];
-  };
-  "/v1/sessions/{session_id}/questions/{question_id}/reply": {
-    /**
-     * Reply to Question
-     * @description Replies to a human-in-the-loop question from the agent.
-     */
-    post: operations["reply_question"];
-  };
-  "/v1/sessions/{session_id}/terminate": {
-    /**
-     * Terminate Session
-     * @description Terminates a running session and cleans up resources.
-     */
-    post: operations["terminate_session"];
+    delete: operations["delete_v2_acp"];
   };
 }
 
@@ -170,6 +42,14 @@ export type webhooks = Record<string, never>;
 
 export interface components {
   schemas: {
+    AcpEnvelope: {
+      error?: unknown;
+      id?: unknown;
+      jsonrpc: string;
+      method?: string | null;
+      params?: unknown;
+      result?: unknown;
+    };
     AgentCapabilities: {
       commandExecution: boolean;
       errorEvents: boolean;
@@ -183,7 +63,6 @@ export interface components {
       questions: boolean;
       reasoning: boolean;
       sessionLifecycle: boolean;
-      /** @description Whether this agent uses a shared long-running server process (vs per-turn subprocess) */
       sharedProcess: boolean;
       status: boolean;
       streamingDeltas: boolean;
@@ -191,25 +70,32 @@ export interface components {
       toolCalls: boolean;
       toolResults: boolean;
     };
-    AgentError: {
-      agent?: string | null;
-      details?: unknown;
-      message: string;
-      session_id?: string | null;
-      type: components["schemas"]["ErrorType"];
-    };
     AgentInfo: {
       capabilities: components["schemas"]["AgentCapabilities"];
-      /** @description Whether the agent's required provider credentials are available */
       credentialsAvailable: boolean;
+      defaultModel?: string | null;
       id: string;
       installed: boolean;
+      models?: components["schemas"]["AgentModelInfo"][] | null;
+      modes?: components["schemas"]["AgentModeInfo"][] | null;
       path?: string | null;
       serverStatus?: components["schemas"]["ServerStatusInfo"] | null;
       version?: string | null;
     };
+    AgentInstallArtifact: {
+      kind: string;
+      path: string;
+      source: string;
+      version?: string | null;
+    };
     AgentInstallRequest: {
+      agentProcessVersion?: string | null;
+      agentVersion?: string | null;
       reinstall?: boolean | null;
+    };
+    AgentInstallResponse: {
+      already_installed: boolean;
+      artifacts: components["schemas"]["AgentInstallArtifact"][];
     };
     AgentListResponse: {
       agents: components["schemas"]["AgentInfo"][];
@@ -220,105 +106,11 @@ export interface components {
       name: string;
     };
     AgentModelInfo: {
-      defaultVariant?: string | null;
       id: string;
       name?: string | null;
-      variants?: string[] | null;
-    };
-    AgentModelsResponse: {
-      defaultModel?: string | null;
-      models: components["schemas"]["AgentModelInfo"][];
-    };
-    AgentModesResponse: {
-      modes: components["schemas"]["AgentModeInfo"][];
-    };
-    AgentUnparsedData: {
-      error: string;
-      location: string;
-      raw_hash?: string | null;
-    };
-    ContentPart: {
-      text: string;
-      /** @enum {string} */
-      type: "text";
-    } | {
-      json: unknown;
-      /** @enum {string} */
-      type: "json";
-    } | {
-      arguments: string;
-      call_id: string;
-      name: string;
-      /** @enum {string} */
-      type: "tool_call";
-    } | {
-      call_id: string;
-      output: string;
-      /** @enum {string} */
-      type: "tool_result";
-    } | ({
-      action: components["schemas"]["FileAction"];
-      diff?: string | null;
-      path: string;
-      /** @enum {string} */
-      type: "file_ref";
-    }) | {
-      text: string;
-      /** @enum {string} */
-      type: "reasoning";
-      visibility: components["schemas"]["ReasoningVisibility"];
-    } | ({
-      mime?: string | null;
-      path: string;
-      /** @enum {string} */
-      type: "image";
-    }) | ({
-      detail?: string | null;
-      label: string;
-      /** @enum {string} */
-      type: "status";
-    });
-    CreateSessionRequest: {
-      agent: string;
-      agentMode?: string | null;
-      agentVersion?: string | null;
-      directory?: string | null;
-      mcp?: {
-        [key: string]: components["schemas"]["McpServerConfig"];
-      } | null;
-      model?: string | null;
-      permissionMode?: string | null;
-      skills?: components["schemas"]["SkillsConfig"] | null;
-      title?: string | null;
-      variant?: string | null;
-    };
-    CreateSessionResponse: {
-      error?: components["schemas"]["AgentError"] | null;
-      healthy: boolean;
-      nativeSessionId?: string | null;
-    };
-    ErrorData: {
-      code?: string | null;
-      details?: unknown;
-      message: string;
     };
     /** @enum {string} */
     ErrorType: "invalid_request" | "unsupported_agent" | "agent_not_installed" | "install_failed" | "agent_process_exited" | "token_invalid" | "permission_denied" | "session_not_found" | "session_already_exists" | "mode_not_supported" | "stream_error" | "timeout";
-    /** @enum {string} */
-    EventSource: "agent" | "daemon";
-    EventsQuery: {
-      includeRaw?: boolean | null;
-      /** Format: int64 */
-      limit?: number | null;
-      /** Format: int64 */
-      offset?: number | null;
-    };
-    EventsResponse: {
-      events: components["schemas"]["UniversalEvent"][];
-      hasMore: boolean;
-    };
-    /** @enum {string} */
-    FileAction: "read" | "write" | "patch";
     FsActionResponse: {
       path: string;
     };
@@ -380,80 +172,6 @@ export interface components {
     HealthResponse: {
       status: string;
     };
-    ItemDeltaData: {
-      delta: string;
-      item_id: string;
-      native_item_id?: string | null;
-    };
-    ItemEventData: {
-      item: components["schemas"]["UniversalItem"];
-    };
-    /** @enum {string} */
-    ItemKind: "message" | "tool_call" | "tool_result" | "system" | "status" | "unknown";
-    /** @enum {string} */
-    ItemRole: "user" | "assistant" | "system" | "tool";
-    /** @enum {string} */
-    ItemStatus: "in_progress" | "completed" | "failed";
-    McpCommand: string | string[];
-    McpOAuthConfig: {
-      clientId?: string | null;
-      clientSecret?: string | null;
-      scope?: string | null;
-    };
-    McpOAuthConfigOrDisabled: components["schemas"]["McpOAuthConfig"] | boolean;
-    /** @enum {string} */
-    McpRemoteTransport: "http" | "sse";
-    McpServerConfig: ({
-      args?: string[];
-      command: components["schemas"]["McpCommand"];
-      cwd?: string | null;
-      enabled?: boolean | null;
-      env?: {
-        [key: string]: string;
-      } | null;
-      /** Format: int64 */
-      timeoutMs?: number | null;
-      /** @enum {string} */
-      type: "local";
-    }) | ({
-      bearerTokenEnvVar?: string | null;
-      enabled?: boolean | null;
-      envHeaders?: {
-        [key: string]: string;
-      } | null;
-      headers?: {
-        [key: string]: string;
-      } | null;
-      oauth?: components["schemas"]["McpOAuthConfigOrDisabled"] | null;
-      /** Format: int64 */
-      timeoutMs?: number | null;
-      transport?: components["schemas"]["McpRemoteTransport"] | null;
-      /** @enum {string} */
-      type: "remote";
-      url: string;
-    });
-    MessageAttachment: {
-      filename?: string | null;
-      mime?: string | null;
-      path: string;
-    };
-    MessageRequest: {
-      attachments?: components["schemas"]["MessageAttachment"][];
-      message: string;
-    };
-    PermissionEventData: {
-      action: string;
-      metadata?: unknown;
-      permission_id: string;
-      status: components["schemas"]["PermissionStatus"];
-    };
-    /** @enum {string} */
-    PermissionReply: "once" | "always" | "reject";
-    PermissionReplyRequest: {
-      reply: components["schemas"]["PermissionReply"];
-    };
-    /** @enum {string} */
-    PermissionStatus: "requested" | "accept" | "accept_for_session" | "reject";
     ProblemDetails: {
       detail?: string | null;
       instance?: string | null;
@@ -463,24 +181,7 @@ export interface components {
       type: string;
       [key: string]: unknown;
     };
-    QuestionEventData: {
-      options: string[];
-      prompt: string;
-      question_id: string;
-      response?: string | null;
-      status: components["schemas"]["QuestionStatus"];
-    };
-    QuestionReplyRequest: {
-      answers: string[][];
-    };
     /** @enum {string} */
-    QuestionStatus: "requested" | "answered" | "rejected";
-    /** @enum {string} */
-    ReasoningVisibility: "public" | "private";
-    /**
-     * @description Status of a shared server process for an agent
-     * @enum {string}
-     */
     ServerStatus: "running" | "stopped" | "error";
     ServerStatusInfo: {
       baseUrl?: string | null;
@@ -491,20 +192,6 @@ export interface components {
       /** Format: int64 */
       uptimeMs?: number | null;
     };
-    /** @enum {string} */
-    SessionEndReason: "completed" | "error" | "terminated";
-    SessionEndedData: {
-      /**
-       * Format: int32
-       * @description Process exit code when reason is Error
-       */
-      exit_code?: number | null;
-      /** @description Error message when reason is Error */
-      message?: string | null;
-      reason: components["schemas"]["SessionEndReason"];
-      stderr?: components["schemas"]["StderrOutput"] | null;
-      terminated_by: components["schemas"]["TerminatedBy"];
-    };
     SessionInfo: {
       agent: string;
       agentMode: string;
@@ -514,81 +201,31 @@ export interface components {
       ended: boolean;
       /** Format: int64 */
       eventCount: number;
-      mcp?: {
-        [key: string]: components["schemas"]["McpServerConfig"];
-      } | null;
       model?: string | null;
       nativeSessionId?: string | null;
       permissionMode: string;
       sessionId: string;
-      skills?: components["schemas"]["SkillsConfig"] | null;
+      terminationInfo?: components["schemas"]["TerminationInfo"] | null;
       title?: string | null;
       /** Format: int64 */
       updatedAt: number;
-      variant?: string | null;
     };
     SessionListResponse: {
       sessions: components["schemas"]["SessionInfo"][];
     };
-    SessionStartedData: {
-      metadata?: unknown;
-    };
-    SkillSource: {
-      ref?: string | null;
-      skills?: string[] | null;
-      source: string;
-      subpath?: string | null;
-      type: string;
-    };
-    SkillsConfig: {
-      sources: components["schemas"]["SkillSource"][];
-    };
     StderrOutput: {
-      /** @description First N lines of stderr (if truncated) or full stderr (if not truncated) */
       head?: string | null;
-      /** @description Last N lines of stderr (only present if truncated) */
       tail?: string | null;
-      /** @description Total number of lines in stderr */
-      total_lines?: number | null;
-      /** @description Whether the output was truncated */
+      totalLines?: number | null;
       truncated: boolean;
     };
-    /** @enum {string} */
-    TerminatedBy: "agent" | "daemon";
-    TurnEventData: {
-      metadata?: unknown;
-      phase: components["schemas"]["TurnPhase"];
-      turn_id?: string | null;
-    };
-    /** @enum {string} */
-    TurnPhase: "started" | "ended";
-    TurnStreamQuery: {
-      includeRaw?: boolean | null;
-    };
-    UniversalEvent: {
-      data: components["schemas"]["UniversalEventData"];
-      event_id: string;
-      native_session_id?: string | null;
-      raw?: unknown;
-      /** Format: int64 */
-      sequence: number;
-      session_id: string;
-      source: components["schemas"]["EventSource"];
-      synthetic: boolean;
-      time: string;
-      type: components["schemas"]["UniversalEventType"];
-    };
-    UniversalEventData: components["schemas"]["TurnEventData"] | components["schemas"]["SessionStartedData"] | components["schemas"]["SessionEndedData"] | components["schemas"]["ItemEventData"] | components["schemas"]["ItemDeltaData"] | components["schemas"]["ErrorData"] | components["schemas"]["PermissionEventData"] | components["schemas"]["QuestionEventData"] | components["schemas"]["AgentUnparsedData"];
-    /** @enum {string} */
-    UniversalEventType: "session.started" | "session.ended" | "turn.started" | "turn.ended" | "item.started" | "item.delta" | "item.completed" | "error" | "permission.requested" | "permission.resolved" | "question.requested" | "question.resolved" | "agent.unparsed";
-    UniversalItem: {
-      content: components["schemas"]["ContentPart"][];
-      item_id: string;
-      kind: components["schemas"]["ItemKind"];
-      native_item_id?: string | null;
-      parent_id?: string | null;
-      role?: components["schemas"]["ItemRole"] | null;
-      status: components["schemas"]["ItemStatus"];
+    TerminationInfo: {
+      /** Format: int32 */
+      exitCode?: number | null;
+      message?: string | null;
+      reason: string;
+      stderr?: components["schemas"]["StderrOutput"] | null;
+      terminatedBy: string;
     };
   };
   responses: never;
@@ -604,197 +241,35 @@ export type external = Record<string, never>;
 
 export interface operations {
 
-  /**
-   * List Agents
-   * @description Returns all available coding agents and their installation status.
-   */
-  list_agents: {
-    responses: {
-      /** @description List of available agents */
-      200: {
-        content: {
-          "application/json": components["schemas"]["AgentListResponse"];
-        };
-      };
-    };
-  };
-  /**
-   * Install Agent
-   * @description Installs or updates a coding agent (e.g. claude, codex, opencode, amp).
-   */
-  install_agent: {
-    parameters: {
-      path: {
-        /** @description Agent id */
-        agent: string;
-      };
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["AgentInstallRequest"];
-      };
-    };
-    responses: {
-      /** @description Agent installed */
-      204: {
-        content: never;
-      };
-      /** @description Invalid request */
-      400: {
-        content: {
-          "application/json": components["schemas"]["ProblemDetails"];
-        };
-      };
-      /** @description Agent not found */
-      404: {
-        content: {
-          "application/json": components["schemas"]["ProblemDetails"];
-        };
-      };
-      /** @description Installation failed */
-      500: {
-        content: {
-          "application/json": components["schemas"]["ProblemDetails"];
-        };
-      };
-    };
-  };
-  /**
-   * List Agent Models
-   * @description Returns the available LLM models for an agent.
-   */
-  get_agent_models: {
-    parameters: {
-      path: {
-        /** @description Agent id */
-        agent: string;
-      };
-    };
-    responses: {
-      /** @description Available models */
-      200: {
-        content: {
-          "application/json": components["schemas"]["AgentModelsResponse"];
-        };
-      };
-      /** @description Agent not found */
-      404: {
-        content: {
-          "application/json": components["schemas"]["ProblemDetails"];
-        };
-      };
-    };
-  };
-  /**
-   * List Agent Modes
-   * @description Returns the available interaction modes for an agent.
-   */
-  get_agent_modes: {
-    parameters: {
-      path: {
-        /** @description Agent id */
-        agent: string;
-      };
-    };
-    responses: {
-      /** @description Available modes */
-      200: {
-        content: {
-          "application/json": components["schemas"]["AgentModesResponse"];
-        };
-      };
-      /** @description Invalid request */
-      400: {
-        content: {
-          "application/json": components["schemas"]["ProblemDetails"];
-        };
-      };
-    };
-  };
-  /**
-   * List Directory
-   * @description Lists files and directories at the given path.
-   */
-  fs_entries: {
-    parameters: {
-      query?: {
-        /** @description Path to list (relative or absolute) */
-        path?: string | null;
-        /** @description Session id for relative paths */
-        session_id?: string | null;
-      };
-    };
-    responses: {
-      /** @description Directory listing */
-      200: {
-        content: {
-          "application/json": components["schemas"]["FsEntry"][];
-        };
-      };
-    };
-  };
-  /**
-   * Delete Entry
-   * @description Deletes a file or directory.
-   */
-  fs_delete_entry: {
+  get_v2_fs_file: {
     parameters: {
       query: {
-        /** @description File or directory path */
+        /** @description File path */
         path: string;
-        /** @description Session id for relative paths */
-        session_id?: string | null;
-        /** @description Delete directories recursively */
-        recursive?: boolean | null;
-      };
-    };
-    responses: {
-      /** @description Delete result */
-      200: {
-        content: {
-          "application/json": components["schemas"]["FsActionResponse"];
-        };
-      };
-    };
-  };
-  /**
-   * Read File
-   * @description Reads the raw bytes of a file.
-   */
-  fs_read_file: {
-    parameters: {
-      query: {
-        /** @description File path (relative or absolute) */
-        path: string;
-        /** @description Session id for relative paths */
+        /** @description Session id for relative path base */
         session_id?: string | null;
       };
     };
     responses: {
       /** @description File content */
       200: {
-        content: {
-          "application/octet-stream": string;
-        };
+        content: never;
       };
     };
   };
-  /**
-   * Write File
-   * @description Writes raw bytes to a file, creating it if it doesn't exist.
-   */
-  fs_write_file: {
+  put_v2_fs_file: {
     parameters: {
       query: {
-        /** @description File path (relative or absolute) */
+        /** @description File path */
         path: string;
-        /** @description Session id for relative paths */
+        /** @description Session id for relative path base */
         session_id?: string | null;
       };
     };
+    /** @description Raw file bytes */
     requestBody: {
       content: {
-        "application/octet-stream": string;
+        "text/plain": string;
       };
     };
     responses: {
@@ -806,95 +281,23 @@ export interface operations {
       };
     };
   };
-  /**
-   * Create Directory
-   * @description Creates a directory, including any missing parent directories.
-   */
-  fs_mkdir: {
-    parameters: {
-      query: {
-        /** @description Directory path to create */
-        path: string;
-        /** @description Session id for relative paths */
-        session_id?: string | null;
-      };
-    };
-    responses: {
-      /** @description Directory created */
-      200: {
-        content: {
-          "application/json": components["schemas"]["FsActionResponse"];
-        };
-      };
-    };
-  };
-  /**
-   * Move Entry
-   * @description Moves or renames a file or directory.
-   */
-  fs_move: {
+  post_v2_fs_upload_batch: {
     parameters: {
       query?: {
-        /** @description Session id for relative paths */
-        session_id?: string | null;
-      };
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["FsMoveRequest"];
-      };
-    };
-    responses: {
-      /** @description Move result */
-      200: {
-        content: {
-          "application/json": components["schemas"]["FsMoveResponse"];
-        };
-      };
-    };
-  };
-  /**
-   * Get File Info
-   * @description Returns metadata (size, timestamps, type) for a path.
-   */
-  fs_stat: {
-    parameters: {
-      query: {
-        /** @description Path to stat */
-        path: string;
-        /** @description Session id for relative paths */
-        session_id?: string | null;
-      };
-    };
-    responses: {
-      /** @description File metadata */
-      200: {
-        content: {
-          "application/json": components["schemas"]["FsStat"];
-        };
-      };
-    };
-  };
-  /**
-   * Upload Files
-   * @description Uploads a tar.gz archive and extracts it to the destination directory.
-   */
-  fs_upload_batch: {
-    parameters: {
-      query?: {
-        /** @description Destination directory for extraction */
+        /** @description Destination path */
         path?: string | null;
-        /** @description Session id for relative paths */
+        /** @description Session id for relative path base */
         session_id?: string | null;
       };
     };
+    /** @description tar archive body */
     requestBody: {
       content: {
-        "application/octet-stream": string;
+        "text/plain": string;
       };
     };
     responses: {
-      /** @description Upload result */
+      /** @description Upload/extract result */
       200: {
         content: {
           "application/json": components["schemas"]["FsUploadBatchResponse"];
@@ -903,12 +306,12 @@ export interface operations {
     };
   };
   /**
-   * Health Check
-   * @description Returns the server health status.
+   * v2 Health
+   * @description Returns server health for the v2 ACP surface.
    */
-  get_health: {
+  get_v2_health: {
     responses: {
-      /** @description Server is healthy */
+      /** @description Service health response */
       200: {
         content: {
           "application/json": components["schemas"]["HealthResponse"];
@@ -917,41 +320,14 @@ export interface operations {
     };
   };
   /**
-   * List Sessions
-   * @description Returns all active sessions.
+   * ACP SSE
+   * @description Streams ACP JSON-RPC envelopes for an ACP client over SSE.
    */
-  list_sessions: {
+  get_v2_acp: {
     responses: {
-      /** @description List of active sessions */
+      /** @description SSE stream of ACP envelopes */
       200: {
-        content: {
-          "application/json": components["schemas"]["SessionListResponse"];
-        };
-      };
-    };
-  };
-  /**
-   * Create Session
-   * @description Creates a new agent session with the given configuration.
-   */
-  create_session: {
-    parameters: {
-      path: {
-        /** @description Client session id */
-        session_id: string;
-      };
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["CreateSessionRequest"];
-      };
-    };
-    responses: {
-      /** @description Session created */
-      200: {
-        content: {
-          "application/json": components["schemas"]["CreateSessionResponse"];
-        };
+        content: never;
       };
       /** @description Invalid request */
       400: {
@@ -959,8 +335,8 @@ export interface operations {
           "application/json": components["schemas"]["ProblemDetails"];
         };
       };
-      /** @description Session already exists */
-      409: {
+      /** @description Unknown ACP client */
+      404: {
         content: {
           "application/json": components["schemas"]["ProblemDetails"];
         };
@@ -968,33 +344,40 @@ export interface operations {
     };
   };
   /**
-   * Get Events
-   * @description Returns session events with optional offset-based pagination.
+   * ACP POST
+   * @description Sends ACP JSON-RPC envelopes to an ACP client and returns request responses.
    */
-  get_events: {
-    parameters: {
-      query?: {
-        /** @description Last seen event sequence (exclusive) */
-        offset?: number | null;
-        /** @description Max events to return */
-        limit?: number | null;
-        /** @description Include raw provider payloads */
-        include_raw?: boolean | null;
-      };
-      path: {
-        /** @description Session id */
-        session_id: string;
+  post_v2_acp: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AcpEnvelope"];
       };
     };
     responses: {
-      /** @description Session events */
+      /** @description JSON-RPC response envelope */
       200: {
         content: {
-          "application/json": components["schemas"]["EventsResponse"];
+          "application/json": components["schemas"]["AcpEnvelope"];
         };
       };
-      /** @description Session not found */
+      /** @description JSON-RPC notification accepted */
+      202: {
+        content: never;
+      };
+      /** @description Invalid ACP envelope */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Unknown ACP client */
       404: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description ACP agent process response timeout */
+      504: {
         content: {
           "application/json": components["schemas"]["ProblemDetails"];
         };
@@ -1002,196 +385,22 @@ export interface operations {
     };
   };
   /**
-   * Subscribe to Events (SSE)
-   * @description Opens an SSE stream for real-time session events.
+   * ACP Close
+   * @description Closes an ACP client and releases agent process resources.
    */
-  get_events_sse: {
-    parameters: {
-      query?: {
-        /** @description Last seen event sequence (exclusive) */
-        offset?: number | null;
-        /** @description Include raw provider payloads */
-        include_raw?: boolean | null;
-      };
-      path: {
-        /** @description Session id */
-        session_id: string;
-      };
-    };
+  delete_v2_acp: {
     responses: {
-      /** @description SSE event stream */
-      200: {
-        content: never;
-      };
-    };
-  };
-  /**
-   * Send Message
-   * @description Sends a message to a session and returns immediately.
-   */
-  post_message: {
-    parameters: {
-      path: {
-        /** @description Session id */
-        session_id: string;
-      };
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["MessageRequest"];
-      };
-    };
-    responses: {
-      /** @description Message accepted */
+      /** @description ACP client closed */
       204: {
         content: never;
       };
-      /** @description Session not found */
-      404: {
+      /** @description Invalid request */
+      400: {
         content: {
           "application/json": components["schemas"]["ProblemDetails"];
         };
       };
-    };
-  };
-  /**
-   * Send Message (Streaming)
-   * @description Sends a message and returns an SSE event stream of the agent's response.
-   */
-  post_message_stream: {
-    parameters: {
-      query?: {
-        /** @description Include raw provider payloads */
-        include_raw?: boolean | null;
-      };
-      path: {
-        /** @description Session id */
-        session_id: string;
-      };
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["MessageRequest"];
-      };
-    };
-    responses: {
-      /** @description SSE event stream */
-      200: {
-        content: never;
-      };
-      /** @description Session not found */
-      404: {
-        content: {
-          "application/json": components["schemas"]["ProblemDetails"];
-        };
-      };
-    };
-  };
-  /**
-   * Reply to Permission
-   * @description Approves or denies a permission request from the agent.
-   */
-  reply_permission: {
-    parameters: {
-      path: {
-        /** @description Session id */
-        session_id: string;
-        /** @description Permission id */
-        permission_id: string;
-      };
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["PermissionReplyRequest"];
-      };
-    };
-    responses: {
-      /** @description Permission reply accepted */
-      204: {
-        content: never;
-      };
-      /** @description Session or permission not found */
-      404: {
-        content: {
-          "application/json": components["schemas"]["ProblemDetails"];
-        };
-      };
-    };
-  };
-  /**
-   * Reject Question
-   * @description Rejects a human-in-the-loop question from the agent.
-   */
-  reject_question: {
-    parameters: {
-      path: {
-        /** @description Session id */
-        session_id: string;
-        /** @description Question id */
-        question_id: string;
-      };
-    };
-    responses: {
-      /** @description Question rejected */
-      204: {
-        content: never;
-      };
-      /** @description Session or question not found */
-      404: {
-        content: {
-          "application/json": components["schemas"]["ProblemDetails"];
-        };
-      };
-    };
-  };
-  /**
-   * Reply to Question
-   * @description Replies to a human-in-the-loop question from the agent.
-   */
-  reply_question: {
-    parameters: {
-      path: {
-        /** @description Session id */
-        session_id: string;
-        /** @description Question id */
-        question_id: string;
-      };
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["QuestionReplyRequest"];
-      };
-    };
-    responses: {
-      /** @description Question answered */
-      204: {
-        content: never;
-      };
-      /** @description Session or question not found */
-      404: {
-        content: {
-          "application/json": components["schemas"]["ProblemDetails"];
-        };
-      };
-    };
-  };
-  /**
-   * Terminate Session
-   * @description Terminates a running session and cleans up resources.
-   */
-  terminate_session: {
-    parameters: {
-      path: {
-        /** @description Session id */
-        session_id: string;
-      };
-    };
-    responses: {
-      /** @description Session terminated */
-      204: {
-        content: never;
-      };
-      /** @description Session not found */
+      /** @description Unknown ACP client */
       404: {
         content: {
           "application/json": components["schemas"]["ProblemDetails"];

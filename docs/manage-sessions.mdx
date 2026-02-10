@@ -25,10 +25,11 @@ Two ways to receive events: SSE streaming (recommended) or polling.
 Use SSE for real-time events with automatic reconnection support.
 
 ```typescript
-import { SandboxAgent } from "sandbox-agent";
+import { SandboxAgentClient } from "sandbox-agent";
 
-const client = await SandboxAgent.connect({
+const client = new SandboxAgentClient({
   baseUrl: "http://127.0.0.1:2468",
+  agent: "mock",
 });
 
 // Get offset from last stored event (0 returns all events)
@@ -130,7 +131,10 @@ const codingSession = actor({
   },
 
   createVars: async (c): Promise<CodingSessionVars> => {
-    const client = await SandboxAgent.connect({ baseUrl: c.state.baseUrl });
+    const client = new SandboxAgentClient({
+  baseUrl: c.state.baseUrl,
+  agent: "mock",
+});
     await client.createSession(c.state.sessionId, { agent: "claude" });
     return { client };
   },

@@ -1,4 +1,4 @@
-import type { UniversalItem } from "sandbox-agent";
+import type { UniversalItem } from "../../types/legacyApi";
 
 export type TimelineEntry = {
   id: string;

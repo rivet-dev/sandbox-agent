@@ -16,7 +16,7 @@ Daytona Tier 3+ is required to access api.anthropic.com and api.openai.com. Tier
 
 ```typescript
 import { Daytona } from "@daytonaio/sdk";
-import { SandboxAgent } from "sandbox-agent";
+import { SandboxAgentClient } from "sandbox-agent";
 
 const daytona = new Daytona();
 
@@ -44,7 +44,7 @@ await new Promise((r) => setTimeout(r, 2000));
 const baseUrl = (await sandbox.getSignedPreviewUrl(3000, 4 * 60 * 60)).url;
 
 // Connect and use the SDK
-const client = await SandboxAgent.connect({ baseUrl });
+const client = new SandboxAgentClient({ baseUrl, agent: "mock" });
 
 await client.createSession("my-session", {
   agent: "claude",

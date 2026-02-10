@@ -18,7 +18,7 @@ const faqs = [
   {
     question: 'How is session data persisted?',
     answer:
-      "This SDK does not handle persisting session data. Events stream in a universal JSON schema that you can persist anywhere. Consider using Postgres or <a href='https://rivet.gg' target='_blank' rel='noopener noreferrer' class='text-orange-400 hover:underline'>Rivet Actors</a> for data persistence.",
+      "This SDK does not handle persisting session data. In v2, traffic is ACP JSON-RPC over <code>/v2/rpc</code>; persist envelopes in your own storage if you need replay or auditing.",
   },
   {
     question: 'Can I run this locally or does it require a sandbox provider?',

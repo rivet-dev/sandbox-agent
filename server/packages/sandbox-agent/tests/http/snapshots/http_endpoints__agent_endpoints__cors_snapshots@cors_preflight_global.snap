@@ -1,9 +1,0 @@
----
-source: server/packages/sandbox-agent/tests/http/agent_endpoints.rs
-expression: "snapshot_cors(status, &headers)"
----
-access-control-allow-headers: "content-type,authorization"
-access-control-allow-methods: "GET,POST"
-access-control-allow-origin: "http://example.com"
-status: 200
-vary: "origin, access-control-request-method, access-control-request-headers"

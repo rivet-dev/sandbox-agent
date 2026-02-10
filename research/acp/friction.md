@@ -1,0 +1,229 @@
+# ACP Migration Friction Log
+
+Track every ACP migration issue that creates implementation friction, unclear behavior, or product risk.
+
+Update this file continuously during the migration.
+
+## Entry template
+
+- Date:
+- Area:
+- Issue:
+- Impact:
+- Proposed direction:
+- Decision:
+- Owner:
+- Status: `open` | `in_progress` | `resolved` | `deferred`
+- Links:
+
+## Entries
+
+- Date: 2026-02-10
+- Area: Agent process availability
+- Issue: Amp does not have a confirmed official ACP agent process in current ACP docs/research.
+- Impact: Blocks full parity if Amp is required in v2 launch scope.
+- Proposed direction: Treat Amp as conditional for v2.0 and support via pinned fallback only if agent process source is validated.
+- Decision: Open.
+- Owner: Unassigned.
+- Status: open
+- Links: `research/acp/acp-notes.md`
+
+- Date: 2026-02-10
+- Area: Transport
+- Issue: ACP streamable HTTP is still draft upstream; v2 requires ACP over HTTP now.
+- Impact: Potential divergence from upstream HTTP semantics.
+- Proposed direction: Use strict JSON-RPC mapping and keep transport shim minimal/documented for later alignment.
+- Decision: Open.
+- Owner: Unassigned.
+- Status: open
+- Links: `research/acp/spec.md`
+
+- Date: 2026-02-10
+- Area: OpenCode compatibility sequencing
+- Issue: OpenCode compatibility must be preserved but not block ACP core rewrite.
+- Impact: Risk of core rewrites being constrained by legacy compat behavior.
+- Proposed direction: Disable/comment out `/opencode/*` during ACP core bring-up, then re-enable via dedicated bridge step after core is stable.
+- Decision: Accepted.
+- Owner: Unassigned.
+- Status: in_progress
+- Links: `research/acp/migration-steps.md`
+
+- Date: 2026-02-10
+- Area: TypeScript SDK layering
+- Issue: Risk of duplicating ACP protocol logic in our TS SDK instead of embedding upstream ACP SDK.
+- Impact: Drift from ACP semantics and higher maintenance cost.
+- Proposed direction: Embed `@agentclientprotocol/sdk` and keep our SDK as wrapper/convenience layer.
+- Decision: Accepted.
+- Owner: Unassigned.
+- Status: resolved
+- Links: `research/acp/spec.md`
+
+- Date: 2026-02-10
+- Area: Installer behavior
+- Issue: Lazy agent process install can race under concurrent first-use requests.
+- Impact: Duplicate downloads, partial installs, or bootstrap failures.
+- Proposed direction: Add per-agent install lock + idempotent install path used by both explicit install and lazy install.
+- Decision: Accepted and implemented.
+- Owner: Unassigned.
+- Status: resolved
+- Links: `research/acp/spec.md`
+
+- Date: 2026-02-10
+- Area: ACP over HTTP standardization
+- Issue: Community is actively piloting both Streamable HTTP and WebSocket; no final single transport profile has emerged yet.
+- Impact: Risk of rework if we overfit to one draft behavior that later shifts.
+- Proposed direction: Lock v2 public contract to Streamable HTTP with ACP JSON-RPC payloads, keep implementation modular so WebSocket can be added later without breaking v2 API.
+- Decision: Accepted.
+- Owner: Unassigned.
+- Status: in_progress
+- Links: `research/acp/acp-over-http-findings.md`, `research/acp/spec.md`
+
+- Date: 2026-02-10
+- Area: Session lifecycle surface
+- Issue: ACP stable does not include v1-equivalent methods for session listing, explicit session termination/delete, or event-log polling.
+- Impact: Direct lift-and-shift of `/v1/sessions`, `/terminate`, and `/events` polling is not possible with ACP core only.
+- Proposed direction: Define `_sandboxagent/session/*` extension methods for these control operations, while keeping core prompt flow on standard ACP methods.
+- Decision: Open.
+- Owner: Unassigned.
+- Status: open
+- Links: `research/acp/v1-schema-to-acp-mapping.md`, `research/acp/spec.md`
+
+- Date: 2026-02-10
+- Area: HITL question flow
+- Issue: ACP stable defines `session/request_permission` but not a generic question request/response method matching v1 `question.*` and question reply endpoints.
+- Impact: Existing question UX cannot be represented with standard ACP methods alone.
+- Proposed direction: Introduce `_sandboxagent/session/request_question` extension request/response and carry legacy shape via `_meta`.
+- Decision: Open.
+- Owner: Unassigned.
+- Status: open
+- Links: `research/acp/v1-schema-to-acp-mapping.md`
+
+- Date: 2026-02-10
+- Area: Filesystem parity
+- Issue: ACP stable filesystem methods are text-only (`fs/read_text_file`, `fs/write_text_file`), while v1 exposes raw bytes plus directory operations.
+- Impact: Binary file reads/writes, archive upload, and directory management cannot map directly to ACP core.
+- Proposed direction: Use ACP standard methods for UTF-8 text paths; add `_sandboxagent/fs/*` extensions for binary and directory operations.
+- Decision: Open.
+- Owner: Unassigned.
+- Status: open
+- Links: `research/acp/v1-schema-to-acp-mapping.md`
+
+- Date: 2026-02-10
+- Area: v1 decommissioning
+- Issue: Ambiguity between "comment out v1" and "remove v1" causes rollout confusion.
+- Impact: Risk of partial compatibility behavior and extra maintenance burden.
+- Proposed direction: Hard-remove v1 behavior and return a stable HTTP 410 error for all `/v1/*` routes.
+- Decision: Accepted.
+- Owner: Unassigned.
+- Status: resolved
+- Links: `research/acp/spec.md`, `research/acp/migration-steps.md`
+
+- Date: 2026-02-10
+- Area: TypeScript ACP-over-HTTP client support
+- Issue: Official ACP client SDK does not currently provide the exact Streamable HTTP transport behavior required by this project.
+- Impact: SDK cannot target `/v2/rpc` without additional transport implementation.
+- Proposed direction: Embed upstream ACP SDK types/lifecycle and implement a project transport agent process for ACP-over-HTTP.
+- Decision: Accepted.
+- Owner: Unassigned.
+- Status: resolved
+- Links: `research/acp/spec.md`, `research/acp/migration-steps.md`
+
+- Date: 2026-02-10
+- Area: Inspector migration
+- Issue: Inspector currently depends on v1 session/event surfaces.
+- Impact: Inspector breaks after v1 removal unless migrated to ACP transport.
+- Proposed direction: Keep `/ui/` route and migrate inspector runtime calls to ACP-over-HTTP; add dedicated inspector ACP tests.
+- Decision: Accepted.
+- Owner: Unassigned.
+- Status: resolved
+- Links: `research/acp/spec.md`, `research/acp/migration-steps.md`
+
+- Date: 2026-02-10
+- Area: Inspector asset embedding
+- Issue: If `cargo build` runs before `frontend/packages/inspector/dist` exists, the build script can cache inspector-disabled embedding state.
+- Impact: Local runs can serve `/ui/` as disabled even after inspector is built, unless Cargo reruns the build script.
+- Proposed direction: Improve build-script invalidation to detect dist directory appearance/disappearance without manual rebuild nudges.
+- Decision: Implemented by watching the inspector package directory in `build.rs` so Cargo reruns when dist appears/disappears.
+- Owner: Unassigned.
+- Status: resolved
+- Links: `server/packages/sandbox-agent/build.rs`, `research/acp/todo.md`
+
+- Date: 2026-02-10
+- Area: Deterministic ACP install tests
+- Issue: Installer and lazy-install tests were coupled to the live ACP registry, causing non-deterministic test behavior.
+- Impact: Flaky CI and inability to reliably validate install provenance and lazy install flows.
+- Proposed direction: Add `SANDBOX_AGENT_ACP_REGISTRY_URL` override and drive tests with a local one-shot registry fixture.
+- Decision: Accepted and implemented.
+- Owner: Unassigned.
+- Status: resolved
+- Links: `server/packages/agent-management/src/agents.rs`, `server/packages/sandbox-agent/tests/v2_api.rs`
+
+- Date: 2026-02-10
+- Area: Inspector E2E tooling
+- Issue: `agent-browser` invocation under pnpm emits npm env warnings (`store-dir`, `recursive`) during scripted runs.
+- Impact: No functional break, but noisy CI logs and possible future npm strictness risk.
+- Proposed direction: Keep `npx -y agent-browser` script for now; revisit pinning/install strategy if warnings become hard failures.
+- Decision: Accepted.
+- Owner: Unassigned.
+- Status: open
+- Links: `frontend/packages/inspector/tests/agent-browser.e2e.sh`
+
+- Date: 2026-02-10
+- Area: Real agent process matrix rollout
+- Issue: Full agent process smoke coverage requires provider credentials and installed real agent processes in CI/runtime environments.
+- Impact: Phase-6 "full matrix green" and "install+prompt+stream per agent process" cannot be marked complete in local-only runs.
+- Proposed direction: Keep deterministic agent process matrix in default CI (stub ACP agent processes for claude/codex/opencode) and run real credentialed agent processes in environment-specific jobs.
+- Decision: Accepted.
+- Owner: Unassigned.
+- Status: resolved
+- Links: `research/acp/todo.md`
+
+- Date: 2026-02-10
+- Area: Inspector v1-to-v2 compatibility
+- Issue: Restored inspector UI expects legacy `/v1` session/event contracts that no longer exist in ACP-native v2.
+- Impact: Full parity would block migration; inspector would otherwise fail to run against v2.
+- Proposed direction: Keep the restored UI and bridge to ACP with a thin compatibility client (`src/lib/legacyClient.ts`), stubbing non-parity features with explicit `TDOO` markers.
+- Decision: Accepted.
+- Owner: Unassigned.
+- Status: open
+- Links: `frontend/packages/inspector/src/lib/legacyClient.ts`, `research/acp/inspector-unimplemented.md`
+
+- Date: 2026-02-10
+- Area: Multi-client session visibility + process sharing
+- Issue: Existing ACP runtime mapped one HTTP ACP connection to one dedicated agent process, which prevented global session visibility and increased process count.
+- Impact: Clients could not discover sessions created by other clients; process utilization scaled with connection count instead of agent type.
+- Proposed direction: Use one shared backend process per `AgentId`, maintain server-owned in-memory meta session registry across all connections, intercept `session/list` as a global aggregated view, and add an experimental detach extension (`_sandboxagent/session/detach`) for connection-level session detachment.
+- Decision: Accepted and implemented.
+- Owner: Unassigned.
+- Status: resolved
+- Links: `server/packages/sandbox-agent/src/acp_runtime/mod.rs`, `server/packages/sandbox-agent/src/acp_runtime/mock.rs`, `server/packages/sandbox-agent/tests/v2_api.rs`, `server/packages/sandbox-agent/tests/v2_agent_process_matrix.rs`
+
+- Date: 2026-02-10
+- Area: TypeScript SDK package split and ACP lifecycle
+- Issue: `sandbox-agent` SDK exposed ACP transport primitives directly (`createAcpClient`, raw envelope APIs, ACP type re-exports), making the public API ACP-heavy.
+- Impact: Harder to keep a simple Sandbox-facing API while still supporting protocol-faithful ACP HTTP behavior and Sandbox metadata/extensions.
+- Proposed direction: Split into `acp-http-client` (pure ACP HTTP transport/client) and `sandbox-agent` (`SandboxAgentClient`) as a thin wrapper with metadata/event conversion and extension helpers.
+- Decision: Accepted and implemented.
+- Owner: Unassigned.
+- Status: resolved
+- Links: `research/acp/ts-client.md`, `sdks/acp-http-client/src/index.ts`, `sdks/typescript/src/client.ts`
+
+- Date: 2026-02-10
+- Area: Streamable HTTP transport contract
+- Issue: Ambiguity over whether `/v2/rpc` should track MCP transport negotiation (`POST` accepting SSE responses, multi-stream fanout) versus Sandbox Agent's simpler JSON-only POST contract.
+- Impact: Without an explicit contract, clients can assume incompatible Accept/media semantics and open duplicate GET streams that receive duplicate events.
+- Proposed direction: Define Sandbox Agent transport profile explicitly: `POST /v2/rpc` is JSON-only (`Content-Type` and `Accept` for `application/json`), `GET /v2/rpc` is SSE-only (`Accept: text/event-stream`), and allow only one active SSE stream per ACP connection id.
+- Decision: Accepted and implemented.
+- Owner: Unassigned.
+- Status: resolved
+- Links: `server/packages/sandbox-agent/src/router.rs`, `server/packages/sandbox-agent/src/acp_runtime/mod.rs`, `server/packages/sandbox-agent/tests/v2_api/acp_transport.rs`, `docs/advanced/acp-http-client.mdx`
+
+- Date: 2026-02-10
+- Area: Agent selection contract for ACP bootstrap/session creation
+- Issue: `x-acp-agent` bound agent selection to transport bootstrap, which conflicted with Sandbox Agent meta-session goals where one client can manage sessions across multiple agents.
+- Impact: Connections appeared agent-affine; agent selection was hidden in HTTP headers rather than explicit in ACP payload metadata.
+- Proposed direction: Hard-remove `x-acp-agent`; require `params._meta["sandboxagent.dev"].agent` on `initialize` and `session/new`, and require `params.agent` for agent-routed calls that have no resolvable `sessionId`.
+- Decision: Accepted and implemented.
+- Owner: Unassigned.
+- Status: resolved
+- Links: `server/packages/sandbox-agent/src/router.rs`, `server/packages/sandbox-agent/src/acp_runtime/helpers.rs`, `server/packages/sandbox-agent/src/acp_runtime/mod.rs`, `server/packages/sandbox-agent/src/acp_runtime/ext_meta.rs`, `server/packages/sandbox-agent/tests/v2_api/acp_transport.rs`

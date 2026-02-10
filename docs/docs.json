@@ -86,6 +86,10 @@
 						"pages": ["file-system"]
 					},
 					{
+						"group": "Advanced",
+						"pages": ["advanced/acp-http-client"]
+					},
+					{
 						"group": "Reference",
 						"pages": [
 							"cli",

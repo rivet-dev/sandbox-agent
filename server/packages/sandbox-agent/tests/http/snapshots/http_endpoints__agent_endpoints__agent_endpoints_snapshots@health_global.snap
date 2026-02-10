@@ -1,5 +1,0 @@
----
-source: server/packages/sandbox-agent/tests/http/agent_endpoints.rs
-expression: normalize_health(&health)
----
-status: ok

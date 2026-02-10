@@ -1,5 +1,5 @@
 import { HelpCircle, Shield } from "lucide-react";
-import type { PermissionEventData, QuestionEventData } from "sandbox-agent";
+import type { PermissionEventData, QuestionEventData } from "../../types/legacyApi";
 import { formatJson } from "../../utils/format";
 
 const ApprovalsTab = ({

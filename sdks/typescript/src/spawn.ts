@@ -207,7 +207,7 @@ async function waitForHealth(
       throw new Error("sandbox-agent exited before becoming healthy.");
     }
     try {
-      const response = await fetcher(`${baseUrl}/v1/health`, {
+      const response = await fetcher(`${baseUrl}/v2/health`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (response.ok) {

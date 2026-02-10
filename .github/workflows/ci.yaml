@@ -23,3 +23,13 @@ jobs:
       - run: pnpm install
       - name: Run checks
         run: ./scripts/release/main.ts --version 0.0.0 --check
+      - name: Run ACP v2 server tests
+        run: |
+          cargo test -p sandbox-agent-agent-management
+          cargo test -p sandbox-agent --test v2_api
+          cargo test -p sandbox-agent --test v2_agent_process_matrix
+          cargo test -p sandbox-agent --lib
+      - name: Run SDK tests
+        run: pnpm --dir sdks/typescript test
+      - name: Run Inspector browser E2E
+        run: pnpm --filter @sandbox-agent/inspector test:agent-browser

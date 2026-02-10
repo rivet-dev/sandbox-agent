@@ -1,6 +1,6 @@
 import { Download, Loader2, RefreshCw } from "lucide-react";
 import { useState } from "react";
-import type { AgentInfo, AgentModeInfo } from "sandbox-agent";
+import type { AgentInfo, AgentModeInfo } from "../../types/legacyApi";
 import FeatureCoverageBadges from "../agents/FeatureCoverageBadges";
 import { emptyFeatureCoverage } from "../../types/agents";
 

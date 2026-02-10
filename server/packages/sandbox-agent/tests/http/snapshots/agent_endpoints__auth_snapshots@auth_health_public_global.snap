@@ -1,8 +1,0 @@
----
-source: server/packages/sandbox-agent/tests/http_sse_snapshots.rs
-assertion_line: 765
-expression: "json!({ \"status\": status.as_u16(), \"payload\": normalize_health(&payload), })"
----
-payload:
-  status: ok
-status: 200

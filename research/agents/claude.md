@@ -9,6 +9,21 @@ Research notes on Claude Code's configuration, credential discovery, and runtime
 - **Session Persistence**: Session ID (string)
 - **SDK**: None (spawns CLI directly)
 
+## ACP Terminology (Sandbox Agent v2)
+
+Use these terms consistently when discussing Claude's ACP path:
+
+| Term | Meaning |
+|------|---------|
+| **ACP agent process launcher** | The command used to start the ACP agent process, commonly an `npx` launcher script that executes `claude-code-acp`. |
+| **ACP agent process** | The running ACP agent process spawned by Sandbox Agent from the launcher command. |
+| **ACP client** | The client-visible transport handle identified by `X-ACP-Connection-Id`; requests and SSE are scoped to this ACP client. |
+
+Related IDs:
+
+- **ACP client ID**: value of `X-ACP-Connection-Id` (transport identity).
+- **ACP session ID**: `sessionId` returned by `session/new` (conversation/session identity within ACP).
+
 ## Credential Discovery
 
 ### Priority Order

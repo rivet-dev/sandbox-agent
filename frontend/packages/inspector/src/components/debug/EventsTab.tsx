@@ -1,6 +1,6 @@
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { UniversalEvent } from "sandbox-agent";
+import type { UniversalEvent } from "../../types/legacyApi";
 import { formatJson, formatTime } from "../../utils/format";
 import { getEventCategory, getEventClass, getEventIcon, getEventKey, getEventType } from "./eventUtils";
 

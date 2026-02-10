@@ -1,11 +1,10 @@
 ---
 title: "TypeScript"
-description: "Use the generated client to manage sessions and stream events."
+description: "Use the TypeScript SDK to manage ACP sessions and Sandbox Agent HTTP APIs."
 icon: "js"
 ---
 
-The TypeScript SDK is generated from the OpenAPI spec that ships with the server. It provides a typed
-client for sessions, events, and agent operations.
+The TypeScript SDK is centered on `sandbox-agent` and its `SandboxAgentClient`, which provides a Sandbox-facing API for session flows, ACP extensions, and binary HTTP filesystem helpers.
 
 ## Install
 
@@ -27,13 +26,16 @@ client for sessions, events, and agent operations.
 ## Create a client
 
 ```ts
-import { SandboxAgent } from "sandbox-agent";
+import { SandboxAgentClient } from "sandbox-agent";
 
-const client = await SandboxAgent.connect({
+const client = new SandboxAgentClient({
   baseUrl: "http://127.0.0.1:2468",
   token: process.env.SANDBOX_TOKEN,
+  agent: "mock",
 });
 ```
+
+`SandboxAgentClient` is the canonical API. By default it auto-connects (`autoConnect: true`), so provide `agent` in the constructor. Use the instance method `client.connect()` only when you explicitly set `autoConnect: false`.
 
 ## Autospawn (Node only)
 
@@ -42,7 +44,9 @@ If you run locally, the SDK can launch the server for you.
 ```ts
 import { SandboxAgent } from "sandbox-agent";
 
-const client = await SandboxAgent.start();
+const client = await SandboxAgent.start({
+  agent: "mock",
+});
 
 await client.dispose();
 ```
@@ -50,69 +54,162 @@ await client.dispose();
 Autospawn uses the local `sandbox-agent` binary. Install `@sandbox-agent/cli` (recommended) or set
 `SANDBOX_AGENT_BIN` to a custom path.
 
-## Sessions and messages
+## Connect lifecycle
+
+Use manual mode when you want explicit ACP session lifecycle control.
 
 ```ts
-await client.createSession("demo-session", {
-  agent: "codex",
-  agentMode: "default",
-  permissionMode: "plan",
+import {
+  AlreadyConnectedError,
+  NotConnectedError,
+  SandboxAgentClient,
+} from "sandbox-agent";
+
+const client = new SandboxAgentClient({
+  baseUrl: "http://127.0.0.1:2468",
+  token: process.env.SANDBOX_TOKEN,
+  agent: "mock",
+  autoConnect: false,
 });
 
-await client.postMessage("demo-session", { message: "Hello" });
+await client.connect();
+
+try {
+  await client.connect();
+} catch (error) {
+  if (error instanceof AlreadyConnectedError) {
+    console.error("already connected");
+  }
+}
+
+await client.disconnect();
+
+try {
+  await client.prompt({ sessionId: "s", prompt: [{ type: "text", text: "hi" }] });
+} catch (error) {
+  if (error instanceof NotConnectedError) {
+    console.error("connect first");
+  }
+}
 ```
 
-List agents and inspect feature coverage (available on `capabilities`):
+## Session flow
 
 ```ts
+const session = await client.newSession({
+  cwd: "/",
+  mcpServers: [],
+  metadata: {
+    agent: "mock",
+    title: "Demo Session",
+    variant: "high",
+    permissionMode: "ask",
+  },
+});
+
+const result = await client.prompt({
+  sessionId: session.sessionId,
+  prompt: [{ type: "text", text: "Summarize this repository." }],
+});
+
+console.log(result.stopReason);
+```
+
+Load, cancel, and runtime settings use ACP-aligned method names:
+
+```ts
+await client.loadSession({ sessionId: session.sessionId, cwd: "/", mcpServers: [] });
+await client.cancel({ sessionId: session.sessionId });
+await client.setSessionMode({ sessionId: session.sessionId, modeId: "default" });
+await client.setSessionConfigOption({
+  sessionId: session.sessionId,
+  configId: "config-id-from-session",
+  value: "config-value-id",
+});
+```
+
+## Extension helpers
+
+Sandbox extensions are exposed as first-class methods:
+
+```ts
+const models = await client.listModels({ sessionId: session.sessionId });
+console.log(models.currentModelId, models.availableModels.length);
+
+await client.setMetadata(session.sessionId, {
+  title: "Renamed Session",
+  model: "mock",
+  permissionMode: "ask",
+});
+
+await client.detachSession(session.sessionId);
+await client.terminateSession(session.sessionId);
+```
+
+## Event handling
+
+Use `onEvent` to consume converted SDK events.
+
+```ts
+import { SandboxAgentClient, type AgentEvent } from "sandbox-agent";
+
+const events: AgentEvent[] = [];
+
+const client = new SandboxAgentClient({
+  baseUrl: "http://127.0.0.1:2468",
+  token: process.env.SANDBOX_TOKEN,
+  agent: "mock",
+  onEvent: (event) => {
+    events.push(event);
+
+    if (event.type === "sessionEnded") {
+      console.log("ended", event.notification.params.sessionId ?? event.notification.params.session_id);
+    }
+
+    if (event.type === "agentUnparsed") {
+      console.warn("unparsed", event.notification.params);
+    }
+  },
+});
+```
+
+You can also handle raw session update notifications directly:
+
+```ts
+const client = new SandboxAgentClient({
+  baseUrl: "http://127.0.0.1:2468",
+  token: process.env.SANDBOX_TOKEN,
+  agent: "mock",
+  onSessionUpdate: (notification) => {
+    console.log(notification.update.sessionUpdate);
+  },
+});
+```
+
+## Control + HTTP helpers
+
+Agent/session and non-binary filesystem control helpers use ACP extension methods over `/v2/rpc`:
+
+```ts
+const health = await client.getHealth();
 const agents = await client.listAgents();
-const codex = agents.agents.find((agent) => agent.id === "codex");
-console.log(codex?.capabilities);
+await client.installAgent("codex", { reinstall: true });
+
+const sessions = await client.listSessions();
+const sessionInfo = await client.getSession(sessions.sessions[0].session_id);
 ```
 
-## Poll events
+These methods require an active ACP connection and throw `NotConnectedError` when disconnected.
 
-```ts
-const events = await client.getEvents("demo-session", {
-  offset: 0,
-  limit: 200,
-  includeRaw: false,
-});
+Binary filesystem transfer intentionally remains HTTP:
 
-for (const event of events.events) {
-  console.log(event.type, event.data);
-}
-```
+- `readFsFile` -> `GET /v2/fs/file`
+- `writeFsFile` -> `PUT /v2/fs/file`
+- `uploadFsBatch` -> `POST /v2/fs/upload-batch`
 
-## Stream events (SSE)
+Reason: these are Sandbox Agent host/runtime filesystem operations (not agent-specific ACP behavior), intentionally separate from ACP native `fs/read_text_file` / `fs/write_text_file`, and they may require streaming very large binary payloads that ACP JSON-RPC is not suited to transport efficiently.
 
-```ts
-for await (const event of client.streamEvents("demo-session", {
-  offset: 0,
-  includeRaw: false,
-})) {
-  console.log(event.type, event.data);
-}
-```
-
-The SDK parses `text/event-stream` into `UniversalEvent` objects. If you want full control, use
-`getEventsSse()` and parse the stream yourself.
-
-## Stream a single turn
-
-```ts
-for await (const event of client.streamTurn("demo-session", { message: "Hello" })) {
-  console.log(event.type, event.data);
-}
-```
-
-This method posts the message and streams only the next turn. For manual control, call
-`postMessageStream()` and parse the SSE response yourself.
-
-## Optional raw payloads
-
-Set `includeRaw: true` on `getEvents`, `streamEvents`, or `streamTurn` to include the raw provider
-payload in `event.raw`. This is useful for debugging and conversion analysis.
+ACP extension variants can exist in parallel for compatibility, but `SandboxAgentClient` should prefer the HTTP endpoints above by default.
 
 ## Error handling
 
@@ -122,7 +219,7 @@ All HTTP errors throw `SandboxAgentError`:
 import { SandboxAgentError } from "sandbox-agent";
 
 try {
-  await client.postMessage("missing-session", { message: "Hi" });
+  await client.listAgents();
 } catch (error) {
   if (error instanceof SandboxAgentError) {
     console.error(error.status, error.problem);
@@ -142,6 +239,7 @@ const url = buildInspectorUrl({
   token: "optional-bearer-token",
   headers: { "X-Custom-Header": "value" },
 });
+
 console.log(url);
 // https://your-sandbox-agent.example.com/ui/?token=...&headers=...
 ```
@@ -153,10 +251,17 @@ Parameters:
 
 ## Types
 
-The SDK exports OpenAPI-derived types for events, items, and feature coverage:
+The SDK exports typed events and responses for the Sandbox layer:
 
 ```ts
-import type { UniversalEvent, UniversalItem, AgentCapabilities } from "sandbox-agent";
+import type {
+  AgentEvent,
+  AgentInfo,
+  HealthResponse,
+  SessionInfo,
+  SessionListResponse,
+  SessionTerminateResponse,
+} from "sandbox-agent";
 ```
 
-See the [API Reference](/api) for schema details.
+For low-level protocol transport details, see [ACP HTTP Client](/advanced/acp-http-client).

@@ -1,7 +1,7 @@
 import { ArrowLeft, ArrowRight, ChevronDown, ChevronRight, Pencil, Plus, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import type { AgentInfo, AgentModelInfo, AgentModeInfo, SkillSource } from "sandbox-agent";
 import type { McpServerEntry } from "../App";
+import type { AgentInfo, AgentModelInfo, AgentModeInfo, SkillSource } from "../types/legacyApi";
 
 export type SessionConfig = {
   model: string;
@@ -14,8 +14,7 @@ const agentLabels: Record<string, string> = {
   claude: "Claude Code",
   codex: "Codex",
   opencode: "OpenCode",
-  amp: "Amp",
-  mock: "Mock"
+  amp: "Amp"
 };
 
 const validateServerJson = (json: string): string | null => {

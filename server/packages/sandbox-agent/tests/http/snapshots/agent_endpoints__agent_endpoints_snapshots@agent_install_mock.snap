@@ -1,6 +1,0 @@
----
-source: server/packages/sandbox-agent/tests/http/http_sse_snapshots.rs
-assertion_line: 1016
-expression: snapshot_status(status)
----
-status: 204

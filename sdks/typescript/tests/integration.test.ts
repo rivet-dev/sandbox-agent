@@ -2,19 +2,23 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { type ChildProcess } from "node:child_process";
-import { SandboxAgent } from "../src/client.ts";
-import { spawnSandboxAgent, isNodeRuntime } from "../src/spawn.ts";
+import {
+  AlreadyConnectedError,
+  NotConnectedError,
+  SandboxAgent,
+  SandboxAgentClient,
+  type AgentEvent,
+} from "../src/index.ts";
+import { spawnSandboxAgent, isNodeRuntime, type SandboxAgentSpawnHandle } from "../src/spawn.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const AGENT_UNPARSED_METHOD = "_sandboxagent/agent/unparsed";
 
-// Check for binary in common locations
 function findBinary(): string | null {
   if (process.env.SANDBOX_AGENT_BIN) {
     return process.env.SANDBOX_AGENT_BIN;
   }
 
-  // Check cargo build output (run from sdks/typescript/tests)
   const cargoPaths = [
     resolve(__dirname, "../../../target/debug/sandbox-agent"),
     resolve(__dirname, "../../../target/release/sandbox-agent"),
@@ -30,136 +34,292 @@ function findBinary(): string | null {
 }
 
 const BINARY_PATH = findBinary();
-const SKIP_INTEGRATION = !BINARY_PATH && !process.env.RUN_INTEGRATION_TESTS;
-
-// Set env var if we found a binary
-if (BINARY_PATH && !process.env.SANDBOX_AGENT_BIN) {
+if (!BINARY_PATH) {
+  throw new Error(
+    "sandbox-agent binary not found. Build it (cargo build -p sandbox-agent) or set SANDBOX_AGENT_BIN.",
+  );
+}
+if (!process.env.SANDBOX_AGENT_BIN) {
   process.env.SANDBOX_AGENT_BIN = BINARY_PATH;
 }
 
-describe.skipIf(SKIP_INTEGRATION)("Integration: spawn (local mode)", () => {
-  it("spawns server and connects", async () => {
-    const handle = await spawnSandboxAgent({
-      enabled: true,
-      log: "silent",
-      timeoutMs: 30000,
-    });
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
-    try {
-      expect(handle.baseUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
-      expect(handle.token).toBeTruthy();
-
-      const client = await SandboxAgent.connect({
-        baseUrl: handle.baseUrl,
-        token: handle.token,
-      });
-
-      const health = await client.getHealth();
-      expect(health.status).toBe("ok");
-    } finally {
-      await handle.dispose();
+async function waitFor<T>(
+  fn: () => T | undefined | null,
+  timeoutMs = 5000,
+  stepMs = 25,
+): Promise<T> {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const value = fn();
+    if (value !== undefined && value !== null) {
+      return value;
     }
-  });
+    await sleep(stepMs);
+  }
+  throw new Error("timed out waiting for condition");
+}
 
-  it("SandboxAgent.start spawns automatically", async () => {
-    const client = await SandboxAgent.start({
-      spawn: { log: "silent", timeoutMs: 30000 },
-    });
-
-    try {
-      const health = await client.getHealth();
-      expect(health.status).toBe("ok");
-
-      const agents = await client.listAgents();
-      expect(agents.agents).toBeDefined();
-      expect(Array.isArray(agents.agents)).toBe(true);
-    } finally {
-      await client.dispose();
-    }
-  });
-
-  it("lists available agents", async () => {
-    const client = await SandboxAgent.start({
-      spawn: { log: "silent", timeoutMs: 30000 },
-    });
-
-    try {
-      const agents = await client.listAgents();
-      expect(agents.agents).toBeDefined();
-      // Should have at least some agents defined
-      expect(agents.agents.length).toBeGreaterThan(0);
-    } finally {
-      await client.dispose();
-    }
-  });
-});
-
-describe.skipIf(SKIP_INTEGRATION)("Integration: connect (remote mode)", () => {
-  let serverProcess: ChildProcess;
+describe("Integration: TypeScript SDK against real server/runtime", () => {
+  let handle: SandboxAgentSpawnHandle;
   let baseUrl: string;
   let token: string;
 
   beforeAll(async () => {
-    // Start server manually to simulate remote server
-    const handle = await spawnSandboxAgent({
+    handle = await spawnSandboxAgent({
       enabled: true,
       log: "silent",
       timeoutMs: 30000,
     });
-    serverProcess = handle.child;
     baseUrl = handle.baseUrl;
     token = handle.token;
   });
 
   afterAll(async () => {
-    if (serverProcess && serverProcess.exitCode === null) {
-      serverProcess.kill("SIGTERM");
-      await new Promise<void>((resolve) => {
-        const timeout = setTimeout(() => {
-          serverProcess.kill("SIGKILL");
-          resolve();
-        }, 5000);
-        serverProcess.once("exit", () => {
-          clearTimeout(timeout);
-          resolve();
-        });
-      });
-    }
+    await handle.dispose();
   });
 
-  it("connects to remote server", async () => {
-    const client = await SandboxAgent.connect({
-      baseUrl,
-      token,
-    });
-
-    const health = await client.getHealth();
-    expect(health.status).toBe("ok");
-  });
-
-  it("handles authentication", async () => {
-    const client = await SandboxAgent.connect({
-      baseUrl,
-      token,
-    });
-
-    const health = await client.getHealth();
-    expect(health.status).toBe("ok");
-  });
-
-  it("rejects invalid token on protected endpoints", async () => {
-    const client = await SandboxAgent.connect({
-      baseUrl,
-      token: "invalid-token",
-    });
-
-    // Health endpoint may be open, but listing agents should require auth
-    await expect(client.listAgents()).rejects.toThrow();
-  });
-});
-
-describe("Runtime detection", () => {
   it("detects Node.js runtime", () => {
     expect(isNodeRuntime()).toBe(true);
+  });
+
+  it("keeps health on HTTP and requires ACP connection for ACP-backed helpers", async () => {
+    const client = await SandboxAgent.connect({
+      baseUrl,
+      token,
+      agent: "mock",
+      autoConnect: false,
+    });
+
+    const health = await client.getHealth();
+    expect(health.status).toBe("ok");
+
+    await expect(client.listAgents()).rejects.toBeInstanceOf(NotConnectedError);
+
+    await client.connect();
+    const agents = await client.listAgents();
+    expect(Array.isArray(agents.agents)).toBe(true);
+    expect(agents.agents.length).toBeGreaterThan(0);
+
+    await client.disconnect();
+  });
+
+  it("auto-connects on constructor and runs initialize/new/prompt flow", async () => {
+    const events: AgentEvent[] = [];
+
+    const client = new SandboxAgentClient({
+      baseUrl,
+      token,
+      agent: "mock",
+      onEvent: (event) => {
+        events.push(event);
+      },
+    });
+
+    const session = await client.newSession({
+      cwd: process.cwd(),
+      mcpServers: [],
+      metadata: {
+        agent: "mock",
+      },
+    });
+    expect(session.sessionId).toBeTruthy();
+
+    const prompt = await client.prompt({
+      sessionId: session.sessionId,
+      prompt: [{ type: "text", text: "hello integration" }],
+    });
+    expect(prompt.stopReason).toBe("end_turn");
+
+    await waitFor(() => {
+      const text = events
+        .filter((event): event is Extract<AgentEvent, { type: "sessionUpdate" }> => {
+          return event.type === "sessionUpdate";
+        })
+        .map((event) => event.notification)
+        .filter((entry) => entry.update.sessionUpdate === "agent_message_chunk")
+        .map((entry) => entry.update.content)
+        .filter((content) => content.type === "text")
+        .map((content) => content.text)
+        .join("");
+      return text.includes("mock: hello integration") ? text : undefined;
+    });
+
+    await client.disconnect();
+  });
+
+  it("enforces manual connect and disconnect lifecycle when autoConnect is disabled", async () => {
+    const client = new SandboxAgentClient({
+      baseUrl,
+      token,
+      agent: "mock",
+      autoConnect: false,
+    });
+
+    await expect(
+      client.newSession({
+        cwd: process.cwd(),
+        mcpServers: [],
+        metadata: {
+          agent: "mock",
+        },
+      }),
+    ).rejects.toBeInstanceOf(NotConnectedError);
+
+    await client.connect();
+
+    const session = await client.newSession({
+      cwd: process.cwd(),
+      mcpServers: [],
+      metadata: {
+        agent: "mock",
+      },
+    });
+    expect(session.sessionId).toBeTruthy();
+
+    await client.disconnect();
+
+    await expect(
+      client.prompt({
+        sessionId: session.sessionId,
+        prompt: [{ type: "text", text: "after disconnect" }],
+      }),
+    ).rejects.toBeInstanceOf(NotConnectedError);
+  });
+
+  it("rejects duplicate connect calls for a single client instance", async () => {
+    const client = new SandboxAgentClient({
+      baseUrl,
+      token,
+      agent: "mock",
+      autoConnect: false,
+    });
+
+    await client.connect();
+    await expect(client.connect()).rejects.toBeInstanceOf(AlreadyConnectedError);
+    await client.disconnect();
+  });
+
+  it("injects metadata on newSession and extracts metadata from session/list", async () => {
+    const client = new SandboxAgentClient({
+      baseUrl,
+      token,
+      agent: "mock",
+      autoConnect: false,
+    });
+
+    await client.connect();
+
+    const session = await client.newSession({
+      cwd: process.cwd(),
+      mcpServers: [],
+      metadata: {
+        agent: "mock",
+        variant: "high",
+      },
+    });
+
+    await client.setMetadata(session.sessionId, {
+      title: "sdk title",
+      permissionMode: "ask",
+      model: "mock",
+    });
+
+    const listed = await client.unstableListSessions({});
+    const current = listed.sessions.find((entry) => entry.sessionId === session.sessionId) as
+      | (Record<string, unknown> & { metadata?: Record<string, unknown> })
+      | undefined;
+
+    expect(current).toBeTruthy();
+    expect(current?.title).toBe("sdk title");
+
+    const metadata =
+      (current?.metadata as Record<string, unknown> | undefined) ??
+      ((current?._meta as Record<string, unknown> | undefined)?.["sandboxagent.dev"] as
+        | Record<string, unknown>
+        | undefined);
+
+    expect(metadata?.variant).toBe("high");
+    expect(metadata?.permissionMode).toBe("ask");
+    expect(metadata?.model).toBe("mock");
+
+    await client.disconnect();
+  });
+
+  it("converts _sandboxagent/session/ended into typed agent events", async () => {
+    const events: AgentEvent[] = [];
+    const client = new SandboxAgentClient({
+      baseUrl,
+      token,
+      agent: "mock",
+      autoConnect: false,
+      onEvent: (event) => {
+        events.push(event);
+      },
+    });
+
+    await client.connect();
+
+    const session = await client.newSession({
+      cwd: process.cwd(),
+      mcpServers: [],
+      metadata: {
+        agent: "mock",
+      },
+    });
+
+    await client.terminateSession(session.sessionId);
+
+    const ended = await waitFor(() => {
+      return events.find((event) => event.type === "sessionEnded");
+    });
+
+    expect(ended.type).toBe("sessionEnded");
+    if (ended.type === "sessionEnded") {
+      const endedSessionId =
+        ended.notification.params.sessionId ?? ended.notification.params.session_id;
+      expect(endedSessionId).toBe(session.sessionId);
+    }
+
+    await client.disconnect();
+  });
+
+  it("converts _sandboxagent/agent/unparsed notifications through the event adapter", async () => {
+    const events: AgentEvent[] = [];
+    const client = new SandboxAgentClient({
+      baseUrl,
+      token,
+      autoConnect: false,
+      onEvent: (event) => {
+        events.push(event);
+      },
+    });
+
+    (client as any).handleEnvelope(
+      {
+        jsonrpc: "2.0",
+        method: AGENT_UNPARSED_METHOD,
+        params: {
+          raw: "unexpected payload",
+        },
+      },
+      "inbound",
+    );
+
+    const unparsed = events.find((event) => event.type === "agentUnparsed");
+    expect(unparsed?.type).toBe("agentUnparsed");
+  });
+
+  it("rejects invalid token on protected /v2 endpoints", async () => {
+    const client = new SandboxAgentClient({
+      baseUrl,
+      token: "invalid-token",
+      autoConnect: false,
+    });
+
+    await expect(client.getHealth()).rejects.toThrow();
   });
 });

@@ -1,7 +1,0 @@
----
-source: server/packages/sandbox-agent/tests/http/agent_endpoints.rs
-expression: "json!({ \"status\": status.as_u16(), \"payload\": normalize_health(&payload), })"
----
-payload:
-  status: ok
-status: 200

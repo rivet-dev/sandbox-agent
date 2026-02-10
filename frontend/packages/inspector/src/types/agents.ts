@@ -1,6 +1,9 @@
-import type { AgentCapabilities } from "sandbox-agent";
-
-export type FeatureCoverageView = AgentCapabilities & {
+export type FeatureCoverageView = {
+  unstable_methods?: boolean;
+  planMode?: boolean;
+  permissions?: boolean;
+  questions?: boolean;
+  toolCalls?: boolean;
   toolResults?: boolean;
   textMessages?: boolean;
   images?: boolean;
@@ -15,9 +18,11 @@ export type FeatureCoverageView = AgentCapabilities & {
   streamingDeltas?: boolean;
   itemStarted?: boolean;
   variants?: boolean;
+  sharedProcess?: boolean;
 };
 
 export const emptyFeatureCoverage: FeatureCoverageView = {
+  unstable_methods: false,
   planMode: false,
   permissions: false,
   questions: false,

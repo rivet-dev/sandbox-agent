@@ -45,7 +45,7 @@ const badges = [
 type BadgeItem = (typeof badges)[number];
 
 const getEnabled = (featureCoverage: FeatureCoverageView, key: BadgeItem["key"]) =>
-  Boolean((featureCoverage as Record<string, boolean | undefined>)[key]);
+  Boolean((featureCoverage as unknown as Record<string, boolean | undefined>)[key]);
 
 const FeatureCoverageBadges = ({ featureCoverage }: { featureCoverage: FeatureCoverageView }) => {
   return (

@@ -1,45 +1,37 @@
 use std::collections::HashMap;
-use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
-use std::process::{Command as ProcessCommand, Stdio};
 use std::sync::Arc;
 use std::time::Duration;
 
 use clap::{Args, Parser, Subcommand};
 
-// Include the generated version constant
 mod build_version {
     include!(concat!(env!("OUT_DIR"), "/version.rs"));
 }
-use crate::router::{build_router_with_state, shutdown_servers};
+
 use crate::router::{
-    AgentInstallRequest, AppState, AuthConfig, BrandingMode, CreateSessionRequest, McpServerConfig,
-    MessageRequest, PermissionReply, PermissionReplyRequest, QuestionReplyRequest, SkillSource,
-    SkillsConfig,
-};
-use crate::router::{
-    AgentListResponse, AgentModelsResponse, AgentModesResponse, CreateSessionResponse,
-    EventsResponse, FsActionResponse, FsEntry, FsMoveRequest, FsMoveResponse, FsStat,
-    FsUploadBatchResponse, FsWriteResponse, SessionListResponse,
+    build_router_with_state, shutdown_servers, AppState, AuthConfig, BrandingMode,
 };
 use crate::server_logs::ServerLogs;
 use crate::telemetry;
 use crate::ui;
 use reqwest::blocking::Client as HttpClient;
 use reqwest::Method;
-use sandbox_agent_agent_management::agents::{AgentId, AgentManager, InstallOptions};
-use sandbox_agent_agent_management::credentials::{
+use sandbox_agent_agent_credentials::{
     extract_all_credentials, AuthType, CredentialExtractionOptions, ExtractedCredentials,
     ProviderCredentials,
 };
+use sandbox_agent_agent_management::agents::{AgentId, AgentManager, InstallOptions};
 use serde::Serialize;
 use serde_json::{json, Value};
 use thiserror::Error;
 use tower_http::cors::{Any, CorsLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
-const API_PREFIX: &str = "/v1";
+const API_PREFIX: &str = "/v2";
+const ACP_EXTENSION_AGENT_LIST_METHOD: &str = "_sandboxagent/agent/list";
+const ACP_EXTENSION_AGENT_INSTALL_METHOD: &str = "_sandboxagent/agent/install";
 const DEFAULT_HOST: &str = "127.0.0.1";
 const DEFAULT_PORT: u16 = 2468;
 const LOGS_RETENTION: Duration = Duration::from_secs(7 * 24 * 60 * 60);
@@ -72,7 +64,6 @@ pub struct GigacodeCli {
     #[arg(long, short = 'n', global = true)]
     pub no_token: bool,
 
-    /// Bypass all permission checks (auto-approve tool calls).
     #[arg(long, global = true)]
     pub yolo: bool,
 }
@@ -83,7 +74,7 @@ pub enum Command {
     Server(ServerArgs),
     /// Call the HTTP API without writing client code.
     Api(ApiArgs),
-    /// EXPERIMENTAL: Start a sandbox-agent server and attach an OpenCode session.
+    /// EXPERIMENTAL: OpenCode compatibility layer (disabled until ACP Phase 7).
     Opencode(OpencodeArgs),
     /// Manage the sandbox-agent background daemon.
     Daemon(DaemonArgs),
@@ -134,7 +125,6 @@ pub struct OpencodeArgs {
     #[arg(long)]
     session_title: Option<String>,
 
-    /// Bypass all permission checks (auto-approve tool calls).
     #[arg(long)]
     pub yolo: bool,
 }
@@ -180,7 +170,6 @@ pub struct DaemonStartArgs {
     #[arg(long, short = 'p', default_value_t = DEFAULT_PORT)]
     port: u16,
 
-    /// If the daemon is already running but outdated, stop and restart it.
     #[arg(long, default_value_t = false)]
     upgrade: bool,
 }
@@ -205,12 +194,10 @@ pub struct DaemonStatusArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum ApiCommand {
-    /// Manage installed agents and their modes.
+    /// Manage available v2 agents and install status.
     Agents(AgentsArgs),
-    /// Create sessions and interact with session events.
-    Sessions(SessionsArgs),
-    /// Manage filesystem entries.
-    Fs(FsArgs),
+    /// Send and stream raw ACP JSON-RPC envelopes.
+    Acp(AcpArgs),
 }
 
 #[derive(Subcommand, Debug)]
@@ -228,84 +215,28 @@ pub struct AgentsArgs {
     command: AgentsCommand,
 }
 
-#[derive(Args, Debug)]
-pub struct SessionsArgs {
-    #[command(subcommand)]
-    command: SessionsCommand,
-}
-
-#[derive(Args, Debug)]
-pub struct FsArgs {
-    #[command(subcommand)]
-    command: FsCommand,
-}
-
 #[derive(Subcommand, Debug)]
 pub enum AgentsCommand {
     /// List all agents and install status.
     List(ClientArgs),
     /// Install or reinstall an agent.
     Install(ApiInstallAgentArgs),
-    /// Show available modes for an agent.
-    Modes(AgentModesArgs),
-    /// Show available models for an agent.
-    Models(AgentModelsArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct AcpArgs {
+    #[command(subcommand)]
+    command: AcpCommand,
 }
 
 #[derive(Subcommand, Debug)]
-pub enum SessionsCommand {
-    /// List active sessions.
-    List(ClientArgs),
-    /// Create a new session for an agent.
-    Create(CreateSessionArgs),
-    #[command(name = "send-message")]
-    /// Send a message to an existing session.
-    SendMessage(SessionMessageArgs),
-    #[command(name = "send-message-stream")]
-    /// Send a message and stream the response for one turn.
-    SendMessageStream(SessionMessageStreamArgs),
-    #[command(name = "terminate")]
-    /// Terminate a session.
-    Terminate(SessionTerminateArgs),
-    #[command(name = "get-messages")]
-    /// Alias for events; returns session events.
-    GetMessages(SessionEventsArgs),
-    #[command(name = "events")]
-    /// Fetch session events with offset/limit.
-    Events(SessionEventsArgs),
-    #[command(name = "events-sse")]
-    /// Stream session events over SSE.
-    EventsSse(SessionEventsSseArgs),
-    #[command(name = "reply-question")]
-    /// Reply to a question event.
-    ReplyQuestion(QuestionReplyArgs),
-    #[command(name = "reject-question")]
-    /// Reject a question event.
-    RejectQuestion(QuestionRejectArgs),
-    #[command(name = "reply-permission")]
-    /// Reply to a permission request.
-    ReplyPermission(PermissionReplyArgs),
-}
-
-#[derive(Subcommand, Debug)]
-pub enum FsCommand {
-    /// List directory entries.
-    Entries(FsEntriesArgs),
-    /// Read a file.
-    Read(FsReadArgs),
-    /// Write a file.
-    Write(FsWriteArgs),
-    /// Delete a file or directory.
-    Delete(FsDeleteArgs),
-    /// Create a directory.
-    Mkdir(FsMkdirArgs),
-    /// Move a file or directory.
-    Move(FsMoveArgs),
-    /// Stat a file or directory.
-    Stat(FsStatArgs),
-    /// Upload a tar archive and extract it.
-    #[command(name = "upload-batch")]
-    UploadBatch(FsUploadBatchArgs),
+pub enum AcpCommand {
+    /// Send one ACP JSON-RPC envelope to /v2/rpc.
+    Post(AcpPostArgs),
+    /// Stream ACP JSON-RPC envelopes from /v2/rpc SSE.
+    Stream(AcpStreamArgs),
+    /// Close an ACP client.
+    Close(AcpCloseArgs),
 }
 
 #[derive(Args, Debug, Clone)]
@@ -319,6 +250,42 @@ pub struct ApiInstallAgentArgs {
     agent: String,
     #[arg(long, short = 'r')]
     reinstall: bool,
+    #[arg(long = "agent-version")]
+    agent_version: Option<String>,
+    #[arg(long = "agent-process-version")]
+    agent_process_version: Option<String>,
+    #[command(flatten)]
+    client: ClientArgs,
+}
+
+#[derive(Args, Debug)]
+pub struct AcpPostArgs {
+    #[arg(long = "client-id")]
+    client_id: Option<String>,
+    #[arg(long)]
+    json: Option<String>,
+    #[arg(long = "json-file")]
+    json_file: Option<PathBuf>,
+    #[arg(long, default_value_t = false)]
+    print_client_id: bool,
+    #[command(flatten)]
+    client: ClientArgs,
+}
+
+#[derive(Args, Debug)]
+pub struct AcpStreamArgs {
+    #[arg(long = "client-id")]
+    client_id: String,
+    #[arg(long = "last-event-id")]
+    last_event_id: Option<u64>,
+    #[command(flatten)]
+    client: ClientArgs,
+}
+
+#[derive(Args, Debug)]
+pub struct AcpCloseArgs {
+    #[arg(long = "client-id")]
+    client_id: String,
     #[command(flatten)]
     client: ClientArgs,
 }
@@ -328,207 +295,10 @@ pub struct InstallAgentArgs {
     agent: String,
     #[arg(long, short = 'r')]
     reinstall: bool,
-}
-
-#[derive(Args, Debug)]
-pub struct AgentModesArgs {
-    agent: String,
-    #[command(flatten)]
-    client: ClientArgs,
-}
-
-#[derive(Args, Debug)]
-pub struct AgentModelsArgs {
-    agent: String,
-    #[command(flatten)]
-    client: ClientArgs,
-}
-
-#[derive(Args, Debug)]
-pub struct CreateSessionArgs {
-    session_id: String,
-    #[arg(long, short = 'a')]
-    agent: String,
-    #[arg(long, short = 'g')]
-    agent_mode: Option<String>,
-    #[arg(long, short = 'p')]
-    permission_mode: Option<String>,
-    #[arg(long, short = 'm')]
-    model: Option<String>,
-    #[arg(long, short = 'v')]
-    variant: Option<String>,
-    #[arg(long, short = 'A')]
+    #[arg(long = "agent-version")]
     agent_version: Option<String>,
-    #[arg(long)]
-    mcp_config: Option<PathBuf>,
-    #[arg(long)]
-    skill: Vec<PathBuf>,
-    #[command(flatten)]
-    client: ClientArgs,
-}
-
-#[derive(Args, Debug)]
-pub struct SessionMessageArgs {
-    session_id: String,
-    #[arg(long, short = 'm')]
-    message: String,
-    #[command(flatten)]
-    client: ClientArgs,
-}
-
-#[derive(Args, Debug)]
-pub struct SessionMessageStreamArgs {
-    session_id: String,
-    #[arg(long, short = 'm')]
-    message: String,
-    #[arg(long)]
-    include_raw: bool,
-    #[command(flatten)]
-    client: ClientArgs,
-}
-
-#[derive(Args, Debug)]
-pub struct SessionEventsArgs {
-    session_id: String,
-    #[arg(long, short = 'o')]
-    offset: Option<u64>,
-    #[arg(long, short = 'l')]
-    limit: Option<u64>,
-    #[arg(long)]
-    include_raw: bool,
-    #[command(flatten)]
-    client: ClientArgs,
-}
-
-#[derive(Args, Debug)]
-pub struct SessionEventsSseArgs {
-    session_id: String,
-    #[arg(long, short = 'o')]
-    offset: Option<u64>,
-    #[arg(long)]
-    include_raw: bool,
-    #[command(flatten)]
-    client: ClientArgs,
-}
-
-#[derive(Args, Debug)]
-pub struct SessionTerminateArgs {
-    session_id: String,
-    #[command(flatten)]
-    client: ClientArgs,
-}
-
-#[derive(Args, Debug)]
-pub struct QuestionReplyArgs {
-    session_id: String,
-    question_id: String,
-    #[arg(long, short = 'a')]
-    answers: String,
-    #[command(flatten)]
-    client: ClientArgs,
-}
-
-#[derive(Args, Debug)]
-pub struct QuestionRejectArgs {
-    session_id: String,
-    question_id: String,
-    #[command(flatten)]
-    client: ClientArgs,
-}
-
-#[derive(Args, Debug)]
-pub struct PermissionReplyArgs {
-    session_id: String,
-    permission_id: String,
-    #[arg(long, short = 'r')]
-    reply: PermissionReply,
-    #[command(flatten)]
-    client: ClientArgs,
-}
-
-#[derive(Args, Debug)]
-pub struct FsEntriesArgs {
-    #[arg(long)]
-    path: Option<String>,
-    #[arg(long)]
-    session_id: Option<String>,
-    #[command(flatten)]
-    client: ClientArgs,
-}
-
-#[derive(Args, Debug)]
-pub struct FsReadArgs {
-    path: String,
-    #[arg(long)]
-    session_id: Option<String>,
-    #[command(flatten)]
-    client: ClientArgs,
-}
-
-#[derive(Args, Debug)]
-pub struct FsWriteArgs {
-    path: String,
-    #[arg(long)]
-    content: Option<String>,
-    #[arg(long = "from-file")]
-    from_file: Option<PathBuf>,
-    #[arg(long)]
-    session_id: Option<String>,
-    #[command(flatten)]
-    client: ClientArgs,
-}
-
-#[derive(Args, Debug)]
-pub struct FsDeleteArgs {
-    path: String,
-    #[arg(long)]
-    recursive: bool,
-    #[arg(long)]
-    session_id: Option<String>,
-    #[command(flatten)]
-    client: ClientArgs,
-}
-
-#[derive(Args, Debug)]
-pub struct FsMkdirArgs {
-    path: String,
-    #[arg(long)]
-    session_id: Option<String>,
-    #[command(flatten)]
-    client: ClientArgs,
-}
-
-#[derive(Args, Debug)]
-pub struct FsMoveArgs {
-    from: String,
-    to: String,
-    #[arg(long)]
-    overwrite: bool,
-    #[arg(long)]
-    session_id: Option<String>,
-    #[command(flatten)]
-    client: ClientArgs,
-}
-
-#[derive(Args, Debug)]
-pub struct FsStatArgs {
-    path: String,
-    #[arg(long)]
-    session_id: Option<String>,
-    #[command(flatten)]
-    client: ClientArgs,
-}
-
-#[derive(Args, Debug)]
-pub struct FsUploadBatchArgs {
-    #[arg(long = "tar")]
-    tar_path: PathBuf,
-    #[arg(long)]
-    path: Option<String>,
-    #[arg(long)]
-    session_id: Option<String>,
-    #[command(flatten)]
-    client: ClientArgs,
+    #[arg(long = "agent-process-version")]
+    agent_process_version: Option<String>,
 }
 
 #[derive(Args, Debug)]
@@ -547,7 +317,6 @@ pub struct CredentialsExtractArgs {
 
 #[derive(Args, Debug)]
 pub struct CredentialsExtractEnvArgs {
-    /// Prefix each line with "export " for shell sourcing.
     #[arg(long, short = 'e')]
     export: bool,
     #[arg(long, short = 'd')]
@@ -591,15 +360,18 @@ pub fn run_sandbox_agent() -> Result<(), CliError> {
         token,
         no_token,
     } = cli;
+
     let config = CliConfig {
         token,
         no_token,
         gigacode: false,
     };
+
     if let Err(err) = init_logging(&command) {
         eprintln!("failed to init logging: {err}");
         return Err(err);
     }
+
     run_command(&command, &config)
 }
 
@@ -643,6 +415,7 @@ fn run_server(cli: &CliConfig, server: &ServerArgs) -> Result<(), CliError> {
     } else {
         BrandingMode::SandboxAgent
     };
+
     let agent_manager = AgentManager::new(default_install_dir())
         .map_err(|err| CliError::Server(err.to_string()))?;
     let state = Arc::new(AppState::with_branding(auth, agent_manager, branding));
@@ -669,13 +442,13 @@ fn run_server(cli: &CliConfig, server: &ServerArgs) -> Result<(), CliError> {
             telemetry::log_enabled_message();
             telemetry::spawn_telemetry_task();
         }
+
         let listener = tokio::net::TcpListener::bind(&addr).await?;
         tracing::info!(addr = %addr, "server listening");
         if ui::is_enabled() {
             tracing::info!(url = %inspector_url, "inspector ui available");
-        } else {
-            tracing::info!("inspector ui not embedded; set SANDBOX_AGENT_SKIP_INSPECTOR=1 to skip embedding during builds");
         }
+
         let shutdown_state = state.clone();
         axum::serve(listener, router)
             .with_graceful_shutdown(async move {
@@ -687,114 +460,172 @@ fn run_server(cli: &CliConfig, server: &ServerArgs) -> Result<(), CliError> {
     })
 }
 
-fn default_install_dir() -> PathBuf {
-    dirs::data_dir()
-        .map(|dir| dir.join("sandbox-agent").join("bin"))
-        .unwrap_or_else(|| PathBuf::from(".").join(".sandbox-agent").join("bin"))
-}
-
-fn default_server_log_dir() -> PathBuf {
-    if let Ok(dir) = std::env::var("SANDBOX_AGENT_LOG_DIR") {
-        return PathBuf::from(dir);
-    }
-    dirs::data_dir()
-        .map(|dir| dir.join("sandbox-agent").join("logs"))
-        .unwrap_or_else(|| PathBuf::from(".").join(".sandbox-agent").join("logs"))
-}
-
-fn maybe_redirect_server_logs() {
-    if std::env::var("SANDBOX_AGENT_LOG_STDOUT").is_ok() {
-        return;
-    }
-
-    let log_dir = default_server_log_dir();
-    if let Err(err) = ServerLogs::new(log_dir, LOGS_RETENTION).start_sync() {
-        eprintln!("failed to redirect logs: {err}");
-    }
-}
-
 fn run_api(command: &ApiCommand, cli: &CliConfig) -> Result<(), CliError> {
     match command {
         ApiCommand::Agents(subcommand) => run_agents(&subcommand.command, cli),
-        ApiCommand::Sessions(subcommand) => run_sessions(&subcommand.command, cli),
-        ApiCommand::Fs(subcommand) => run_fs(&subcommand.command, cli),
+        ApiCommand::Acp(subcommand) => run_acp(&subcommand.command, cli),
     }
 }
 
-fn run_opencode(cli: &CliConfig, args: &OpencodeArgs) -> Result<(), CliError> {
-    let name = if cli.gigacode {
-        "Gigacode"
-    } else {
-        "OpenCode command"
-    };
-    write_stderr_line(&format!("\nEXPERIMENTAL: Please report bugs to:\n- GitHub: https://github.com/rivet-dev/sandbox-agent/issues\n- Discord: https://rivet.dev/discord\n\n{name} is powered by:\n- OpenCode (TUI): https://opencode.ai/\n- Sandbox Agent SDK (multi-agent compatibility): https://sandboxagent.dev/\n\n"))?;
-
-    let yolo = args.yolo;
-    let token = cli.token.clone();
-
-    let base_url = format!("http://{}:{}", args.host, args.port);
-    let has_proxy_env = std::env::var_os("HTTP_PROXY").is_some()
-        || std::env::var_os("http_proxy").is_some()
-        || std::env::var_os("HTTPS_PROXY").is_some()
-        || std::env::var_os("https_proxy").is_some();
-    let has_no_proxy_env =
-        std::env::var_os("NO_PROXY").is_some() || std::env::var_os("no_proxy").is_some();
-    write_stderr_line(&format!(
-        "gigacode startup: ensuring daemon at {base_url} (token: {}, proxy env: {}, no_proxy env: {})",
-        if token.is_some() { "set" } else { "unset" },
-        if has_proxy_env { "set" } else { "unset" },
-        if has_no_proxy_env { "set" } else { "unset" }
-    ))?;
-    crate::daemon::ensure_running(cli, &args.host, args.port, token.as_deref())?;
-    write_stderr_line("gigacode startup: daemon is healthy")?;
-
-    let attach_session_id = if args.session_title.is_some() || yolo {
-        write_stderr_line("gigacode startup: creating OpenCode session via /opencode/session")?;
-        let session_id = create_opencode_session(
-            &base_url,
-            token.as_deref(),
-            args.session_title.as_deref(),
-            yolo,
-        )?;
-        write_stdout_line(&format!("OpenCode session: {session_id}"))?;
-        Some(session_id)
-    } else {
-        write_stderr_line("gigacode startup: attaching OpenCode without precreating a session")?;
-        None
-    };
-
-    let attach_url = format!("{base_url}/opencode");
-    write_stderr_line("gigacode startup: resolving OpenCode binary (installing if needed)")?;
-    let opencode_bin = resolve_opencode_bin()?;
-    write_stderr_line(&format!(
-        "gigacode startup: launching OpenCode attach using {}",
-        opencode_bin.display()
-    ))?;
-    let mut opencode_cmd = ProcessCommand::new(opencode_bin);
-    opencode_cmd
-        .arg("attach")
-        .arg(&attach_url)
-        .stdin(Stdio::inherit())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit());
-    if let Some(session_id) = attach_session_id.as_deref() {
-        opencode_cmd.arg("--session").arg(session_id);
+fn run_agents(command: &AgentsCommand, cli: &CliConfig) -> Result<(), CliError> {
+    match command {
+        AgentsCommand::List(args) => {
+            let ctx = ClientContext::new(cli, args)?;
+            let result = call_acp_extension(&ctx, ACP_EXTENSION_AGENT_LIST_METHOD, json!({}))?;
+            write_stdout_line(&serde_json::to_string_pretty(&result)?)
+        }
+        AgentsCommand::Install(args) => {
+            let ctx = ClientContext::new(cli, &args.client)?;
+            let mut params = serde_json::Map::new();
+            params.insert("agent".to_string(), Value::String(args.agent.clone()));
+            if args.reinstall {
+                params.insert("reinstall".to_string(), Value::Bool(true));
+            }
+            if let Some(version) = args.agent_version.clone() {
+                params.insert("agentVersion".to_string(), Value::String(version));
+            }
+            if let Some(version) = args.agent_process_version.clone() {
+                params.insert("agentProcessVersion".to_string(), Value::String(version));
+            }
+            let result = call_acp_extension(
+                &ctx,
+                ACP_EXTENSION_AGENT_INSTALL_METHOD,
+                Value::Object(params),
+            )?;
+            write_stdout_line(&serde_json::to_string_pretty(&result)?)
+        }
     }
-    if let Some(token) = token.as_deref() {
-        opencode_cmd.arg("--password").arg(token);
+}
+
+fn call_acp_extension(ctx: &ClientContext, method: &str, params: Value) -> Result<Value, CliError> {
+    let initialize = json!({
+        "jsonrpc": "2.0",
+        "id": "cli-init",
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "1.0",
+            "clientCapabilities": {},
+            "_meta": {
+                "sandboxagent.dev": {
+                    "agent": "mock"
+                }
+            }
+        }
+    });
+    let initialize_response =
+        ctx.post_with_headers(&format!("{API_PREFIX}/rpc"), &initialize, &[])?;
+    let connection_id = extract_connection_id(initialize_response)?;
+
+    let request = json!({
+        "jsonrpc": "2.0",
+        "id": "cli-ext",
+        "method": method,
+        "params": params,
+    });
+    let response = ctx.post_with_headers(
+        &format!("{API_PREFIX}/rpc"),
+        &request,
+        &[("x-acp-connection-id", connection_id.as_str())],
+    );
+
+    let _ = ctx.delete_with_headers(
+        &format!("{API_PREFIX}/rpc"),
+        &[("x-acp-connection-id", connection_id.as_str())],
+    );
+
+    let response = response?;
+    let status = response.status();
+    let text = response.text()?;
+    if !status.is_success() {
+        print_error_body(&text)?;
+        return Err(CliError::HttpStatus(status));
     }
 
-    let status = opencode_cmd
-        .status()
-        .map_err(|err| CliError::Server(format!("failed to start opencode: {err}")))?;
-
-    if !status.success() {
+    let parsed: Value = serde_json::from_str(&text)?;
+    if parsed.get("error").is_some() {
+        let pretty = serde_json::to_string_pretty(&parsed)?;
+        write_stderr_line(&pretty)?;
         return Err(CliError::Server(format!(
-            "opencode exited with status {status}"
+            "ACP extension call failed: {method}"
         )));
     }
 
-    Ok(())
+    Ok(parsed.get("result").cloned().unwrap_or(Value::Null))
+}
+
+fn extract_connection_id(response: reqwest::blocking::Response) -> Result<String, CliError> {
+    let status = response.status();
+    let headers = response.headers().clone();
+    let text = response.text()?;
+    if !status.is_success() {
+        print_error_body(&text)?;
+        return Err(CliError::HttpStatus(status));
+    }
+    headers
+        .get("x-acp-connection-id")
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.to_string())
+        .ok_or_else(|| {
+            CliError::Server("missing x-acp-connection-id in initialize response".to_string())
+        })
+}
+
+fn run_acp(command: &AcpCommand, cli: &CliConfig) -> Result<(), CliError> {
+    match command {
+        AcpCommand::Post(args) => {
+            let ctx = ClientContext::new(cli, &args.client)?;
+            let payload = load_json_payload(args.json.as_deref(), args.json_file.as_deref())?;
+
+            let mut headers = Vec::new();
+            if let Some(client_id) = args.client_id.as_deref() {
+                headers.push(("x-acp-connection-id", client_id));
+            }
+
+            let response =
+                ctx.post_with_headers(&format!("{API_PREFIX}/rpc"), &payload, &headers)?;
+            let client_id = response
+                .headers()
+                .get("x-acp-connection-id")
+                .and_then(|value| value.to_str().ok())
+                .map(|value| value.to_string());
+
+            print_json_or_empty(response)?;
+
+            if args.print_client_id {
+                if let Some(client_id) = client_id {
+                    write_stdout_line(&client_id)?;
+                }
+            }
+
+            Ok(())
+        }
+        AcpCommand::Stream(args) => {
+            let ctx = ClientContext::new(cli, &args.client)?;
+            let request = ctx
+                .request(Method::GET, &format!("{API_PREFIX}/rpc"))
+                .header("x-acp-connection-id", args.client_id.as_str())
+                .header("accept", "text/event-stream");
+
+            let request = apply_last_event_id_header(request, args.last_event_id);
+
+            let response = request.send()?;
+            print_text_response(response)
+        }
+        AcpCommand::Close(args) => {
+            let ctx = ClientContext::new(cli, &args.client)?;
+            let response = ctx.delete_with_headers(
+                &format!("{API_PREFIX}/rpc"),
+                &[("x-acp-connection-id", args.client_id.as_str())],
+            )?;
+            print_empty_response(response)
+        }
+    }
+}
+
+fn run_opencode(_cli: &CliConfig, _args: &OpencodeArgs) -> Result<(), CliError> {
+    Err(CliError::Server(
+        "/opencode is disabled during ACP core bring-up and will return in Phase 7".to_string(),
+    ))
 }
 
 fn run_daemon(command: &DaemonCommand, cli: &CliConfig) -> Result<(), CliError> {
@@ -806,382 +637,10 @@ fn run_daemon(command: &DaemonCommand, cli: &CliConfig) -> Result<(), CliError> 
         DaemonCommand::Start(args) => crate::daemon::start(cli, &args.host, args.port, token),
         DaemonCommand::Stop(args) => crate::daemon::stop(&args.host, args.port),
         DaemonCommand::Status(args) => {
-            let st = crate::daemon::status(&args.host, args.port, token)?;
-            write_stderr_line(&st.to_string())?;
+            let status = crate::daemon::status(&args.host, args.port, token)?;
+            write_stderr_line(&status.to_string())?;
             Ok(())
         }
-    }
-}
-
-fn run_agents(command: &AgentsCommand, cli: &CliConfig) -> Result<(), CliError> {
-    match command {
-        AgentsCommand::List(args) => {
-            let ctx = ClientContext::new(cli, args)?;
-            let response = ctx.get(&format!("{API_PREFIX}/agents"))?;
-            print_json_response::<AgentListResponse>(response)
-        }
-        AgentsCommand::Install(args) => {
-            let ctx = ClientContext::new(cli, &args.client)?;
-            let body = AgentInstallRequest {
-                reinstall: if args.reinstall { Some(true) } else { None },
-            };
-            let path = format!("{API_PREFIX}/agents/{}/install", args.agent);
-            let response = ctx.post(&path, &body)?;
-            print_empty_response(response)
-        }
-        AgentsCommand::Modes(args) => {
-            let ctx = ClientContext::new(cli, &args.client)?;
-            let path = format!("{API_PREFIX}/agents/{}/modes", args.agent);
-            let response = ctx.get(&path)?;
-            print_json_response::<AgentModesResponse>(response)
-        }
-        AgentsCommand::Models(args) => {
-            let ctx = ClientContext::new(cli, &args.client)?;
-            let path = format!("{API_PREFIX}/agents/{}/models", args.agent);
-            let response = ctx.get(&path)?;
-            print_json_response::<AgentModelsResponse>(response)
-        }
-    }
-}
-
-fn run_sessions(command: &SessionsCommand, cli: &CliConfig) -> Result<(), CliError> {
-    match command {
-        SessionsCommand::List(args) => {
-            let ctx = ClientContext::new(cli, args)?;
-            let response = ctx.get(&format!("{API_PREFIX}/sessions"))?;
-            print_json_response::<SessionListResponse>(response)
-        }
-        SessionsCommand::Create(args) => {
-            let ctx = ClientContext::new(cli, &args.client)?;
-            let mcp = if let Some(path) = &args.mcp_config {
-                let text = std::fs::read_to_string(path)?;
-                let parsed = serde_json::from_str::<
-                    std::collections::BTreeMap<String, McpServerConfig>,
-                >(&text)?;
-                Some(parsed)
-            } else {
-                None
-            };
-            let skills = if args.skill.is_empty() {
-                None
-            } else {
-                Some(SkillsConfig {
-                    sources: args
-                        .skill
-                        .iter()
-                        .map(|path| SkillSource {
-                            source_type: "local".to_string(),
-                            source: path.to_string_lossy().to_string(),
-                            skills: None,
-                            git_ref: None,
-                            subpath: None,
-                        })
-                        .collect(),
-                })
-            };
-            let body = CreateSessionRequest {
-                agent: args.agent.clone(),
-                agent_mode: args.agent_mode.clone(),
-                permission_mode: args.permission_mode.clone(),
-                model: args.model.clone(),
-                variant: args.variant.clone(),
-                agent_version: args.agent_version.clone(),
-                directory: None,
-                title: None,
-                mcp,
-                skills,
-            };
-            let path = format!("{API_PREFIX}/sessions/{}", args.session_id);
-            let response = ctx.post(&path, &body)?;
-            print_json_response::<CreateSessionResponse>(response)
-        }
-        SessionsCommand::SendMessage(args) => {
-            let ctx = ClientContext::new(cli, &args.client)?;
-            let body = MessageRequest {
-                message: args.message.clone(),
-                attachments: Vec::new(),
-            };
-            let path = format!("{API_PREFIX}/sessions/{}/messages", args.session_id);
-            let response = ctx.post(&path, &body)?;
-            print_empty_response(response)
-        }
-        SessionsCommand::SendMessageStream(args) => {
-            let ctx = ClientContext::new(cli, &args.client)?;
-            let body = MessageRequest {
-                message: args.message.clone(),
-                attachments: Vec::new(),
-            };
-            let path = format!("{API_PREFIX}/sessions/{}/messages/stream", args.session_id);
-            let response = ctx.post_with_query(
-                &path,
-                &body,
-                &[(
-                    "include_raw",
-                    if args.include_raw {
-                        Some("true".to_string())
-                    } else {
-                        None
-                    },
-                )],
-            )?;
-            print_text_response(response)
-        }
-        SessionsCommand::Terminate(args) => {
-            let ctx = ClientContext::new(cli, &args.client)?;
-            let path = format!("{API_PREFIX}/sessions/{}/terminate", args.session_id);
-            let response = ctx.post_empty(&path)?;
-            print_empty_response(response)
-        }
-        SessionsCommand::GetMessages(args) | SessionsCommand::Events(args) => {
-            let ctx = ClientContext::new(cli, &args.client)?;
-            let path = format!("{API_PREFIX}/sessions/{}/events", args.session_id);
-            let response = ctx.get_with_query(
-                &path,
-                &[
-                    ("offset", args.offset.map(|v| v.to_string())),
-                    ("limit", args.limit.map(|v| v.to_string())),
-                    (
-                        "include_raw",
-                        if args.include_raw {
-                            Some("true".to_string())
-                        } else {
-                            None
-                        },
-                    ),
-                ],
-            )?;
-            print_json_response::<EventsResponse>(response)
-        }
-        SessionsCommand::EventsSse(args) => {
-            let ctx = ClientContext::new(cli, &args.client)?;
-            let path = format!("{API_PREFIX}/sessions/{}/events/sse", args.session_id);
-            let response = ctx.get_with_query(
-                &path,
-                &[
-                    ("offset", args.offset.map(|v| v.to_string())),
-                    (
-                        "include_raw",
-                        if args.include_raw {
-                            Some("true".to_string())
-                        } else {
-                            None
-                        },
-                    ),
-                ],
-            )?;
-            print_text_response(response)
-        }
-        SessionsCommand::ReplyQuestion(args) => {
-            let ctx = ClientContext::new(cli, &args.client)?;
-            let answers: Vec<Vec<String>> = serde_json::from_str(&args.answers)?;
-            let body = QuestionReplyRequest { answers };
-            let path = format!(
-                "{API_PREFIX}/sessions/{}/questions/{}/reply",
-                args.session_id, args.question_id
-            );
-            let response = ctx.post(&path, &body)?;
-            print_empty_response(response)
-        }
-        SessionsCommand::RejectQuestion(args) => {
-            let ctx = ClientContext::new(cli, &args.client)?;
-            let path = format!(
-                "{API_PREFIX}/sessions/{}/questions/{}/reject",
-                args.session_id, args.question_id
-            );
-            let response = ctx.post_empty(&path)?;
-            print_empty_response(response)
-        }
-        SessionsCommand::ReplyPermission(args) => {
-            let ctx = ClientContext::new(cli, &args.client)?;
-            let body = PermissionReplyRequest {
-                reply: args.reply.clone(),
-            };
-            let path = format!(
-                "{API_PREFIX}/sessions/{}/permissions/{}/reply",
-                args.session_id, args.permission_id
-            );
-            let response = ctx.post(&path, &body)?;
-            print_empty_response(response)
-        }
-    }
-}
-
-fn run_fs(command: &FsCommand, cli: &CliConfig) -> Result<(), CliError> {
-    match command {
-        FsCommand::Entries(args) => {
-            let ctx = ClientContext::new(cli, &args.client)?;
-            let response = ctx.get_with_query(
-                &format!("{API_PREFIX}/fs/entries"),
-                &[
-                    ("path", args.path.clone()),
-                    ("session_id", args.session_id.clone()),
-                ],
-            )?;
-            print_json_response::<Vec<FsEntry>>(response)
-        }
-        FsCommand::Read(args) => {
-            let ctx = ClientContext::new(cli, &args.client)?;
-            let response = ctx.get_with_query(
-                &format!("{API_PREFIX}/fs/file"),
-                &[
-                    ("path", Some(args.path.clone())),
-                    ("session_id", args.session_id.clone()),
-                ],
-            )?;
-            print_binary_response(response)
-        }
-        FsCommand::Write(args) => {
-            let ctx = ClientContext::new(cli, &args.client)?;
-            let body = match (&args.content, &args.from_file) {
-                (Some(_), Some(_)) => {
-                    return Err(CliError::Server(
-                        "use --content or --from-file, not both".to_string(),
-                    ))
-                }
-                (None, None) => {
-                    return Err(CliError::Server(
-                        "write requires --content or --from-file".to_string(),
-                    ))
-                }
-                (Some(content), None) => content.clone().into_bytes(),
-                (None, Some(path)) => std::fs::read(path)?,
-            };
-            let response = ctx.put_raw_with_query(
-                &format!("{API_PREFIX}/fs/file"),
-                body,
-                "application/octet-stream",
-                &[
-                    ("path", Some(args.path.clone())),
-                    ("session_id", args.session_id.clone()),
-                ],
-            )?;
-            print_json_response::<FsWriteResponse>(response)
-        }
-        FsCommand::Delete(args) => {
-            let ctx = ClientContext::new(cli, &args.client)?;
-            let response = ctx.delete_with_query(
-                &format!("{API_PREFIX}/fs/entry"),
-                &[
-                    ("path", Some(args.path.clone())),
-                    ("session_id", args.session_id.clone()),
-                    (
-                        "recursive",
-                        if args.recursive {
-                            Some("true".to_string())
-                        } else {
-                            None
-                        },
-                    ),
-                ],
-            )?;
-            print_json_response::<FsActionResponse>(response)
-        }
-        FsCommand::Mkdir(args) => {
-            let ctx = ClientContext::new(cli, &args.client)?;
-            let response = ctx.post_empty_with_query(
-                &format!("{API_PREFIX}/fs/mkdir"),
-                &[
-                    ("path", Some(args.path.clone())),
-                    ("session_id", args.session_id.clone()),
-                ],
-            )?;
-            print_json_response::<FsActionResponse>(response)
-        }
-        FsCommand::Move(args) => {
-            let ctx = ClientContext::new(cli, &args.client)?;
-            let body = FsMoveRequest {
-                from: args.from.clone(),
-                to: args.to.clone(),
-                overwrite: if args.overwrite { Some(true) } else { None },
-            };
-            let response = ctx.post_with_query(
-                &format!("{API_PREFIX}/fs/move"),
-                &body,
-                &[("session_id", args.session_id.clone())],
-            )?;
-            print_json_response::<FsMoveResponse>(response)
-        }
-        FsCommand::Stat(args) => {
-            let ctx = ClientContext::new(cli, &args.client)?;
-            let response = ctx.get_with_query(
-                &format!("{API_PREFIX}/fs/stat"),
-                &[
-                    ("path", Some(args.path.clone())),
-                    ("session_id", args.session_id.clone()),
-                ],
-            )?;
-            print_json_response::<FsStat>(response)
-        }
-        FsCommand::UploadBatch(args) => {
-            let ctx = ClientContext::new(cli, &args.client)?;
-            let file = File::open(&args.tar_path)?;
-            let response = ctx.post_raw_with_query(
-                &format!("{API_PREFIX}/fs/upload-batch"),
-                file,
-                "application/x-tar",
-                &[
-                    ("path", args.path.clone()),
-                    ("session_id", args.session_id.clone()),
-                ],
-            )?;
-            print_json_response::<FsUploadBatchResponse>(response)
-        }
-    }
-}
-
-fn create_opencode_session(
-    base_url: &str,
-    token: Option<&str>,
-    title: Option<&str>,
-    yolo: bool,
-) -> Result<String, CliError> {
-    let client = HttpClient::builder().build()?;
-    let url = format!("{base_url}/opencode/session");
-    let mut body = if let Some(title) = title {
-        json!({ "title": title })
-    } else {
-        json!({})
-    };
-    if yolo {
-        body["permissionMode"] = json!("bypass");
-    }
-    let mut request = client.post(&url).json(&body);
-    if let Ok(directory) = std::env::current_dir() {
-        request = request.header(
-            "x-opencode-directory",
-            directory.to_string_lossy().to_string(),
-        );
-    }
-    if let Some(token) = token {
-        request = request.bearer_auth(token);
-    }
-    let response = request.send()?;
-    let status = response.status();
-    let text = response.text()?;
-    if !status.is_success() {
-        print_error_body(&text)?;
-        return Err(CliError::HttpStatus(status));
-    }
-    let body: Value = serde_json::from_str(&text)?;
-    let session_id = body
-        .get("id")
-        .and_then(|value| value.as_str())
-        .ok_or_else(|| CliError::Server("opencode session missing id".to_string()))?;
-    Ok(session_id.to_string())
-}
-
-fn resolve_opencode_bin() -> Result<PathBuf, CliError> {
-    let manager = AgentManager::new(default_install_dir())
-        .map_err(|err| CliError::Server(err.to_string()))?;
-    match manager.install(
-        AgentId::Opencode,
-        InstallOptions {
-            reinstall: false,
-            version: None,
-        },
-    ) {
-        Ok(result) => Ok(result.path),
-        Err(err) => Err(CliError::Server(err.to_string())),
     }
 }
 
@@ -1241,6 +700,56 @@ fn run_credentials(command: &CredentialsCommand) -> Result<(), CliError> {
             Ok(())
         }
     }
+}
+
+fn load_json_payload(
+    json_inline: Option<&str>,
+    json_file: Option<&std::path::Path>,
+) -> Result<Value, CliError> {
+    match (json_inline, json_file) {
+        (Some(_), Some(_)) => Err(CliError::Server(
+            "provide either --json or --json-file, not both".to_string(),
+        )),
+        (None, None) => Err(CliError::Server(
+            "missing payload: provide --json or --json-file".to_string(),
+        )),
+        (Some(inline), None) => Ok(serde_json::from_str(inline)?),
+        (None, Some(path)) => {
+            let text = std::fs::read_to_string(path)?;
+            Ok(serde_json::from_str(&text)?)
+        }
+    }
+}
+
+fn install_agent_local(args: &InstallAgentArgs) -> Result<(), CliError> {
+    let agent_id = AgentId::parse(&args.agent)
+        .ok_or_else(|| CliError::Server(format!("unsupported agent: {}", args.agent)))?;
+
+    let manager = AgentManager::new(default_install_dir())
+        .map_err(|err| CliError::Server(err.to_string()))?;
+
+    let result = manager
+        .install(
+            agent_id,
+            InstallOptions {
+                reinstall: args.reinstall,
+                version: args.agent_version.clone(),
+                agent_process_version: args.agent_process_version.clone(),
+            },
+        )
+        .map_err(|err| CliError::Server(err.to_string()))?;
+
+    let output = json!({
+        "alreadyInstalled": result.already_installed,
+        "artifacts": result.artifacts.into_iter().map(|artifact| json!({
+            "kind": format!("{:?}", artifact.kind),
+            "path": artifact.path,
+            "source": format!("{:?}", artifact.source),
+            "version": artifact.version,
+        })).collect::<Vec<_>>()
+    });
+
+    write_stdout_line(&serde_json::to_string_pretty(&output)?)
 }
 
 #[derive(Serialize)]
@@ -1311,23 +820,6 @@ fn redact_key(key: &str) -> String {
     let prefix = &trimmed[..4];
     let suffix = &trimmed[len - 4..];
     format!("{prefix}...{suffix}")
-}
-
-fn install_agent_local(args: &InstallAgentArgs) -> Result<(), CliError> {
-    let agent_id = AgentId::parse(&args.agent)
-        .ok_or_else(|| CliError::Server(format!("unsupported agent: {}", args.agent)))?;
-    let manager = AgentManager::new(default_install_dir())
-        .map_err(|err| CliError::Server(err.to_string()))?;
-    manager
-        .install(
-            agent_id,
-            InstallOptions {
-                reinstall: args.reinstall,
-                version: None,
-            },
-        )
-        .map_err(|err| CliError::Server(err.to_string()))?;
-    Ok(())
 }
 
 fn select_token_for_agent(
@@ -1453,10 +945,45 @@ fn available_providers(credentials: &ExtractedCredentials) -> Vec<String> {
     providers
 }
 
+fn default_install_dir() -> PathBuf {
+    dirs::data_dir()
+        .map(|dir| dir.join("sandbox-agent").join("bin"))
+        .unwrap_or_else(|| PathBuf::from(".").join(".sandbox-agent").join("bin"))
+}
+
+fn apply_last_event_id_header(
+    request: reqwest::blocking::RequestBuilder,
+    last_event_id: Option<u64>,
+) -> reqwest::blocking::RequestBuilder {
+    match last_event_id {
+        Some(last_event_id) => request.header("last-event-id", last_event_id.to_string()),
+        None => request,
+    }
+}
+
+fn default_server_log_dir() -> PathBuf {
+    if let Ok(dir) = std::env::var("SANDBOX_AGENT_LOG_DIR") {
+        return PathBuf::from(dir);
+    }
+    dirs::data_dir()
+        .map(|dir| dir.join("sandbox-agent").join("logs"))
+        .unwrap_or_else(|| PathBuf::from(".").join(".sandbox-agent").join("logs"))
+}
+
+fn maybe_redirect_server_logs() {
+    if std::env::var("SANDBOX_AGENT_LOG_STDOUT").is_ok() {
+        return;
+    }
+
+    let log_dir = default_server_log_dir();
+    if let Err(err) = ServerLogs::new(log_dir, LOGS_RETENTION).start_sync() {
+        eprintln!("failed to redirect logs: {err}");
+    }
+}
+
 fn build_cors_layer(server: &ServerArgs) -> Result<CorsLayer, CliError> {
     let mut cors = CorsLayer::new();
 
-    // Build origins list from provided origins
     let mut origins = Vec::new();
     for origin in &server.cors_allow_origin {
         let value = origin
@@ -1465,13 +992,11 @@ fn build_cors_layer(server: &ServerArgs) -> Result<CorsLayer, CliError> {
         origins.push(value);
     }
     if origins.is_empty() {
-        // No origins allowed - use permissive CORS with no origins (effectively disabled)
         cors = cors.allow_origin(tower_http::cors::AllowOrigin::predicate(|_, _| false));
     } else {
         cors = cors.allow_origin(origins);
     }
 
-    // Methods: allow any if not specified, otherwise use provided list
     if server.cors_allow_method.is_empty() {
         cors = cors.allow_methods(Any);
     } else {
@@ -1485,7 +1010,6 @@ fn build_cors_layer(server: &ServerArgs) -> Result<CorsLayer, CliError> {
         cors = cors.allow_methods(methods);
     }
 
-    // Headers: allow any if not specified, otherwise use provided list
     if server.cors_allow_header.is_empty() {
         cors = cors.allow_headers(Any);
     } else {
@@ -1548,20 +1072,6 @@ impl ClientContext {
         Ok(self.request(Method::GET, path).send()?)
     }
 
-    fn get_with_query(
-        &self,
-        path: &str,
-        query: &[(&str, Option<String>)],
-    ) -> Result<reqwest::blocking::Response, CliError> {
-        let mut request = self.request(Method::GET, path);
-        for (key, value) in query {
-            if let Some(value) = value {
-                request = request.query(&[(key, value)]);
-            }
-        }
-        Ok(request.send()?)
-    }
-
     fn post<T: Serialize>(
         &self,
         path: &str,
@@ -1570,89 +1080,29 @@ impl ClientContext {
         Ok(self.request(Method::POST, path).json(body).send()?)
     }
 
-    fn post_with_query<T: Serialize>(
+    fn post_with_headers<T: Serialize>(
         &self,
         path: &str,
         body: &T,
-        query: &[(&str, Option<String>)],
+        headers: &[(&str, &str)],
     ) -> Result<reqwest::blocking::Response, CliError> {
         let mut request = self.request(Method::POST, path).json(body);
-        for (key, value) in query {
-            if let Some(value) = value {
-                request = request.query(&[(key, value)]);
-            }
+        for (name, value) in headers {
+            request = request.header(*name, *value);
         }
         Ok(request.send()?)
     }
 
-    fn put_raw_with_query<B: Into<reqwest::blocking::Body>>(
+    fn delete_with_headers(
         &self,
         path: &str,
-        body: B,
-        content_type: &str,
-        query: &[(&str, Option<String>)],
-    ) -> Result<reqwest::blocking::Response, CliError> {
-        let mut request = self
-            .request(Method::PUT, path)
-            .header(reqwest::header::CONTENT_TYPE, content_type)
-            .header(reqwest::header::ACCEPT, "application/json");
-        for (key, value) in query {
-            if let Some(value) = value {
-                request = request.query(&[(key, value)]);
-            }
-        }
-        Ok(request.body(body).send()?)
-    }
-
-    fn post_empty(&self, path: &str) -> Result<reqwest::blocking::Response, CliError> {
-        Ok(self.request(Method::POST, path).send()?)
-    }
-
-    fn post_empty_with_query(
-        &self,
-        path: &str,
-        query: &[(&str, Option<String>)],
-    ) -> Result<reqwest::blocking::Response, CliError> {
-        let mut request = self.request(Method::POST, path);
-        for (key, value) in query {
-            if let Some(value) = value {
-                request = request.query(&[(key, value)]);
-            }
-        }
-        Ok(request.send()?)
-    }
-
-    fn delete_with_query(
-        &self,
-        path: &str,
-        query: &[(&str, Option<String>)],
+        headers: &[(&str, &str)],
     ) -> Result<reqwest::blocking::Response, CliError> {
         let mut request = self.request(Method::DELETE, path);
-        for (key, value) in query {
-            if let Some(value) = value {
-                request = request.query(&[(key, value)]);
-            }
+        for (name, value) in headers {
+            request = request.header(*name, *value);
         }
         Ok(request.send()?)
-    }
-
-    fn post_raw_with_query<B: Into<reqwest::blocking::Body>>(
-        &self,
-        path: &str,
-        body: B,
-        content_type: &str,
-        query: &[(&str, Option<String>)],
-    ) -> Result<reqwest::blocking::Response, CliError> {
-        let mut request = self
-            .request(Method::POST, path)
-            .header(reqwest::header::CONTENT_TYPE, content_type)
-            .header(reqwest::header::ACCEPT, "application/json");
-        for (key, value) in query {
-            if let Some(value) = value {
-                request = request.query(&[(key, value)]);
-            }
-        }
-        Ok(request.body(body).send()?)
     }
 }
 
@@ -1673,6 +1123,26 @@ fn print_json_response<T: serde::de::DeserializeOwned + Serialize>(
     Ok(())
 }
 
+fn print_json_or_empty(response: reqwest::blocking::Response) -> Result<(), CliError> {
+    let status = response.status();
+    let text = response.text()?;
+
+    if !status.is_success() {
+        print_error_body(&text)?;
+        return Err(CliError::HttpStatus(status));
+    }
+
+    if text.trim().is_empty() {
+        return Ok(());
+    }
+
+    if let Ok(value) = serde_json::from_str::<Value>(&text) {
+        write_stdout_line(&serde_json::to_string_pretty(&value)?)
+    } else {
+        write_stdout_line(&text)
+    }
+}
+
 fn print_text_response(response: reqwest::blocking::Response) -> Result<(), CliError> {
     let status = response.status();
     let text = response.text()?;
@@ -1682,27 +1152,7 @@ fn print_text_response(response: reqwest::blocking::Response) -> Result<(), CliE
         return Err(CliError::HttpStatus(status));
     }
 
-    write_stdout(&text)?;
-    Ok(())
-}
-
-fn print_binary_response(response: reqwest::blocking::Response) -> Result<(), CliError> {
-    let status = response.status();
-    let bytes = response.bytes()?;
-
-    if !status.is_success() {
-        if let Ok(text) = std::str::from_utf8(&bytes) {
-            print_error_body(text)?;
-        } else {
-            write_stderr_line("Request failed with non-text response body")?;
-        }
-        return Err(CliError::HttpStatus(status));
-    }
-
-    let mut out = std::io::stdout();
-    out.write_all(&bytes)?;
-    out.flush()?;
-    Ok(())
+    write_stdout(&text)
 }
 
 fn print_empty_response(response: reqwest::blocking::Response) -> Result<(), CliError> {
@@ -1710,6 +1160,7 @@ fn print_empty_response(response: reqwest::blocking::Response) -> Result<(), Cli
     if status.is_success() {
         return Ok(());
     }
+
     let text = response.text()?;
     print_error_body(&text)?;
     Err(CliError::HttpStatus(status))
@@ -1718,11 +1169,10 @@ fn print_empty_response(response: reqwest::blocking::Response) -> Result<(), Cli
 fn print_error_body(text: &str) -> Result<(), CliError> {
     if let Ok(json) = serde_json::from_str::<Value>(text) {
         let pretty = serde_json::to_string_pretty(&json)?;
-        write_stderr_line(&pretty)?;
+        write_stderr_line(&pretty)
     } else {
-        write_stderr_line(text)?;
+        write_stderr_line(text)
     }
-    Ok(())
 }
 
 fn write_stdout(text: &str) -> Result<(), CliError> {
@@ -1746,4 +1196,32 @@ fn write_stderr_line(text: &str) -> Result<(), CliError> {
     out.write_all(b"\n")?;
     out.flush()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn apply_last_event_id_header_sets_header_when_provided() {
+        let client = HttpClient::builder().build().expect("build client");
+        let request = apply_last_event_id_header(client.get("http://localhost/v2/rpc"), Some(42))
+            .build()
+            .expect("build request");
+
+        let header = request
+            .headers()
+            .get("last-event-id")
+            .and_then(|value| value.to_str().ok());
+        assert_eq!(header, Some("42"));
+    }
+
+    #[test]
+    fn apply_last_event_id_header_omits_header_when_absent() {
+        let client = HttpClient::builder().build().expect("build client");
+        let request = apply_last_event_id_header(client.get("http://localhost/v2/rpc"), None)
+            .build()
+            .expect("build request");
+        assert!(request.headers().get("last-event-id").is_none());
+    }
 }

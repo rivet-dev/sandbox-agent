@@ -15,7 +15,6 @@ path = "src/main.rs"
 sandbox-agent-error.workspace = true
 sandbox-agent-agent-management.workspace = true
 sandbox-agent-agent-credentials.workspace = true
-sandbox-agent-universal-agent-schema.workspace = true
 thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -26,7 +25,7 @@ reqwest.workspace = true
 dirs.workspace = true
 time.workspace = true
 chrono.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["process", "io-util", "sync"] }
 tokio-stream.workspace = true
 tower-http.workspace = true
 utoipa.workspace = true
@@ -52,6 +51,7 @@ http-body-util.workspace = true
 insta.workspace = true
 tower.workspace = true
 tempfile.workspace = true
+serial_test = "3.2"
 
 [features]
 test-utils = ["tempfile"]

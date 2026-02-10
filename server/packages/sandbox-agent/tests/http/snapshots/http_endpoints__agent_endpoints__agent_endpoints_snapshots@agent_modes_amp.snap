@@ -1,9 +1,0 @@
----
-source: server/packages/sandbox-agent/tests/http/agent_endpoints.rs
-assertion_line: 162
-expression: normalize_agent_modes(&modes)
----
-modes:
-  - description: true
-    id: build
-    name: Build

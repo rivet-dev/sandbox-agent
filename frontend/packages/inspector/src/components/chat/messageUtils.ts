@@ -1,4 +1,4 @@
-import type { UniversalItem } from "sandbox-agent";
+import type { UniversalItem } from "../../types/legacyApi";
 
 export const getMessageClass = (item: UniversalItem) => {
   if (item.kind === "tool_call" || item.kind === "tool_result") return "tool";

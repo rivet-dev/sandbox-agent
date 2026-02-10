@@ -66,13 +66,14 @@ Both approaches execute code inside the sandbox, so your tools have full access 
 
     <CodeGroup>
     ```ts TypeScript
-    import { SandboxAgent } from "sandbox-agent";
+    import { SandboxAgentClient } from "sandbox-agent";
     import fs from "node:fs";
 
-    const client = await SandboxAgent.connect({
+    const client = new SandboxAgentClient({
       baseUrl: "http://127.0.0.1:2468",
       token: process.env.SANDBOX_TOKEN,
-    });
+      agent: "mock",
+      });
 
     const content = await fs.promises.readFile("./dist/mcp-server.cjs");
     await client.writeFsFile(
@@ -175,13 +176,14 @@ Skills are markdown files that instruct the agent how to use a script. Upload th
 
     <CodeGroup>
     ```ts TypeScript
-    import { SandboxAgent } from "sandbox-agent";
+    import { SandboxAgentClient } from "sandbox-agent";
     import fs from "node:fs";
 
-    const client = await SandboxAgent.connect({
+    const client = new SandboxAgentClient({
       baseUrl: "http://127.0.0.1:2468",
       token: process.env.SANDBOX_TOKEN,
-    });
+      agent: "mock",
+      });
 
     const script = await fs.promises.readFile("./dist/random-number.cjs");
     await client.writeFsFile(

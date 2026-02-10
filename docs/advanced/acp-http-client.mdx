@@ -1,0 +1,67 @@
+---
+title: "ACP HTTP Client"
+description: "Protocol-pure ACP JSON-RPC over streamable HTTP client."
+---
+
+`acp-http-client` is a standalone, low-level package for ACP over HTTP (`/v2/rpc`).
+
+Use it when you want strict ACP protocol behavior with no Sandbox-specific metadata or extension adaptation.
+
+## Install
+
+```bash
+npm install acp-http-client
+```
+
+## Usage
+
+```ts
+import { AcpHttpClient } from "acp-http-client";
+
+const client = new AcpHttpClient({
+  baseUrl: "http://127.0.0.1:2468",
+  token: process.env.SANDBOX_TOKEN,
+});
+
+await client.initialize({
+  _meta: {
+    "sandboxagent.dev": {
+      agent: "mock",
+    },
+  },
+});
+
+const session = await client.newSession({
+  cwd: "/",
+  mcpServers: [],
+  _meta: {
+    "sandboxagent.dev": {
+      agent: "mock",
+    },
+  },
+});
+
+const result = await client.prompt({
+  sessionId: session.sessionId,
+  prompt: [{ type: "text", text: "hello" }],
+});
+
+console.log(result.stopReason);
+await client.disconnect();
+```
+
+## Scope
+
+- Implements ACP HTTP transport and connection lifecycle.
+- Supports ACP requests/notifications and session streaming.
+- Does not inject `_meta["sandboxagent.dev"]`.
+- Does not wrap `_sandboxagent/*` extension methods/events.
+
+## Transport Contract
+
+- `POST /v2/rpc` is JSON-only. Send `Content-Type: application/json` and `Accept: application/json`.
+- `GET /v2/rpc` is SSE-only. Send `Accept: text/event-stream`.
+- Keep one active SSE stream per ACP connection id.
+- `x-acp-agent` is removed. Provide agent via `_meta["sandboxagent.dev"].agent` on `initialize` and `session/new`.
+
+If you want Sandbox Agent metadata/extensions and higher-level helpers, use `sandbox-agent` and `SandboxAgentClient` instead.

@@ -14,9 +14,12 @@ fn main() {
         .join("packages")
         .join("inspector")
         .join("dist");
+    let inspector_pkg_dir = root_dir.join("frontend").join("packages").join("inspector");
 
     println!("cargo:rerun-if-env-changed=SANDBOX_AGENT_SKIP_INSPECTOR");
     println!("cargo:rerun-if-env-changed=SANDBOX_AGENT_VERSION");
+    // Watch the inspector package directory so Cargo reruns when dist appears/disappears.
+    println!("cargo:rerun-if-changed={}", inspector_pkg_dir.display());
     let dist_exists = dist_dir.exists();
     if dist_exists {
         println!("cargo:rerun-if-changed={}", dist_dir.display());

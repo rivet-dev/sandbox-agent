@@ -98,7 +98,7 @@ const PORT = 8000;
 /** Check if sandbox-agent is already running */
 async function isServerRunning(sandbox: Sandbox): Promise<boolean> {
   try {
-    const result = await sandbox.exec(`curl -sf http://localhost:${PORT}/v1/health`);
+    const result = await sandbox.exec(`curl -sf http://localhost:${PORT}/v2/health`);
     return result.success;
   } catch {
     return false;
@@ -131,7 +131,7 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
-    // Proxy requests: /sandbox/:name/v1/...
+    // Proxy requests: /sandbox/:name/v2/...
     const match = url.pathname.match(/^\/sandbox\/([^/]+)(\/.*)?$/);
     if (match) {
       const [, name, path = "/"] = match;
@@ -154,11 +154,12 @@ export default {
 ## Connect from Client
 
 ```typescript
-import { SandboxAgent } from "sandbox-agent";
+import { SandboxAgentClient } from "sandbox-agent";
 
 // Connect via the proxy endpoint
-const client = await SandboxAgent.connect({
+const client = new SandboxAgentClient({
   baseUrl: "http://localhost:8787/sandbox/my-sandbox",
+  agent: "mock",
 });
 
 // Wait for server to be ready
@@ -230,7 +231,7 @@ First run builds the Docker container (2-3 minutes). Subsequent runs are much fa
 Test with curl:
 
 ```bash
-curl http://localhost:8787/sandbox/demo/v1/health
+curl http://localhost:8787/sandbox/demo/v2/health
 ```
 
 <Tip>

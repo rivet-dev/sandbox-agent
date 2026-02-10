@@ -3,7 +3,7 @@ resolver = "2"
 members = ["server/packages/*", "gigacode"]
 
 [workspace.package]
-version = "0.1.12-rc.1"
+version = "0.2.0"
 edition = "2021"
 authors = [ "Rivet Gaming, LLC <developer@rivet.gg>" ]
 license = "Apache-2.0"
@@ -12,12 +12,10 @@ description = "Universal API for automatic coding agents in sandboxes. Supports 
 
 [workspace.dependencies]
 # Internal crates
-sandbox-agent = { version = "0.1.12-rc.1", path = "server/packages/sandbox-agent" }
-sandbox-agent-error = { version = "0.1.12-rc.1", path = "server/packages/error" }
-sandbox-agent-agent-management = { version = "0.1.12-rc.1", path = "server/packages/agent-management" }
-sandbox-agent-agent-credentials = { version = "0.1.12-rc.1", path = "server/packages/agent-credentials" }
-sandbox-agent-universal-agent-schema = { version = "0.1.12-rc.1", path = "server/packages/universal-agent-schema" }
-sandbox-agent-extracted-agent-schemas = { version = "0.1.12-rc.1", path = "server/packages/extracted-agent-schemas" }
+sandbox-agent = { version = "0.2.0", path = "server/packages/sandbox-agent" }
+sandbox-agent-error = { version = "0.2.0", path = "server/packages/error" }
+sandbox-agent-agent-management = { version = "0.2.0", path = "server/packages/agent-management" }
+sandbox-agent-agent-credentials = { version = "0.2.0", path = "server/packages/agent-credentials" }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }

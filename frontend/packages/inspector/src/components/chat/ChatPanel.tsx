@@ -1,7 +1,14 @@
 import { MessageSquare, Plus, Square, Terminal } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import type { AgentInfo, AgentModelInfo, AgentModeInfo, PermissionEventData, QuestionEventData, SkillSource } from "sandbox-agent";
 import type { McpServerEntry } from "../../App";
+import type {
+  AgentInfo,
+  AgentModelInfo,
+  AgentModeInfo,
+  PermissionEventData,
+  QuestionEventData,
+  SkillSource
+} from "../../types/legacyApi";
 import ApprovalsTab from "../debug/ApprovalsTab";
 import SessionCreateMenu, { type SessionConfig } from "../SessionCreateMenu";
 import ChatInput from "./ChatInput";
@@ -175,11 +182,6 @@ const ChatPanel = ({
             <Terminal className="empty-state-icon" />
             <div className="empty-state-title">Ready to Chat</div>
             <p className="empty-state-text">Send a message to start a conversation with the agent.</p>
-            {agentLabel === "Mock" && (
-              <div className="mock-agent-hint">
-                The mock agent simulates agent responses for testing the inspector UI without requiring API credentials. Send <code>help</code> for available commands.
-              </div>
-            )}
           </div>
         ) : (
           <ChatMessages

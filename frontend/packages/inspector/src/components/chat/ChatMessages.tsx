@@ -37,7 +37,9 @@ const ChatMessages = ({
         const isInProgress = item.status === "in_progress";
         const isFailed = item.status === "failed";
         const messageClass = getMessageClass(item);
-        const statusLabel = item.status !== "completed" ? item.status.replace("_", " ") : "";
+        const statusValue = item.status ?? "";
+        const statusLabel =
+          statusValue && statusValue !== "completed" ? statusValue.replace("_", " ") : "";
         const kindLabel = item.kind.replace("_", " ");
 
         return (

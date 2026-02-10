@@ -79,7 +79,7 @@ async function waitForHealth(
     }
 
     try {
-      const response = await fetch(`${baseUrl}/v1/health`, {
+      const response = await fetch(`${baseUrl}/v2/health`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (response.ok) {

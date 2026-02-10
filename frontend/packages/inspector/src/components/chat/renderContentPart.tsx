@@ -1,4 +1,4 @@
-import type { ContentPart } from "sandbox-agent";
+import type { ContentPart } from "../../types/legacyApi";
 import { formatJson } from "../../utils/format";
 
 const renderContentPart = (part: ContentPart, index: number) => {

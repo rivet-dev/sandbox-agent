@@ -10,7 +10,7 @@
     "license": {
       "name": "Apache-2.0"
     },
-    "version": "0.1.12-rc.1"
+    "version": "0.2.0"
   },
   "servers": [
     {
@@ -18,240 +18,17 @@
     }
   ],
   "paths": {
-    "/v1/agents": {
+    "/v2/fs/file": {
       "get": {
         "tags": [
-          "agents"
+          "v2"
         ],
-        "summary": "List Agents",
-        "description": "Returns all available coding agents and their installation status.",
-        "operationId": "list_agents",
-        "responses": {
-          "200": {
-            "description": "List of available agents",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AgentListResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/agents/{agent}/install": {
-      "post": {
-        "tags": [
-          "agents"
-        ],
-        "summary": "Install Agent",
-        "description": "Installs or updates a coding agent (e.g. claude, codex, opencode, amp).",
-        "operationId": "install_agent",
-        "parameters": [
-          {
-            "name": "agent",
-            "in": "path",
-            "description": "Agent id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AgentInstallRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "Agent installed"
-          },
-          "400": {
-            "description": "Invalid request",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Agent not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Installation failed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/agents/{agent}/models": {
-      "get": {
-        "tags": [
-          "agents"
-        ],
-        "summary": "List Agent Models",
-        "description": "Returns the available LLM models for an agent.",
-        "operationId": "get_agent_models",
-        "parameters": [
-          {
-            "name": "agent",
-            "in": "path",
-            "description": "Agent id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Available models",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AgentModelsResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Agent not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/agents/{agent}/modes": {
-      "get": {
-        "tags": [
-          "agents"
-        ],
-        "summary": "List Agent Modes",
-        "description": "Returns the available interaction modes for an agent.",
-        "operationId": "get_agent_modes",
-        "parameters": [
-          {
-            "name": "agent",
-            "in": "path",
-            "description": "Agent id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Available modes",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AgentModesResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid request",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/fs/entries": {
-      "get": {
-        "tags": [
-          "fs"
-        ],
-        "summary": "List Directory",
-        "description": "Lists files and directories at the given path.",
-        "operationId": "fs_entries",
+        "operationId": "get_v2_fs_file",
         "parameters": [
           {
             "name": "path",
             "in": "query",
-            "description": "Path to list (relative or absolute)",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "nullable": true
-            }
-          },
-          {
-            "name": "session_id",
-            "in": "query",
-            "description": "Session id for relative paths",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "nullable": true
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Directory listing",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/FsEntry"
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/fs/entry": {
-      "delete": {
-        "tags": [
-          "fs"
-        ],
-        "summary": "Delete Entry",
-        "description": "Deletes a file or directory.",
-        "operationId": "fs_delete_entry",
-        "parameters": [
-          {
-            "name": "path",
-            "in": "query",
-            "description": "File or directory path",
+            "description": "File path",
             "required": true,
             "schema": {
               "type": "string"
@@ -260,60 +37,7 @@
           {
             "name": "session_id",
             "in": "query",
-            "description": "Session id for relative paths",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "nullable": true
-            }
-          },
-          {
-            "name": "recursive",
-            "in": "query",
-            "description": "Delete directories recursively",
-            "required": false,
-            "schema": {
-              "type": "boolean",
-              "nullable": true
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Delete result",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FsActionResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/fs/file": {
-      "get": {
-        "tags": [
-          "fs"
-        ],
-        "summary": "Read File",
-        "description": "Reads the raw bytes of a file.",
-        "operationId": "fs_read_file",
-        "parameters": [
-          {
-            "name": "path",
-            "in": "query",
-            "description": "File path (relative or absolute)",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "session_id",
-            "in": "query",
-            "description": "Session id for relative paths",
+            "description": "Session id for relative path base",
             "required": false,
             "schema": {
               "type": "string",
@@ -323,30 +47,20 @@
         ],
         "responses": {
           "200": {
-            "description": "File content",
-            "content": {
-              "application/octet-stream": {
-                "schema": {
-                  "type": "string",
-                  "format": "binary"
-                }
-              }
-            }
+            "description": "File content"
           }
         }
       },
       "put": {
         "tags": [
-          "fs"
+          "v2"
         ],
-        "summary": "Write File",
-        "description": "Writes raw bytes to a file, creating it if it doesn't exist.",
-        "operationId": "fs_write_file",
+        "operationId": "put_v2_fs_file",
         "parameters": [
           {
             "name": "path",
             "in": "query",
-            "description": "File path (relative or absolute)",
+            "description": "File path",
             "required": true,
             "schema": {
               "type": "string"
@@ -355,7 +69,7 @@
           {
             "name": "session_id",
             "in": "query",
-            "description": "Session id for relative paths",
+            "description": "Session id for relative path base",
             "required": false,
             "schema": {
               "type": "string",
@@ -364,11 +78,11 @@
           }
         ],
         "requestBody": {
+          "description": "Raw file bytes",
           "content": {
-            "application/octet-stream": {
+            "text/plain": {
               "schema": {
-                "type": "string",
-                "format": "binary"
+                "type": "string"
               }
             }
           },
@@ -388,62 +102,27 @@
         }
       }
     },
-    "/v1/fs/mkdir": {
+    "/v2/fs/upload-batch": {
       "post": {
         "tags": [
-          "fs"
+          "v2"
         ],
-        "summary": "Create Directory",
-        "description": "Creates a directory, including any missing parent directories.",
-        "operationId": "fs_mkdir",
+        "operationId": "post_v2_fs_upload_batch",
         "parameters": [
           {
             "name": "path",
             "in": "query",
-            "description": "Directory path to create",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "session_id",
-            "in": "query",
-            "description": "Session id for relative paths",
+            "description": "Destination path",
             "required": false,
             "schema": {
               "type": "string",
               "nullable": true
             }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Directory created",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FsActionResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/fs/move": {
-      "post": {
-        "tags": [
-          "fs"
-        ],
-        "summary": "Move Entry",
-        "description": "Moves or renames a file or directory.",
-        "operationId": "fs_move",
-        "parameters": [
+          },
           {
             "name": "session_id",
             "in": "query",
-            "description": "Session id for relative paths",
+            "description": "Session id for relative path base",
             "required": false,
             "schema": {
               "type": "string",
@@ -452,10 +131,11 @@
           }
         ],
         "requestBody": {
+          "description": "tar archive body",
           "content": {
-            "application/json": {
+            "text/plain": {
               "schema": {
-                "$ref": "#/components/schemas/FsMoveRequest"
+                "type": "string"
               }
             }
           },
@@ -463,105 +143,7 @@
         },
         "responses": {
           "200": {
-            "description": "Move result",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FsMoveResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/fs/stat": {
-      "get": {
-        "tags": [
-          "fs"
-        ],
-        "summary": "Get File Info",
-        "description": "Returns metadata (size, timestamps, type) for a path.",
-        "operationId": "fs_stat",
-        "parameters": [
-          {
-            "name": "path",
-            "in": "query",
-            "description": "Path to stat",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "session_id",
-            "in": "query",
-            "description": "Session id for relative paths",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "nullable": true
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "File metadata",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FsStat"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/fs/upload-batch": {
-      "post": {
-        "tags": [
-          "fs"
-        ],
-        "summary": "Upload Files",
-        "description": "Uploads a tar.gz archive and extracts it to the destination directory.",
-        "operationId": "fs_upload_batch",
-        "parameters": [
-          {
-            "name": "path",
-            "in": "query",
-            "description": "Destination directory for extraction",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "nullable": true
-            }
-          },
-          {
-            "name": "session_id",
-            "in": "query",
-            "description": "Session id for relative paths",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "nullable": true
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/octet-stream": {
-              "schema": {
-                "type": "string",
-                "format": "binary"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Upload result",
+            "description": "Upload/extract result",
             "content": {
               "application/json": {
                 "schema": {
@@ -573,17 +155,17 @@
         }
       }
     },
-    "/v1/health": {
+    "/v2/health": {
       "get": {
         "tags": [
-          "meta"
+          "v2"
         ],
-        "summary": "Health Check",
-        "description": "Returns the server health status.",
-        "operationId": "get_health",
+        "summary": "v2 Health",
+        "description": "Returns server health for the v2 ACP surface.",
+        "operationId": "get_v2_health",
         "responses": {
           "200": {
-            "description": "Server is healthy",
+            "description": "Service health response",
             "content": {
               "application/json": {
                 "schema": {
@@ -595,67 +177,17 @@
         }
       }
     },
-    "/v1/sessions": {
+    "/v2/rpc": {
       "get": {
         "tags": [
-          "sessions"
+          "v2"
         ],
-        "summary": "List Sessions",
-        "description": "Returns all active sessions.",
-        "operationId": "list_sessions",
+        "summary": "ACP SSE",
+        "description": "Streams ACP JSON-RPC envelopes for an ACP client over SSE.",
+        "operationId": "get_v2_acp",
         "responses": {
           "200": {
-            "description": "List of active sessions",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SessionListResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/sessions/{session_id}": {
-      "post": {
-        "tags": [
-          "sessions"
-        ],
-        "summary": "Create Session",
-        "description": "Creates a new agent session with the given configuration.",
-        "operationId": "create_session",
-        "parameters": [
-          {
-            "name": "session_id",
-            "in": "path",
-            "description": "Client session id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateSessionRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Session created",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CreateSessionResponse"
-                }
-              }
-            }
+            "description": "SSE stream of ACP envelopes"
           },
           "400": {
             "description": "Invalid request",
@@ -667,8 +199,28 @@
               }
             }
           },
+          "404": {
+            "description": "Unknown ACP client",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "Client does not accept SSE responses",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "409": {
-            "description": "Session already exists",
+            "description": "ACP client already has an active SSE stream",
             "content": {
               "application/json": {
                 "schema": {
@@ -678,213 +230,19 @@
             }
           }
         }
-      }
-    },
-    "/v1/sessions/{session_id}/events": {
-      "get": {
-        "tags": [
-          "sessions"
-        ],
-        "summary": "Get Events",
-        "description": "Returns session events with optional offset-based pagination.",
-        "operationId": "get_events",
-        "parameters": [
-          {
-            "name": "session_id",
-            "in": "path",
-            "description": "Session id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "offset",
-            "in": "query",
-            "description": "Last seen event sequence (exclusive)",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "format": "int64",
-              "nullable": true,
-              "minimum": 0
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "description": "Max events to return",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "format": "int64",
-              "nullable": true,
-              "minimum": 0
-            }
-          },
-          {
-            "name": "include_raw",
-            "in": "query",
-            "description": "Include raw provider payloads",
-            "required": false,
-            "schema": {
-              "type": "boolean",
-              "nullable": true
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Session events",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EventsResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Session not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/sessions/{session_id}/events/sse": {
-      "get": {
-        "tags": [
-          "sessions"
-        ],
-        "summary": "Subscribe to Events (SSE)",
-        "description": "Opens an SSE stream for real-time session events.",
-        "operationId": "get_events_sse",
-        "parameters": [
-          {
-            "name": "session_id",
-            "in": "path",
-            "description": "Session id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "offset",
-            "in": "query",
-            "description": "Last seen event sequence (exclusive)",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "format": "int64",
-              "nullable": true,
-              "minimum": 0
-            }
-          },
-          {
-            "name": "include_raw",
-            "in": "query",
-            "description": "Include raw provider payloads",
-            "required": false,
-            "schema": {
-              "type": "boolean",
-              "nullable": true
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "SSE event stream"
-          }
-        }
-      }
-    },
-    "/v1/sessions/{session_id}/messages": {
+      },
       "post": {
         "tags": [
-          "sessions"
+          "v2"
         ],
-        "summary": "Send Message",
-        "description": "Sends a message to a session and returns immediately.",
-        "operationId": "post_message",
-        "parameters": [
-          {
-            "name": "session_id",
-            "in": "path",
-            "description": "Session id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
+        "summary": "ACP POST",
+        "description": "Sends ACP JSON-RPC envelopes to an ACP client and returns request responses.",
+        "operationId": "post_v2_acp",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/MessageRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "Message accepted"
-          },
-          "404": {
-            "description": "Session not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/sessions/{session_id}/messages/stream": {
-      "post": {
-        "tags": [
-          "sessions"
-        ],
-        "summary": "Send Message (Streaming)",
-        "description": "Sends a message and returns an SSE event stream of the agent's response.",
-        "operationId": "post_message_stream",
-        "parameters": [
-          {
-            "name": "session_id",
-            "in": "path",
-            "description": "Session id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "include_raw",
-            "in": "query",
-            "description": "Include raw provider payloads",
-            "required": false,
-            "schema": {
-              "type": "boolean",
-              "nullable": true
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/MessageRequest"
+                "$ref": "#/components/schemas/AcpEnvelope"
               }
             }
           },
@@ -892,10 +250,60 @@
         },
         "responses": {
           "200": {
-            "description": "SSE event stream"
+            "description": "JSON-RPC response envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcpEnvelope"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "JSON-RPC notification accepted"
+          },
+          "400": {
+            "description": "Invalid ACP envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
           },
           "404": {
-            "description": "Session not found",
+            "description": "Unknown ACP client",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "Client does not accept JSON responses",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "ACP agent process response timeout",
             "content": {
               "application/json": {
                 "schema": {
@@ -905,52 +313,20 @@
             }
           }
         }
-      }
-    },
-    "/v1/sessions/{session_id}/permissions/{permission_id}/reply": {
-      "post": {
+      },
+      "delete": {
         "tags": [
-          "sessions"
+          "v2"
         ],
-        "summary": "Reply to Permission",
-        "description": "Approves or denies a permission request from the agent.",
-        "operationId": "reply_permission",
-        "parameters": [
-          {
-            "name": "session_id",
-            "in": "path",
-            "description": "Session id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "permission_id",
-            "in": "path",
-            "description": "Permission id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PermissionReplyRequest"
-              }
-            }
-          },
-          "required": true
-        },
+        "summary": "ACP Close",
+        "description": "Closes an ACP client and releases agent process resources.",
+        "operationId": "delete_v2_acp",
         "responses": {
           "204": {
-            "description": "Permission reply accepted"
+            "description": "ACP client closed"
           },
-          "404": {
-            "description": "Session or permission not found",
+          "400": {
+            "description": "Invalid request",
             "content": {
               "application/json": {
                 "schema": {
@@ -958,135 +334,9 @@
                 }
               }
             }
-          }
-        }
-      }
-    },
-    "/v1/sessions/{session_id}/questions/{question_id}/reject": {
-      "post": {
-        "tags": [
-          "sessions"
-        ],
-        "summary": "Reject Question",
-        "description": "Rejects a human-in-the-loop question from the agent.",
-        "operationId": "reject_question",
-        "parameters": [
-          {
-            "name": "session_id",
-            "in": "path",
-            "description": "Session id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "question_id",
-            "in": "path",
-            "description": "Question id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Question rejected"
           },
           "404": {
-            "description": "Session or question not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/sessions/{session_id}/questions/{question_id}/reply": {
-      "post": {
-        "tags": [
-          "sessions"
-        ],
-        "summary": "Reply to Question",
-        "description": "Replies to a human-in-the-loop question from the agent.",
-        "operationId": "reply_question",
-        "parameters": [
-          {
-            "name": "session_id",
-            "in": "path",
-            "description": "Session id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "question_id",
-            "in": "path",
-            "description": "Question id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/QuestionReplyRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "Question answered"
-          },
-          "404": {
-            "description": "Session or question not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/sessions/{session_id}/terminate": {
-      "post": {
-        "tags": [
-          "sessions"
-        ],
-        "summary": "Terminate Session",
-        "description": "Terminates a running session and cleans up resources.",
-        "operationId": "terminate_session",
-        "parameters": [
-          {
-            "name": "session_id",
-            "in": "path",
-            "description": "Session id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Session terminated"
-          },
-          "404": {
-            "description": "Session not found",
+            "description": "Unknown ACP client",
             "content": {
               "application/json": {
                 "schema": {
@@ -1101,6 +351,33 @@
   },
   "components": {
     "schemas": {
+      "AcpEnvelope": {
+        "type": "object",
+        "required": [
+          "jsonrpc"
+        ],
+        "properties": {
+          "error": {
+            "nullable": true
+          },
+          "id": {
+            "nullable": true
+          },
+          "jsonrpc": {
+            "type": "string"
+          },
+          "method": {
+            "type": "string",
+            "nullable": true
+          },
+          "params": {
+            "nullable": true
+          },
+          "result": {
+            "nullable": true
+          }
+        }
+      },
       "AgentCapabilities": {
         "type": "object",
         "required": [
@@ -1161,8 +438,7 @@
             "type": "boolean"
           },
           "sharedProcess": {
-            "type": "boolean",
-            "description": "Whether this agent uses a shared long-running server process (vs per-turn subprocess)"
+            "type": "boolean"
           },
           "status": {
             "type": "boolean"
@@ -1181,32 +457,6 @@
           }
         }
       },
-      "AgentError": {
-        "type": "object",
-        "required": [
-          "type",
-          "message"
-        ],
-        "properties": {
-          "agent": {
-            "type": "string",
-            "nullable": true
-          },
-          "details": {
-            "nullable": true
-          },
-          "message": {
-            "type": "string"
-          },
-          "session_id": {
-            "type": "string",
-            "nullable": true
-          },
-          "type": {
-            "$ref": "#/components/schemas/ErrorType"
-          }
-        }
-      },
       "AgentInfo": {
         "type": "object",
         "required": [
@@ -1220,14 +470,31 @@
             "$ref": "#/components/schemas/AgentCapabilities"
           },
           "credentialsAvailable": {
-            "type": "boolean",
-            "description": "Whether the agent's required provider credentials are available"
+            "type": "boolean"
+          },
+          "defaultModel": {
+            "type": "string",
+            "nullable": true
           },
           "id": {
             "type": "string"
           },
           "installed": {
             "type": "boolean"
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentModelInfo"
+            },
+            "nullable": true
+          },
+          "modes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentModeInfo"
+            },
+            "nullable": true
           },
           "path": {
             "type": "string",
@@ -1247,12 +514,61 @@
           }
         }
       },
+      "AgentInstallArtifact": {
+        "type": "object",
+        "required": [
+          "kind",
+          "path",
+          "source"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
       "AgentInstallRequest": {
         "type": "object",
         "properties": {
+          "agentProcessVersion": {
+            "type": "string",
+            "nullable": true
+          },
+          "agentVersion": {
+            "type": "string",
+            "nullable": true
+          },
           "reinstall": {
             "type": "boolean",
             "nullable": true
+          }
+        }
+      },
+      "AgentInstallResponse": {
+        "type": "object",
+        "required": [
+          "already_installed",
+          "artifacts"
+        ],
+        "properties": {
+          "already_installed": {
+            "type": "boolean"
+          },
+          "artifacts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentInstallArtifact"
+            }
           }
         }
       },
@@ -1315,402 +631,24 @@
           }
         }
       },
-      "AgentModelsResponse": {
-        "type": "object",
-        "required": [
-          "models"
-        ],
-        "properties": {
-          "defaultModel": {
-            "type": "string",
-            "nullable": true
-          },
-          "models": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/AgentModelInfo"
-            }
-          }
-        }
-      },
-      "AgentModesResponse": {
-        "type": "object",
-        "required": [
-          "modes"
-        ],
-        "properties": {
-          "modes": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/AgentModeInfo"
-            }
-          }
-        }
-      },
-      "AgentUnparsedData": {
-        "type": "object",
-        "required": [
-          "error",
-          "location"
-        ],
-        "properties": {
-          "error": {
-            "type": "string"
-          },
-          "location": {
-            "type": "string"
-          },
-          "raw_hash": {
-            "type": "string",
-            "nullable": true
-          }
-        }
-      },
-      "ContentPart": {
-        "oneOf": [
-          {
-            "type": "object",
-            "required": [
-              "text",
-              "type"
-            ],
-            "properties": {
-              "text": {
-                "type": "string"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "text"
-                ]
-              }
-            }
-          },
-          {
-            "type": "object",
-            "required": [
-              "json",
-              "type"
-            ],
-            "properties": {
-              "json": {},
-              "type": {
-                "type": "string",
-                "enum": [
-                  "json"
-                ]
-              }
-            }
-          },
-          {
-            "type": "object",
-            "required": [
-              "name",
-              "arguments",
-              "call_id",
-              "type"
-            ],
-            "properties": {
-              "arguments": {
-                "type": "string"
-              },
-              "call_id": {
-                "type": "string"
-              },
-              "name": {
-                "type": "string"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "tool_call"
-                ]
-              }
-            }
-          },
-          {
-            "type": "object",
-            "required": [
-              "call_id",
-              "output",
-              "type"
-            ],
-            "properties": {
-              "call_id": {
-                "type": "string"
-              },
-              "output": {
-                "type": "string"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "tool_result"
-                ]
-              }
-            }
-          },
-          {
-            "type": "object",
-            "required": [
-              "path",
-              "action",
-              "type"
-            ],
-            "properties": {
-              "action": {
-                "$ref": "#/components/schemas/FileAction"
-              },
-              "diff": {
-                "type": "string",
-                "nullable": true
-              },
-              "path": {
-                "type": "string"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "file_ref"
-                ]
-              }
-            }
-          },
-          {
-            "type": "object",
-            "required": [
-              "text",
-              "visibility",
-              "type"
-            ],
-            "properties": {
-              "text": {
-                "type": "string"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "reasoning"
-                ]
-              },
-              "visibility": {
-                "$ref": "#/components/schemas/ReasoningVisibility"
-              }
-            }
-          },
-          {
-            "type": "object",
-            "required": [
-              "path",
-              "type"
-            ],
-            "properties": {
-              "mime": {
-                "type": "string",
-                "nullable": true
-              },
-              "path": {
-                "type": "string"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "image"
-                ]
-              }
-            }
-          },
-          {
-            "type": "object",
-            "required": [
-              "label",
-              "type"
-            ],
-            "properties": {
-              "detail": {
-                "type": "string",
-                "nullable": true
-              },
-              "label": {
-                "type": "string"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "status"
-                ]
-              }
-            }
-          }
-        ],
-        "discriminator": {
-          "propertyName": "type"
-        }
-      },
-      "CreateSessionRequest": {
-        "type": "object",
-        "required": [
-          "agent"
-        ],
-        "properties": {
-          "agent": {
-            "type": "string"
-          },
-          "agentMode": {
-            "type": "string",
-            "nullable": true
-          },
-          "agentVersion": {
-            "type": "string",
-            "nullable": true
-          },
-          "directory": {
-            "type": "string",
-            "nullable": true
-          },
-          "mcp": {
-            "type": "object",
-            "additionalProperties": {
-              "$ref": "#/components/schemas/McpServerConfig"
-            },
-            "nullable": true
-          },
-          "model": {
-            "type": "string",
-            "nullable": true
-          },
-          "permissionMode": {
-            "type": "string",
-            "nullable": true
-          },
-          "skills": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SkillsConfig"
-              }
-            ],
-            "nullable": true
-          },
-          "title": {
-            "type": "string",
-            "nullable": true
-          },
-          "variant": {
-            "type": "string",
-            "nullable": true
-          }
-        }
-      },
-      "CreateSessionResponse": {
-        "type": "object",
-        "required": [
-          "healthy"
-        ],
-        "properties": {
-          "error": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/AgentError"
-              }
-            ],
-            "nullable": true
-          },
-          "healthy": {
-            "type": "boolean"
-          },
-          "nativeSessionId": {
-            "type": "string",
-            "nullable": true
-          }
-        }
-      },
-      "ErrorData": {
-        "type": "object",
-        "required": [
-          "message"
-        ],
-        "properties": {
-          "code": {
-            "type": "string",
-            "nullable": true
-          },
-          "details": {
-            "nullable": true
-          },
-          "message": {
-            "type": "string"
-          }
-        }
-      },
       "ErrorType": {
         "type": "string",
         "enum": [
           "invalid_request",
+          "conflict",
           "unsupported_agent",
           "agent_not_installed",
           "install_failed",
           "agent_process_exited",
           "token_invalid",
           "permission_denied",
+          "not_acceptable",
+          "unsupported_media_type",
           "session_not_found",
           "session_already_exists",
           "mode_not_supported",
           "stream_error",
           "timeout"
-        ]
-      },
-      "EventSource": {
-        "type": "string",
-        "enum": [
-          "agent",
-          "daemon"
-        ]
-      },
-      "EventsQuery": {
-        "type": "object",
-        "properties": {
-          "includeRaw": {
-            "type": "boolean",
-            "nullable": true
-          },
-          "limit": {
-            "type": "integer",
-            "format": "int64",
-            "nullable": true,
-            "minimum": 0
-          },
-          "offset": {
-            "type": "integer",
-            "format": "int64",
-            "nullable": true,
-            "minimum": 0
-          }
-        }
-      },
-      "EventsResponse": {
-        "type": "object",
-        "required": [
-          "events",
-          "hasMore"
-        ],
-        "properties": {
-          "events": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/UniversalEvent"
-            }
-          },
-          "hasMore": {
-            "type": "boolean"
-          }
-        }
-      },
-      "FileAction": {
-        "type": "string",
-        "enum": [
-          "read",
-          "write",
-          "patch"
         ]
       },
       "FsActionResponse": {
@@ -1934,311 +872,6 @@
           }
         }
       },
-      "ItemDeltaData": {
-        "type": "object",
-        "required": [
-          "item_id",
-          "delta"
-        ],
-        "properties": {
-          "delta": {
-            "type": "string"
-          },
-          "item_id": {
-            "type": "string"
-          },
-          "native_item_id": {
-            "type": "string",
-            "nullable": true
-          }
-        }
-      },
-      "ItemEventData": {
-        "type": "object",
-        "required": [
-          "item"
-        ],
-        "properties": {
-          "item": {
-            "$ref": "#/components/schemas/UniversalItem"
-          }
-        }
-      },
-      "ItemKind": {
-        "type": "string",
-        "enum": [
-          "message",
-          "tool_call",
-          "tool_result",
-          "system",
-          "status",
-          "unknown"
-        ]
-      },
-      "ItemRole": {
-        "type": "string",
-        "enum": [
-          "user",
-          "assistant",
-          "system",
-          "tool"
-        ]
-      },
-      "ItemStatus": {
-        "type": "string",
-        "enum": [
-          "in_progress",
-          "completed",
-          "failed"
-        ]
-      },
-      "McpCommand": {
-        "oneOf": [
-          {
-            "type": "string"
-          },
-          {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          }
-        ]
-      },
-      "McpOAuthConfig": {
-        "type": "object",
-        "properties": {
-          "clientId": {
-            "type": "string",
-            "nullable": true
-          },
-          "clientSecret": {
-            "type": "string",
-            "nullable": true
-          },
-          "scope": {
-            "type": "string",
-            "nullable": true
-          }
-        }
-      },
-      "McpOAuthConfigOrDisabled": {
-        "oneOf": [
-          {
-            "$ref": "#/components/schemas/McpOAuthConfig"
-          },
-          {
-            "type": "boolean"
-          }
-        ]
-      },
-      "McpRemoteTransport": {
-        "type": "string",
-        "enum": [
-          "http",
-          "sse"
-        ]
-      },
-      "McpServerConfig": {
-        "oneOf": [
-          {
-            "type": "object",
-            "required": [
-              "command",
-              "type"
-            ],
-            "properties": {
-              "args": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "command": {
-                "$ref": "#/components/schemas/McpCommand"
-              },
-              "cwd": {
-                "type": "string",
-                "nullable": true
-              },
-              "enabled": {
-                "type": "boolean",
-                "nullable": true
-              },
-              "env": {
-                "type": "object",
-                "additionalProperties": {
-                  "type": "string"
-                },
-                "nullable": true
-              },
-              "timeoutMs": {
-                "type": "integer",
-                "format": "int64",
-                "nullable": true,
-                "minimum": 0
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "local"
-                ]
-              }
-            }
-          },
-          {
-            "type": "object",
-            "required": [
-              "url",
-              "type"
-            ],
-            "properties": {
-              "bearerTokenEnvVar": {
-                "type": "string",
-                "nullable": true
-              },
-              "enabled": {
-                "type": "boolean",
-                "nullable": true
-              },
-              "envHeaders": {
-                "type": "object",
-                "additionalProperties": {
-                  "type": "string"
-                },
-                "nullable": true
-              },
-              "headers": {
-                "type": "object",
-                "additionalProperties": {
-                  "type": "string"
-                },
-                "nullable": true
-              },
-              "oauth": {
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/McpOAuthConfigOrDisabled"
-                  }
-                ],
-                "nullable": true
-              },
-              "timeoutMs": {
-                "type": "integer",
-                "format": "int64",
-                "nullable": true,
-                "minimum": 0
-              },
-              "transport": {
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/McpRemoteTransport"
-                  }
-                ],
-                "nullable": true
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "remote"
-                ]
-              },
-              "url": {
-                "type": "string"
-              }
-            }
-          }
-        ],
-        "discriminator": {
-          "propertyName": "type"
-        }
-      },
-      "MessageAttachment": {
-        "type": "object",
-        "required": [
-          "path"
-        ],
-        "properties": {
-          "filename": {
-            "type": "string",
-            "nullable": true
-          },
-          "mime": {
-            "type": "string",
-            "nullable": true
-          },
-          "path": {
-            "type": "string"
-          }
-        }
-      },
-      "MessageRequest": {
-        "type": "object",
-        "required": [
-          "message"
-        ],
-        "properties": {
-          "attachments": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/MessageAttachment"
-            }
-          },
-          "message": {
-            "type": "string"
-          }
-        }
-      },
-      "PermissionEventData": {
-        "type": "object",
-        "required": [
-          "permission_id",
-          "action",
-          "status"
-        ],
-        "properties": {
-          "action": {
-            "type": "string"
-          },
-          "metadata": {
-            "nullable": true
-          },
-          "permission_id": {
-            "type": "string"
-          },
-          "status": {
-            "$ref": "#/components/schemas/PermissionStatus"
-          }
-        }
-      },
-      "PermissionReply": {
-        "type": "string",
-        "enum": [
-          "once",
-          "always",
-          "reject"
-        ]
-      },
-      "PermissionReplyRequest": {
-        "type": "object",
-        "required": [
-          "reply"
-        ],
-        "properties": {
-          "reply": {
-            "$ref": "#/components/schemas/PermissionReply"
-          }
-        }
-      },
-      "PermissionStatus": {
-        "type": "string",
-        "enum": [
-          "requested",
-          "accept",
-          "accept_for_session",
-          "reject"
-        ]
-      },
       "ProblemDetails": {
         "type": "object",
         "required": [
@@ -2269,71 +902,8 @@
         },
         "additionalProperties": {}
       },
-      "QuestionEventData": {
-        "type": "object",
-        "required": [
-          "question_id",
-          "prompt",
-          "options",
-          "status"
-        ],
-        "properties": {
-          "options": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "prompt": {
-            "type": "string"
-          },
-          "question_id": {
-            "type": "string"
-          },
-          "response": {
-            "type": "string",
-            "nullable": true
-          },
-          "status": {
-            "$ref": "#/components/schemas/QuestionStatus"
-          }
-        }
-      },
-      "QuestionReplyRequest": {
-        "type": "object",
-        "required": [
-          "answers"
-        ],
-        "properties": {
-          "answers": {
-            "type": "array",
-            "items": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            }
-          }
-        }
-      },
-      "QuestionStatus": {
-        "type": "string",
-        "enum": [
-          "requested",
-          "answered",
-          "rejected"
-        ]
-      },
-      "ReasoningVisibility": {
-        "type": "string",
-        "enum": [
-          "public",
-          "private"
-        ]
-      },
       "ServerStatus": {
         "type": "string",
-        "description": "Status of a shared server process for an agent",
         "enum": [
           "running",
           "stopped",
@@ -2368,48 +938,6 @@
             "format": "int64",
             "nullable": true,
             "minimum": 0
-          }
-        }
-      },
-      "SessionEndReason": {
-        "type": "string",
-        "enum": [
-          "completed",
-          "error",
-          "terminated"
-        ]
-      },
-      "SessionEndedData": {
-        "type": "object",
-        "required": [
-          "reason",
-          "terminated_by"
-        ],
-        "properties": {
-          "exit_code": {
-            "type": "integer",
-            "format": "int32",
-            "description": "Process exit code when reason is Error",
-            "nullable": true
-          },
-          "message": {
-            "type": "string",
-            "description": "Error message when reason is Error",
-            "nullable": true
-          },
-          "reason": {
-            "$ref": "#/components/schemas/SessionEndReason"
-          },
-          "stderr": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/StderrOutput"
-              }
-            ],
-            "nullable": true
-          },
-          "terminated_by": {
-            "$ref": "#/components/schemas/TerminatedBy"
           }
         }
       },
@@ -2448,13 +976,6 @@
             "format": "int64",
             "minimum": 0
           },
-          "mcp": {
-            "type": "object",
-            "additionalProperties": {
-              "$ref": "#/components/schemas/McpServerConfig"
-            },
-            "nullable": true
-          },
           "model": {
             "type": "string",
             "nullable": true
@@ -2469,10 +990,10 @@
           "sessionId": {
             "type": "string"
           },
-          "skills": {
+          "terminationInfo": {
             "allOf": [
               {
-                "$ref": "#/components/schemas/SkillsConfig"
+                "$ref": "#/components/schemas/TerminationInfo"
               }
             ],
             "nullable": true
@@ -2484,10 +1005,6 @@
           "updatedAt": {
             "type": "integer",
             "format": "int64"
-          },
-          "variant": {
-            "type": "string",
-            "nullable": true
           }
         }
       },
@@ -2505,58 +1022,6 @@
           }
         }
       },
-      "SessionStartedData": {
-        "type": "object",
-        "properties": {
-          "metadata": {
-            "nullable": true
-          }
-        }
-      },
-      "SkillSource": {
-        "type": "object",
-        "required": [
-          "type",
-          "source"
-        ],
-        "properties": {
-          "ref": {
-            "type": "string",
-            "nullable": true
-          },
-          "skills": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "nullable": true
-          },
-          "source": {
-            "type": "string"
-          },
-          "subpath": {
-            "type": "string",
-            "nullable": true
-          },
-          "type": {
-            "type": "string"
-          }
-        }
-      },
-      "SkillsConfig": {
-        "type": "object",
-        "required": [
-          "sources"
-        ],
-        "properties": {
-          "sources": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SkillSource"
-            }
-          }
-        }
-      },
       "StderrOutput": {
         "type": "object",
         "required": [
@@ -2565,203 +1030,51 @@
         "properties": {
           "head": {
             "type": "string",
-            "description": "First N lines of stderr (if truncated) or full stderr (if not truncated)",
             "nullable": true
           },
           "tail": {
             "type": "string",
-            "description": "Last N lines of stderr (only present if truncated)",
             "nullable": true
           },
-          "total_lines": {
+          "totalLines": {
             "type": "integer",
-            "description": "Total number of lines in stderr",
             "nullable": true,
             "minimum": 0
           },
           "truncated": {
-            "type": "boolean",
-            "description": "Whether the output was truncated"
-          }
-        }
-      },
-      "TerminatedBy": {
-        "type": "string",
-        "enum": [
-          "agent",
-          "daemon"
-        ]
-      },
-      "TurnEventData": {
-        "type": "object",
-        "required": [
-          "phase"
-        ],
-        "properties": {
-          "metadata": {
-            "nullable": true
-          },
-          "phase": {
-            "$ref": "#/components/schemas/TurnPhase"
-          },
-          "turn_id": {
-            "type": "string",
-            "nullable": true
-          }
-        }
-      },
-      "TurnPhase": {
-        "type": "string",
-        "enum": [
-          "started",
-          "ended"
-        ]
-      },
-      "TurnStreamQuery": {
-        "type": "object",
-        "properties": {
-          "includeRaw": {
-            "type": "boolean",
-            "nullable": true
-          }
-        }
-      },
-      "UniversalEvent": {
-        "type": "object",
-        "required": [
-          "event_id",
-          "sequence",
-          "time",
-          "session_id",
-          "synthetic",
-          "source",
-          "type",
-          "data"
-        ],
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/UniversalEventData"
-          },
-          "event_id": {
-            "type": "string"
-          },
-          "native_session_id": {
-            "type": "string",
-            "nullable": true
-          },
-          "raw": {
-            "nullable": true
-          },
-          "sequence": {
-            "type": "integer",
-            "format": "int64",
-            "minimum": 0
-          },
-          "session_id": {
-            "type": "string"
-          },
-          "source": {
-            "$ref": "#/components/schemas/EventSource"
-          },
-          "synthetic": {
             "type": "boolean"
-          },
-          "time": {
-            "type": "string"
-          },
-          "type": {
-            "$ref": "#/components/schemas/UniversalEventType"
           }
         }
       },
-      "UniversalEventData": {
-        "oneOf": [
-          {
-            "$ref": "#/components/schemas/TurnEventData"
-          },
-          {
-            "$ref": "#/components/schemas/SessionStartedData"
-          },
-          {
-            "$ref": "#/components/schemas/SessionEndedData"
-          },
-          {
-            "$ref": "#/components/schemas/ItemEventData"
-          },
-          {
-            "$ref": "#/components/schemas/ItemDeltaData"
-          },
-          {
-            "$ref": "#/components/schemas/ErrorData"
-          },
-          {
-            "$ref": "#/components/schemas/PermissionEventData"
-          },
-          {
-            "$ref": "#/components/schemas/QuestionEventData"
-          },
-          {
-            "$ref": "#/components/schemas/AgentUnparsedData"
-          }
-        ]
-      },
-      "UniversalEventType": {
-        "type": "string",
-        "enum": [
-          "session.started",
-          "session.ended",
-          "turn.started",
-          "turn.ended",
-          "item.started",
-          "item.delta",
-          "item.completed",
-          "error",
-          "permission.requested",
-          "permission.resolved",
-          "question.requested",
-          "question.resolved",
-          "agent.unparsed"
-        ]
-      },
-      "UniversalItem": {
+      "TerminationInfo": {
         "type": "object",
         "required": [
-          "item_id",
-          "kind",
-          "content",
-          "status"
+          "reason",
+          "terminatedBy"
         ],
         "properties": {
-          "content": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ContentPart"
-            }
+          "exitCode": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
           },
-          "item_id": {
+          "message": {
+            "type": "string",
+            "nullable": true
+          },
+          "reason": {
             "type": "string"
           },
-          "kind": {
-            "$ref": "#/components/schemas/ItemKind"
-          },
-          "native_item_id": {
-            "type": "string",
-            "nullable": true
-          },
-          "parent_id": {
-            "type": "string",
-            "nullable": true
-          },
-          "role": {
+          "stderr": {
             "allOf": [
               {
-                "$ref": "#/components/schemas/ItemRole"
+                "$ref": "#/components/schemas/StderrOutput"
               }
             ],
             "nullable": true
           },
-          "status": {
-            "$ref": "#/components/schemas/ItemStatus"
+          "terminatedBy": {
+            "type": "string"
           }
         }
       }
@@ -2769,20 +1082,8 @@
   },
   "tags": [
     {
-      "name": "meta",
-      "description": "Service metadata"
-    },
-    {
-      "name": "agents",
-      "description": "Agent management"
-    },
-    {
-      "name": "sessions",
-      "description": "Session management"
-    },
-    {
-      "name": "fs",
-      "description": "Filesystem operations"
+      "name": "v2",
+      "description": "ACP-native v2 API"
     }
   ]
 }

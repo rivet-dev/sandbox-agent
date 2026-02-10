@@ -145,7 +145,7 @@ pub fn is_process_running(pid: u32) -> bool {
 // ---------------------------------------------------------------------------
 
 pub fn check_health(base_url: &str, token: Option<&str>) -> Result<bool, CliError> {
-    let url = format!("{base_url}/v1/health");
+    let url = format!("{base_url}/v2/health");
     let started_at = Instant::now();
     let client = HttpClient::builder()
         .connect_timeout(HEALTH_CHECK_CONNECT_TIMEOUT)
@@ -205,7 +205,7 @@ pub fn wait_for_health(
             }
         }
 
-        let url = format!("{base_url}/v1/health");
+        let url = format!("{base_url}/v2/health");
         let mut request = client.get(&url);
         if let Some(token) = token {
             request = request.bearer_auth(token);

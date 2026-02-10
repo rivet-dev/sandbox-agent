@@ -3,8 +3,9 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 use sandbox_agent_error::SandboxError;
-use sandbox_agent_universal_agent_schema::StderrOutput;
 use time::{Duration, OffsetDateTime};
+
+use super::StderrOutput;
 
 const LOG_RETENTION_DAYS: i64 = 7;
 const LOG_HEAD_LINES: usize = 20;

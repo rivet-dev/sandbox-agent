@@ -34,22 +34,22 @@ describe("OpenCode-compatible Session API", () => {
   }
 
   async function getBackingSessionPermissionMode(sessionId: string) {
-    const response = await fetch(`${handle.baseUrl}/v1/sessions`, {
+    const response = await fetch(`${handle.baseUrl}/opencode/session`, {
       headers: { Authorization: `Bearer ${handle.token}` },
     });
     expect(response.ok).toBe(true);
-    const data = await response.json();
-    const session = (data.sessions ?? []).find((item: any) => item.sessionId === sessionId);
+    const sessions = await response.json();
+    const session = (sessions ?? []).find((item: any) => item.id === sessionId);
     return session?.permissionMode;
   }
 
   async function getBackingSession(sessionId: string) {
-    const response = await fetch(`${handle.baseUrl}/v1/sessions`, {
+    const response = await fetch(`${handle.baseUrl}/opencode/session`, {
       headers: { Authorization: `Bearer ${handle.token}` },
     });
     expect(response.ok).toBe(true);
-    const data = await response.json();
-    return (data.sessions ?? []).find((item: any) => item.sessionId === sessionId);
+    const sessions = await response.json();
+    return (sessions ?? []).find((item: any) => item.id === sessionId);
   }
 
   async function initSessionViaHttp(

@@ -1,5 +1,5 @@
 import { Cloud, PlayCircle, Terminal } from "lucide-react";
-import type { AgentInfo, AgentModeInfo, UniversalEvent } from "sandbox-agent";
+import type { AgentInfo, AgentModeInfo, UniversalEvent } from "../../types/legacyApi";
 import AgentsTab from "./AgentsTab";
 import EventsTab from "./EventsTab";
 import RequestLogTab from "./RequestLogTab";
