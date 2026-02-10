@@ -21,6 +21,72 @@ pub fn event_to_universal(
 ) -> Result<Vec<EventConversion>, String> {
     let mut events = Vec::new();
     match event.type_ {
+        // System init message - contains metadata like cwd, tools, session_id
+        // We skip this as it's not a user-facing event
+        schema::StreamJsonMessageType::System => {}
+        // User message - extract content from the nested message field
+        schema::StreamJsonMessageType::User => {
+            if !event.message.is_empty() {
+                let text = event
+                    .message
+                    .get("content")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let item = UniversalItem {
+                    item_id: next_temp_id("tmp_amp_user"),
+                    native_item_id: event.session_id.clone(),
+                    parent_id: None,
+                    kind: ItemKind::Message,
+                    role: Some(ItemRole::User),
+                    content: vec![ContentPart::Text { text: text.clone() }],
+                    status: ItemStatus::Completed,
+                };
+                events.extend(message_events(item, text));
+            }
+        }
+        // Assistant message - extract content from the nested message field
+        schema::StreamJsonMessageType::Assistant => {
+            if !event.message.is_empty() {
+                let text = event
+                    .message
+                    .get("content")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let item = UniversalItem {
+                    item_id: next_temp_id("tmp_amp_assistant"),
+                    native_item_id: event.session_id.clone(),
+                    parent_id: None,
+                    kind: ItemKind::Message,
+                    role: Some(ItemRole::Assistant),
+                    content: vec![ContentPart::Text { text: text.clone() }],
+                    status: ItemStatus::Completed,
+                };
+                events.extend(message_events(item, text));
+            }
+        }
+        // Result message - signals completion
+        schema::StreamJsonMessageType::Result => {
+            events.push(turn_ended_event(None, None).synthetic());
+            events.push(
+                EventConversion::new(
+                    UniversalEventType::SessionEnded,
+                    UniversalEventData::SessionEnded(SessionEndedData {
+                        reason: if event.is_error.unwrap_or(false) {
+                            SessionEndReason::Error
+                        } else {
+                            SessionEndReason::Completed
+                        },
+                        terminated_by: TerminatedBy::Agent,
+                        message: event.result.clone(),
+                        exit_code: None,
+                        stderr: None,
+                    }),
+                )
+                .with_raw(serde_json::to_value(event).ok()),
+            );
+        }
         schema::StreamJsonMessageType::Message => {
             let text = event.content.clone().unwrap_or_default();
             let item = UniversalItem {

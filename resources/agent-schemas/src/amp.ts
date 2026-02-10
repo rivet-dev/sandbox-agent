@@ -204,12 +204,27 @@ function createFallbackSchema(): NormalizedSchema {
       properties: {
         type: {
           type: "string",
-          enum: ["message", "tool_call", "tool_result", "error", "done"],
+          enum: ["system", "user", "assistant", "result", "message", "tool_call", "tool_result", "error", "done"],
         },
+        // Common fields
         id: { type: "string" },
         content: { type: "string" },
         tool_call: { $ref: "#/definitions/ToolCall" },
         error: { type: "string" },
+        // System message fields
+        subtype: { type: "string" },
+        cwd: { type: "string" },
+        session_id: { type: "string" },
+        tools: { type: "array", items: { type: "string" } },
+        mcp_servers: { type: "array", items: { type: "object" } },
+        // User/Assistant message fields
+        message: { type: "object" },
+        parent_tool_use_id: { type: "string" },
+        // Result fields
+        duration_ms: { type: "number" },
+        is_error: { type: "boolean" },
+        num_turns: { type: "number" },
+        result: { type: "string" },
       },
       required: ["type"],
     },

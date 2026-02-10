@@ -73,3 +73,32 @@ fn test_amp_message() {
     assert!(json.contains("user"));
     assert!(json.contains("Hello"));
 }
+
+#[test]
+fn test_amp_stream_json_message_types() {
+    // Test that all new message types can be parsed
+    let system_msg = r#"{"type":"system","subtype":"init","cwd":"/tmp","session_id":"sess-1","tools":["Bash"],"mcp_servers":[]}"#;
+    let parsed: amp::StreamJsonMessage = serde_json::from_str(system_msg).unwrap();
+    assert!(matches!(parsed.type_, amp::StreamJsonMessageType::System));
+
+    let user_msg = r#"{"type":"user","message":{"role":"user","content":"Hello"},"session_id":"sess-1"}"#;
+    let parsed: amp::StreamJsonMessage = serde_json::from_str(user_msg).unwrap();
+    assert!(matches!(parsed.type_, amp::StreamJsonMessageType::User));
+
+    let assistant_msg = r#"{"type":"assistant","message":{"role":"assistant","content":"Hi there"},"session_id":"sess-1"}"#;
+    let parsed: amp::StreamJsonMessage = serde_json::from_str(assistant_msg).unwrap();
+    assert!(matches!(parsed.type_, amp::StreamJsonMessageType::Assistant));
+
+    let result_msg = r#"{"type":"result","subtype":"success","duration_ms":1000,"is_error":false,"num_turns":1,"result":"Done","session_id":"sess-1"}"#;
+    let parsed: amp::StreamJsonMessage = serde_json::from_str(result_msg).unwrap();
+    assert!(matches!(parsed.type_, amp::StreamJsonMessageType::Result));
+
+    // Test legacy types still work
+    let message_msg = r#"{"type":"message","id":"msg-1","content":"Hello"}"#;
+    let parsed: amp::StreamJsonMessage = serde_json::from_str(message_msg).unwrap();
+    assert!(matches!(parsed.type_, amp::StreamJsonMessageType::Message));
+
+    let done_msg = r#"{"type":"done"}"#;
+    let parsed: amp::StreamJsonMessage = serde_json::from_str(done_msg).unwrap();
+    assert!(matches!(parsed.type_, amp::StreamJsonMessageType::Done));
+}

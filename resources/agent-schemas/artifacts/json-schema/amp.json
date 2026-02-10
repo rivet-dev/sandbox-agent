@@ -9,6 +9,10 @@
         "type": {
           "type": "string",
           "enum": [
+            "system",
+            "user",
+            "assistant",
+            "result",
             "message",
             "tool_call",
             "tool_result",
@@ -26,6 +30,45 @@
           "$ref": "#/definitions/ToolCall"
         },
         "error": {
+          "type": "string"
+        },
+        "subtype": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "mcp_servers": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "message": {
+          "type": "object"
+        },
+        "parent_tool_use_id": {
+          "type": "string"
+        },
+        "duration_ms": {
+          "type": "number"
+        },
+        "is_error": {
+          "type": "boolean"
+        },
+        "num_turns": {
+          "type": "number"
+        },
+        "result": {
           "type": "string"
         }
       },

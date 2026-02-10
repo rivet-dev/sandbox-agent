@@ -1035,26 +1035,21 @@ fn spawn_amp(
     let mut args: Vec<&str> = Vec::new();
     if flags.execute {
         args.push("--execute");
-    } else if flags.print {
-        args.push("--print");
+        args.push(&options.prompt);
     }
     if flags.output_format {
-        args.push("--output-format");
-        args.push("stream-json");
+        args.push("--stream-json");
     }
     if flags.dangerously_skip_permissions && options.permission_mode.as_deref() == Some("bypass") {
-        args.push("--dangerously-skip-permissions");
+        args.push("--dangerously-allow-all");
     }
 
     let mut command = Command::new(path);
     command.current_dir(working_dir);
-    if let Some(model) = options.model.as_deref() {
-        command.arg("--model").arg(model);
-    }
     if let Some(session_id) = options.session_id.as_deref() {
         command.arg("--continue").arg(session_id);
     }
-    command.args(&args).arg(&options.prompt);
+    command.args(&args);
     for (key, value) in &options.env {
         command.env(key, value);
     }
@@ -1078,24 +1073,19 @@ fn build_amp_command(path: &Path, working_dir: &Path, options: &SpawnOptions) ->
     let flags = detect_amp_flags(path, working_dir).unwrap_or_default();
     let mut command = Command::new(path);
     command.current_dir(working_dir);
-    if let Some(model) = options.model.as_deref() {
-        command.arg("--model").arg(model);
-    }
     if let Some(session_id) = options.session_id.as_deref() {
         command.arg("--continue").arg(session_id);
     }
     if flags.execute {
         command.arg("--execute");
-    } else if flags.print {
-        command.arg("--print");
+        command.arg(&options.prompt);
     }
     if flags.output_format {
-        command.arg("--output-format").arg("stream-json");
+        command.arg("--stream-json");
     }
     if flags.dangerously_skip_permissions && options.permission_mode.as_deref() == Some("bypass") {
-        command.arg("--dangerously-skip-permissions");
+        command.arg("--dangerously-allow-all");
     }
-    command.arg(&options.prompt);
     for (key, value) in &options.env {
         command.env(key, value);
     }
@@ -1105,7 +1095,6 @@ fn build_amp_command(path: &Path, working_dir: &Path, options: &SpawnOptions) ->
 #[derive(Debug, Default, Clone, Copy)]
 struct AmpFlags {
     execute: bool,
-    print: bool,
     output_format: bool,
     dangerously_skip_permissions: bool,
 }
@@ -1123,9 +1112,8 @@ fn detect_amp_flags(path: &Path, working_dir: &Path) -> Option<AmpFlags> {
     );
     Some(AmpFlags {
         execute: text.contains("--execute"),
-        print: text.contains("--print"),
-        output_format: text.contains("--output-format"),
-        dangerously_skip_permissions: text.contains("--dangerously-skip-permissions"),
+        output_format: text.contains("--stream-json"),
+        dangerously_skip_permissions: text.contains("--dangerously-allow-all"),
     })
 }
 
@@ -1134,23 +1122,19 @@ fn spawn_amp_fallback(
     working_dir: &Path,
     options: &SpawnOptions,
 ) -> Result<std::process::Output, AgentError> {
-    let mut attempts = vec![
+    let mut attempts: Vec<Vec<&str>> = vec![
         vec!["--execute"],
-        vec!["--print", "--output-format", "stream-json"],
-        vec!["--output-format", "stream-json"],
-        vec!["--dangerously-skip-permissions"],
+        vec!["stream-json"],
+        vec!["--dangerously-allow-all"],
         vec![],
     ];
     if options.permission_mode.as_deref() != Some("bypass") {
-        attempts.retain(|args| !args.contains(&"--dangerously-skip-permissions"));
+        attempts.retain(|args| !args.contains(&"--dangerously-allow-all"));
     }
 
     for args in attempts {
         let mut command = Command::new(path);
         command.current_dir(working_dir);
-        if let Some(model) = options.model.as_deref() {
-            command.arg("--model").arg(model);
-        }
         if let Some(session_id) = options.session_id.as_deref() {
             command.arg("--continue").arg(session_id);
         }
@@ -1169,9 +1153,6 @@ fn spawn_amp_fallback(
 
     let mut command = Command::new(path);
     command.current_dir(working_dir);
-    if let Some(model) = options.model.as_deref() {
-        command.arg("--model").arg(model);
-    }
     if let Some(session_id) = options.session_id.as_deref() {
         command.arg("--continue").arg(session_id);
     }
