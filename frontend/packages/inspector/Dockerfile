@@ -7,6 +7,8 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY frontend/packages/inspector/package.json ./frontend/packages/inspector/
 COPY sdks/typescript/package.json ./sdks/typescript/
 COPY sdks/cli-shared/package.json ./sdks/cli-shared/
+COPY sdks/acp-http-client/package.json ./sdks/acp-http-client/
+COPY sdks/persist-indexeddb/package.json ./sdks/persist-indexeddb/
 
 # Install dependencies
 RUN pnpm install --filter @sandbox-agent/inspector...
@@ -15,11 +17,17 @@ RUN pnpm install --filter @sandbox-agent/inspector...
 COPY sdks/cli-shared ./sdks/cli-shared
 RUN cd sdks/cli-shared && pnpm exec tsup
 
-# Copy SDK source (with pre-generated types)
-COPY sdks/typescript ./sdks/typescript
+# Copy acp-http-client source and build it
+COPY sdks/acp-http-client ./sdks/acp-http-client
+RUN cd sdks/acp-http-client && pnpm exec tsup
 
-# Build SDK (just tsup, skip generate since types are pre-generated)
+# Copy SDK source (with pre-generated types) and build
+COPY sdks/typescript ./sdks/typescript
 RUN cd sdks/typescript && pnpm exec tsup
+
+# Copy persist-indexeddb and build (depends on SDK)
+COPY sdks/persist-indexeddb ./sdks/persist-indexeddb
+RUN cd sdks/persist-indexeddb && pnpm exec tsup
 
 # Copy inspector source
 COPY frontend/packages/inspector ./frontend/packages/inspector

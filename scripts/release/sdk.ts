@@ -8,9 +8,10 @@ import { downloadFromReleases, PREFIX } from "./utils";
 const CRATES = [
 	"error",
 	"agent-credentials",
-	"extracted-agent-schemas",
-	"universal-agent-schema",
 	"agent-management",
+	"opencode-server-manager",
+	"opencode-adapter",
+	"acp-http-adapter",
 	"sandbox-agent",
 	"gigacode",
 ] as const;
@@ -235,10 +236,6 @@ export async function publishNpmCliShared(opts: ReleaseOpts) {
 		cwd: cliSharedPath,
 	})`pnpm publish --access public --tag ${tag} --no-git-checks`;
 
-	if (opts.latest && tag === "latest") {
-		await addNpmDistTag(name, opts.version, opts.minorVersionChannel);
-	}
-
 	console.log(`✅ Published ${name}@${opts.version}`);
 }
 
@@ -275,10 +272,6 @@ export async function publishNpmSdk(opts: ReleaseOpts) {
 		stdio: "inherit",
 		cwd: sdkPath,
 	})`pnpm publish --access public --tag ${tag} --no-git-checks`;
-
-	if (opts.latest && tag === "latest") {
-		await addNpmDistTag(name, opts.version, opts.minorVersionChannel);
-	}
 
 	console.log(`✅ Published ${name}@${opts.version}`);
 }
@@ -368,13 +361,6 @@ export async function publishNpmCli(opts: ReleaseOpts) {
 			})`pnpm publish --access public --tag ${tag} --no-git-checks`;
 			console.log(`✅ Published ${packageName}@${opts.version}`);
 
-			if (
-				opts.latest &&
-				tag === "latest" &&
-				isSandboxAgentCliPackage(packageName)
-			) {
-				await addNpmDistTag(packageName, opts.version, opts.minorVersionChannel);
-			}
 		} catch (err) {
 			console.error(`❌ Failed to publish ${packageName}`);
 			throw err;
@@ -401,17 +387,3 @@ function getCliPackageNpmTag(opts: {
 	return opts.minorVersionChannel;
 }
 
-function isSandboxAgentCliPackage(packageName: string): boolean {
-	return packageName === "@sandbox-agent/cli" || packageName.startsWith("@sandbox-agent/cli-");
-}
-
-async function addNpmDistTag(
-	packageName: string,
-	version: string,
-	tag: string,
-): Promise<void> {
-	console.log(`==> Adding npm dist-tag: ${packageName}@${version} as ${tag}`);
-	await $({
-		stdio: "inherit",
-	})`npm dist-tag add ${packageName}@${version} ${tag}`;
-}
