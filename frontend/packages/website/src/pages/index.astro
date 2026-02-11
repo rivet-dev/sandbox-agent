@@ -11,8 +11,7 @@ import { Footer } from '../components/Footer';
 ---
 
 <Layout title="Sandbox Agent SDK - Run Coding Agents in Sandboxes. Control Them Over HTTP.">
-  <div class="min-h-screen bg-black text-white selection:bg-accent/30">
-    <Navigation client:load />
+  <Navigation client:load />
     <main>
       <Hero client:load />
       <PainPoints client:visible />
@@ -21,6 +20,5 @@ import { Footer } from '../components/Footer';
       <Inspector client:visible />
       <FAQ client:visible />
     </main>
-    <Footer client:visible />
-  </div>
+  <Footer client:visible />
 </Layout>

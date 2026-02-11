@@ -3,13 +3,61 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    --header-height: 3.5rem;
+
+    /* Theme colors (HSL for flexibility) */
+    --background: 20 14.3% 4.1%;
+    --foreground: 60 9.1% 97.8%;
+    --primary: 18.5 100% 50%;
+    --primary-foreground: 60 9.1% 97.8%;
+    --muted: 34 10% 10%;
+    --muted-foreground: 24 5.4% 63.9%;
+    --border: 12 6.5% 15.1%;
+    --card: 0 9.09% 6.47%;
+
+    /* Shiki syntax highlighting */
+    --shiki-color-text: theme('colors.white');
+    --shiki-foreground: hsl(var(--foreground));
+    --shiki-token-constant: theme('colors.violet.300');
+    --shiki-token-string: theme('colors.violet.300');
+    --shiki-token-comment: theme('colors.zinc.500');
+    --shiki-token-keyword: theme('colors.sky.300');
+    --shiki-token-parameter: theme('colors.pink.300');
+    --shiki-token-function: theme('colors.violet.300');
+    --shiki-token-string-expression: theme('colors.violet.300');
+    --shiki-token-punctuation: theme('colors.zinc.200');
+  }
+
+  * {
+    @apply border-white/10;
+  }
+
   body {
     @apply bg-black text-white antialiased;
     font-family: 'Open Sans', system-ui, sans-serif;
   }
 
+  /* Text selection - matches rivet.dev */
   ::selection {
-    @apply bg-accent/30 text-white;
+    background-color: rgba(255, 79, 0, 0.3);
+    color: #fed7aa;
+  }
+
+  ::-moz-selection {
+    background-color: rgba(255, 79, 0, 0.3);
+    color: #fed7aa;
+  }
+
+  /* Selection style for white/light backgrounds */
+  .selection-dark::selection {
+    background-color: #18181b;
+    color: white;
+  }
+
+  .selection-dark::-moz-selection {
+    background-color: #18181b;
+    color: white;
   }
 
   /* Firefox scrollbar */
@@ -65,6 +113,7 @@
 }
 
 @layer components {
+  /* Glass morphism effects */
   .glass {
     @apply bg-white/[0.02] backdrop-blur-md border border-white/10;
   }
@@ -72,4 +121,123 @@
   .glass-hover {
     @apply hover:bg-white/[0.04] hover:border-white/20 transition-all;
   }
+
+  .glass-strong {
+    @apply bg-black/95 backdrop-blur-lg border border-white/10;
+  }
+
+  /* Bento box card effects */
+  .bento-box {
+    transition: border-color 0.3s ease;
+  }
+
+  .bento-box:hover {
+    border-color: rgba(255, 255, 255, 0.2);
+  }
+
+  /* Scroll-triggered animations */
+  .animate-on-scroll {
+    opacity: 0;
+    transition: opacity 0.8s ease-out, transform 0.8s cubic-bezier(0.19, 1, 0.22, 1);
+    transition-delay: var(--scroll-delay, 0s);
+    will-change: opacity, transform;
+  }
+
+  .animate-fade-up {
+    transform: translateY(30px);
+  }
+
+  .animate-on-scroll.is-visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  /* Delay utilities for staggered animations */
+  .delay-100 { --scroll-delay: 100ms; }
+  .delay-200 { --scroll-delay: 200ms; }
+  .delay-300 { --scroll-delay: 300ms; }
+  .delay-400 { --scroll-delay: 400ms; }
+  .delay-500 { --scroll-delay: 500ms; }
+  .delay-600 { --scroll-delay: 600ms; }
+
+  /* Top shine highlight for cards */
+  .shine-top {
+    position: relative;
+  }
+
+  .shine-top::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    height: 1px;
+    background: linear-gradient(to right, transparent, rgba(255, 255, 255, 0.2), transparent);
+    pointer-events: none;
+  }
+
+  /* Glow effect for buttons and interactive elements */
+  .glow-accent {
+    box-shadow: 0 0 20px rgba(255, 69, 0, 0.3);
+  }
+
+  .glow-accent-hover:hover {
+    box-shadow: 0 0 30px rgba(255, 69, 0, 0.5);
+  }
+
+  /* Code highlight styling */
+  .code-highlight-ref {
+    position: relative;
+    transition: background-color 0.3s ease-out;
+    display: block;
+    margin: 0 -1.5rem;
+    padding: 0 1.5rem;
+  }
+
+  .code-highlight-ref.is-active {
+    background-color: rgba(255, 69, 0, 0.1);
+  }
+
+  .code-highlight-ref.is-active::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background-color: #ff4500;
+  }
+
+  /* Hide scrollbar */
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
+
+@layer utilities {
+  /* Gradient text */
+  .text-gradient-accent {
+    @apply bg-gradient-to-r from-orange-400 to-orange-600 bg-clip-text text-transparent;
+  }
+
+  /* Backdrop with blur */
+  .backdrop-glow {
+    @apply backdrop-blur-lg bg-black/80;
+  }
+
+  /* Better focus ring */
+  .focus-ring {
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-black;
+  }
+}
+
+/* View transition disable (for smooth prefetching) */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
 }

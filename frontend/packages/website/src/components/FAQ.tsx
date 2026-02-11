@@ -61,14 +61,14 @@ function FAQItem({ question, answer }: { question: string; answer: string }) {
   const [isOpen, setIsOpen] = useState(false);
 
   return (
-    <div className="border-b border-white/5">
+    <div className="border-t border-white/10 first:border-t-0">
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="flex w-full items-center justify-between py-5 text-left"
+        className="group flex w-full items-center justify-between py-5 text-left"
       >
-        <span className="text-base font-medium text-white pr-4">{question}</span>
+        <span className="text-base font-normal text-white pr-4 group-hover:text-zinc-300 transition-colors">{question}</span>
         <ChevronDown
-          className={`h-5 w-5 shrink-0 text-zinc-500 transition-transform duration-200 ${
+          className={`h-4 w-4 shrink-0 text-zinc-500 transition-transform duration-200 ${
             isOpen ? 'rotate-180' : ''
           }`}
         />
@@ -82,7 +82,7 @@ function FAQItem({ question, answer }: { question: string; answer: string }) {
             transition={{ duration: 0.2 }}
             className="overflow-hidden"
           >
-            <p className="pb-5 text-sm leading-relaxed text-zinc-400" dangerouslySetInnerHTML={{ __html: answer }} />
+            <p className="pb-5 text-sm leading-relaxed text-zinc-500" dangerouslySetInnerHTML={{ __html: answer }} />
           </motion.div>
         )}
       </AnimatePresence>
@@ -92,22 +92,40 @@ function FAQItem({ question, answer }: { question: string; answer: string }) {
 
 export function FAQ() {
   return (
-    <section className="relative overflow-hidden border-t border-white/5 py-24">
-      <div className="mx-auto max-w-3xl px-6">
+    <section className="border-t border-white/10 py-48">
+      <div className="mx-auto max-w-7xl px-6">
         <div className="mb-12 text-center">
-          <h2 className="mb-4 text-3xl font-medium tracking-tight text-white">
+          <motion.h2
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.5 }}
+            className="mb-2 text-2xl font-normal tracking-tight text-white md:text-4xl"
+          >
             Frequently Asked Questions
-          </h2>
-          <p className="text-zinc-400">
+          </motion.h2>
+          <motion.p
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.5, delay: 0.1 }}
+            className="mx-auto max-w-xl text-base leading-relaxed text-zinc-500"
+          >
             Common questions about running agents in sandboxes.
-          </p>
+          </motion.p>
         </div>
 
-        <div className="divide-y divide-white/5 rounded-2xl border border-white/5 bg-zinc-900/30 px-6">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          transition={{ duration: 0.5, delay: 0.2 }}
+          className="mx-auto max-w-3xl"
+        >
           {faqs.map((faq, index) => (
             <FAQItem key={index} question={faq.question} answer={faq.answer} />
           ))}
-        </div>
+        </motion.div>
       </div>
     </section>
   );

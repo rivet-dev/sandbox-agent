@@ -1,23 +1,45 @@
 'use client';
 
+import { motion } from 'framer-motion';
+
 export function Inspector() {
   return (
-    <section className="relative overflow-hidden border-t border-white/5 py-24">
-      <div className="mx-auto max-w-4xl px-6 text-center">
-        <h2 className="mb-4 text-3xl font-medium tracking-tight text-white md:text-5xl">
-          Built-in Debugger
-        </h2>
-        <p className="mb-12 text-lg text-zinc-400">
-          Inspect sessions, view event payloads, and troubleshoot without writing code.
-        </p>
+    <section className="border-t border-white/10 py-48">
+      <div className="mx-auto max-w-7xl px-6">
+        <div className="mb-12 text-center">
+          <motion.h2
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.5 }}
+            className="mb-2 text-2xl font-normal tracking-tight text-white md:text-4xl"
+          >
+            Built-in Debugger
+          </motion.h2>
+          <motion.p
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.5, delay: 0.1 }}
+            className="mx-auto max-w-xl text-base leading-relaxed text-zinc-500"
+          >
+            Inspect sessions, view event payloads, and troubleshoot without writing&nbsp;code.
+          </motion.p>
+        </div>
 
-        <div className="overflow-hidden rounded-2xl border border-white/10 shadow-2xl">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          transition={{ duration: 0.5, delay: 0.2 }}
+          className="overflow-hidden rounded-2xl border border-white/10"
+        >
           <img
             src="/images/inspector.png"
             alt="Sandbox Agent Inspector"
             className="w-full"
           />
-        </div>
+        </motion.div>
       </div>
     </section>
   );

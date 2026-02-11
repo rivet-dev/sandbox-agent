@@ -4,32 +4,81 @@ interface Props {
   description?: string;
 }
 
-const { title, description = "Universal SDK for coding agents. Control Claude Code, Codex, OpenCode, and Amp with unified events and sessions." } = Astro.props;
+const { title, description = "Universal SDK for coding agents. Control Claude Code, Codex, OpenCode, Amp, and Pi with unified events and sessions." } = Astro.props;
+const canonicalURL = new URL(Astro.url.pathname, 'https://sandbox-agent.dev');
+const ogImageURL = new URL('/og.png', 'https://sandbox-agent.dev');
+
+const structuredData = {
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "Sandbox Agent SDK",
+  "applicationCategory": "DeveloperApplication",
+  "operatingSystem": "Linux, macOS, Windows",
+  "description": description,
+  "url": "https://sandbox-agent.dev",
+  "author": {
+    "@type": "Organization",
+    "name": "Rivet",
+    "url": "https://rivet.dev"
+  },
+  "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "USD"
+  },
+  "keywords": "coding agents, AI SDK, Claude Code, Codex, OpenCode, Amp, sandbox, remote code execution, developer tools"
+};
 ---
 
 <!doctype html>
-<html lang="en">
+<html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content={description} />
+    <meta name="keywords" content="coding agents, AI SDK, Claude Code, Codex, OpenCode, Amp, Pi, sandbox, remote code execution, developer tools, AI coding assistant, code automation" />
+    <meta name="author" content="Rivet" />
+    <meta name="robots" content="index, follow" />
+    <meta name="theme-color" content="#000000" />
+    <link rel="canonical" href={canonicalURL} />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+
+    <!-- Preconnect to font providers -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preconnect" href="https://api.fontshare.com" crossorigin />
+
+    <!-- Satoshi for headings (from Fontshare) -->
+    <link href="https://api.fontshare.com/v2/css?f[]=satoshi@700,900&display=swap" rel="stylesheet" />
+
+    <!-- Open Sans + JetBrains Mono (from Google Fonts) -->
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Open+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
     <title>{title}</title>
 
+    <!-- Open Graph -->
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
     <meta property="og:type" content="website" />
-    <meta property="og:image" content="/og.png" />
+    <meta property="og:url" content={canonicalURL} />
+    <meta property="og:site_name" content="Sandbox Agent SDK" />
+    <meta property="og:image" content={ogImageURL} />
     <meta property="og:image:width" content="2400" />
     <meta property="og:image:height" content="1260" />
     <meta property="og:image:alt" content="Sandbox Agent SDK - Run Coding Agents in Sandboxes. Control Them Over HTTP." />
+
+    <!-- Twitter -->
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:image" content="/og.png" />
+    <meta name="twitter:site" content="@rivet_dev" />
+    <meta name="twitter:creator" content="@rivet_dev" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={ogImageURL} />
+
+    <!-- Structured Data -->
+    <script type="application/ld+json" set:html={JSON.stringify(structuredData)} />
   </head>
-  <body class="min-h-screen">
+  <body class="min-h-screen bg-background text-foreground antialiased">
     <slot />
   </body>
 </html>
