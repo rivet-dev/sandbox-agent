@@ -11,7 +11,6 @@ use serde::Serialize;
 use time::OffsetDateTime;
 use tokio::time::Instant;
 
-use crate::http_client;
 static TELEMETRY_ENABLED: AtomicBool = AtomicBool::new(false);
 
 const TELEMETRY_URL: &str = "https://tc.rivet.dev";
@@ -83,7 +82,7 @@ pub fn log_enabled_message() {
 
 pub fn spawn_telemetry_task() {
     tokio::spawn(async move {
-        let client = match http_client::client_builder()
+        let client = match Client::builder()
             .timeout(Duration::from_millis(TELEMETRY_TIMEOUT_MS))
             .build()
         {

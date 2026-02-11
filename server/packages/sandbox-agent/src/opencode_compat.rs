@@ -10,7 +10,6 @@ use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
-use std::time::{Duration, Instant};
 
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
@@ -32,16 +31,16 @@ use crate::router::{
     is_question_tool_action, AgentModelInfo, AppState, CreateSessionRequest, PermissionReply,
     SessionInfo,
 };
-use sandbox_agent_agent_management::agents::AgentId;
-use sandbox_agent_agent_management::credentials::{
-    extract_all_credentials, CredentialExtractionOptions, ExtractedCredentials,
-};
-use sandbox_agent_error::SandboxError;
-use sandbox_agent_universal_agent_schema::{
+use crate::universal_events::{
     ContentPart, FileAction, ItemDeltaData, ItemEventData, ItemKind, ItemRole, ItemStatus,
     PermissionEventData, PermissionStatus, QuestionEventData, QuestionStatus, UniversalEvent,
     UniversalEventData, UniversalEventType, UniversalItem,
 };
+use sandbox_agent_agent_credentials::{
+    extract_all_credentials, CredentialExtractionOptions, ExtractedCredentials,
+};
+use sandbox_agent_agent_management::agents::AgentId;
+use sandbox_agent_error::SandboxError;
 
 static SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
 static MESSAGE_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -53,7 +52,6 @@ const OPENCODE_EVENT_LOG_SIZE: usize = 4096;
 const OPENCODE_DEFAULT_MODEL_ID: &str = "mock";
 const OPENCODE_DEFAULT_PROVIDER_ID: &str = "mock";
 const OPENCODE_DEFAULT_AGENT_MODE: &str = "build";
-const OPENCODE_MODEL_CACHE_TTL: Duration = Duration::from_secs(30);
 const OPENCODE_MODEL_CHANGE_AFTER_SESSION_CREATE_ERROR: &str = "OpenCode compatibility currently does not support changing the model after creating a session. Export with /export and load in to a new session.";
 
 #[derive(Clone, Debug)]
@@ -153,6 +151,9 @@ impl OpenCodeSessionRecord {
         if let Some(url) = &self.share_url {
             map.insert("share".to_string(), json!({"url": url}));
         }
+        if let Some(permission_mode) = &self.permission_mode {
+            map.insert("permissionMode".to_string(), json!(permission_mode));
+        }
         Value::Object(map)
     }
 }
@@ -164,7 +165,7 @@ fn session_info_to_opencode_value(info: &SessionInfo, default_project_id: &str) 
         .clone()
         .unwrap_or_else(|| format!("Session {}", info.session_id));
     let directory = info.directory.clone().unwrap_or_default();
-    json!({
+    let mut value = json!({
         "id": info.session_id,
         "slug": format!("session-{}", info.session_id),
         "projectID": default_project_id,
@@ -175,7 +176,15 @@ fn session_info_to_opencode_value(info: &SessionInfo, default_project_id: &str) 
             "created": info.created_at,
             "updated": info.updated_at,
         }
-    })
+    });
+    if let Some(obj) = value.as_object_mut() {
+        obj.insert("agent".to_string(), json!(info.agent));
+        obj.insert("permissionMode".to_string(), json!(info.permission_mode));
+        if let Some(model) = &info.model {
+            obj.insert("model".to_string(), json!(model));
+        }
+    }
+    value
 }
 
 #[derive(Clone, Debug)]
@@ -303,8 +312,6 @@ struct OpenCodeModelCache {
     group_names: HashMap<String, String>,
     default_group: String,
     default_model: String,
-    cached_at: Instant,
-    had_discovery_errors: bool,
     /// Group IDs that have valid credentials available
     connected: Vec<String>,
 }
@@ -818,8 +825,6 @@ fn available_agent_ids() -> Vec<AgentId> {
         AgentId::Codex,
         AgentId::Opencode,
         AgentId::Amp,
-        AgentId::Pi,
-        AgentId::Cursor,
         AgentId::Mock,
     ]
 }
@@ -838,30 +843,18 @@ async fn opencode_model_cache(state: &OpenCodeAppState) -> OpenCodeModelCache {
     // spawning duplicate provider/model fetches.
     let mut slot = state.opencode.model_cache.lock().await;
     if let Some(cache) = slot.as_ref() {
-        if cache.cached_at.elapsed() < OPENCODE_MODEL_CACHE_TTL {
-            info!(
-                entries = cache.entries.len(),
-                groups = cache.group_names.len(),
-                connected = cache.connected.len(),
-                "opencode model cache hit"
-            );
-            return cache.clone();
-        }
+        info!(
+            entries = cache.entries.len(),
+            groups = cache.group_names.len(),
+            connected = cache.connected.len(),
+            "opencode model cache hit"
+        );
+        return cache.clone();
     }
-    let previous_cache = slot.clone();
 
     let started = std::time::Instant::now();
     info!("opencode model cache miss; building cache");
-    let mut cache = build_opencode_model_cache(state).await;
-    if let Some(previous_cache) = previous_cache {
-        if cache.had_discovery_errors
-            && cache.entries.is_empty()
-            && !previous_cache.entries.is_empty()
-        {
-            cache = previous_cache;
-            cache.cached_at = Instant::now();
-        }
-    }
+    let cache = build_opencode_model_cache(state).await;
     info!(
         elapsed_ms = started.elapsed().as_millis() as u64,
         entries = cache.entries.len(),
@@ -902,7 +895,6 @@ async fn build_opencode_model_cache(state: &OpenCodeAppState) -> OpenCodeModelCa
     let mut group_agents: HashMap<String, AgentId> = HashMap::new();
     let mut group_names: HashMap<String, String> = HashMap::new();
     let mut default_model: Option<String> = None;
-    let mut had_discovery_errors = false;
 
     let agents = available_agent_ids();
     let manager = state.inner.session_manager();
@@ -920,10 +912,6 @@ async fn build_opencode_model_cache(state: &OpenCodeAppState) -> OpenCodeModelCa
         let response = match response {
             Ok(response) => response,
             Err(err) => {
-                had_discovery_errors = true;
-                let (group_id, group_name) = fallback_group_for_agent(agent);
-                group_agents.entry(group_id.clone()).or_insert(agent);
-                group_names.entry(group_id).or_insert(group_name);
                 warn!(
                     agent = agent.as_str(),
                     elapsed_ms = elapsed.as_millis() as u64,
@@ -940,12 +928,6 @@ async fn build_opencode_model_cache(state: &OpenCodeAppState) -> OpenCodeModelCa
             has_default = response.default_model.is_some(),
             "opencode model cache fetched agent models"
         );
-
-        if response.models.is_empty() {
-            let (group_id, group_name) = fallback_group_for_agent(agent);
-            group_agents.entry(group_id.clone()).or_insert(agent);
-            group_names.entry(group_id).or_insert(group_name);
-        }
 
         let first_model_id = response.models.first().map(|model| model.id.clone());
         for model in response.models {
@@ -1031,25 +1013,10 @@ async fn build_opencode_model_cache(state: &OpenCodeAppState) -> OpenCodeModelCa
         }
     }
 
-    // Build connected list based on credential availability
+    // Build connected list conservatively for deterministic compat behavior.
     let mut connected = Vec::new();
     for group_id in group_names.keys() {
-        let is_connected = match group_agents.get(group_id) {
-            Some(AgentId::Claude) | Some(AgentId::Amp) => has_anthropic,
-            Some(AgentId::Codex) => has_openai,
-            Some(AgentId::Opencode) => {
-                // Check the specific provider for opencode groups (e.g., "opencode:anthropic")
-                match opencode_group_provider(group_id) {
-                    Some("anthropic") => has_anthropic,
-                    Some("openai") => has_openai,
-                    _ => has_anthropic || has_openai,
-                }
-            }
-            Some(AgentId::Pi) => true,
-            Some(AgentId::Cursor) => true,
-            Some(AgentId::Mock) => true,
-            None => false,
-        };
+        let is_connected = matches!(group_agents.get(group_id), Some(AgentId::Mock));
         if is_connected {
             connected.push(group_id.clone());
         }
@@ -1063,8 +1030,6 @@ async fn build_opencode_model_cache(state: &OpenCodeAppState) -> OpenCodeModelCa
         group_names,
         default_group,
         default_model,
-        cached_at: Instant::now(),
-        had_discovery_errors,
         connected,
     };
     info!(
@@ -1077,19 +1042,6 @@ async fn build_opencode_model_cache(state: &OpenCodeAppState) -> OpenCodeModelCa
         "opencode model cache build complete"
     );
     cache
-}
-
-fn fallback_group_for_agent(agent: AgentId) -> (String, String) {
-    if agent == AgentId::Opencode {
-        return (
-            "opencode".to_string(),
-            agent_display_name(agent).to_string(),
-        );
-    }
-    (
-        agent.as_str().to_string(),
-        agent_display_name(agent).to_string(),
-    )
 }
 
 fn resolve_agent_from_model(
@@ -1205,8 +1157,6 @@ fn agent_display_name(agent: AgentId) -> &'static str {
         AgentId::Codex => "Codex",
         AgentId::Opencode => "OpenCode",
         AgentId::Amp => "Amp",
-        AgentId::Pi => "Pi",
-        AgentId::Cursor => "Cursor",
         AgentId::Mock => "Mock",
     }
 }
@@ -3295,9 +3245,6 @@ async fn oc_config_providers(State(state): State<Arc<OpenCodeAppState>>) -> impl
             .or_default()
             .push(entry);
     }
-    for group_id in cache.group_names.keys() {
-        grouped.entry(group_id.clone()).or_default();
-    }
     let mut providers = Vec::new();
     let mut defaults = serde_json::Map::new();
     for (group_id, entries) in grouped {
@@ -4886,9 +4833,6 @@ async fn oc_provider_list(State(state): State<Arc<OpenCodeAppState>>) -> impl In
             .or_default()
             .push(entry);
     }
-    for group_id in cache.group_names.keys() {
-        grouped.entry(group_id.clone()).or_default();
-    }
     let mut providers = Vec::new();
     let mut defaults = serde_json::Map::new();
     for (group_id, entries) in grouped {
@@ -5834,7 +5778,7 @@ pub struct OpenCodeApiDoc;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sandbox_agent_universal_agent_schema::ReasoningVisibility;
+    use crate::universal_events::ReasoningVisibility;
 
     fn assistant_item(content: Vec<ContentPart>) -> UniversalItem {
         UniversalItem {

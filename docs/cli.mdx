@@ -1,12 +1,17 @@
 ---
 title: "CLI Reference"
-description: "Complete CLI reference for sandbox-agent."
+description: "CLI reference for sandbox-agent."
 sidebarTitle: "CLI"
 ---
 
-## Server
+Global flags (available on all commands):
 
-Start the HTTP server:
+- `-t, --token <TOKEN>`: require/use bearer auth
+- `-n, --no-token`: disable auth
+
+## server
+
+Run the HTTP server.
 
 ```bash
 sandbox-agent server [OPTIONS]
@@ -14,32 +19,27 @@ sandbox-agent server [OPTIONS]
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `-t, --token <TOKEN>` | - | Authentication token for all requests |
-| `-n, --no-token` | - | Disable authentication (local dev only) |
-| `-H, --host <HOST>` | `127.0.0.1` | Host to bind to |
-| `-p, --port <PORT>` | `2468` | Port to bind to |
-| `-O, --cors-allow-origin <ORIGIN>` | - | CORS origin to allow (repeatable) |
-| `-M, --cors-allow-method <METHOD>` | all | CORS allowed method (repeatable) |
-| `-A, --cors-allow-header <HEADER>` | all | CORS allowed header (repeatable) |
-| `-C, --cors-allow-credentials` | - | Enable CORS credentials |
-| `--no-telemetry` | - | Disable anonymous telemetry |
-| `--log-to-file` | - | Redirect server logs to a daily log file |
+| `-H, --host <HOST>` | `127.0.0.1` | Host to bind |
+| `-p, --port <PORT>` | `2468` | Port to bind |
+| `-O, --cors-allow-origin <ORIGIN>` | - | Allowed CORS origin (repeatable) |
+| `-M, --cors-allow-method <METHOD>` | all | Allowed CORS method (repeatable) |
+| `-A, --cors-allow-header <HEADER>` | all | Allowed CORS header (repeatable) |
+| `-C, --cors-allow-credentials` | false | Enable CORS credentials |
+| `--no-telemetry` | false | Disable anonymous telemetry |
 
 ```bash
-sandbox-agent server --token "$TOKEN" --port 3000
+sandbox-agent server --port 3000
 ```
 
-Server logs print to stdout/stderr by default. Use `--log-to-file` or `SANDBOX_AGENT_LOG_TO_FILE=1` to redirect logs to a daily log file under the sandbox-agent data directory (for example, `~/.local/share/sandbox-agent/logs`). Override the directory with `SANDBOX_AGENT_LOG_DIR`, or set `SANDBOX_AGENT_LOG_STDOUT=1` to force stdout/stderr.
+Notes:
 
-HTTP request logging is enabled by default. Control it with:
-- `SANDBOX_AGENT_LOG_HTTP=0` to disable request logs
-- `SANDBOX_AGENT_LOG_HTTP_HEADERS=1` to include request headers (Authorization is redacted)
+- Server logs are redirected to files by default.
+- Set `SANDBOX_AGENT_LOG_STDOUT=1` to force stdout/stderr logging.
+- Use `SANDBOX_AGENT_LOG_DIR` to override log directory.
 
----
+## install-agent
 
-## Install Agent (Local)
-
-Install an agent without running the server:
+Install or reinstall a single agent.
 
 ```bash
 sandbox-agent install-agent <AGENT> [OPTIONS]
@@ -47,17 +47,17 @@ sandbox-agent install-agent <AGENT> [OPTIONS]
 
 | Option | Description |
 |--------|-------------|
-| `-r, --reinstall` | Force reinstall even if already installed |
+| `-r, --reinstall` | Force reinstall |
+| `--agent-version <VERSION>` | Override agent package version |
+| `--agent-process-version <VERSION>` | Override agent process version |
 
 ```bash
 sandbox-agent install-agent claude --reinstall
 ```
 
----
+## opencode (experimental)
 
-## OpenCode (Experimental)
-
-Start (or reuse) a sandbox-agent daemon and attach an OpenCode session (uses `opencode attach`):
+Start/reuse daemon and run `opencode attach` against `/opencode`.
 
 ```bash
 sandbox-agent opencode [OPTIONS]
@@ -65,27 +65,20 @@ sandbox-agent opencode [OPTIONS]
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `-t, --token <TOKEN>` | - | Authentication token for all requests |
-| `-n, --no-token` | - | Disable authentication (local dev only) |
-| `-H, --host <HOST>` | `127.0.0.1` | Host to bind to |
-| `-p, --port <PORT>` | `2468` | Port to bind to |
-| `--session-title <TITLE>` | - | Title for the OpenCode session |
+| `-H, --host <HOST>` | `127.0.0.1` | Daemon host |
+| `-p, --port <PORT>` | `2468` | Daemon port |
+| `--session-title <TITLE>` | - | Reserved option (currently no-op) |
+| `--yolo` | false | OpenCode attach mode flag |
 
 ```bash
-sandbox-agent opencode --token "$TOKEN"
+sandbox-agent opencode
 ```
 
-The daemon logs to a per-host log file under the sandbox-agent data directory (for example, `~/.local/share/sandbox-agent/daemon/daemon-127-0-0-1-2468.log`).
+## daemon
 
-Existing installs are reused and missing binaries are installed automatically.
+Manage the background daemon.
 
----
-
-## Daemon
-
-Manage the background daemon. See the [Daemon](/daemon) docs for details on lifecycle and auto-upgrade.
-
-### Start
+### daemon start
 
 ```bash
 sandbox-agent daemon start [OPTIONS]
@@ -93,16 +86,16 @@ sandbox-agent daemon start [OPTIONS]
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `-H, --host <HOST>` | `127.0.0.1` | Host to bind to |
-| `-p, --port <PORT>` | `2468` | Port to bind to |
-| `-t, --token <TOKEN>` | - | Authentication token |
-| `-n, --no-token` | - | Disable authentication |
+| `-H, --host <HOST>` | `127.0.0.1` | Host |
+| `-p, --port <PORT>` | `2468` | Port |
+| `--upgrade` | false | Use ensure-running + upgrade behavior |
 
 ```bash
-sandbox-agent daemon start --no-token
+sandbox-agent daemon start
+sandbox-agent daemon start --upgrade
 ```
 
-### Stop
+### daemon stop
 
 ```bash
 sandbox-agent daemon stop [OPTIONS]
@@ -110,10 +103,10 @@ sandbox-agent daemon stop [OPTIONS]
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `-H, --host <HOST>` | `127.0.0.1` | Host of the daemon |
-| `-p, --port <PORT>` | `2468` | Port of the daemon |
+| `-H, --host <HOST>` | `127.0.0.1` | Host |
+| `-p, --port <PORT>` | `2468` | Port |
 
-### Status
+### daemon status
 
 ```bash
 sandbox-agent daemon status [OPTIONS]
@@ -121,16 +114,12 @@ sandbox-agent daemon status [OPTIONS]
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `-H, --host <HOST>` | `127.0.0.1` | Host of the daemon |
-| `-p, --port <PORT>` | `2468` | Port of the daemon |
+| `-H, --host <HOST>` | `127.0.0.1` | Host |
+| `-p, --port <PORT>` | `2468` | Port |
 
----
+## credentials
 
-## Credentials
-
-### Extract
-
-Extract locally discovered credentials:
+### credentials extract
 
 ```bash
 sandbox-agent credentials extract [OPTIONS]
@@ -138,20 +127,17 @@ sandbox-agent credentials extract [OPTIONS]
 
 | Option | Description |
 |--------|-------------|
-| `-a, --agent <AGENT>` | Filter by agent (`claude`, `codex`, `opencode`, `amp`, `pi`) |
-| `-p, --provider <PROVIDER>` | Filter by provider (`anthropic`, `openai`) |
-| `-d, --home-dir <DIR>` | Custom home directory for credential search |
-| `-r, --reveal` | Show full credential values (default: redacted) |
-| `--no-oauth` | Exclude OAuth credentials |
+| `-a, --agent <AGENT>` | Filter by `claude`, `codex`, `opencode`, or `amp` |
+| `-p, --provider <PROVIDER>` | Filter by provider |
+| `-d, --home-dir <DIR>` | Override home dir |
+| `--no-oauth` | Skip OAuth sources |
+| `-r, --reveal` | Show full credential values |
 
 ```bash
 sandbox-agent credentials extract --agent claude --reveal
-sandbox-agent credentials extract --provider anthropic
 ```
 
-### Extract as Environment Variables
-
-Output credentials as shell environment variables:
+### credentials extract-env
 
 ```bash
 sandbox-agent credentials extract-env [OPTIONS]
@@ -159,378 +145,28 @@ sandbox-agent credentials extract-env [OPTIONS]
 
 | Option | Description |
 |--------|-------------|
-| `-e, --export` | Prefix each line with `export` |
-| `-d, --home-dir <DIR>` | Custom home directory for credential search |
-| `--no-oauth` | Exclude OAuth credentials |
+| `-e, --export` | Prefix output with `export` |
+| `-d, --home-dir <DIR>` | Override home dir |
+| `--no-oauth` | Skip OAuth sources |
 
 ```bash
-# Source directly into shell
 eval "$(sandbox-agent credentials extract-env --export)"
 ```
 
----
+## api
 
-## API Commands
+API subcommands for scripting.
 
-The `sandbox-agent api` subcommand mirrors the HTTP API for scripting without client code.
-
-All API commands support:
+Shared option:
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `-e, --endpoint <URL>` | `http://127.0.0.1:2468` | API endpoint |
-| `-t, --token <TOKEN>` | - | Authentication token |
+| `-e, --endpoint <URL>` | `http://127.0.0.1:2468` | Target server |
 
----
-
-### Agents
-
-#### List Agents
+### api agents
 
 ```bash
-sandbox-agent api agents list
+sandbox-agent api agents list [--endpoint <URL>]
+sandbox-agent api agents install <AGENT> [--reinstall] [--endpoint <URL>]
 ```
 
-#### Install Agent
-
-```bash
-sandbox-agent api agents install <AGENT> [OPTIONS]
-```
-
-| Option | Description |
-|--------|-------------|
-| `-r, --reinstall` | Force reinstall |
-
-```bash
-sandbox-agent api agents install claude --reinstall
-```
-
-#### Get Agent Modes
-
-```bash
-sandbox-agent api agents modes <AGENT>
-```
-
-```bash
-sandbox-agent api agents modes claude
-```
-
-#### Get Agent Models
-
-```bash
-sandbox-agent api agents models <AGENT>
-```
-
-```bash
-sandbox-agent api agents models claude
-```
-
----
-
-### Sessions
-
-#### List Sessions
-
-```bash
-sandbox-agent api sessions list
-```
-
-#### Create Session
-
-```bash
-sandbox-agent api sessions create <SESSION_ID> [OPTIONS]
-```
-
-| Option | Description |
-|--------|-------------|
-| `-a, --agent <AGENT>` | Agent identifier (required) |
-| `-g, --agent-mode <MODE>` | Agent mode |
-| `-p, --permission-mode <MODE>` | Permission mode (`default`, `plan`, `bypass`, `acceptEdits`) |
-| `-m, --model <MODEL>` | Model override |
-| `-v, --variant <VARIANT>` | Model variant |
-| `-A, --agent-version <VERSION>` | Agent version |
-| `--mcp-config <PATH>` | JSON file with MCP server config (see `mcp` docs) |
-| `--skill <PATH>` | Skill directory or `SKILL.md` path (repeatable) |
-
-```bash
-sandbox-agent api sessions create my-session \
-  --agent claude \
-  --agent-mode code \
-  --permission-mode default
-```
-
-`acceptEdits` passes through to Claude, auto-approves file changes for Codex, and is treated as `default` for other agents.
-
-#### Send Message
-
-```bash
-sandbox-agent api sessions send-message <SESSION_ID> [OPTIONS]
-```
-
-| Option | Description |
-|--------|-------------|
-| `-m, --message <TEXT>` | Message text (required) |
-
-```bash
-sandbox-agent api sessions send-message my-session \
-  --message "Summarize the repository"
-```
-
-#### Send Message (Streaming)
-
-Send a message and stream the response:
-
-```bash
-sandbox-agent api sessions send-message-stream <SESSION_ID> [OPTIONS]
-```
-
-| Option | Description |
-|--------|-------------|
-| `-m, --message <TEXT>` | Message text (required) |
-| `--include-raw` | Include raw agent data |
-
-```bash
-sandbox-agent api sessions send-message-stream my-session \
-  --message "Help me debug this"
-```
-
-#### Terminate Session
-
-```bash
-sandbox-agent api sessions terminate <SESSION_ID>
-```
-
-```bash
-sandbox-agent api sessions terminate my-session
-```
-
-#### Get Events
-
-Fetch session events:
-
-```bash
-sandbox-agent api sessions events <SESSION_ID> [OPTIONS]
-```
-
-| Option | Description |
-|--------|-------------|
-| `-o, --offset <N>` | Event offset |
-| `-l, --limit <N>` | Max events to return |
-| `--include-raw` | Include raw agent data |
-
-```bash
-sandbox-agent api sessions events my-session --offset 0 --limit 50
-```
-
-`get-messages` is an alias for `events`.
-
-#### Stream Events (SSE)
-
-Stream session events via Server-Sent Events:
-
-```bash
-sandbox-agent api sessions events-sse <SESSION_ID> [OPTIONS]
-```
-
-| Option | Description |
-|--------|-------------|
-| `-o, --offset <N>` | Event offset to start from |
-| `--include-raw` | Include raw agent data |
-
-```bash
-sandbox-agent api sessions events-sse my-session --offset 0
-```
-
-#### Reply to Question
-
-```bash
-sandbox-agent api sessions reply-question <SESSION_ID> <QUESTION_ID> [OPTIONS]
-```
-
-| Option | Description |
-|--------|-------------|
-| `-a, --answers <JSON>` | JSON array of answers (required) |
-
-```bash
-sandbox-agent api sessions reply-question my-session q1 \
-  --answers '[["yes"]]'
-```
-
-#### Reject Question
-
-```bash
-sandbox-agent api sessions reject-question <SESSION_ID> <QUESTION_ID>
-```
-
-```bash
-sandbox-agent api sessions reject-question my-session q1
-```
-
-#### Reply to Permission
-
-```bash
-sandbox-agent api sessions reply-permission <SESSION_ID> <PERMISSION_ID> [OPTIONS]
-```
-
-| Option | Description |
-|--------|-------------|
-| `-r, --reply <REPLY>` | `once`, `always`, or `reject` (required) |
-
-```bash
-sandbox-agent api sessions reply-permission my-session perm1 --reply once
-```
-
----
-
-### Filesystem
-
-#### List Entries
-
-```bash
-sandbox-agent api fs entries [OPTIONS]
-```
-
-| Option | Description |
-|--------|-------------|
-| `--path <PATH>` | Directory path (default: `.`) |
-| `--session-id <SESSION_ID>` | Resolve relative paths from the session working directory |
-
-```bash
-sandbox-agent api fs entries --path ./workspace
-```
-
-#### Read File
-
-`api fs read` writes raw bytes to stdout.
-
-```bash
-sandbox-agent api fs read <PATH> [OPTIONS]
-```
-
-| Option | Description |
-|--------|-------------|
-| `--session-id <SESSION_ID>` | Resolve relative paths from the session working directory |
-
-```bash
-sandbox-agent api fs read ./notes.txt > ./notes.txt
-```
-
-#### Write File
-
-```bash
-sandbox-agent api fs write <PATH> [OPTIONS]
-```
-
-| Option | Description |
-|--------|-------------|
-| `--content <TEXT>` | Write UTF-8 content |
-| `--from-file <PATH>` | Read content from a local file |
-| `--session-id <SESSION_ID>` | Resolve relative paths from the session working directory |
-
-```bash
-sandbox-agent api fs write ./hello.txt --content "hello"
-sandbox-agent api fs write ./image.bin --from-file ./image.bin
-```
-
-#### Delete Entry
-
-```bash
-sandbox-agent api fs delete <PATH> [OPTIONS]
-```
-
-| Option | Description |
-|--------|-------------|
-| `--recursive` | Delete directories recursively |
-| `--session-id <SESSION_ID>` | Resolve relative paths from the session working directory |
-
-```bash
-sandbox-agent api fs delete ./old.log
-```
-
-#### Create Directory
-
-```bash
-sandbox-agent api fs mkdir <PATH> [OPTIONS]
-```
-
-| Option | Description |
-|--------|-------------|
-| `--session-id <SESSION_ID>` | Resolve relative paths from the session working directory |
-
-```bash
-sandbox-agent api fs mkdir ./cache
-```
-
-#### Move/Rename
-
-```bash
-sandbox-agent api fs move <FROM> <TO> [OPTIONS]
-```
-
-| Option | Description |
-|--------|-------------|
-| `--overwrite` | Overwrite destination if it exists |
-| `--session-id <SESSION_ID>` | Resolve relative paths from the session working directory |
-
-```bash
-sandbox-agent api fs move ./a.txt ./b.txt --overwrite
-```
-
-#### Stat
-
-```bash
-sandbox-agent api fs stat <PATH> [OPTIONS]
-```
-
-| Option | Description |
-|--------|-------------|
-| `--session-id <SESSION_ID>` | Resolve relative paths from the session working directory |
-
-```bash
-sandbox-agent api fs stat ./notes.txt
-```
-
-#### Upload Batch (tar)
-
-```bash
-sandbox-agent api fs upload-batch --tar <PATH> [OPTIONS]
-```
-
-| Option | Description |
-|--------|-------------|
-| `--tar <PATH>` | Tar archive to extract |
-| `--path <PATH>` | Destination directory |
-| `--session-id <SESSION_ID>` | Resolve relative paths from the session working directory |
-
-```bash
-sandbox-agent api fs upload-batch --tar ./skills.tar --path ./skills
-```
-
----
-
-## CLI to HTTP Mapping
-
-| CLI Command | HTTP Endpoint |
-|-------------|---------------|
-| `api agents list` | `GET /v1/agents` |
-| `api agents install` | `POST /v1/agents/{agent}/install` |
-| `api agents modes` | `GET /v1/agents/{agent}/modes` |
-| `api agents models` | `GET /v1/agents/{agent}/models` |
-| `api sessions list` | `GET /v1/sessions` |
-| `api sessions create` | `POST /v1/sessions/{sessionId}` |
-| `api sessions send-message` | `POST /v1/sessions/{sessionId}/messages` |
-| `api sessions send-message-stream` | `POST /v1/sessions/{sessionId}/messages/stream` |
-| `api sessions terminate` | `POST /v1/sessions/{sessionId}/terminate` |
-| `api sessions events` | `GET /v1/sessions/{sessionId}/events` |
-| `api sessions events-sse` | `GET /v1/sessions/{sessionId}/events/sse` |
-| `api sessions reply-question` | `POST /v1/sessions/{sessionId}/questions/{questionId}/reply` |
-| `api sessions reject-question` | `POST /v1/sessions/{sessionId}/questions/{questionId}/reject` |
-| `api sessions reply-permission` | `POST /v1/sessions/{sessionId}/permissions/{permissionId}/reply` |
-| `api fs entries` | `GET /v1/fs/entries` |
-| `api fs read` | `GET /v1/fs/file` |
-| `api fs write` | `PUT /v1/fs/file` |
-| `api fs delete` | `DELETE /v1/fs/entry` |
-| `api fs mkdir` | `POST /v1/fs/mkdir` |
-| `api fs move` | `POST /v1/fs/move` |
-| `api fs stat` | `GET /v1/fs/stat` |
-| `api fs upload-batch` | `POST /v1/fs/upload-batch` |

@@ -31,10 +31,7 @@ Sandbox Agent solves three problems:
 ## Features
 
 - **Universal Agent API**: Single interface to control Claude Code, Codex, OpenCode, Cursor, Amp, and Pi with full feature coverage
-- **Streaming Events**: Real-time SSE stream of everything the agent does — tool calls, permission requests, file edits, and more
-- **Universal Session Schema**: [Standardized schema](https://sandboxagent.dev/docs/session-transcript-schema) that normalizes all agent event formats for storage and replay
-- **Human-in-the-Loop**: Approve or deny tool executions and answer agent questions remotely over HTTP
-- **Automatic Agent Installation**: Agents are installed on-demand when first used — no setup required
+- **Universal Session Schema**: Standardized schema that normalizes all agent event formats for storage and replay
 - **Runs Inside Any Sandbox**: Lightweight static Rust binary. One curl command to install inside E2B, Daytona, Vercel Sandboxes, or Docker
 - **Server or SDK Mode**: Run as an HTTP server or embed with the TypeScript SDK
 - **OpenAPI Spec**: [Well documented](https://sandboxagent.dev/docs/api-reference) and easy to integrate from any language
@@ -83,11 +80,11 @@ Import the SDK directly into your Node or browser application. Full type safety 
 **Install**
 
 ```bash
-npm install sandbox-agent
+npm install sandbox-agent@0.2.x
 ```
 
 ```bash
-bun add sandbox-agent
+bun add sandbox-agent@0.2.x
 # Optional: allow Bun to run postinstall scripts for native binaries (required for SandboxAgent.start()).
 bun pm trust @sandbox-agent/cli-linux-x64 @sandbox-agent/cli-darwin-arm64 @sandbox-agent/cli-darwin-x64 @sandbox-agent/cli-win32-x64
 ```
@@ -141,7 +138,7 @@ Run as an HTTP server and connect from any language. Deploy to E2B, Daytona, Ver
 
 ```bash
 # Install it
-curl -fsSL https://releases.rivet.dev/sandbox-agent/latest/install.sh | sh
+curl -fsSL https://releases.rivet.dev/sandbox-agent/0.2.x/install.sh | sh
 # Run it
 sandbox-agent server --token "$SANDBOX_TOKEN" --host 127.0.0.1 --port 2468
 ```
@@ -168,12 +165,12 @@ sandbox-agent server --no-token --host 127.0.0.1 --port 2468
 Install the CLI wrapper (optional but convenient):
 
 ```bash
-npm install -g @sandbox-agent/cli
+npm install -g @sandbox-agent/cli@0.2.x
 ```
 
 ```bash
 # Allow Bun to run postinstall scripts for native binaries.
-bun add -g @sandbox-agent/cli
+bun add -g @sandbox-agent/cli@0.2.x
 bun pm -g trust @sandbox-agent/cli-linux-x64 @sandbox-agent/cli-darwin-arm64 @sandbox-agent/cli-darwin-x64 @sandbox-agent/cli-win32-x64
 ```
 
@@ -188,11 +185,11 @@ sandbox-agent api sessions send-message-stream my-session --message "Hello" --en
 You can also use npx like:
 
 ```bash
-npx sandbox-agent --help
+npx @sandbox-agent/cli@0.2.x --help
 ```
 
 ```bash
-bunx sandbox-agent --help
+bunx @sandbox-agent/cli@0.2.x --help
 ```
 
 [CLI documentation](https://sandboxagent.dev/docs/cli)
@@ -208,10 +205,6 @@ Debug sessions and events with the built-in Inspector UI (e.g., `http://localhos
 ### OpenAPI Specification
 
 [Explore API](https://sandboxagent.dev/docs/api-reference) — [View Specification](https://github.com/rivet-dev/sandbox-agent/blob/main/docs/openapi.json)
-
-### Session Transcript Schema
-
-All events follow a [session transcript schema](https://sandboxagent.dev/docs/session-transcript-schema) that normalizes differences between agents.
 
 ### Tip: Extract credentials
 

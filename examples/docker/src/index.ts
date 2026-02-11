@@ -1,6 +1,6 @@
 import Docker from "dockerode";
 import { SandboxAgent } from "sandbox-agent";
-import { detectAgent, buildInspectorUrl, generateSessionId, waitForHealth } from "@sandbox-agent/example-shared";
+import { detectAgent, buildInspectorUrl, waitForHealth } from "@sandbox-agent/example-shared";
 
 const IMAGE = "alpine:latest";
 const PORT = 3000;
@@ -25,7 +25,7 @@ const container = await docker.createContainer({
   Image: IMAGE,
   Cmd: ["sh", "-c", [
     "apk add --no-cache curl ca-certificates libstdc++ libgcc bash",
-    "curl -fsSL https://releases.rivet.dev/sandbox-agent/latest/install.sh | sh",
+    "curl -fsSL https://releases.rivet.dev/sandbox-agent/0.2.x/install.sh | sh",
     "sandbox-agent install-agent claude",
     "sandbox-agent install-agent codex",
     `sandbox-agent server --no-token --host 0.0.0.0 --port ${PORT}`,
@@ -46,8 +46,8 @@ const baseUrl = `http://127.0.0.1:${PORT}`;
 await waitForHealth({ baseUrl });
 
 const client = await SandboxAgent.connect({ baseUrl });
-const sessionId = generateSessionId();
-await client.createSession(sessionId, { agent: detectAgent() });
+const session = await client.createSession({ agent: detectAgent(), sessionInit: { cwd: "/root", mcpServers: [] } });
+const sessionId = session.id;
 
 console.log(`  UI: ${buildInspectorUrl({ baseUrl, sessionId })}`);
 console.log("  Press Ctrl+C to stop.");

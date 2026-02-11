@@ -3,7 +3,7 @@ title: "Inspector"
 description: "Debug and inspect agent sessions with the Inspector UI."
 ---
 
-The Inspector is a web-based GUI for debugging and inspecting Sandbox Agent sessions. Use it to view events, send messages, and troubleshoot agent behavior in real-time.
+The Inspector is a web UI for inspecting Sandbox Agent sessions. Use it to view events, inspect payloads, and troubleshoot behavior.
 
 <Frame>
   <img src="/images/inspector.png" alt="Sandbox Agent Inspector" />
@@ -11,35 +11,32 @@ The Inspector is a web-based GUI for debugging and inspecting Sandbox Agent sess
 
 ## Open the Inspector
 
-The Inspector UI is served at `/ui/` on your sandbox-agent server. For example, if your server is running at `http://localhost:2468`, open `http://localhost:2468/ui/` in your browser.
+The Inspector is served at `/ui/` on your Sandbox Agent server.
+For example, if your server runs at `http://localhost:2468`, open `http://localhost:2468/ui/`.
 
-You can also generate a pre-filled Inspector URL with authentication from the TypeScript SDK:
+You can also generate a pre-filled Inspector URL from the SDK:
 
 ```typescript
 import { buildInspectorUrl } from "sandbox-agent";
 
 const url = buildInspectorUrl({
   baseUrl: "http://127.0.0.1:2468",
-  token: process.env.SANDBOX_TOKEN,
 });
+
 console.log(url);
-// http://127.0.0.1:2468/ui/?token=...
+// http://127.0.0.1:2468/ui/
 ```
 
 ## Features
 
-- **Session list**: View all active sessions and their status
-- **Event stream**: See events in real-time as they arrive (SSE or polling)
-- **Event details**: Expand any event to see its full JSON payload
-- **Send messages**: Post messages to a session directly from the UI
-- **Agent selection**: Switch between agents and modes
-- **Request log**: View raw HTTP requests and responses for debugging
-- **Pi concurrent sessions**: Pi sessions run concurrently by default via per-session runtime processes
+- Session list
+- Event stream view
+- Event JSON inspector
+- Prompt testing
+- Request/response debugging
 
-## When to Use
+## When to use
 
-The Inspector is useful for:
-
-- **Development**: Test your integration without writing client code
-- **Debugging**: Inspect event payloads and timing issues
-- **Learning**: Understand how agents respond to different prompts
+- Development: validate session behavior quickly
+- Debugging: inspect raw event payloads
+- Integration work: compare UI behavior with SDK/API calls

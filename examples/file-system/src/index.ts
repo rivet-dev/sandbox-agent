@@ -1,5 +1,5 @@
 import { SandboxAgent } from "sandbox-agent";
-import { detectAgent, buildInspectorUrl, generateSessionId } from "@sandbox-agent/example-shared";
+import { detectAgent, buildInspectorUrl } from "@sandbox-agent/example-shared";
 import { startDockerSandbox } from "@sandbox-agent/example-shared/docker";
 import * as tar from "tar";
 import fs from "node:fs";
@@ -47,8 +47,8 @@ const readmeText = new TextDecoder().decode(readmeBytes);
 console.log(`  README.md content: ${readmeText.trim()}`);
 
 console.log("Creating session...");
-const sessionId = generateSessionId();
-await client.createSession(sessionId, { agent: detectAgent() });
+const session = await client.createSession({ agent: detectAgent(), sessionInit: { cwd: "/opt/my-project", mcpServers: [] } });
+const sessionId = session.id;
 console.log(`  UI: ${buildInspectorUrl({ baseUrl, sessionId })}`);
 console.log('  Try: "read the README in /opt/my-project"');
 console.log("  Press Ctrl+C to stop.");

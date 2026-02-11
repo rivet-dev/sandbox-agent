@@ -1,18 +1,27 @@
+import { BookOpen } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  SandboxAgentError,
   SandboxAgent,
+  SandboxAgentError,
   type AgentInfo,
-  type CreateSessionRequest,
-  type AgentModelInfo,
-  type AgentModeInfo,
-  type PermissionEventData,
-  type QuestionEventData,
-  type SessionInfo,
-  type SkillSource,
-  type UniversalEvent,
-  type UniversalItem
+  type SessionEvent,
+  type Session,
+  InMemorySessionPersistDriver,
+  type SessionPersistDriver,
 } from "sandbox-agent";
+
+type ConfigSelectOption = { value: string; name: string; description?: string };
+type ConfigOption = {
+  id: string;
+  name: string;
+  category?: string;
+  type?: string;
+  currentValue?: string;
+  options?: ConfigSelectOption[] | Array<{ group: string; name: string; options: ConfigSelectOption[] }>;
+};
+type AgentModeInfo = { id: string; name: string; description: string };
+type AgentModelInfo = { id: string; name?: string };
+import { IndexedDbSessionPersistDriver } from "@sandbox-agent/persist-indexeddb";
 import ChatPanel from "./components/chat/ChatPanel";
 import type { TimelineEntry } from "./components/chat/types";
 import ConnectScreen from "./components/ConnectScreen";
@@ -21,65 +30,31 @@ import SessionSidebar from "./components/SessionSidebar";
 import type { RequestLog } from "./types/requestLog";
 import { buildCurl } from "./utils/http";
 
+const flattenSelectOptions = (
+  options: ConfigSelectOption[] | Array<{ group: string; name: string; options: ConfigSelectOption[] }>
+): ConfigSelectOption[] => {
+  if (options.length === 0) return [];
+  if ("value" in options[0]) return options as ConfigSelectOption[];
+  return (options as Array<{ options: ConfigSelectOption[] }>).flatMap((g) => g.options);
+};
+
 const logoUrl = `${import.meta.env.BASE_URL}logos/sandboxagent.svg`;
-const defaultAgents = ["claude", "codex", "opencode", "amp", "pi", "mock"];
+const defaultAgents = ["claude", "codex", "opencode", "amp", "pi", "cursor"];
 
-type ItemEventData = {
-  item: UniversalItem;
+type ErrorToast = {
+  id: number;
+  message: string;
 };
 
-type ItemDeltaEventData = {
-  item_id: string;
-  native_item_id?: string | null;
-  delta: string;
+type SessionListItem = {
+  sessionId: string;
+  agent: string;
+  ended: boolean;
 };
 
-export type McpServerEntry = {
-  name: string;
-  configJson: string;
-  error: string | null;
-};
-
-type ParsedMcpConfig = {
-  value: NonNullable<CreateSessionRequest["mcp"]>;
-  count: number;
-  error: string | null;
-};
-
-const buildMcpConfig = (entries: McpServerEntry[]): ParsedMcpConfig => {
-  if (entries.length === 0) {
-    return { value: {}, count: 0, error: null };
-  }
-  const firstError = entries.find((e) => e.error);
-  if (firstError) {
-    return { value: {}, count: entries.length, error: `${firstError.name}: ${firstError.error}` };
-  }
-  const value: NonNullable<CreateSessionRequest["mcp"]> = {};
-  for (const entry of entries) {
-    try {
-      value[entry.name] = JSON.parse(entry.configJson);
-    } catch {
-      return { value: {}, count: entries.length, error: `${entry.name}: Invalid JSON` };
-    }
-  }
-  return { value, count: entries.length, error: null };
-};
-
-const buildSkillsConfig = (sources: SkillSource[]): NonNullable<CreateSessionRequest["skills"]> => {
-  return { sources };
-};
-
-const buildStubItem = (itemId: string, nativeItemId?: string | null): UniversalItem => {
-  return {
-    item_id: itemId,
-    native_item_id: nativeItemId ?? null,
-    parent_id: null,
-    kind: "message",
-    role: null,
-    content: [],
-    status: "in_progress"
-  } as UniversalItem;
-};
+const ERROR_TOAST_MS = 6000;
+const MAX_ERROR_TOASTS = 3;
+const HTTP_ERROR_EVENT = "inspector-http-error";
 
 const DEFAULT_ENDPOINT = "http://localhost:2468";
 
@@ -88,6 +63,53 @@ const getCurrentOriginEndpoint = () => {
     return null;
   }
   return window.location.origin;
+};
+
+const getErrorMessage = (error: unknown, fallback: string) => {
+  if (error instanceof SandboxAgentError) {
+    return error.problem?.detail ?? error.problem?.title ?? error.message;
+  }
+  if (error instanceof Error) {
+    // ACP RequestError may carry a data object with a hint or details field.
+    const data = (error as { data?: Record<string, unknown> }).data;
+    if (data && typeof data === "object") {
+      const hint = typeof data.hint === "string" ? data.hint : null;
+      const details = typeof data.details === "string" ? data.details : null;
+      if (hint) return hint;
+      if (details) return details;
+    }
+    return error.message;
+  }
+  return fallback;
+};
+
+const getHttpErrorMessage = (status: number, statusText: string, responseBody: string) => {
+  const base = statusText ? `HTTP ${status} ${statusText}` : `HTTP ${status}`;
+  const body = responseBody.trim();
+  if (!body) {
+    return base;
+  }
+  try {
+    const parsed = JSON.parse(body);
+    if (parsed && typeof parsed === "object") {
+      const detail = (parsed as { detail?: unknown }).detail;
+      if (typeof detail === "string" && detail.trim()) {
+        return detail;
+      }
+      const title = (parsed as { title?: unknown }).title;
+      if (typeof title === "string" && title.trim()) {
+        return title;
+      }
+      const message = (parsed as { message?: unknown }).message;
+      if (typeof message === "string" && message.trim()) {
+        return message;
+      }
+    }
+  } catch {
+    // Ignore parse failures and fall through to body text.
+  }
+  const clippedBody = body.length > 240 ? `${body.slice(0, 240)}...` : body;
+  return `${base}: ${clippedBody}`;
 };
 
 const getSessionIdFromPath = (): string => {
@@ -132,8 +154,19 @@ const getInitialConnection = () => {
   };
 };
 
+const agentDisplayNames: Record<string, string> = {
+  claude: "Claude Code",
+  codex: "Codex",
+  opencode: "OpenCode",
+  amp: "Amp",
+  pi: "Pi",
+  cursor: "Cursor"
+};
+
 export default function App() {
-  const issueTrackerUrl = "https://github.com/rivet-dev/sandbox-agent/issues/new";
+  const issueTrackerUrl = "https://github.com/rivet-dev/sandbox-agent/issues";
+  const docsUrl = "https://sandboxagent.dev/docs";
+  const discordUrl = "https://rivet.dev/discord";
   const initialConnectionRef = useRef(getInitialConnection());
   const [endpoint, setEndpoint] = useState(initialConnectionRef.current.endpoint);
   const [token, setToken] = useState(initialConnectionRef.current.token);
@@ -143,52 +176,34 @@ export default function App() {
   const [connectError, setConnectError] = useState<string | null>(null);
 
   const [agents, setAgents] = useState<AgentInfo[]>([]);
-  const [modesByAgent, setModesByAgent] = useState<Record<string, AgentModeInfo[]>>({});
-  const [modelsByAgent, setModelsByAgent] = useState<Record<string, AgentModelInfo[]>>({});
-  const [defaultModelByAgent, setDefaultModelByAgent] = useState<Record<string, string>>({});
-  const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  const [sessions, setSessions] = useState<SessionListItem[]>([]);
   const [agentsLoading, setAgentsLoading] = useState(false);
   const [agentsError, setAgentsError] = useState<string | null>(null);
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [sessionsError, setSessionsError] = useState<string | null>(null);
-  const [modesLoadingByAgent, setModesLoadingByAgent] = useState<Record<string, boolean>>({});
-  const [modesErrorByAgent, setModesErrorByAgent] = useState<Record<string, string | null>>({});
-  const [modelsLoadingByAgent, setModelsLoadingByAgent] = useState<Record<string, boolean>>({});
-  const [modelsErrorByAgent, setModelsErrorByAgent] = useState<Record<string, string | null>>({});
 
   const [agentId, setAgentId] = useState("claude");
   const [sessionId, setSessionId] = useState(getSessionIdFromPath());
   const [sessionError, setSessionError] = useState<string | null>(null);
 
   const [message, setMessage] = useState("");
-  const [events, setEvents] = useState<UniversalEvent[]>([]);
-  const [offset, setOffset] = useState(0);
-  const offsetRef = useRef(0);
-  const [eventsLoading, setEventsLoading] = useState(false);
-  const [mcpServers, setMcpServers] = useState<McpServerEntry[]>([]);
-  const [skillSources, setSkillSources] = useState<SkillSource[]>([]);
-
-  const [polling, setPolling] = useState(false);
-  const pollTimerRef = useRef<number | null>(null);
-  const [turnStreaming, setTurnStreaming] = useState(false);
-  const [streamMode, setStreamMode] = useState<"poll" | "sse" | "turn">("sse");
-  const [eventError, setEventError] = useState<string | null>(null);
-
-  const [questionSelections, setQuestionSelections] = useState<Record<string, string[][]>>({});
-  const [questionStatus, setQuestionStatus] = useState<Record<string, "replied" | "rejected">>({});
-  const [permissionStatus, setPermissionStatus] = useState<Record<string, "replied" | "rejected">>({});
+  const [events, setEvents] = useState<SessionEvent[]>([]);
+  const [sending, setSending] = useState(false);
 
   const [requestLog, setRequestLog] = useState<RequestLog[]>([]);
   const logIdRef = useRef(1);
   const [copiedLogId, setCopiedLogId] = useState<number | null>(null);
+  const [errorToasts, setErrorToasts] = useState<ErrorToast[]>([]);
+  const toastIdRef = useRef(1);
+  const toastTimeoutsRef = useRef<Map<number, number>>(new Map());
 
   const [debugTab, setDebugTab] = useState<DebugTab>("events");
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const clientRef = useRef<SandboxAgent | null>(null);
-  const sseAbortRef = useRef<AbortController | null>(null);
-  const turnAbortRef = useRef<AbortController | null>(null);
+  const activeSessionRef = useRef<Session | null>(null);
+  const eventUnsubRef = useRef<(() => void) | null>(null);
 
   const logRequest = useCallback((entry: RequestLog) => {
     setRequestLog((prev) => {
@@ -210,17 +225,24 @@ export default function App() {
       const bodyText = typeof init?.body === "string" ? init.body : undefined;
       const curl = buildCurl(method, url, bodyText, token);
       const logId = logIdRef.current++;
+
+      const headers: Record<string, string> = {};
+      if (init?.headers) {
+        const h = new Headers(init.headers as HeadersInit);
+        h.forEach((v, k) => { headers[k] = v; });
+      }
+
       const entry: RequestLog = {
         id: logId,
         method,
         url,
+        headers,
         body: bodyText,
         time: new Date().toLocaleTimeString(),
         curl
       };
       let logged = false;
 
-      // Add targetAddressSpace for local network access from HTTPS
       const fetchInit = {
         ...init,
         targetAddressSpace: "loopback"
@@ -228,7 +250,25 @@ export default function App() {
 
       try {
         const response = await fetch(input, fetchInit);
-        logRequest({ ...entry, status: response.status });
+        const acceptsStream = headers["accept"]?.includes("text/event-stream");
+        if (acceptsStream) {
+          const ct = response.headers.get("content-type") ?? "";
+          if (!ct.includes("text/event-stream")) {
+            throw new Error(
+              `Expected text/event-stream from ${method} ${url} but got ${ct || "(no content-type)"} (HTTP ${response.status})`
+            );
+          }
+          logRequest({ ...entry, status: response.status, responseBody: "(SSE stream)" });
+          logged = true;
+          return response;
+        }
+        const clone = response.clone();
+        const responseBody = await clone.text().catch(() => "");
+        logRequest({ ...entry, status: response.status, responseBody });
+        if (!response.ok && response.status >= 500) {
+          const messageText = getHttpErrorMessage(response.status, response.statusText, responseBody);
+          window.dispatchEvent(new CustomEvent<string>(HTTP_ERROR_EVENT, { detail: messageText }));
+        }
         logged = true;
         return response;
       } catch (error) {
@@ -240,11 +280,24 @@ export default function App() {
       }
     };
 
+    let persist: SessionPersistDriver;
+    try {
+      persist = new IndexedDbSessionPersistDriver({
+        databaseName: "sandbox-agent-inspector",
+      });
+    } catch {
+      persist = new InMemorySessionPersistDriver({
+        maxSessions: 512,
+        maxEventsPerSession: 5_000,
+      });
+    }
+
     const client = await SandboxAgent.connect({
       baseUrl: targetEndpoint,
       token: token || undefined,
       fetch: fetchWithLog,
-      headers: Object.keys(extraHeaders).length > 0 ? extraHeaders : undefined
+      headers: Object.keys(extraHeaders).length > 0 ? extraHeaders : undefined,
+      persist,
     });
     clientRef.current = client;
     return client;
@@ -257,12 +310,64 @@ export default function App() {
     return clientRef.current;
   }, []);
 
-  const getErrorMessage = (error: unknown, fallback: string) => {
-    if (error instanceof SandboxAgentError) {
-      return error.problem?.detail ?? error.problem?.title ?? error.message;
+  const dismissErrorToast = useCallback((toastId: number) => {
+    const timeoutId = toastTimeoutsRef.current.get(toastId);
+    if (timeoutId != null) {
+      window.clearTimeout(timeoutId);
+      toastTimeoutsRef.current.delete(toastId);
     }
-    return error instanceof Error ? error.message : fallback;
-  };
+    setErrorToasts((prev) => prev.filter((toast) => toast.id !== toastId));
+  }, []);
+
+  const pushErrorToast = useCallback((error: unknown, fallback: string) => {
+    const messageText = getErrorMessage(error, fallback).trim() || fallback;
+    const toastId = toastIdRef.current++;
+    setErrorToasts((prev) => {
+      if (prev.some((toast) => toast.message === messageText)) {
+        return prev;
+      }
+      return [...prev, { id: toastId, message: messageText }].slice(-MAX_ERROR_TOASTS);
+    });
+    const timeoutId = window.setTimeout(() => {
+      dismissErrorToast(toastId);
+    }, ERROR_TOAST_MS);
+    toastTimeoutsRef.current.set(toastId, timeoutId);
+  }, [dismissErrorToast]);
+
+  // Subscribe to events for the current active session
+  const subscribeToSession = useCallback((session: Session) => {
+    // Unsubscribe from previous
+    if (eventUnsubRef.current) {
+      eventUnsubRef.current();
+      eventUnsubRef.current = null;
+    }
+
+    activeSessionRef.current = session;
+
+    // Hydrate existing events from persistence
+    const hydrateEvents = async () => {
+      const allEvents: SessionEvent[] = [];
+      let cursor: string | undefined;
+      while (true) {
+        const page = await getClient().getEvents({
+          sessionId: session.id,
+          cursor,
+          limit: 250,
+        });
+        allEvents.push(...page.items);
+        if (!page.nextCursor) break;
+        cursor = page.nextCursor;
+      }
+      setEvents(allEvents);
+    };
+    hydrateEvents().catch(() => {});
+
+    // Subscribe to new events
+    const unsub = session.onEvent((event) => {
+      setEvents((prev) => [...prev, event]);
+    });
+    eventUnsubRef.current = unsub;
+  }, [getClient]);
 
   const connectToDaemon = async (reportError: boolean, overrideEndpoint?: string) => {
     setConnecting(true);
@@ -297,26 +402,24 @@ export default function App() {
   const connect = () => connectToDaemon(true);
 
   const disconnect = () => {
+    if (eventUnsubRef.current) {
+      eventUnsubRef.current();
+      eventUnsubRef.current = null;
+    }
+    activeSessionRef.current = null;
+    if (clientRef.current) {
+      void clientRef.current.dispose();
+    }
     setConnected(false);
     clientRef.current = null;
     setSessionError(null);
     setEvents([]);
-    setOffset(0);
-    offsetRef.current = 0;
-    setEventError(null);
-    stopPolling();
-    stopSse();
-    stopTurnStream();
     setAgents([]);
     setSessions([]);
-    setModelsByAgent({});
-    setDefaultModelByAgent({});
     setAgentsLoading(false);
     setSessionsLoading(false);
     setAgentsError(null);
     setSessionsError(null);
-    setModelsLoadingByAgent({});
-    setModelsErrorByAgent({});
   };
 
   const refreshAgents = async () => {
@@ -324,14 +427,7 @@ export default function App() {
     setAgentsError(null);
     try {
       const data = await getClient().listAgents();
-      const agentList = data.agents ?? [];
-      setAgents(agentList);
-      for (const agent of agentList) {
-        if (agent.installed) {
-          loadModes(agent.id);
-          loadModels(agent.id);
-        }
-      }
+      setAgents(data.agents ?? []);
     } catch (error) {
       setAgentsError(getErrorMessage(error, "Unable to refresh agents"));
     } finally {
@@ -339,13 +435,39 @@ export default function App() {
     }
   };
 
+  const loadAgentConfig = useCallback(async (targetAgentId: string) => {
+    try {
+      const info = await getClient().getAgent(targetAgentId, { config: true });
+      setAgents((prev) =>
+        prev.map((a) => (a.id === targetAgentId ? { ...a, configOptions: info.configOptions, configError: info.configError } : a))
+      );
+    } catch {
+      // Config loading is best-effort; the menu still works without it.
+    }
+  }, [getClient]);
+
   const fetchSessions = async () => {
     setSessionsLoading(true);
     setSessionsError(null);
     try {
-      const data = await getClient().listSessions();
-      const sessionList = data.sessions ?? [];
-      setSessions(sessionList);
+      // TODO: This eagerly paginates all sessions so we can reverse-sort to
+      // show newest first. Replace with a server-side descending sort or a
+      // dedicated "recent sessions" query once the API supports it.
+      const all: SessionListItem[] = [];
+      let cursor: string | undefined;
+      do {
+        const page = await getClient().listSessions({ cursor, limit: 200 });
+        for (const s of page.items) {
+          all.push({
+            sessionId: s.id,
+            agent: s.agent,
+            ended: s.destroyedAt != null,
+          });
+        }
+        cursor = page.nextCursor;
+      } while (cursor);
+      all.reverse();
+      setSessions(all);
     } catch {
       setSessionsError("Unable to load sessions.");
     } finally {
@@ -362,258 +484,99 @@ export default function App() {
     }
   };
 
-  const loadModes = async (targetId: string) => {
-    setModesLoadingByAgent((prev) => ({ ...prev, [targetId]: true }));
-    setModesErrorByAgent((prev) => ({ ...prev, [targetId]: null }));
-    try {
-      const data = await getClient().getAgentModes(targetId);
-      const modes = data.modes ?? [];
-      setModesByAgent((prev) => ({ ...prev, [targetId]: modes }));
-    } catch {
-      setModesErrorByAgent((prev) => ({ ...prev, [targetId]: "Unable to load modes." }));
-    } finally {
-      setModesLoadingByAgent((prev) => ({ ...prev, [targetId]: false }));
-    }
-  };
-
-  const loadModels = async (targetId: string) => {
-    setModelsLoadingByAgent((prev) => ({ ...prev, [targetId]: true }));
-    setModelsErrorByAgent((prev) => ({ ...prev, [targetId]: null }));
-    try {
-      const data = await getClient().getAgentModels(targetId);
-      const models = data.models ?? [];
-      setModelsByAgent((prev) => ({ ...prev, [targetId]: models }));
-      if (data.defaultModel) {
-        setDefaultModelByAgent((prev) => ({ ...prev, [targetId]: data.defaultModel! }));
-      } else {
-        setDefaultModelByAgent((prev) => {
-          const next = { ...prev };
-          delete next[targetId];
-          return next;
-        });
-      }
-    } catch {
-      setModelsErrorByAgent((prev) => ({ ...prev, [targetId]: "Unable to load models." }));
-    } finally {
-      setModelsLoadingByAgent((prev) => ({ ...prev, [targetId]: false }));
-    }
-  };
-
   const sendMessage = async () => {
     const prompt = message.trim();
-    if (!prompt || !sessionId || turnStreaming) return;
+    if (!prompt || !sessionId || sending) return;
     setSessionError(null);
     setMessage("");
-
-    if (streamMode === "turn") {
-      await startTurnStream(prompt);
-      return;
-    }
+    setSending(true);
 
     try {
-      await getClient().postMessage(sessionId, { message: prompt });
-      if (!polling) {
-        if (streamMode === "poll") {
-          startPolling();
-        } else {
-          startSse();
-        }
+      let session = activeSessionRef.current;
+      if (!session || session.id !== sessionId) {
+        session = await getClient().resumeSession(sessionId);
+        subscribeToSession(session);
       }
+      await session.prompt([{ type: "text", text: prompt }]);
     } catch (error) {
       setSessionError(getErrorMessage(error, "Unable to send message"));
+    } finally {
+      setSending(false);
     }
   };
 
-  const selectSession = (session: SessionInfo) => {
-    stopPolling();
-    stopSse();
-    stopTurnStream();
+  const selectSession = async (session: SessionListItem) => {
     setSessionId(session.sessionId);
     updateSessionPath(session.sessionId);
     setAgentId(session.agent);
     setEvents([]);
-    setOffset(0);
-    offsetRef.current = 0;
-    setSessionError(null);
-  };
-
-  const createNewSession = async (
-    nextAgentId: string,
-    config: { model: string; agentMode: string; permissionMode: string; variant: string }
-  ) => {
-    stopPolling();
-    stopSse();
-    stopTurnStream();
-    setAgentId(nextAgentId);
-    if (parsedMcpConfig.error) {
-      setSessionError(parsedMcpConfig.error);
-      return;
-    }
-    const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
-    let id = "session-";
-    for (let i = 0; i < 8; i++) {
-      id += chars[Math.floor(Math.random() * chars.length)];
-    }
     setSessionError(null);
 
     try {
-      const body: CreateSessionRequest = { agent: nextAgentId };
-      if (config.agentMode) body.agentMode = config.agentMode;
-      if (config.permissionMode) body.permissionMode = config.permissionMode;
-      if (config.model) body.model = config.model;
-      if (config.variant) body.variant = config.variant;
-      if (parsedMcpConfig.count > 0) {
-        body.mcp = parsedMcpConfig.value;
-      }
-      if (parsedSkillsConfig.sources.length > 0) {
-        body.skills = parsedSkillsConfig;
+      const sdkSession = await getClient().resumeSession(session.sessionId);
+      subscribeToSession(sdkSession);
+    } catch (error) {
+      setSessionError(getErrorMessage(error, "Unable to load session"));
+    }
+  };
+
+  const createNewSession = async (nextAgentId: string, config: { agentMode: string; model: string }) => {
+    setAgentId(nextAgentId);
+    setSessionError(null);
+    setEvents([]);
+
+    try {
+      const session = await getClient().createSession({
+        agent: nextAgentId,
+        sessionInit: {
+          cwd: "/",
+          mcpServers: [],
+        },
+      });
+
+      setSessionId(session.id);
+      updateSessionPath(session.id);
+      subscribeToSession(session);
+
+      // Apply mode if selected
+      if (config.agentMode) {
+        try {
+          await session.send("session/set_mode", { modeId: config.agentMode });
+        } catch {
+          // Mode application is best-effort
+        }
       }
 
-      await getClient().createSession(id, body);
-      setSessionId(id);
-      updateSessionPath(id);
-      setEvents([]);
-      setOffset(0);
-      offsetRef.current = 0;
+      // Apply model if selected
+      if (config.model) {
+        try {
+          await session.send("unstable/set_session_model", { modelId: config.model });
+        } catch {
+          // Model application is best-effort
+        }
+      }
+
       await fetchSessions();
     } catch (error) {
-      setSessionError(getErrorMessage(error, "Unable to create session"));
+      const messageText = getErrorMessage(error, "Unable to create session");
+      setSessionError(messageText);
+      pushErrorToast(error, messageText);
     }
   };
 
-  const appendEvents = useCallback((incoming: UniversalEvent[]) => {
-    if (!incoming.length) return;
-    setEvents((prev) => [...prev, ...incoming]);
-    const lastSeq = incoming[incoming.length - 1]?.sequence ?? offsetRef.current;
-    offsetRef.current = lastSeq;
-    setOffset(lastSeq);
-  }, []);
-
-  const fetchEvents = useCallback(async () => {
+  const endSession = async () => {
     if (!sessionId) return;
-    setEventsLoading(true);
     try {
-      const response = await getClient().getEvents(sessionId, {
-        offset: offsetRef.current,
-        limit: 200
-      });
-      const newEvents = response.events ?? [];
-      appendEvents(newEvents);
-      setEventError(null);
+      await getClient().destroySession(sessionId);
+      if (eventUnsubRef.current) {
+        eventUnsubRef.current();
+        eventUnsubRef.current = null;
+      }
+      activeSessionRef.current = null;
+      await fetchSessions();
     } catch (error) {
-      setEventError(getErrorMessage(error, "Unable to fetch events"));
-    } finally {
-      setEventsLoading(false);
+      setSessionError(getErrorMessage(error, "Unable to end session"));
     }
-  }, [appendEvents, getClient, sessionId]);
-
-  const startPolling = () => {
-    stopSse();
-    if (pollTimerRef.current) return;
-    setPolling(true);
-    fetchEvents();
-    pollTimerRef.current = window.setInterval(fetchEvents, 500);
-  };
-
-  const stopPolling = () => {
-    if (pollTimerRef.current) {
-      window.clearInterval(pollTimerRef.current);
-      pollTimerRef.current = null;
-    }
-    setPolling(false);
-  };
-
-  const startSse = () => {
-    stopPolling();
-    if (sseAbortRef.current) return;
-    if (!sessionId) {
-      setEventError("Select or create a session first.");
-      return;
-    }
-    setEventError(null);
-    setPolling(true);
-    const controller = new AbortController();
-    sseAbortRef.current = controller;
-    const start = async () => {
-      try {
-        for await (const event of getClient().streamEvents(
-          sessionId,
-          { offset: offsetRef.current },
-          controller.signal
-        )) {
-          appendEvents([event]);
-        }
-      } catch (error) {
-        if (controller.signal.aborted) {
-          return;
-        }
-        setEventError(getErrorMessage(error, "SSE connection error. Falling back to polling."));
-        stopSse();
-        startPolling();
-      } finally {
-        if (sseAbortRef.current === controller) {
-          sseAbortRef.current = null;
-          setPolling(false);
-        }
-      }
-    };
-    void start();
-  };
-
-  const stopSse = () => {
-    if (sseAbortRef.current) {
-      sseAbortRef.current.abort();
-      sseAbortRef.current = null;
-    }
-    setPolling(false);
-  };
-
-  const startTurnStream = async (prompt: string) => {
-    stopPolling();
-    stopSse();
-    if (turnAbortRef.current) return;
-    if (!sessionId) {
-      setEventError("Select or create a session first.");
-      return;
-    }
-    setEventError(null);
-    setTurnStreaming(true);
-    const controller = new AbortController();
-    turnAbortRef.current = controller;
-    try {
-      for await (const event of getClient().streamTurn(
-        sessionId,
-        { message: prompt },
-        undefined,
-        controller.signal
-      )) {
-        appendEvents([event]);
-      }
-    } catch (error) {
-      if (controller.signal.aborted) {
-        return;
-      }
-      setEventError(getErrorMessage(error, "Turn stream error."));
-    } finally {
-      if (turnAbortRef.current === controller) {
-        turnAbortRef.current = null;
-        setTurnStreaming(false);
-      }
-    }
-  };
-
-  const stopTurnStream = () => {
-    if (turnAbortRef.current) {
-      turnAbortRef.current.abort();
-      turnAbortRef.current = null;
-    }
-    setTurnStreaming(false);
-  };
-
-  const resetEvents = () => {
-    setEvents([]);
-    setOffset(0);
-    offsetRef.current = 0;
   };
 
   const handleCopy = (entry: RequestLog) => {
@@ -648,200 +611,266 @@ export default function App() {
     document.body.removeChild(textarea);
   };
 
-  const selectQuestionOption = (requestId: string, optionLabel: string) => {
-    setQuestionSelections((prev) => ({
-      ...prev,
-      [requestId]: [[optionLabel]]
-    }));
-  };
-
-  const answerQuestion = async (request: QuestionEventData) => {
-    const answers = questionSelections[request.question_id] ?? [];
-    try {
-      await getClient().replyQuestion(sessionId, request.question_id, { answers });
-      setQuestionStatus((prev) => ({ ...prev, [request.question_id]: "replied" }));
-    } catch (error) {
-      setEventError(getErrorMessage(error, "Unable to reply"));
-    }
-  };
-
-  const rejectQuestion = async (requestId: string) => {
-    try {
-      await getClient().rejectQuestion(sessionId, requestId);
-      setQuestionStatus((prev) => ({ ...prev, [requestId]: "rejected" }));
-    } catch (error) {
-      setEventError(getErrorMessage(error, "Unable to reject"));
-    }
-  };
-
-  const replyPermission = async (requestId: string, reply: "once" | "always" | "reject") => {
-    try {
-      await getClient().replyPermission(sessionId, requestId, { reply });
-      setPermissionStatus((prev) => ({ ...prev, [requestId]: "replied" }));
-    } catch (error) {
-      setEventError(getErrorMessage(error, "Unable to reply"));
-    }
-  };
-
-  const endSession = async () => {
-    if (!sessionId) return;
-    try {
-      await getClient().terminateSession(sessionId);
-      await fetchSessions();
-    } catch (error) {
-      setSessionError(getErrorMessage(error, "Unable to end session"));
-    }
-  };
-
-  const questionRequests = useMemo(() => {
-    const latestById = new Map<string, QuestionEventData>();
-    for (const event of events) {
-      if (event.type === "question.requested" || event.type === "question.resolved") {
-        const data = event.data as QuestionEventData;
-        latestById.set(data.question_id, data);
-      }
-    }
-    return Array.from(latestById.values()).filter(
-      (request) => request.status === "requested" && !questionStatus[request.question_id]
-    );
-  }, [events, questionStatus]);
-
-  const permissionRequests = useMemo(() => {
-    const latestById = new Map<string, PermissionEventData>();
-    for (const event of events) {
-      if (event.type === "permission.requested" || event.type === "permission.resolved") {
-        const data = event.data as PermissionEventData;
-        latestById.set(data.permission_id, data);
-      }
-    }
-    return Array.from(latestById.values()).filter(
-      (request) => request.status === "requested" && !permissionStatus[request.permission_id]
-    );
-  }, [events, permissionStatus]);
-
+  // Build transcript entries from raw SessionEvents
   const transcriptEntries = useMemo(() => {
     const entries: TimelineEntry[] = [];
-    const itemMap = new Map<string, TimelineEntry>();
 
-    const upsertItemEntry = (item: UniversalItem, time: string) => {
-      let entry = itemMap.get(item.item_id);
-      if (!entry) {
-        entry = {
-          id: item.item_id,
-          kind: "item",
-          time,
-          item,
-          deltaText: ""
-        };
-        itemMap.set(item.item_id, entry);
-        entries.push(entry);
-      } else {
-        entry.item = item;
-        entry.time = time;
+    // Accumulators for streaming chunks
+    let assistantAccumId: string | null = null;
+    let assistantAccumText = "";
+    let thoughtAccumId: string | null = null;
+    let thoughtAccumText = "";
+
+    const flushAssistant = (time: string) => {
+      if (assistantAccumId) {
+        const existing = entries.find((e) => e.id === assistantAccumId);
+        if (existing) {
+          existing.text = assistantAccumText;
+          existing.time = time;
+        }
       }
-      return entry;
+      assistantAccumId = null;
+      assistantAccumText = "";
     };
 
+    const flushThought = (time: string) => {
+      if (thoughtAccumId) {
+        const existing = entries.find((e) => e.id === thoughtAccumId);
+        if (existing && existing.reasoning) {
+          existing.reasoning.text = thoughtAccumText;
+          existing.time = time;
+        }
+      }
+      thoughtAccumId = null;
+      thoughtAccumText = "";
+    };
+
+    // Track tool calls by ID for updates
+    const toolEntryMap = new Map<string, TimelineEntry>();
+
     for (const event of events) {
-      switch (event.type) {
-        case "item.started": {
-          const data = event.data as ItemEventData;
-          upsertItemEntry(data.item, event.time);
-          break;
-        }
-        case "item.delta": {
-          const data = event.data as ItemDeltaEventData;
-          const stub = buildStubItem(data.item_id, data.native_item_id);
-          const entry = upsertItemEntry(stub, event.time);
-          entry.deltaText = `${entry.deltaText ?? ""}${data.delta ?? ""}`;
-          break;
-        }
-        case "item.completed": {
-          const data = event.data as ItemEventData;
-          const entry = upsertItemEntry(data.item, event.time);
-          entry.deltaText = "";
-          break;
-        }
-        case "error": {
-          const data = event.data as { message: string; code?: string | null };
-          entries.push({
-            id: event.event_id,
-            kind: "meta",
-            time: event.time,
-            meta: {
-              title: data.code ? `Error - ${data.code}` : "Error",
-              detail: data.message,
-              severity: "error"
+      const payload = event.payload as Record<string, unknown>;
+      const method = typeof payload.method === "string" ? payload.method : null;
+      const time = new Date(event.createdAt).toISOString();
+
+      if (event.sender === "client" && method === "session/prompt") {
+        // User message
+        flushAssistant(time);
+        flushThought(time);
+        const params = payload.params as Record<string, unknown> | undefined;
+        const promptArray = params?.prompt as Array<{ type: string; text?: string }> | undefined;
+        const text = promptArray?.[0]?.text ?? "";
+        entries.push({
+          id: event.id,
+          kind: "message",
+          time,
+          role: "user",
+          text,
+        });
+        continue;
+      }
+
+      if (event.sender === "agent" && method === "session/update") {
+        const params = payload.params as Record<string, unknown> | undefined;
+        const update = params?.update as Record<string, unknown> | undefined;
+        if (!update || typeof update.sessionUpdate !== "string") continue;
+
+        switch (update.sessionUpdate) {
+          case "agent_message_chunk": {
+            const content = update.content as { type?: string; text?: string } | undefined;
+            if (content?.type === "text" && content.text) {
+              if (!assistantAccumId) {
+                assistantAccumId = `assistant-${event.id}`;
+                assistantAccumText = "";
+                entries.push({
+                  id: assistantAccumId,
+                  kind: "message",
+                  time,
+                  role: "assistant",
+                  text: "",
+                });
+              }
+              assistantAccumText += content.text;
+              const entry = entries.find((e) => e.id === assistantAccumId);
+              if (entry) {
+                entry.text = assistantAccumText;
+                entry.time = time;
+              }
             }
-          });
-          break;
-        }
-        case "agent.unparsed": {
-          const data = event.data as { error: string; location: string };
-          entries.push({
-            id: event.event_id,
-            kind: "meta",
-            time: event.time,
-            meta: {
-              title: "Agent parse failure",
-              detail: `${data.location}: ${data.error}`,
-              severity: "error"
+            break;
+          }
+          case "agent_thought_chunk": {
+            const content = update.content as { type?: string; text?: string } | undefined;
+            if (content?.type === "text" && content.text) {
+              if (!thoughtAccumId) {
+                thoughtAccumId = `thought-${event.id}`;
+                thoughtAccumText = "";
+                entries.push({
+                  id: thoughtAccumId,
+                  kind: "reasoning",
+                  time,
+                  reasoning: { text: "", visibility: "public" },
+                });
+              }
+              thoughtAccumText += content.text;
+              const entry = entries.find((e) => e.id === thoughtAccumId);
+              if (entry && entry.reasoning) {
+                entry.reasoning.text = thoughtAccumText;
+                entry.time = time;
+              }
             }
-          });
-          break;
-        }
-        case "session.started": {
-          entries.push({
-            id: event.event_id,
-            kind: "meta",
-            time: event.time,
-            meta: {
-              title: "Session started",
-              severity: "info"
+            break;
+          }
+          case "user_message_chunk": {
+            const content = update.content as { type?: string; text?: string } | undefined;
+            const text = content?.type === "text" ? (content.text ?? "") : JSON.stringify(content);
+            entries.push({
+              id: event.id,
+              kind: "message",
+              time,
+              role: "user",
+              text,
+            });
+            break;
+          }
+          case "tool_call": {
+            flushAssistant(time);
+            flushThought(time);
+            const toolCallId = (update.toolCallId as string) ?? event.id;
+            const existing = toolEntryMap.get(toolCallId);
+            if (existing) {
+              // Update existing entry instead of creating a duplicate
+              if (update.status) existing.toolStatus = update.status as string;
+              if (update.rawInput != null) existing.toolInput = JSON.stringify(update.rawInput, null, 2);
+              if (update.rawOutput != null) existing.toolOutput = JSON.stringify(update.rawOutput, null, 2);
+              if (update.title) existing.toolName = update.title as string;
+              existing.time = time;
+            } else {
+              const entry: TimelineEntry = {
+                id: `tool-${toolCallId}`,
+                kind: "tool",
+                time,
+                toolName: (update.title as string) ?? "tool",
+                toolInput: update.rawInput != null ? JSON.stringify(update.rawInput, null, 2) : undefined,
+                toolOutput: update.rawOutput != null ? JSON.stringify(update.rawOutput, null, 2) : undefined,
+                toolStatus: (update.status as string) ?? "in_progress",
+              };
+              toolEntryMap.set(toolCallId, entry);
+              entries.push(entry);
             }
-          });
-          break;
-        }
-        case "session.ended": {
-          const data = event.data as { reason: string; terminated_by: string };
-          entries.push({
-            id: event.event_id,
-            kind: "meta",
-            time: event.time,
-            meta: {
-              title: "Session ended",
-              detail: `${data.reason} - ${data.terminated_by}`,
-              severity: "info"
+            break;
+          }
+          case "tool_call_update": {
+            const toolCallId = update.toolCallId as string;
+            const existing = toolEntryMap.get(toolCallId);
+            if (existing) {
+              if (update.status) existing.toolStatus = update.status as string;
+              if (update.rawOutput != null) existing.toolOutput = JSON.stringify(update.rawOutput, null, 2);
+              if (update.title) existing.toolName = (existing.toolName ?? "") + (update.title as string);
+              existing.time = time;
             }
-          });
-          break;
-        }
-        case "turn.started": {
-          entries.push({
-            id: event.event_id,
-            kind: "meta",
-            time: event.time,
-            meta: {
-              title: "Turn started",
-              severity: "info"
+            break;
+          }
+          case "plan": {
+            const planEntries = (update.entries as Array<{ content: string; status: string }>) ?? [];
+            const detail = planEntries.map((e) => `[${e.status}] ${e.content}`).join("\n");
+            entries.push({
+              id: event.id,
+              kind: "meta",
+              time,
+              meta: { title: "Plan", detail, severity: "info" },
+            });
+            break;
+          }
+          case "session_info_update": {
+            const title = update.title as string | undefined;
+            entries.push({
+              id: event.id,
+              kind: "meta",
+              time,
+              meta: { title: "Session info update", detail: title ? `Title: ${title}` : undefined, severity: "info" },
+            });
+            break;
+          }
+          case "usage_update": {
+            const size = update.size as number | undefined;
+            const used = update.used as number | undefined;
+            const cost = update.cost as { total?: number } | undefined;
+            const parts = [`${used ?? 0}/${size ?? 0} tokens`];
+            if (cost?.total != null) {
+              parts.push(`cost: $${cost.total.toFixed(4)}`);
             }
-          });
-          break;
+            entries.push({
+              id: event.id,
+              kind: "meta",
+              time,
+              meta: { title: "Usage update", detail: parts.join(" | "), severity: "info" },
+            });
+            break;
+          }
+          case "current_mode_update": {
+            entries.push({
+              id: event.id,
+              kind: "meta",
+              time,
+              meta: { title: "Mode changed", detail: update.currentModeId as string, severity: "info" },
+            });
+            break;
+          }
+          case "config_option_update": {
+            entries.push({
+              id: event.id,
+              kind: "meta",
+              time,
+              meta: { title: "Config option update", severity: "info" },
+            });
+            break;
+          }
+          case "available_commands_update": {
+            entries.push({
+              id: event.id,
+              kind: "meta",
+              time,
+              meta: { title: "Available commands update", severity: "info" },
+            });
+            break;
+          }
+          default: {
+            entries.push({
+              id: event.id,
+              kind: "meta",
+              time,
+              meta: { title: `session/update: ${update.sessionUpdate}`, severity: "info" },
+            });
+            break;
+          }
         }
-        case "turn.ended": {
-          entries.push({
-            id: event.event_id,
-            kind: "meta",
-            time: event.time,
-            meta: {
-              title: "Turn ended",
-              severity: "info"
-            }
-          });
-          break;
-        }
-        default:
-          break;
+        continue;
+      }
+
+      if (event.sender === "agent" && method === "_sandboxagent/agent/unparsed") {
+        const params = payload.params as { error?: string; location?: string } | undefined;
+        entries.push({
+          id: event.id,
+          kind: "meta",
+          time,
+          meta: {
+            title: "Agent parse failure",
+            detail: `${params?.location ?? "unknown"}: ${params?.error ?? "unknown error"}`,
+            severity: "error",
+          },
+        });
+        continue;
+      }
+
+      // For any other ACP envelope, show as generic meta
+      if (method) {
+        entries.push({
+          id: event.id,
+          kind: "meta",
+          time,
+          meta: { title: method, detail: event.sender, severity: "info" },
+        });
       }
     }
 
@@ -850,9 +879,42 @@ export default function App() {
 
   useEffect(() => {
     return () => {
-      stopPolling();
-      stopSse();
-      stopTurnStream();
+      if (eventUnsubRef.current) {
+        eventUnsubRef.current();
+        eventUnsubRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleWindowError = (event: ErrorEvent) => {
+      pushErrorToast(event.error ?? event.message, "Unexpected error");
+    };
+    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+      pushErrorToast(event.reason, "Unhandled promise rejection");
+    };
+    const handleHttpError = (event: Event) => {
+      const detail = (event as CustomEvent<string>).detail;
+      if (typeof detail === "string" && detail.trim()) {
+        pushErrorToast(new Error(detail), detail);
+      }
+    };
+    window.addEventListener("error", handleWindowError);
+    window.addEventListener("unhandledrejection", handleUnhandledRejection);
+    window.addEventListener(HTTP_ERROR_EVENT, handleHttpError);
+    return () => {
+      window.removeEventListener("error", handleWindowError);
+      window.removeEventListener("unhandledrejection", handleUnhandledRejection);
+      window.removeEventListener(HTTP_ERROR_EVENT, handleHttpError);
+    };
+  }, [pushErrorToast]);
+
+  useEffect(() => {
+    return () => {
+      for (const timeoutId of toastTimeoutsRef.current.values()) {
+        window.clearTimeout(timeoutId);
+      }
+      toastTimeoutsRef.current.clear();
     };
   }, []);
 
@@ -861,7 +923,6 @@ export default function App() {
     const attempt = async () => {
       const { hasUrlParam } = initialConnectionRef.current;
 
-      // If URL param was provided, just try that endpoint (don't fall back)
       if (hasUrlParam) {
         try {
           await connectToDaemon(false);
@@ -871,7 +932,6 @@ export default function App() {
         return;
       }
 
-      // No URL param: try current origin first
       const originEndpoint = getCurrentOriginEndpoint();
       if (originEndpoint) {
         try {
@@ -882,12 +942,10 @@ export default function App() {
         }
       }
 
-      // Fall back to localhost:2468
       if (!active) return;
       try {
         await connectToDaemon(false, DEFAULT_ENDPOINT);
       } catch {
-        // Keep localhost:2468 as the default in the form
         setEndpoint(DEFAULT_ENDPOINT);
       }
     };
@@ -905,53 +963,72 @@ export default function App() {
     refreshAgents();
   }, [connected]);
 
+  // Auto-load session when sessionId changes
   useEffect(() => {
-    if (!connected || !sessionId || polling) return;
-    if (streamMode === "turn") return;
-    const hasSession = sessions.some((session) => session.sessionId === sessionId);
+    if (!connected || !sessionId) return;
+    const hasSession = sessions.some((s) => s.sessionId === sessionId);
     if (!hasSession) return;
-    if (streamMode === "poll") {
-      startPolling();
-    } else {
-      startSse();
-    }
-  }, [connected, sessionId, polling, streamMode, sessions]);
+    if (activeSessionRef.current?.id === sessionId) return;
 
-  useEffect(() => {
-    if (streamMode === "turn") {
-      stopPolling();
-      stopSse();
-    } else if (turnStreaming) {
-      stopTurnStream();
-    }
-  }, [streamMode, turnStreaming]);
+    getClient().resumeSession(sessionId).then((session) => {
+      subscribeToSession(session);
+    }).catch(() => {});
+  }, [connected, sessionId, sessions, getClient, subscribeToSession]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [transcriptEntries]);
 
   const currentAgent = agents.find((agent) => agent.id === agentId);
-  const currentSessionInfo = sessions.find((s) => s.sessionId === sessionId);
-  const parsedMcpConfig = useMemo(() => buildMcpConfig(mcpServers), [mcpServers]);
-  const parsedSkillsConfig = useMemo(() => buildSkillsConfig(skillSources), [skillSources]);
-  const agentDisplayNames: Record<string, string> = {
-    claude: "Claude Code",
-    codex: "Codex",
-    opencode: "OpenCode",
-    amp: "Amp",
-    pi: "Pi",
-    mock: "Mock"
-  };
   const agentLabel = agentDisplayNames[agentId] ?? agentId;
+  const sessionEnded = sessions.find((s) => s.sessionId === sessionId)?.ended ?? false;
 
-  const handleSelectAgent = useCallback((targetAgentId: string) => {
-    if (connected && !modesByAgent[targetAgentId]) {
-      loadModes(targetAgentId);
+  // Extract modes and models from configOptions
+  const modesByAgent = useMemo(() => {
+    const result: Record<string, AgentModeInfo[]> = {};
+    for (const agent of agents) {
+      const options = (agent.configOptions ?? []) as ConfigOption[];
+      for (const opt of options) {
+        if (opt.category === "mode" && opt.type === "select" && opt.options) {
+          result[agent.id] = flattenSelectOptions(opt.options).map((o) => ({
+            id: o.value,
+            name: o.name,
+            description: o.description ?? "",
+          }));
+        }
+      }
     }
-    if (connected && !modelsByAgent[targetAgentId]) {
-      loadModels(targetAgentId);
+    return result;
+  }, [agents]);
+
+  const modelsByAgent = useMemo(() => {
+    const result: Record<string, AgentModelInfo[]> = {};
+    for (const agent of agents) {
+      const options = (agent.configOptions ?? []) as ConfigOption[];
+      for (const opt of options) {
+        if (opt.category === "model" && opt.type === "select" && opt.options) {
+          result[agent.id] = flattenSelectOptions(opt.options).map((o) => ({
+            id: o.value,
+            name: o.name,
+          }));
+        }
+      }
     }
-  }, [connected, modesByAgent, modelsByAgent]);
+    return result;
+  }, [agents]);
+
+  const defaultModelByAgent = useMemo(() => {
+    const result: Record<string, string> = {};
+    for (const agent of agents) {
+      const options = (agent.configOptions ?? []) as ConfigOption[];
+      for (const opt of options) {
+        if (opt.category === "model" && opt.type === "select" && opt.currentValue) {
+          result[agent.id] = opt.currentValue;
+        }
+      }
+    }
+    return result;
+  }, [agents]);
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey) {
@@ -960,35 +1037,44 @@ export default function App() {
     }
   };
 
-  const toggleStream = () => {
-    if (streamMode === "turn") {
-      return;
-    }
-    if (polling) {
-      if (streamMode === "poll") {
-        stopPolling();
-      } else {
-        stopSse();
-      }
-    } else if (streamMode === "poll") {
-      startPolling();
-    } else {
-      startSse();
-    }
-  };
+  const toastStack = (
+    <div className="toast-stack" aria-live="assertive" aria-atomic="false">
+      {errorToasts.map((toast) => (
+        <div key={toast.id} className="toast error" role="status">
+          <div className="toast-content">
+            <div className="toast-title">Request failed</div>
+            <div className="toast-message">{toast.message}</div>
+          </div>
+          <button
+            type="button"
+            className="toast-close"
+            aria-label="Dismiss error"
+            onClick={() => dismissErrorToast(toast.id)}
+          >
+            x
+          </button>
+        </div>
+      ))}
+    </div>
+  );
 
   if (!connected) {
     return (
-      <ConnectScreen
-        endpoint={endpoint}
-        token={token}
-        connectError={connectError}
-        connecting={connecting}
-        onEndpointChange={setEndpoint}
-        onTokenChange={setToken}
-        onConnect={connect}
-        reportUrl={issueTrackerUrl}
-      />
+      <>
+        <ConnectScreen
+          endpoint={endpoint}
+          token={token}
+          connectError={connectError}
+          connecting={connecting}
+          onEndpointChange={setEndpoint}
+          onTokenChange={setToken}
+          onConnect={connect}
+          reportUrl={issueTrackerUrl}
+          docsUrl={docsUrl}
+          discordUrl={discordUrl}
+        />
+        {toastStack}
+      </>
     );
   }
 
@@ -999,8 +1085,17 @@ export default function App() {
           <img src={logoUrl} alt="Sandbox Agent" className="logo-text" style={{ height: '20px', width: 'auto' }} />
         </div>
         <div className="header-right">
-          <a className="button ghost small" href={issueTrackerUrl} target="_blank" rel="noreferrer">
-            Report Bug
+          <a className="header-link" href={docsUrl} target="_blank" rel="noreferrer">
+            <BookOpen size={12} />
+            Docs
+          </a>
+          <a className="header-link" href={discordUrl} target="_blank" rel="noreferrer">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.095 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.095 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/></svg>
+            Discord
+          </a>
+          <a className="header-link" href={issueTrackerUrl} target="_blank" rel="noreferrer">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>
+            Issues
           </a>
           <span className="header-endpoint">{endpoint}</span>
           <button className="button secondary small" onClick={disconnect}>
@@ -1016,8 +1111,13 @@ export default function App() {
           onSelectSession={selectSession}
           onRefresh={fetchSessions}
           onCreateSession={createNewSession}
-          onSelectAgent={handleSelectAgent}
-          agents={agents.length ? agents : defaultAgents.map((id) => ({ id, installed: false, capabilities: {} }) as AgentInfo)}
+          onSelectAgent={loadAgentConfig}
+          agents={agents.length ? agents : defaultAgents.map((id) => ({
+            id,
+            installed: false,
+            credentialsAvailable: true,
+            capabilities: {} as AgentInfo["capabilities"],
+          }))}
           agentsLoading={agentsLoading}
           agentsError={agentsError}
           sessionsLoading={sessionsLoading}
@@ -1025,15 +1125,6 @@ export default function App() {
           modesByAgent={modesByAgent}
           modelsByAgent={modelsByAgent}
           defaultModelByAgent={defaultModelByAgent}
-          modesLoadingByAgent={modesLoadingByAgent}
-          modelsLoadingByAgent={modelsLoadingByAgent}
-          modesErrorByAgent={modesErrorByAgent}
-          modelsErrorByAgent={modelsErrorByAgent}
-          mcpServers={mcpServers}
-          onMcpServersChange={setMcpServers}
-          mcpConfigError={parsedMcpConfig.error}
-          skillSources={skillSources}
-          onSkillSourcesChange={setSkillSources}
         />
 
         <ChatPanel
@@ -1045,48 +1136,30 @@ export default function App() {
           onSendMessage={sendMessage}
           onKeyDown={handleKeyDown}
           onCreateSession={createNewSession}
-          onSelectAgent={handleSelectAgent}
-          agents={agents.length ? agents : defaultAgents.map((id) => ({ id, installed: false, capabilities: {} }) as AgentInfo)}
+          onSelectAgent={loadAgentConfig}
+          agents={agents.length ? agents : defaultAgents.map((id) => ({
+            id,
+            installed: false,
+            credentialsAvailable: true,
+            capabilities: {} as AgentInfo["capabilities"],
+          }))}
           agentsLoading={agentsLoading}
           agentsError={agentsError}
           messagesEndRef={messagesEndRef}
           agentLabel={agentLabel}
           currentAgentVersion={currentAgent?.version ?? null}
-          sessionModel={currentSessionInfo?.model ?? null}
-          sessionVariant={currentSessionInfo?.variant ?? null}
-          sessionPermissionMode={currentSessionInfo?.permissionMode ?? null}
-          sessionMcpServerCount={currentSessionInfo?.mcp ? Object.keys(currentSessionInfo.mcp).length : 0}
-          sessionSkillSourceCount={currentSessionInfo?.skills?.sources?.length ?? 0}
+          sessionEnded={sessionEnded}
           onEndSession={endSession}
-          eventError={eventError}
-          questionRequests={questionRequests}
-          permissionRequests={permissionRequests}
-          questionSelections={questionSelections}
-          onSelectQuestionOption={selectQuestionOption}
-          onAnswerQuestion={answerQuestion}
-          onRejectQuestion={rejectQuestion}
-          onReplyPermission={replyPermission}
           modesByAgent={modesByAgent}
           modelsByAgent={modelsByAgent}
           defaultModelByAgent={defaultModelByAgent}
-          modesLoadingByAgent={modesLoadingByAgent}
-          modelsLoadingByAgent={modelsLoadingByAgent}
-          modesErrorByAgent={modesErrorByAgent}
-          modelsErrorByAgent={modelsErrorByAgent}
-          mcpServers={mcpServers}
-          onMcpServersChange={setMcpServers}
-          mcpConfigError={parsedMcpConfig.error}
-          skillSources={skillSources}
-          onSkillSourcesChange={setSkillSources}
         />
 
         <DebugPanel
           debugTab={debugTab}
           onDebugTabChange={setDebugTab}
           events={events}
-          offset={offset}
-          onResetEvents={resetEvents}
-          eventsError={eventError}
+          onResetEvents={() => setEvents([])}
           requestLog={requestLog}
           copiedLogId={copiedLogId}
           onClearRequestLog={() => setRequestLog([])}
@@ -1098,8 +1171,10 @@ export default function App() {
           onInstallAgent={installAgent}
           agentsLoading={agentsLoading}
           agentsError={agentsError}
+          getClient={getClient}
         />
       </main>
+      {toastStack}
     </div>
   );
 }

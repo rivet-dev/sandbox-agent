@@ -1,6 +1,6 @@
 import { Daytona } from "@daytonaio/sdk";
 import { SandboxAgent } from "sandbox-agent";
-import { detectAgent, buildInspectorUrl, generateSessionId, waitForHealth } from "@sandbox-agent/example-shared";
+import { detectAgent, buildInspectorUrl, waitForHealth } from "@sandbox-agent/example-shared";
 
 const daytona = new Daytona();
 
@@ -17,7 +17,7 @@ const sandbox = await daytona.create({ envVars, autoStopInterval: 0 });
 // Install sandbox-agent and start server
 console.log("Installing sandbox-agent...");
 await sandbox.process.executeCommand(
-	"curl -fsSL https://releases.rivet.dev/sandbox-agent/latest/install.sh | sh",
+	"curl -fsSL https://releases.rivet.dev/sandbox-agent/0.2.x/install.sh | sh",
 );
 
 await sandbox.process.executeCommand(
@@ -30,8 +30,8 @@ console.log("Waiting for server...");
 await waitForHealth({ baseUrl });
 
 const client = await SandboxAgent.connect({ baseUrl });
-const sessionId = generateSessionId();
-await client.createSession(sessionId, { agent: detectAgent() });
+const session = await client.createSession({ agent: detectAgent(), sessionInit: { cwd: "/root", mcpServers: [] } });
+const sessionId = session.id;
 
 console.log(`  UI: ${buildInspectorUrl({ baseUrl, sessionId })}`);
 console.log("  Press Ctrl+C to stop.");

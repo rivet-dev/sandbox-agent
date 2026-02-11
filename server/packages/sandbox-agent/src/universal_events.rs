@@ -3,15 +3,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use utoipa::ToSchema;
 
-pub use sandbox_agent_extracted_agent_schemas::{amp, claude, codex, opencode, pi};
-
-pub mod agents;
-
-pub use agents::{
-    amp as convert_amp, claude as convert_claude, codex as convert_codex,
-    opencode as convert_opencode, pi as convert_pi,
-};
-
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
 pub struct UniversalEvent {
     pub event_id: String,
@@ -87,13 +78,10 @@ pub struct SessionStartedData {
 pub struct SessionEndedData {
     pub reason: SessionEndReason,
     pub terminated_by: TerminatedBy,
-    /// Error message when reason is Error
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
-    /// Process exit code when reason is Error
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exit_code: Option<i32>,
-    /// Agent stderr output when reason is Error
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stderr: Option<StderrOutput>,
 }
@@ -116,15 +104,11 @@ pub enum TurnPhase {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
 pub struct StderrOutput {
-    /// First N lines of stderr (if truncated) or full stderr (if not truncated)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub head: Option<String>,
-    /// Last N lines of stderr (only present if truncated)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tail: Option<String>,
-    /// Whether the output was truncated
     pub truncated: bool,
-    /// Total number of lines in stderr
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub total_lines: Option<usize>,
 }
@@ -226,7 +210,7 @@ pub enum ItemKind {
     Unknown,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ItemRole {
     User,
@@ -235,7 +219,7 @@ pub enum ItemRole {
     Tool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ItemStatus {
     InProgress,
@@ -293,94 +277,4 @@ pub enum FileAction {
 pub enum ReasoningVisibility {
     Public,
     Private,
-}
-
-#[derive(Debug, Clone)]
-pub struct EventConversion {
-    pub event_type: UniversalEventType,
-    pub data: UniversalEventData,
-    pub native_session_id: Option<String>,
-    pub source: EventSource,
-    pub synthetic: bool,
-    pub raw: Option<Value>,
-}
-
-impl EventConversion {
-    pub fn new(event_type: UniversalEventType, data: UniversalEventData) -> Self {
-        Self {
-            event_type,
-            data,
-            native_session_id: None,
-            source: EventSource::Agent,
-            synthetic: false,
-            raw: None,
-        }
-    }
-
-    pub fn with_native_session(mut self, session_id: Option<String>) -> Self {
-        self.native_session_id = session_id;
-        self
-    }
-
-    pub fn with_raw(mut self, raw: Option<Value>) -> Self {
-        self.raw = raw;
-        self
-    }
-
-    pub fn synthetic(mut self) -> Self {
-        self.synthetic = true;
-        self.source = EventSource::Daemon;
-        self
-    }
-
-    pub fn with_source(mut self, source: EventSource) -> Self {
-        self.source = source;
-        self
-    }
-}
-
-pub fn turn_started_event(turn_id: Option<String>, metadata: Option<Value>) -> EventConversion {
-    EventConversion::new(
-        UniversalEventType::TurnStarted,
-        UniversalEventData::Turn(TurnEventData {
-            phase: TurnPhase::Started,
-            turn_id,
-            metadata,
-        }),
-    )
-}
-
-pub fn turn_ended_event(turn_id: Option<String>, metadata: Option<Value>) -> EventConversion {
-    EventConversion::new(
-        UniversalEventType::TurnEnded,
-        UniversalEventData::Turn(TurnEventData {
-            phase: TurnPhase::Ended,
-            turn_id,
-            metadata,
-        }),
-    )
-}
-
-pub fn item_from_text(role: ItemRole, text: String) -> UniversalItem {
-    UniversalItem {
-        item_id: String::new(),
-        native_item_id: None,
-        parent_id: None,
-        kind: ItemKind::Message,
-        role: Some(role),
-        content: vec![ContentPart::Text { text }],
-        status: ItemStatus::Completed,
-    }
-}
-
-pub fn item_from_parts(role: ItemRole, kind: ItemKind, parts: Vec<ContentPart>) -> UniversalItem {
-    UniversalItem {
-        item_id: String::new(),
-        native_item_id: None,
-        parent_id: None,
-        kind,
-        role: Some(role),
-        content: parts,
-        status: ItemStatus::Completed,
-    }
 }

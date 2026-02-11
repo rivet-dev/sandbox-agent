@@ -1,5 +1,5 @@
 import { SandboxAgent } from "sandbox-agent";
-import { detectAgent, buildInspectorUrl, generateSessionId } from "@sandbox-agent/example-shared";
+import { detectAgent, buildInspectorUrl } from "@sandbox-agent/example-shared";
 import { startDockerSandbox } from "@sandbox-agent/example-shared/docker";
 import fs from "node:fs";
 import path from "node:path";
@@ -36,15 +36,17 @@ const skillResult = await client.writeFsFile(
 );
 console.log(`  Skill:  ${skillResult.path} (${skillResult.bytesWritten} bytes)`);
 
-// Create a session with the uploaded skill as a local source.
+// Configure the uploaded skill.
+console.log("Configuring custom skill...");
+await client.setSkillsConfig(
+  { directory: "/", skillName: "random-number" },
+  { sources: [{ type: "local", source: "/opt/skills/random-number" }] },
+);
+
+// Create a session.
 console.log("Creating session with custom skill...");
-const sessionId = generateSessionId();
-await client.createSession(sessionId, {
-  agent: detectAgent(),
-  skills: {
-    sources: [{ type: "local", source: "/opt/skills/random-number" }],
-  },
-});
+const session = await client.createSession({ agent: detectAgent(), sessionInit: { cwd: "/root", mcpServers: [] } });
+const sessionId = session.id;
 console.log(`  UI: ${buildInspectorUrl({ baseUrl, sessionId })}`);
 console.log('  Try: "generate a random number between 1 and 100"');
 console.log("  Press Ctrl+C to stop.");

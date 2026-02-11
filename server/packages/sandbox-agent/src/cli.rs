@@ -774,7 +774,6 @@ enum CredentialAgent {
     Codex,
     Opencode,
     Amp,
-    Pi,
 }
 
 fn credentials_to_output(credentials: ExtractedCredentials, reveal: bool) -> CredentialsOutput {
@@ -873,31 +872,6 @@ fn select_token_for_agent(
             } else {
                 Err(CliError::Server(format!(
                     "multiple providers available for opencode: {} (use --provider)",
-                    available.join(", ")
-                )))
-            }
-        }
-        CredentialAgent::Pi => {
-            if let Some(provider) = provider {
-                return select_token_for_provider(credentials, provider);
-            }
-            if let Some(openai) = credentials.openai.as_ref() {
-                return Ok(openai.api_key.clone());
-            }
-            if let Some(anthropic) = credentials.anthropic.as_ref() {
-                return Ok(anthropic.api_key.clone());
-            }
-            if credentials.other.len() == 1 {
-                if let Some((_, cred)) = credentials.other.iter().next() {
-                    return Ok(cred.api_key.clone());
-                }
-            }
-            let available = available_providers(credentials);
-            if available.is_empty() {
-                Err(CliError::Server("no credentials found for pi".to_string()))
-            } else {
-                Err(CliError::Server(format!(
-                    "multiple providers available for pi: {} (use --provider)",
                     available.join(", ")
                 )))
             }

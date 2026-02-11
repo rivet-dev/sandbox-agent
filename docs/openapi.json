@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "sandbox-agent",
-    "description": "Universal API for automatic coding agents in sandboxes. Supports Claude Code, Codex, OpenCode, Cursor, Amp, and Pi.",
+    "description": "Universal API for automatic coding agents in sandboxes. Supports Claude Code, Codex, OpenCode, and Amp.",
     "contact": {
       "name": "Rivet Gaming, LLC",
       "email": "developer@rivet.gg"

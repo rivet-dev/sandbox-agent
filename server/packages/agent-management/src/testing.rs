@@ -2,6 +2,7 @@ use std::env;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use reqwest::blocking::Client;
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use reqwest::StatusCode;
 use thiserror::Error;
@@ -35,7 +36,6 @@ pub enum TestAgentConfigError {
 const AGENTS_ENV: &str = "SANDBOX_TEST_AGENTS";
 const ANTHROPIC_ENV: &str = "SANDBOX_TEST_ANTHROPIC_API_KEY";
 const OPENAI_ENV: &str = "SANDBOX_TEST_OPENAI_API_KEY";
-const PI_ENV: &str = "SANDBOX_TEST_PI";
 const ANTHROPIC_MODELS_URL: &str = "https://api.anthropic.com/v1/models";
 const OPENAI_MODELS_URL: &str = "https://api.openai.com/v1/models";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
@@ -64,6 +64,7 @@ pub fn test_agents_from_env() -> Result<Vec<TestAgentConfig>, TestAgentConfigErr
                     AgentId::Opencode,
                     AgentId::Amp,
                     AgentId::Pi,
+                    AgentId::Cursor,
                 ]);
                 continue;
             }
@@ -73,12 +74,6 @@ pub fn test_agents_from_env() -> Result<Vec<TestAgentConfig>, TestAgentConfigErr
         }
         agents
     };
-
-    let include_pi = pi_tests_enabled() && find_in_path(AgentId::Pi.binary_name());
-    if !include_pi && agents.iter().any(|agent| *agent == AgentId::Pi) {
-        eprintln!("Skipping Pi tests: set {PI_ENV}=1 and ensure pi is on PATH.");
-    }
-    agents.retain(|agent| *agent != AgentId::Pi || include_pi);
 
     agents.sort_by(|a, b| a.as_str().cmp(b.as_str()));
     agents.dedup();
@@ -144,22 +139,7 @@ pub fn test_agents_from_env() -> Result<Vec<TestAgentConfig>, TestAgentConfigErr
                 }
                 credentials_with(anthropic_cred.clone(), openai_cred.clone())
             }
-            AgentId::Pi => {
-                if anthropic_cred.is_none() && openai_cred.is_none() {
-                    return Err(TestAgentConfigError::MissingCredentials {
-                        agent,
-                        missing: format!("{ANTHROPIC_ENV} or {OPENAI_ENV}"),
-                    });
-                }
-                if let Some(cred) = anthropic_cred.as_ref() {
-                    ensure_anthropic_ok(&mut health_cache, cred)?;
-                }
-                if let Some(cred) = openai_cred.as_ref() {
-                    ensure_openai_ok(&mut health_cache, cred)?;
-                }
-                credentials_with(anthropic_cred.clone(), openai_cred.clone())
-            }
-            AgentId::Cursor => credentials_with(None, None),
+            AgentId::Pi | AgentId::Cursor => credentials_with(None, None),
             AgentId::Mock => credentials_with(None, None),
         };
         configs.push(TestAgentConfig { agent, credentials });
@@ -195,7 +175,7 @@ fn ensure_openai_ok(
 fn health_check_anthropic(credentials: &ProviderCredentials) -> Result<(), TestAgentConfigError> {
     let credentials = credentials.clone();
     run_blocking_check("anthropic", move || {
-        let client = crate::http_client::blocking_client_builder()
+        let client = Client::builder()
             .timeout(Duration::from_secs(10))
             .build()
             .map_err(|err| TestAgentConfigError::HealthCheckFailed {
@@ -249,7 +229,7 @@ fn health_check_anthropic(credentials: &ProviderCredentials) -> Result<(), TestA
 fn health_check_openai(credentials: &ProviderCredentials) -> Result<(), TestAgentConfigError> {
     let credentials = credentials.clone();
     run_blocking_check("openai", move || {
-        let client = crate::http_client::blocking_client_builder()
+        let client = Client::builder()
             .timeout(Duration::from_secs(10))
             .build()
             .map_err(|err| TestAgentConfigError::HealthCheckFailed {
@@ -321,15 +301,14 @@ where
 }
 
 fn detect_system_agents() -> Vec<AgentId> {
-    let mut candidates = vec![
+    let candidates = [
         AgentId::Claude,
         AgentId::Codex,
         AgentId::Opencode,
         AgentId::Amp,
+        AgentId::Pi,
+        AgentId::Cursor,
     ];
-    if pi_tests_enabled() && find_in_path(AgentId::Pi.binary_name()) {
-        candidates.push(AgentId::Pi);
-    }
     let install_dir = default_install_dir();
     candidates
         .into_iter()
@@ -369,15 +348,6 @@ fn read_env_key(name: &str) -> Option<String> {
             Some(trimmed)
         }
     })
-}
-
-fn pi_tests_enabled() -> bool {
-    env::var(PI_ENV)
-        .map(|value| {
-            let value = value.trim().to_ascii_lowercase();
-            value == "1" || value == "true" || value == "yes"
-        })
-        .unwrap_or(false)
 }
 
 fn credentials_with(

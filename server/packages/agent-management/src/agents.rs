@@ -1,17 +1,18 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::fs;
-use std::io::{self, BufRead, BufReader, Read, Write};
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, ExitStatus, Stdio};
-use std::time::{Duration, Instant};
+use std::process::{Command, Stdio};
 
 use flate2::read::GzDecoder;
-use sandbox_agent_extracted_agent_schemas::codex as codex_schema;
+use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use thiserror::Error;
 use url::Url;
+
+const DEFAULT_ACP_REGISTRY_URL: &str =
+    "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -62,6 +63,51 @@ impl AgentId {
             _ => None,
         }
     }
+
+    pub fn all() -> &'static [AgentId] {
+        &[
+            AgentId::Claude,
+            AgentId::Codex,
+            AgentId::Opencode,
+            AgentId::Amp,
+            AgentId::Pi,
+            AgentId::Cursor,
+            AgentId::Mock,
+        ]
+    }
+
+    fn agent_process_registry_id(self) -> Option<&'static str> {
+        match self {
+            AgentId::Claude => Some("claude-code-acp"),
+            AgentId::Codex => Some("codex-acp"),
+            AgentId::Opencode => Some("opencode"),
+            AgentId::Amp => Some("amp-acp"),
+            AgentId::Pi => Some("pi-acp"),
+            AgentId::Cursor => Some("cursor-agent-acp"),
+            AgentId::Mock => None,
+        }
+    }
+
+    fn agent_process_binary_hint(self) -> Option<&'static str> {
+        match self {
+            AgentId::Claude => Some("claude-code-acp"),
+            AgentId::Codex => Some("codex-acp"),
+            AgentId::Opencode => Some("opencode"),
+            AgentId::Amp => Some("amp-acp"),
+            AgentId::Pi => Some("pi-acp"),
+            AgentId::Cursor => Some("cursor-agent-acp"),
+            AgentId::Mock => None,
+        }
+    }
+
+    fn native_required(self) -> bool {
+        matches!(self, AgentId::Claude | AgentId::Codex | AgentId::Opencode)
+    }
+
+    fn unstable_enabled(self) -> bool {
+        // v1 profile includes unstable methods; support still depends on agent process capability.
+        !matches!(self, AgentId::Amp)
+    }
 }
 
 impl fmt::Display for AgentId {
@@ -77,14 +123,14 @@ pub enum Platform {
     LinuxArm64,
     MacosArm64,
     MacosX64,
+    WindowsX64,
+    WindowsArm64,
 }
 
 impl Platform {
     pub fn detect() -> Result<Self, AgentError> {
         let os = std::env::consts::OS;
         let arch = std::env::consts::ARCH;
-        // Detect musl at runtime by checking for the musl dynamic linker
-        // This is more reliable than cfg!(target_env = "musl") which checks compile-time
         let is_musl = Self::detect_musl_runtime();
 
         match (os, arch, is_musl) {
@@ -93,6 +139,8 @@ impl Platform {
             ("linux", "aarch64", _) => Ok(Self::LinuxArm64),
             ("macos", "aarch64", _) => Ok(Self::MacosArm64),
             ("macos", "x86_64", _) => Ok(Self::MacosX64),
+            ("windows", "x86_64", _) => Ok(Self::WindowsX64),
+            ("windows", "aarch64", _) => Ok(Self::WindowsArm64),
             _ => Err(AgentError::UnsupportedPlatform {
                 os: os.to_string(),
                 arch: arch.to_string(),
@@ -100,19 +148,102 @@ impl Platform {
         }
     }
 
-    /// Detect if the runtime environment uses musl libc by checking for musl dynamic linker
+    #[cfg(target_os = "linux")]
     fn detect_musl_runtime() -> bool {
-        use std::path::Path;
-        // Check for musl dynamic linkers (x86_64 and aarch64)
         Path::new("/lib/ld-musl-x86_64.so.1").exists()
             || Path::new("/lib/ld-musl-aarch64.so.1").exists()
     }
+
+    #[cfg(not(target_os = "linux"))]
+    fn detect_musl_runtime() -> bool {
+        false
+    }
+
+    fn registry_key(self) -> &'static str {
+        match self {
+            Platform::LinuxX64 | Platform::LinuxX64Musl => "linux-x86_64",
+            Platform::LinuxArm64 => "linux-aarch64",
+            Platform::MacosArm64 => "darwin-aarch64",
+            Platform::MacosX64 => "darwin-x86_64",
+            Platform::WindowsX64 => "windows-x86_64",
+            Platform::WindowsArm64 => "windows-aarch64",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InstallSource {
+    Registry,
+    Fallback,
+    LocalPath,
+    Builtin,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InstalledArtifactKind {
+    NativeAgent,
+    AgentProcess,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InstalledArtifact {
+    pub kind: InstalledArtifactKind,
+    pub path: PathBuf,
+    pub version: Option<String>,
+    pub source: InstallSource,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InstallResult {
+    pub artifacts: Vec<InstalledArtifact>,
+    pub already_installed: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct InstallOptions {
+    pub reinstall: bool,
+    pub version: Option<String>,
+    pub agent_process_version: Option<String>,
+}
+
+impl Default for InstallOptions {
+    fn default() -> Self {
+        Self {
+            reinstall: false,
+            version: None,
+            agent_process_version: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentInstallStatus {
+    pub agent: AgentId,
+    pub native_required: bool,
+    pub native_installed: bool,
+    pub native_version: Option<String>,
+    pub agent_process_installed: bool,
+    pub agent_process_source: Option<InstallSource>,
+    pub agent_process_version: Option<String>,
+    pub unstable_enabled: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct AgentProcessLaunchSpec {
+    pub program: PathBuf,
+    pub args: Vec<String>,
+    pub env: HashMap<String, String>,
+    pub source: InstallSource,
+    pub version: Option<String>,
 }
 
 #[derive(Debug, Clone)]
 pub struct AgentManager {
     install_dir: PathBuf,
     platform: Platform,
+    registry_url: Url,
 }
 
 impl AgentManager {
@@ -120,14 +251,69 @@ impl AgentManager {
         Ok(Self {
             install_dir: install_dir.into(),
             platform: Platform::detect()?,
+            registry_url: registry_url_from_env()?,
         })
     }
 
     pub fn with_platform(install_dir: impl Into<PathBuf>, platform: Platform) -> Self {
+        let registry_url = registry_url_from_env().unwrap_or_else(|_| {
+            Url::parse(DEFAULT_ACP_REGISTRY_URL).expect("hardcoded valid ACP registry URL")
+        });
         Self {
             install_dir: install_dir.into(),
             platform,
+            registry_url,
         }
+    }
+
+    pub fn install_dir(&self) -> &Path {
+        &self.install_dir
+    }
+
+    pub fn binary_path(&self, agent: AgentId) -> PathBuf {
+        self.install_dir.join(agent.binary_name())
+    }
+
+    pub fn agent_process_path(&self, agent: AgentId) -> PathBuf {
+        let base = self.install_dir.join("agent_processes");
+        if cfg!(windows) {
+            base.join(format!("{}-acp.cmd", agent.as_str()))
+        } else {
+            base.join(format!("{}-acp", agent.as_str()))
+        }
+    }
+
+    pub fn agent_process_storage_dir(&self, agent: AgentId) -> PathBuf {
+        self.install_dir
+            .join("agent_processes")
+            .join(agent.as_str())
+    }
+
+    pub fn list_status(&self) -> Vec<AgentInstallStatus> {
+        AgentId::all()
+            .iter()
+            .copied()
+            .map(|agent| {
+                let native_required = agent.native_required();
+                let native_installed = !native_required || self.native_installed(agent);
+                let native_version = if native_installed && native_required {
+                    self.version(agent).ok().flatten()
+                } else {
+                    None
+                };
+                let agent_process = self.agent_process_status(agent);
+                AgentInstallStatus {
+                    agent,
+                    native_required,
+                    native_installed,
+                    native_version,
+                    agent_process_installed: agent_process.is_some(),
+                    agent_process_source: agent_process.as_ref().map(|a| a.source),
+                    agent_process_version: agent_process.and_then(|a| a.version),
+                    unstable_enabled: agent.unstable_enabled(),
+                }
+            })
+            .collect()
     }
 
     pub fn install(
@@ -135,53 +321,39 @@ impl AgentManager {
         agent: AgentId,
         options: InstallOptions,
     ) -> Result<InstallResult, AgentError> {
-        let install_path = self.binary_path(agent);
-        if !options.reinstall {
-            if let Ok(existing_path) = self.resolve_binary(agent) {
-                return Ok(InstallResult {
-                    path: existing_path,
-                    version: self.version(agent).unwrap_or(None),
-                });
+        fs::create_dir_all(&self.install_dir)?;
+        fs::create_dir_all(self.install_dir.join("agent_processes"))?;
+
+        let mut artifacts = Vec::new();
+        let mut already_installed = true;
+
+        if agent.native_required() {
+            let native_artifact = self.install_native(agent, &options)?;
+            if native_artifact.is_some() {
+                already_installed = false;
+            }
+            if let Some(artifact) = native_artifact {
+                artifacts.push(artifact);
             }
         }
 
-        fs::create_dir_all(&self.install_dir)?;
-
-        match agent {
-            AgentId::Claude => {
-                install_claude(&install_path, self.platform, options.version.as_deref())?
-            }
-            AgentId::Codex => {
-                install_codex(&install_path, self.platform, options.version.as_deref())?
-            }
-            AgentId::Opencode => {
-                install_opencode(&install_path, self.platform, options.version.as_deref())?
-            }
-            AgentId::Amp => install_amp(&install_path, self.platform, options.version.as_deref())?,
-            AgentId::Pi => install_pi(&install_path, self.platform, options.version.as_deref())?,
-            AgentId::Cursor => install_cursor(&install_path, self.platform, options.version.as_deref())?,
-            AgentId::Mock => {
-                if !install_path.exists() {
-                    fs::write(&install_path, b"mock")?;
-                }
-            }
+        let agent_process_artifact = self.install_agent_process(agent, &options)?;
+        if agent_process_artifact.is_some() {
+            already_installed = false;
+        }
+        if let Some(artifact) = agent_process_artifact {
+            artifacts.push(artifact);
         }
 
         Ok(InstallResult {
-            path: install_path,
-            version: self.version(agent).unwrap_or(None),
+            artifacts,
+            already_installed,
         })
     }
 
     pub fn is_installed(&self, agent: AgentId) -> bool {
-        if agent == AgentId::Mock {
-            return true;
-        }
-        self.binary_path(agent).exists() || find_in_path(agent.binary_name()).is_some()
-    }
-
-    pub fn binary_path(&self, agent: AgentId) -> PathBuf {
-        self.install_dir.join(agent.binary_name())
+        let native_ok = !agent.native_required() || self.native_installed(agent);
+        native_ok && self.agent_process_status(agent).is_some()
     }
 
     pub fn version(&self, agent: AgentId) -> Result<Option<String>, AgentError> {
@@ -189,8 +361,7 @@ impl AgentManager {
             return Ok(Some("builtin".to_string()));
         }
         let path = self.resolve_binary(agent)?;
-        let attempts = [vec!["--version"], vec!["version"], vec!["-V"]];
-        for args in attempts {
+        for args in [["--version"], ["version"], ["-V"]] {
             let output = Command::new(&path).args(args).output();
             if let Ok(output) = output {
                 if output.status.success() {
@@ -203,515 +374,10 @@ impl AgentManager {
         Ok(None)
     }
 
-    pub fn spawn(&self, agent: AgentId, options: SpawnOptions) -> Result<SpawnResult, AgentError> {
-        if agent == AgentId::Mock {
-            return Err(AgentError::UnsupportedAgent {
-                agent: agent.as_str().to_string(),
-            });
-        }
-        if agent == AgentId::Codex {
-            return self.spawn_codex_app_server(options);
-        }
-        let path = self.resolve_binary(agent)?;
-        let working_dir = options
-            .working_dir
-            .clone()
-            .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-        let mut command = Command::new(&path);
-        command.current_dir(&working_dir);
-
-        match agent {
-            AgentId::Claude => {
-                command
-                    .arg("--output-format")
-                    .arg("stream-json")
-                    .arg("--verbose");
-                if let Some(model) = options.model.as_deref() {
-                    command.arg("--model").arg(model);
-                }
-                if let Some(session_id) = options.session_id.as_deref() {
-                    command.arg("--resume").arg(session_id);
-                }
-                match options.permission_mode.as_deref() {
-                    Some("plan") => {
-                        command.arg("--permission-mode").arg("plan");
-                    }
-                    Some("bypass") => {
-                        command.arg("--dangerously-skip-permissions");
-                    }
-                    Some("acceptEdits") => {
-                        command.arg("--permission-mode").arg("acceptEdits");
-                    }
-                    _ => {}
-                }
-                if options.streaming_input {
-                    command
-                        .arg("--input-format")
-                        .arg("stream-json")
-                        .arg("--permission-prompt-tool")
-                        .arg("stdio")
-                        .arg("--include-partial-messages");
-                } else {
-                    command.arg("--print").arg("--").arg(&options.prompt);
-                }
-            }
-            AgentId::Codex => {
-                if options.session_id.is_some() {
-                    return Err(AgentError::ResumeUnsupported { agent });
-                }
-                command.arg("app-server");
-            }
-            AgentId::Opencode => {
-                command.arg("run").arg("--format").arg("json");
-                if let Some(model) = options.model.as_deref() {
-                    command.arg("-m").arg(model);
-                }
-                if let Some(agent_mode) = options.agent_mode.as_deref() {
-                    command.arg("--agent").arg(agent_mode);
-                }
-                if let Some(variant) = options.variant.as_deref() {
-                    command.arg("--variant").arg(variant);
-                }
-                if options.permission_mode.as_deref() == Some("bypass") {
-                    command.arg("--dangerously-skip-permissions");
-                }
-                if let Some(session_id) = options.session_id.as_deref() {
-                    command.arg("-s").arg(session_id);
-                }
-                command.arg(&options.prompt);
-            }
-            AgentId::Cursor => {
-                // cursor-agent typically runs as HTTP server on localhost:32123
-                // For CLI usage similar to opencode
-                command.arg("run").arg("--format").arg("json");
-                if let Some(model) = options.model.as_deref() {
-                    command.arg("-m").arg(model);
-                }
-                if let Some(session_id) = options.session_id.as_deref() {
-                    command.arg("-s").arg(session_id);
-                }
-                command.arg(&options.prompt);
-            }
-            AgentId::Amp => {
-                let output = spawn_amp(&path, &working_dir, &options)?;
-                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-                let events = parse_jsonl_from_outputs(&stdout, &stderr);
-                return Ok(SpawnResult {
-                    status: output.status,
-                    stdout,
-                    stderr,
-                    session_id: extract_session_id(agent, &events),
-                    result: extract_result_text(agent, &events),
-                    events,
-                });
-            }
-            AgentId::Pi => {
-                let output = spawn_pi(&path, &working_dir, &options)?;
-                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-                let events = parse_jsonl_from_outputs(&stdout, &stderr);
-                return Ok(SpawnResult {
-                    status: output.status,
-                    stdout,
-                    stderr,
-                    session_id: extract_session_id(agent, &events),
-                    result: extract_result_text(agent, &events),
-                    events,
-                });
-            }
-            AgentId::Mock => {
-                return Err(AgentError::UnsupportedAgent {
-                    agent: agent.as_str().to_string(),
-                });
-            }
-        }
-
-        for (key, value) in options.env {
-            command.env(key, value);
-        }
-
-        let output = command.output().map_err(AgentError::Io)?;
-        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-        let events = parse_jsonl_from_outputs(&stdout, &stderr);
-        Ok(SpawnResult {
-            status: output.status,
-            stdout,
-            stderr,
-            session_id: extract_session_id(agent, &events),
-            result: extract_result_text(agent, &events),
-            events,
-        })
-    }
-
-    pub fn spawn_streaming(
-        &self,
-        agent: AgentId,
-        mut options: SpawnOptions,
-    ) -> Result<StreamingSpawn, AgentError> {
-        // Pi sessions are intentionally handled by the router's dedicated RPC runtime
-        // (one process per daemon session), not by generic subprocess streaming.
-        if agent == AgentId::Pi {
-            return Err(AgentError::UnsupportedRuntimePath {
-                agent,
-                operation: "spawn_streaming",
-                recommended_path: "router-managed per-session RPC runtime",
-            });
-        }
-        let codex_options = if agent == AgentId::Codex {
-            Some(options.clone())
-        } else {
-            None
-        };
-        if agent == AgentId::Claude {
-            options.streaming_input = true;
-        }
-        let mut command = self.build_command(agent, &options)?;
-
-        // Pass environment variables to the agent process (e.g., ANTHROPIC_API_KEY)
-        for (key, value) in &options.env {
-            command.env(key, value);
-        }
-
-        if matches!(agent, AgentId::Codex | AgentId::Claude) {
-            command.stdin(Stdio::piped());
-        }
-        command.stdout(Stdio::piped()).stderr(Stdio::piped());
-        let mut child = command.spawn().map_err(AgentError::Io)?;
-        let stdin = child.stdin.take();
-        let stdout = child.stdout.take();
-        let stderr = child.stderr.take();
-        Ok(StreamingSpawn {
-            child,
-            stdin,
-            stdout,
-            stderr,
-            codex_options,
-        })
-    }
-
-    fn spawn_codex_app_server(&self, options: SpawnOptions) -> Result<SpawnResult, AgentError> {
-        if options.session_id.is_some() {
-            return Err(AgentError::ResumeUnsupported {
-                agent: AgentId::Codex,
-            });
-        }
-        let mut command = self.build_command(AgentId::Codex, &options)?;
-        command
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        for (key, value) in options.env {
-            command.env(key, value);
-        }
-
-        let mut child = command.spawn().map_err(AgentError::Io)?;
-        let mut stdin = child.stdin.take().ok_or_else(|| {
-            AgentError::Io(io::Error::new(io::ErrorKind::Other, "missing codex stdin"))
-        })?;
-        let stdout = child.stdout.take().ok_or_else(|| {
-            AgentError::Io(io::Error::new(io::ErrorKind::Other, "missing codex stdout"))
-        })?;
-        let stderr = child.stderr.take().ok_or_else(|| {
-            AgentError::Io(io::Error::new(io::ErrorKind::Other, "missing codex stderr"))
-        })?;
-
-        let stderr_handle = std::thread::spawn(move || {
-            let mut buffer = String::new();
-            let _ = BufReader::new(stderr).read_to_string(&mut buffer);
-            buffer
-        });
-
-        let approval_policy = codex_approval_policy(options.permission_mode.as_deref());
-        let sandbox_mode = codex_sandbox_mode(options.permission_mode.as_deref());
-        let sandbox_policy = codex_sandbox_policy(options.permission_mode.as_deref());
-        let prompt = codex_prompt_for_mode(&options.prompt, options.agent_mode.as_deref());
-        let cwd = options
-            .working_dir
-            .as_ref()
-            .map(|path| path.to_string_lossy().to_string());
-
-        let mut next_id = 1i64;
-        let init_id = next_request_id(&mut next_id);
-        send_json_line(
-            &mut stdin,
-            &codex_schema::ClientRequest::Initialize {
-                id: init_id.clone(),
-                params: codex_schema::InitializeParams {
-                    client_info: codex_schema::ClientInfo {
-                        name: "sandbox-agent".to_string(),
-                        title: Some("sandbox-agent".to_string()),
-                        version: env!("CARGO_PKG_VERSION").to_string(),
-                    },
-                },
-            },
-        )?;
-
-        let mut init_done = false;
-        let mut thread_start_sent = false;
-        let mut thread_start_id: Option<String> = None;
-        let mut turn_start_sent = false;
-        let mut thread_id: Option<String> = None;
-        let mut stdout_buffer = String::new();
-        let mut events = Vec::new();
-        let mut line = String::new();
-        let mut reader = BufReader::new(stdout);
-        let mut completed = false;
-        while reader.read_line(&mut line).map_err(AgentError::Io)? > 0 {
-            stdout_buffer.push_str(&line);
-            let trimmed = line.trim_end_matches(&['\r', '\n'][..]).to_string();
-            line.clear();
-            if trimmed.is_empty() {
-                continue;
-            }
-            let value: Value = match serde_json::from_str(&trimmed) {
-                Ok(value) => value,
-                Err(_) => continue,
-            };
-            let message: codex_schema::JsonrpcMessage = match serde_json::from_value(value.clone())
-            {
-                Ok(message) => message,
-                Err(_) => continue,
-            };
-            match message {
-                codex_schema::JsonrpcMessage::Response(response) => {
-                    let response_id = response.id.to_string();
-                    if !init_done && response_id == init_id.to_string() {
-                        init_done = true;
-                        send_json_line(
-                            &mut stdin,
-                            &codex_schema::JsonrpcNotification {
-                                method: "initialized".to_string(),
-                                params: None,
-                            },
-                        )?;
-                        let request_id = next_request_id(&mut next_id);
-                        let request_id_str = request_id.to_string();
-                        let mut params = codex_schema::ThreadStartParams::default();
-                        params.approval_policy = approval_policy;
-                        params.sandbox = sandbox_mode;
-                        params.model = options.model.clone();
-                        params.cwd = cwd.clone();
-                        send_json_line(
-                            &mut stdin,
-                            &codex_schema::ClientRequest::ThreadStart {
-                                id: request_id,
-                                params,
-                            },
-                        )?;
-                        thread_start_id = Some(request_id_str);
-                        thread_start_sent = true;
-                    } else if thread_start_id.as_deref() == Some(&response_id)
-                        && thread_id.is_none()
-                    {
-                        thread_id = codex_thread_id_from_response(&response.result);
-                    }
-                    events.push(value);
-                }
-                codex_schema::JsonrpcMessage::Notification(_) => {
-                    if let Ok(notification) =
-                        serde_json::from_value::<codex_schema::ServerNotification>(value.clone())
-                    {
-                        if thread_id.is_none() {
-                            thread_id = codex_thread_id_from_notification(&notification);
-                        }
-                        if matches!(
-                            notification,
-                            codex_schema::ServerNotification::TurnCompleted(_)
-                                | codex_schema::ServerNotification::Error(_)
-                        ) {
-                            completed = true;
-                        }
-                        if let codex_schema::ServerNotification::ItemCompleted(params) =
-                            &notification
-                        {
-                            if matches!(params.item, codex_schema::ThreadItem::AgentMessage { .. })
-                            {
-                                completed = true;
-                            }
-                        }
-                    }
-                    events.push(value);
-                }
-                codex_schema::JsonrpcMessage::Request(_) => {
-                    events.push(value);
-                }
-                codex_schema::JsonrpcMessage::Error(_) => {
-                    events.push(value);
-                    completed = true;
-                }
-            }
-            if thread_id.is_some() && thread_start_sent && !turn_start_sent {
-                let request_id = next_request_id(&mut next_id);
-                let params = codex_schema::TurnStartParams {
-                    approval_policy,
-                    collaboration_mode: None,
-                    cwd: cwd.clone(),
-                    effort: None,
-                    input: vec![codex_schema::UserInput::Text {
-                        text: prompt.clone(),
-                        text_elements: Vec::new(),
-                    }],
-                    model: options.model.clone(),
-                    output_schema: None,
-                    sandbox_policy: sandbox_policy.clone(),
-                    summary: None,
-                    thread_id: thread_id.clone().unwrap_or_default(),
-                };
-                send_json_line(
-                    &mut stdin,
-                    &codex_schema::ClientRequest::TurnStart {
-                        id: request_id,
-                        params,
-                    },
-                )?;
-                turn_start_sent = true;
-            }
-            if completed {
-                break;
-            }
-        }
-
-        drop(stdin);
-        let status = if completed {
-            let start = Instant::now();
-            loop {
-                if let Some(status) = child.try_wait().map_err(AgentError::Io)? {
-                    break status;
-                }
-                if start.elapsed() > Duration::from_secs(5) {
-                    let _ = child.kill();
-                    break child.wait().map_err(AgentError::Io)?;
-                }
-                std::thread::sleep(Duration::from_millis(50));
-            }
-        } else {
-            child.wait().map_err(AgentError::Io)?
-        };
-        let stderr_output = stderr_handle.join().unwrap_or_default();
-
-        Ok(SpawnResult {
-            status,
-            stdout: stdout_buffer,
-            stderr: stderr_output,
-            session_id: extract_session_id(AgentId::Codex, &events),
-            result: extract_result_text(AgentId::Codex, &events),
-            events,
-        })
-    }
-
-    fn build_command(&self, agent: AgentId, options: &SpawnOptions) -> Result<Command, AgentError> {
-        if agent == AgentId::Pi {
-            return Err(AgentError::UnsupportedRuntimePath {
-                agent,
-                operation: "build_command",
-                recommended_path: "router-managed per-session RPC runtime",
-            });
-        }
-        if agent == AgentId::Mock {
-            return Err(AgentError::UnsupportedAgent {
-                agent: agent.as_str().to_string(),
-            });
-        }
-
-        let path = self.resolve_binary(agent)?;
-        let working_dir = options
-            .working_dir
-            .clone()
-            .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-        let mut command = Command::new(&path);
-        command.current_dir(&working_dir);
-
-        match agent {
-            AgentId::Claude => {
-                command
-                    .arg("--output-format")
-                    .arg("stream-json")
-                    .arg("--verbose");
-                if let Some(model) = options.model.as_deref() {
-                    command.arg("--model").arg(model);
-                }
-                if let Some(session_id) = options.session_id.as_deref() {
-                    command.arg("--resume").arg(session_id);
-                }
-                match options.permission_mode.as_deref() {
-                    Some("plan") => {
-                        command.arg("--permission-mode").arg("plan");
-                    }
-                    Some("bypass") => {
-                        command.arg("--dangerously-skip-permissions");
-                    }
-                    Some("acceptEdits") => {
-                        command.arg("--permission-mode").arg("acceptEdits");
-                    }
-                    _ => {}
-                }
-                if options.streaming_input {
-                    command
-                        .arg("--input-format")
-                        .arg("stream-json")
-                        .arg("--permission-prompt-tool")
-                        .arg("stdio")
-                        .arg("--include-partial-messages");
-                } else {
-                    command.arg(&options.prompt);
-                }
-            }
-            AgentId::Codex => {
-                if options.session_id.is_some() {
-                    return Err(AgentError::ResumeUnsupported { agent });
-                }
-                command.arg("app-server");
-            }
-            AgentId::Opencode => {
-                command.arg("run").arg("--format").arg("json");
-                if let Some(model) = options.model.as_deref() {
-                    command.arg("-m").arg(model);
-                }
-                if let Some(agent_mode) = options.agent_mode.as_deref() {
-                    command.arg("--agent").arg(agent_mode);
-                }
-                if let Some(variant) = options.variant.as_deref() {
-                    command.arg("--variant").arg(variant);
-                }
-                if options.permission_mode.as_deref() == Some("bypass") {
-                    command.arg("--dangerously-skip-permissions");
-                }
-                if let Some(session_id) = options.session_id.as_deref() {
-                    command.arg("-s").arg(session_id);
-                }
-                command.arg(&options.prompt);
-            }
-            AgentId::Amp => {
-                return Ok(build_amp_command(&path, &working_dir, options));
-            }
-            AgentId::Cursor => {
-                command.arg("run").arg("--format").arg("json");
-                if let Some(model) = options.model.as_deref() {
-                    command.arg("-m").arg(model);
-                }
-                if let Some(session_id) = options.session_id.as_deref() {
-                    command.arg("-s").arg(session_id);
-                }
-                command.arg(&options.prompt);
-            }
-            AgentId::Pi => {
-                unreachable!("Pi is handled by router RPC runtime");
-            }
-            AgentId::Mock => {
-                unreachable!("Mock is handled above");
-            }
-        }
-
-        for (key, value) in &options.env {
-            command.env(key, value);
-        }
-
-        Ok(command)
-    }
-
     pub fn resolve_binary(&self, agent: AgentId) -> Result<PathBuf, AgentError> {
+        if agent == AgentId::Mock {
+            return Ok(self.binary_path(agent));
+        }
         let path = self.binary_path(agent);
         if path.exists() {
             return Ok(path);
@@ -721,76 +387,322 @@ impl AgentManager {
         }
         Err(AgentError::BinaryNotFound { agent })
     }
-}
 
-#[derive(Debug, Clone)]
-pub struct InstallOptions {
-    pub reinstall: bool,
-    pub version: Option<String>,
-}
+    pub fn resolve_agent_process(
+        &self,
+        agent: AgentId,
+    ) -> Result<AgentProcessLaunchSpec, AgentError> {
+        if agent == AgentId::Mock {
+            return Ok(AgentProcessLaunchSpec {
+                program: self.agent_process_path(agent),
+                args: Vec::new(),
+                env: HashMap::new(),
+                source: InstallSource::Builtin,
+                version: Some("builtin".to_string()),
+            });
+        }
 
-impl Default for InstallOptions {
-    fn default() -> Self {
-        Self {
-            reinstall: false,
+        let launcher = self.agent_process_path(agent);
+        if launcher.exists() {
+            return Ok(AgentProcessLaunchSpec {
+                program: launcher,
+                args: Vec::new(),
+                env: HashMap::new(),
+                source: InstallSource::LocalPath,
+                version: None,
+            });
+        }
+
+        if let Some(bin) = agent.agent_process_binary_hint().and_then(find_in_path) {
+            let args = if agent == AgentId::Opencode {
+                vec!["acp".to_string()]
+            } else {
+                Vec::new()
+            };
+            return Ok(AgentProcessLaunchSpec {
+                program: bin,
+                args,
+                env: HashMap::new(),
+                source: InstallSource::LocalPath,
+                version: None,
+            });
+        }
+
+        if agent == AgentId::Opencode {
+            let native = self.resolve_binary(agent)?;
+            return Ok(AgentProcessLaunchSpec {
+                program: native,
+                args: vec!["acp".to_string()],
+                env: HashMap::new(),
+                source: InstallSource::LocalPath,
+                version: None,
+            });
+        }
+
+        Err(AgentError::AgentProcessNotFound {
+            agent,
+            hint: Some("run install to provision ACP agent process".to_string()),
+        })
+    }
+
+    fn native_installed(&self, agent: AgentId) -> bool {
+        self.binary_path(agent).exists() || find_in_path(agent.binary_name()).is_some()
+    }
+
+    fn install_native(
+        &self,
+        agent: AgentId,
+        options: &InstallOptions,
+    ) -> Result<Option<InstalledArtifact>, AgentError> {
+        if !options.reinstall && self.native_installed(agent) {
+            return Ok(None);
+        }
+
+        let path = self.binary_path(agent);
+        match agent {
+            AgentId::Claude => install_claude(&path, self.platform, options.version.as_deref())?,
+            AgentId::Codex => install_codex(&path, self.platform, options.version.as_deref())?,
+            AgentId::Opencode => {
+                install_opencode(&path, self.platform, options.version.as_deref())?
+            }
+            AgentId::Amp => install_amp(&path, self.platform, options.version.as_deref())?,
+            AgentId::Pi | AgentId::Cursor => {
+                return Ok(None);
+            }
+            AgentId::Mock => {
+                write_text_file(&path, "#!/usr/bin/env sh\nexit 0\n")?;
+            }
+        }
+
+        Ok(Some(InstalledArtifact {
+            kind: InstalledArtifactKind::NativeAgent,
+            path,
+            version: self.version(agent).ok().flatten(),
+            source: InstallSource::Fallback,
+        }))
+    }
+
+    fn install_agent_process(
+        &self,
+        agent: AgentId,
+        options: &InstallOptions,
+    ) -> Result<Option<InstalledArtifact>, AgentError> {
+        if !options.reinstall {
+            if self.agent_process_status(agent).is_some() {
+                return Ok(None);
+            }
+        }
+
+        if agent == AgentId::Mock {
+            let path = self.agent_process_path(agent);
+            write_mock_agent_process_launcher(&path)?;
+            return Ok(Some(InstalledArtifact {
+                kind: InstalledArtifactKind::AgentProcess,
+                path,
+                version: Some("builtin".to_string()),
+                source: InstallSource::Builtin,
+            }));
+        }
+
+        if let Some(artifact) = self.install_agent_process_from_registry(agent, options)? {
+            return Ok(Some(artifact));
+        }
+
+        let artifact = self.install_agent_process_fallback(agent, options)?;
+        Ok(Some(artifact))
+    }
+
+    fn agent_process_status(&self, agent: AgentId) -> Option<AgentProcessStatus> {
+        if agent == AgentId::Mock {
+            return Some(AgentProcessStatus {
+                source: InstallSource::Builtin,
+                version: Some("builtin".to_string()),
+            });
+        }
+
+        let launcher = self.agent_process_path(agent);
+        if launcher.exists() {
+            return Some(AgentProcessStatus {
+                source: InstallSource::LocalPath,
+                version: None,
+            });
+        }
+
+        agent.agent_process_binary_hint().and_then(find_in_path)?;
+        Some(AgentProcessStatus {
+            source: InstallSource::LocalPath,
             version: None,
+        })
+    }
+
+    fn install_agent_process_from_registry(
+        &self,
+        agent: AgentId,
+        options: &InstallOptions,
+    ) -> Result<Option<InstalledArtifact>, AgentError> {
+        let Some(registry_id) = agent.agent_process_registry_id() else {
+            return Ok(None);
+        };
+
+        let registry = fetch_registry(&self.registry_url)?;
+        let Some(entry) = registry.agents.into_iter().find(|a| a.id == registry_id) else {
+            return Ok(None);
+        };
+
+        if let Some(npx) = entry.distribution.npx {
+            let package =
+                apply_npx_version_override(&npx.package, options.agent_process_version.as_deref());
+            let launcher = self.agent_process_path(agent);
+            write_npx_agent_process_launcher(&launcher, &package, &npx.args, &npx.env)?;
+            verify_command(&launcher, &[])?;
+            return Ok(Some(InstalledArtifact {
+                kind: InstalledArtifactKind::AgentProcess,
+                path: launcher,
+                version: options
+                    .agent_process_version
+                    .clone()
+                    .or(entry.version)
+                    .or(extract_npx_version(&package)),
+                source: InstallSource::Registry,
+            }));
         }
+
+        if let Some(binary) = entry.distribution.binary {
+            let key = self.platform.registry_key();
+            if let Some(target) = binary.get(key) {
+                let archive_url = Url::parse(&target.archive)?;
+                let payload = download_bytes(&archive_url)?;
+                let root = self.agent_process_storage_dir(agent);
+                if root.exists() {
+                    fs::remove_dir_all(&root)?;
+                }
+                fs::create_dir_all(&root)?;
+                unpack_archive(&payload, &archive_url, &root)?;
+
+                let cmd_path = resolve_extracted_command(&root, &target.cmd)?;
+                let launcher = self.agent_process_path(agent);
+                write_exec_agent_process_launcher(&launcher, &cmd_path, &target.args, &target.env)?;
+                verify_command(&launcher, &[])?;
+
+                return Ok(Some(InstalledArtifact {
+                    kind: InstalledArtifactKind::AgentProcess,
+                    path: launcher,
+                    version: options.agent_process_version.clone().or(entry.version),
+                    source: InstallSource::Registry,
+                }));
+            }
+        }
+
+        Ok(None)
+    }
+
+    fn install_agent_process_fallback(
+        &self,
+        agent: AgentId,
+        options: &InstallOptions,
+    ) -> Result<InstalledArtifact, AgentError> {
+        let launcher = self.agent_process_path(agent);
+
+        match agent {
+            AgentId::Claude => {
+                let package = fallback_npx_package(
+                    "@zed-industries/claude-code-acp",
+                    options.agent_process_version.as_deref(),
+                );
+                write_npx_agent_process_launcher(&launcher, &package, &[], &HashMap::new())?;
+            }
+            AgentId::Codex => {
+                let package = fallback_npx_package(
+                    "@zed-industries/codex-acp",
+                    options.agent_process_version.as_deref(),
+                );
+                write_npx_agent_process_launcher(&launcher, &package, &[], &HashMap::new())?;
+            }
+            AgentId::Opencode => {
+                let native = self.resolve_binary(agent)?;
+                write_exec_agent_process_launcher(
+                    &launcher,
+                    &native,
+                    &["acp".to_string()],
+                    &HashMap::new(),
+                )?;
+            }
+            AgentId::Amp => {
+                let package =
+                    fallback_npx_package("amp-acp", options.agent_process_version.as_deref());
+                write_npx_agent_process_launcher(&launcher, &package, &[], &HashMap::new())?;
+            }
+            AgentId::Pi => {
+                let package =
+                    fallback_npx_package("pi-acp", options.agent_process_version.as_deref());
+                write_npx_agent_process_launcher(&launcher, &package, &[], &HashMap::new())?;
+            }
+            AgentId::Cursor => {
+                let package = fallback_npx_package(
+                    "@blowmage/cursor-agent-acp",
+                    options.agent_process_version.as_deref(),
+                );
+                write_npx_agent_process_launcher(&launcher, &package, &[], &HashMap::new())?;
+            }
+            AgentId::Mock => {
+                write_mock_agent_process_launcher(&launcher)?;
+            }
+        }
+
+        verify_command(&launcher, &[])?;
+
+        Ok(InstalledArtifact {
+            kind: InstalledArtifactKind::AgentProcess,
+            path: launcher,
+            version: options.agent_process_version.clone(),
+            source: InstallSource::Fallback,
+        })
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct InstallResult {
-    pub path: PathBuf,
-    pub version: Option<String>,
+struct AgentProcessStatus {
+    source: InstallSource,
+    version: Option<String>,
 }
 
-#[derive(Debug, Clone)]
-pub struct SpawnOptions {
-    pub prompt: String,
-    pub model: Option<String>,
-    pub variant: Option<String>,
-    pub agent_mode: Option<String>,
-    pub permission_mode: Option<String>,
-    pub session_id: Option<String>,
-    pub working_dir: Option<PathBuf>,
-    pub env: HashMap<String, String>,
-    /// Use stream-json input via stdin (Claude only).
-    pub streaming_input: bool,
+#[derive(Debug, Deserialize)]
+struct RegistryDocument {
+    agents: Vec<RegistryAgent>,
 }
 
-impl SpawnOptions {
-    pub fn new(prompt: impl Into<String>) -> Self {
-        Self {
-            prompt: prompt.into(),
-            model: None,
-            variant: None,
-            agent_mode: None,
-            permission_mode: None,
-            session_id: None,
-            working_dir: None,
-            env: HashMap::new(),
-            streaming_input: false,
-        }
-    }
+#[derive(Debug, Deserialize)]
+struct RegistryAgent {
+    id: String,
+    version: Option<String>,
+    distribution: RegistryDistribution,
 }
 
-#[derive(Debug, Clone)]
-pub struct SpawnResult {
-    pub status: ExitStatus,
-    pub stdout: String,
-    pub stderr: String,
-    pub events: Vec<Value>,
-    pub session_id: Option<String>,
-    pub result: Option<String>,
+#[derive(Debug, Deserialize)]
+struct RegistryDistribution {
+    #[serde(default)]
+    npx: Option<RegistryNpx>,
+    #[serde(default)]
+    binary: Option<HashMap<String, RegistryBinaryTarget>>,
 }
 
-#[derive(Debug)]
-pub struct StreamingSpawn {
-    pub child: Child,
-    pub stdin: Option<ChildStdin>,
-    pub stdout: Option<ChildStdout>,
-    pub stderr: Option<ChildStderr>,
-    pub codex_options: Option<SpawnOptions>,
+#[derive(Debug, Deserialize)]
+struct RegistryNpx {
+    package: String,
+    #[serde(default)]
+    args: Vec<String>,
+    #[serde(default)]
+    env: HashMap<String, String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RegistryBinaryTarget {
+    archive: String,
+    cmd: String,
+    #[serde(default)]
+    args: Vec<String>,
+    #[serde(default)]
+    env: HashMap<String, String>,
 }
 
 #[derive(Debug, Error)]
@@ -801,6 +713,11 @@ pub enum AgentError {
     UnsupportedAgent { agent: String },
     #[error("binary not found for {agent}")]
     BinaryNotFound { agent: AgentId },
+    #[error("agent process not found for {agent}")]
+    AgentProcessNotFound {
+        agent: AgentId,
+        hint: Option<String>,
+    },
     #[error("download failed: {url}")]
     DownloadFailed { url: Url },
     #[error("http error: {0}")]
@@ -811,584 +728,241 @@ pub enum AgentError {
     Io(#[from] io::Error),
     #[error("extract failed: {0}")]
     ExtractFailed(String),
-    #[error("resume unsupported for {agent}")]
-    ResumeUnsupported { agent: AgentId },
-    #[error("unsupported runtime path for {agent}: {operation}; use {recommended_path}")]
-    UnsupportedRuntimePath {
-        agent: AgentId,
-        operation: &'static str,
-        recommended_path: &'static str,
-    },
+    #[error("registry parse failed: {0}")]
+    RegistryParse(String),
+    #[error("command verification failed: {0}")]
+    VerifyFailed(String),
 }
 
-fn parse_version_output(output: &std::process::Output) -> Option<String> {
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    let combined = format!("{}\n{}", stdout, stderr);
-    combined
-        .lines()
-        .map(str::trim)
-        .find(|line| !line.is_empty())
-        .map(|line| {
-            // Strip trailing metadata like " (released ...)" from version strings
-            match line.find(" (") {
-                Some(pos) => line[..pos].to_string(),
-                None => line.to_string(),
+fn fallback_npx_package(base: &str, version: Option<&str>) -> String {
+    match version {
+        Some(version) => format!("{base}@{version}"),
+        None => base.to_string(),
+    }
+}
+
+fn registry_url_from_env() -> Result<Url, AgentError> {
+    match std::env::var("SANDBOX_AGENT_ACP_REGISTRY_URL") {
+        Ok(url) => Ok(Url::parse(url.trim())?),
+        Err(_) => {
+            Ok(Url::parse(DEFAULT_ACP_REGISTRY_URL).expect("hardcoded valid ACP registry URL"))
+        }
+    }
+}
+
+fn apply_npx_version_override(package: &str, version: Option<&str>) -> String {
+    let Some(version) = version else {
+        return package.to_string();
+    };
+
+    if let Some((scope_and_name, _)) = split_package_version(package) {
+        format!("{scope_and_name}@{version}")
+    } else {
+        format!("{package}@{version}")
+    }
+}
+
+fn extract_npx_version(package: &str) -> Option<String> {
+    split_package_version(package).map(|(_, version)| version.to_string())
+}
+
+fn split_package_version(package: &str) -> Option<(&str, &str)> {
+    if let Some(stripped) = package.strip_prefix('@') {
+        let idx = stripped.rfind('@')? + 1;
+        let full_idx = idx + 1;
+        let (name, version) = package.split_at(full_idx);
+        Some((name.trim_end_matches('@'), version.trim_start_matches('@')))
+    } else {
+        let idx = package.rfind('@')?;
+        let (name, version) = package.split_at(idx);
+        Some((name, version.trim_start_matches('@')))
+    }
+}
+
+fn write_npx_agent_process_launcher(
+    path: &Path,
+    package: &str,
+    args: &[String],
+    env: &HashMap<String, String>,
+) -> Result<(), AgentError> {
+    let mut command = vec!["npx".to_string(), "-y".to_string(), package.to_string()];
+    command.extend(args.iter().cloned());
+    write_launcher(path, &command, env)
+}
+
+fn write_exec_agent_process_launcher(
+    path: &Path,
+    executable: &Path,
+    args: &[String],
+    env: &HashMap<String, String>,
+) -> Result<(), AgentError> {
+    let mut command = vec![executable.to_string_lossy().to_string()];
+    command.extend(args.iter().cloned());
+    write_launcher(path, &command, env)
+}
+
+fn write_mock_agent_process_launcher(path: &Path) -> Result<(), AgentError> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let script = if cfg!(windows) {
+        "@echo off\r\necho mock agent process is in-process in sandbox-agent\r\nexit /b 1\r\n"
+    } else {
+        "#!/usr/bin/env sh\necho 'mock agent process is in-process in sandbox-agent'\nexit 1\n"
+    };
+    write_text_file(path, script)
+}
+
+fn write_launcher(
+    path: &Path,
+    command: &[String],
+    env: &HashMap<String, String>,
+) -> Result<(), AgentError> {
+    if command.is_empty() {
+        return Err(AgentError::ExtractFailed(
+            "launcher command cannot be empty".to_string(),
+        ));
+    }
+
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    if cfg!(windows) {
+        let mut script = String::from("@echo off\r\nsetlocal enabledelayedexpansion\r\n");
+        for (key, value) in env {
+            script.push_str(&format!("set {}={}\r\n", key, value));
+        }
+        script.push_str("\"");
+        script.push_str(&command[0]);
+        script.push_str("\"");
+        for arg in &command[1..] {
+            script.push(' ');
+            script.push_str(arg);
+        }
+        script.push_str(" %*\r\n");
+        write_text_file(path, &script)?;
+    } else {
+        let mut script = String::from("#!/usr/bin/env sh\nset -e\n");
+        for (key, value) in env {
+            script.push_str(&format!("export {}='{}'\n", key, shell_escape(value)));
+        }
+        script.push_str("exec ");
+        for (idx, part) in command.iter().enumerate() {
+            if idx > 0 {
+                script.push(' ');
             }
-        })
-}
-
-fn parse_jsonl(text: &str) -> Vec<Value> {
-    text.lines()
-        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
-        .collect()
-}
-
-fn parse_jsonl_from_outputs(stdout: &str, stderr: &str) -> Vec<Value> {
-    let mut events = parse_jsonl(stdout);
-    events.extend(parse_jsonl(stderr));
-    events
-}
-
-fn codex_prompt_for_mode(prompt: &str, mode: Option<&str>) -> String {
-    match mode {
-        Some("plan") => format!("Make a plan before acting.\n\n{prompt}"),
-        _ => prompt.to_string(),
+            script.push('\'');
+            script.push_str(&shell_escape(part));
+            script.push('\'');
+        }
+        script.push_str(" \"$@\"\n");
+        write_text_file(path, &script)?;
     }
-}
 
-fn codex_approval_policy(mode: Option<&str>) -> Option<codex_schema::AskForApproval> {
-    match mode {
-        Some("plan") => Some(codex_schema::AskForApproval::Untrusted),
-        Some("bypass") => Some(codex_schema::AskForApproval::Never),
-        _ => None,
-    }
-}
-
-fn codex_sandbox_mode(mode: Option<&str>) -> Option<codex_schema::SandboxMode> {
-    match mode {
-        Some("plan") => Some(codex_schema::SandboxMode::ReadOnly),
-        Some("bypass") => Some(codex_schema::SandboxMode::DangerFullAccess),
-        _ => None,
-    }
-}
-
-fn codex_sandbox_policy(mode: Option<&str>) -> Option<codex_schema::SandboxPolicy> {
-    match mode {
-        Some("plan") => Some(codex_schema::SandboxPolicy::ReadOnly),
-        Some("bypass") => Some(codex_schema::SandboxPolicy::DangerFullAccess),
-        _ => None,
-    }
-}
-
-fn next_request_id(next_id: &mut i64) -> codex_schema::RequestId {
-    let id = *next_id;
-    *next_id += 1;
-    codex_schema::RequestId::from(id)
-}
-
-fn send_json_line<T: Serialize>(stdin: &mut ChildStdin, payload: &T) -> Result<(), AgentError> {
-    let line = serde_json::to_string(payload)
-        .map_err(|err| AgentError::Io(io::Error::new(io::ErrorKind::Other, err)))?;
-    writeln!(stdin, "{line}").map_err(AgentError::Io)?;
-    stdin.flush().map_err(AgentError::Io)?;
     Ok(())
 }
 
-fn codex_thread_id_from_notification(
-    notification: &codex_schema::ServerNotification,
-) -> Option<String> {
-    match notification {
-        codex_schema::ServerNotification::ThreadStarted(params) => Some(params.thread.id.clone()),
-        codex_schema::ServerNotification::TurnStarted(params) => Some(params.thread_id.clone()),
-        codex_schema::ServerNotification::TurnCompleted(params) => Some(params.thread_id.clone()),
-        codex_schema::ServerNotification::ItemStarted(params) => Some(params.thread_id.clone()),
-        codex_schema::ServerNotification::ItemCompleted(params) => Some(params.thread_id.clone()),
-        codex_schema::ServerNotification::ItemAgentMessageDelta(params) => {
-            Some(params.thread_id.clone())
-        }
-        codex_schema::ServerNotification::ItemReasoningTextDelta(params) => {
-            Some(params.thread_id.clone())
-        }
-        codex_schema::ServerNotification::ItemReasoningSummaryTextDelta(params) => {
-            Some(params.thread_id.clone())
-        }
-        codex_schema::ServerNotification::ItemCommandExecutionOutputDelta(params) => {
-            Some(params.thread_id.clone())
-        }
-        codex_schema::ServerNotification::ItemFileChangeOutputDelta(params) => {
-            Some(params.thread_id.clone())
-        }
-        codex_schema::ServerNotification::ItemMcpToolCallProgress(params) => {
-            Some(params.thread_id.clone())
-        }
-        codex_schema::ServerNotification::ThreadTokenUsageUpdated(params) => {
-            Some(params.thread_id.clone())
-        }
-        codex_schema::ServerNotification::TurnDiffUpdated(params) => Some(params.thread_id.clone()),
-        codex_schema::ServerNotification::TurnPlanUpdated(params) => Some(params.thread_id.clone()),
-        codex_schema::ServerNotification::ItemCommandExecutionTerminalInteraction(params) => {
-            Some(params.thread_id.clone())
-        }
-        codex_schema::ServerNotification::ItemReasoningSummaryPartAdded(params) => {
-            Some(params.thread_id.clone())
-        }
-        codex_schema::ServerNotification::ThreadCompacted(params) => Some(params.thread_id.clone()),
-        _ => None,
-    }
+fn shell_escape(value: &str) -> String {
+    value.replace('\'', "'\\''")
 }
 
-fn codex_thread_id_from_response(result: &Value) -> Option<String> {
-    if let Some(id) = result
-        .get("thread")
-        .and_then(|thread| thread.get("id"))
-        .and_then(Value::as_str)
-    {
-        return Some(id.to_string());
-    }
-    if let Some(id) = result.get("threadId").and_then(Value::as_str) {
-        return Some(id.to_string());
-    }
-    None
+fn write_text_file(path: &Path, contents: &str) -> Result<(), AgentError> {
+    fs::write(path, contents)?;
+    set_executable(path)?;
+    Ok(())
 }
 
-fn extract_nested_string(value: &Value, path: &[&str]) -> Option<String> {
-    let mut current = value;
-    for key in path {
-        if let Ok(index) = key.parse::<usize>() {
-            current = current.get(index)?;
-        } else {
-            current = current.get(*key)?;
-        }
-    }
-    current.as_str().map(|s| s.to_string())
-}
-
-fn extract_session_id(agent: AgentId, events: &[Value]) -> Option<String> {
-    for event in events {
-        match agent {
-            AgentId::Claude | AgentId::Amp => {
-                if let Some(id) = event.get("session_id").and_then(Value::as_str) {
-                    return Some(id.to_string());
-                }
-            }
-            AgentId::Codex => {
-                if let Ok(notification) =
-                    serde_json::from_value::<codex_schema::ServerNotification>(event.clone())
-                {
-                    match notification {
-                        codex_schema::ServerNotification::ThreadStarted(params) => {
-                            return Some(params.thread.id);
-                        }
-                        codex_schema::ServerNotification::TurnStarted(params) => {
-                            return Some(params.thread_id);
-                        }
-                        codex_schema::ServerNotification::TurnCompleted(params) => {
-                            return Some(params.thread_id);
-                        }
-                        codex_schema::ServerNotification::ItemStarted(params) => {
-                            return Some(params.thread_id);
-                        }
-                        codex_schema::ServerNotification::ItemCompleted(params) => {
-                            return Some(params.thread_id);
-                        }
-                        _ => {}
-                    }
-                }
-                if let Some(id) = event.get("thread_id").and_then(Value::as_str) {
-                    return Some(id.to_string());
-                }
-                if let Some(id) = event.get("threadId").and_then(Value::as_str) {
-                    return Some(id.to_string());
-                }
-            }
-            AgentId::Opencode => {
-                if let Some(id) = event.get("session_id").and_then(Value::as_str) {
-                    return Some(id.to_string());
-                }
-                if let Some(id) = event.get("sessionID").and_then(Value::as_str) {
-                    return Some(id.to_string());
-                }
-                if let Some(id) = event.get("sessionId").and_then(Value::as_str) {
-                    return Some(id.to_string());
-                }
-                if let Some(id) = extract_nested_string(event, &["properties", "sessionID"]) {
-                    return Some(id);
-                }
-                if let Some(id) = extract_nested_string(event, &["properties", "part", "sessionID"])
-                {
-                    return Some(id);
-                }
-                if let Some(id) = extract_nested_string(event, &["session", "id"]) {
-                    return Some(id);
-                }
-                if let Some(id) = extract_nested_string(event, &["properties", "session", "id"]) {
-                    return Some(id);
-                }
-            }
-            AgentId::Pi => {
-                if event.get("type").and_then(Value::as_str) == Some("session") {
-                    if let Some(id) = event.get("id").and_then(Value::as_str) {
-                        return Some(id.to_string());
-                    }
-                }
-                if let Some(id) = event.get("session_id").and_then(Value::as_str) {
-                    return Some(id.to_string());
-                }
-                if let Some(id) = event.get("sessionId").and_then(Value::as_str) {
-                    return Some(id.to_string());
-                }
-                if let Some(id) = extract_nested_string(event, &["data", "sessionId"]) {
-                    return Some(id);
-                }
-                if let Some(id) = extract_nested_string(event, &["session", "id"]) {
-                    return Some(id);
-                }
-            }
-            AgentId::Cursor => {
-                if let Some(id) = event.get("session_id").and_then(Value::as_str) {
-                    return Some(id.to_string());
-                }
-                if let Some(id) = event.get("sessionId").and_then(Value::as_str) {
-                    return Some(id.to_string());
-                }
-            }
-            AgentId::Mock => {}
-        }
-    }
-    None
-}
-
-fn extract_result_text(agent: AgentId, events: &[Value]) -> Option<String> {
-    match agent {
-        AgentId::Claude | AgentId::Amp => {
-            for event in events {
-                if let Some(result) = event.get("result").and_then(Value::as_str) {
-                    return Some(result.to_string());
-                }
-                if let Some(text) =
-                    extract_nested_string(event, &["message", "content", "0", "text"])
-                {
-                    return Some(text);
-                }
-            }
-            None
-        }
-        AgentId::Codex => {
-            let mut last = None;
-            for event in events {
-                if let Ok(notification) =
-                    serde_json::from_value::<codex_schema::ServerNotification>(event.clone())
-                {
-                    match notification {
-                        codex_schema::ServerNotification::ItemCompleted(params) => {
-                            if let codex_schema::ThreadItem::AgentMessage { text, .. } = params.item
-                            {
-                                last = Some(text);
-                            }
-                        }
-                        codex_schema::ServerNotification::TurnCompleted(params) => {
-                            for item in params.turn.items.iter().rev() {
-                                if let codex_schema::ThreadItem::AgentMessage { text, .. } = item {
-                                    last = Some(text.clone());
-                                    break;
-                                }
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-                if let Some(result) = event.get("result").and_then(Value::as_str) {
-                    last = Some(result.to_string());
-                }
-                if let Some(output) = event.get("output").and_then(Value::as_str) {
-                    last = Some(output.to_string());
-                }
-                if let Some(message) = event.get("message").and_then(Value::as_str) {
-                    last = Some(message.to_string());
-                }
-            }
-            last
-        }
-        AgentId::Opencode => {
-            let mut buffer = String::new();
-            for event in events {
-                if event.get("type").and_then(Value::as_str) == Some("message.part.updated") {
-                    if let Some(delta) = extract_nested_string(event, &["properties", "delta"]) {
-                        buffer.push_str(&delta);
-                    }
-                    if let Some(content) =
-                        extract_nested_string(event, &["properties", "part", "content"])
-                    {
-                        buffer.push_str(&content);
-                    }
-                }
-                if let Some(result) = event.get("result").and_then(Value::as_str) {
-                    if buffer.is_empty() {
-                        buffer.push_str(result);
-                    }
-                }
-            }
-            if buffer.is_empty() {
-                None
-            } else {
-                Some(buffer)
-            }
-        }
-        AgentId::Pi => extract_pi_result_text(events),
-        AgentId::Cursor => None,
-        AgentId::Mock => None,
-    }
-}
-
-fn extract_text_from_content_parts(content: &Value) -> Option<String> {
-    let parts = content.as_array()?;
-    let mut text = String::new();
-    for part in parts {
-        if part.get("type").and_then(Value::as_str) != Some("text") {
-            continue;
-        }
-        if let Some(part_text) = part.get("text").and_then(Value::as_str) {
-            text.push_str(part_text);
-        }
-    }
-    if text.is_empty() {
-        None
+fn verify_command(path: &Path, args: &[&str]) -> Result<(), AgentError> {
+    let mut command = Command::new(path);
+    if args.is_empty() {
+        command.arg("--help");
     } else {
-        Some(text)
+        command.args(args);
+    }
+    command.stdout(Stdio::null()).stderr(Stdio::null());
+
+    match command.status() {
+        Ok(status) if status.success() => Ok(()),
+        Ok(status) => Err(AgentError::VerifyFailed(format!(
+            "{} exited with status {}",
+            path.display(),
+            status
+        ))),
+        Err(err) => Err(AgentError::VerifyFailed(format!(
+            "{} failed to execute: {}",
+            path.display(),
+            err
+        ))),
     }
 }
 
-fn extract_assistant_message_text(message: &Value) -> Option<String> {
-    if message.get("role").and_then(Value::as_str) != Some("assistant") {
-        return None;
+fn fetch_registry(url: &Url) -> Result<RegistryDocument, AgentError> {
+    let client = Client::builder().build()?;
+    let response = client.get(url.clone()).send()?;
+    if !response.status().is_success() {
+        return Err(AgentError::DownloadFailed { url: url.clone() });
     }
-    if let Some(content) = message.get("content") {
-        return extract_text_from_content_parts(content);
-    }
-    None
+    response
+        .json::<RegistryDocument>()
+        .map_err(|err| AgentError::RegistryParse(err.to_string()))
 }
 
-fn extract_pi_result_text(events: &[Value]) -> Option<String> {
-    let mut delta_buffer = String::new();
-    let mut last_full = None;
-    for event in events {
-        if event.get("type").and_then(Value::as_str) == Some("message_update") {
-            if let Some(delta_kind) =
-                extract_nested_string(event, &["assistantMessageEvent", "type"])
-            {
-                if delta_kind == "text_delta" {
-                    if let Some(delta) =
-                        extract_nested_string(event, &["assistantMessageEvent", "delta"])
-                    {
-                        delta_buffer.push_str(&delta);
-                    }
-                    if let Some(delta) =
-                        extract_nested_string(event, &["assistantMessageEvent", "text"])
-                    {
-                        delta_buffer.push_str(&delta);
-                    }
-                }
+fn resolve_extracted_command(root: &Path, cmd: &str) -> Result<PathBuf, AgentError> {
+    let normalized = cmd.trim_start_matches("./");
+    let direct = root.join(normalized);
+    if direct.exists() {
+        return Ok(direct);
+    }
+
+    let filename = Path::new(normalized)
+        .file_name()
+        .and_then(|x| x.to_str())
+        .ok_or_else(|| AgentError::ExtractFailed(format!("invalid command path: {cmd}")))?;
+
+    find_file_recursive(root, filename)?
+        .ok_or_else(|| AgentError::ExtractFailed(format!("missing extracted command: {cmd}")))
+}
+
+fn unpack_archive(bytes: &[u8], url: &Url, destination: &Path) -> Result<(), AgentError> {
+    let path = url.path().to_ascii_lowercase();
+    if path.ends_with(".zip") {
+        let reader = io::Cursor::new(bytes.to_vec());
+        let mut archive = zip::ZipArchive::new(reader)
+            .map_err(|err| AgentError::ExtractFailed(err.to_string()))?;
+        for idx in 0..archive.len() {
+            let mut file = archive
+                .by_index(idx)
+                .map_err(|err| AgentError::ExtractFailed(err.to_string()))?;
+            let Some(name) = file.enclosed_name().map(|p| p.to_path_buf()) else {
+                continue;
+            };
+            let out_path = destination.join(name);
+            if file.is_dir() {
+                fs::create_dir_all(&out_path)?;
+                continue;
             }
-        }
-        if let Some(message) = event.get("message") {
-            if let Some(text) = extract_assistant_message_text(message) {
-                last_full = Some(text);
+            if let Some(parent) = out_path.parent() {
+                fs::create_dir_all(parent)?;
             }
+            let mut out = fs::File::create(&out_path)?;
+            io::copy(&mut file, &mut out)?;
+            let _ = set_executable(&out_path);
         }
-        if event.get("type").and_then(Value::as_str) == Some("agent_end") {
-            if let Some(messages) = event.get("messages").and_then(Value::as_array) {
-                for message in messages {
-                    if let Some(text) = extract_assistant_message_text(message) {
-                        last_full = Some(text);
-                    }
-                }
-            }
-        }
-    }
-    if delta_buffer.is_empty() {
-        last_full
-    } else {
-        Some(delta_buffer)
-    }
-}
-
-fn apply_pi_model_args(command: &mut Command, model: Option<&str>) {
-    let Some(model) = model else {
-        return;
-    };
-    if let Some((provider, model_id)) = model.split_once('/') {
-        command
-            .arg("--provider")
-            .arg(provider)
-            .arg("--model")
-            .arg(model_id);
-        return;
-    }
-    command.arg("--model").arg(model);
-}
-
-fn spawn_pi(
-    path: &Path,
-    working_dir: &Path,
-    options: &SpawnOptions,
-) -> Result<std::process::Output, AgentError> {
-    if options.session_id.is_some() {
-        return Err(AgentError::ResumeUnsupported { agent: AgentId::Pi });
+        return Ok(());
     }
 
-    let mut command = Command::new(path);
-    command
-        .current_dir(working_dir)
-        .arg("--mode")
-        .arg("json")
-        .arg("--print");
-    apply_pi_model_args(&mut command, options.model.as_deref());
-    if let Some(variant) = options.variant.as_deref() {
-        command.arg("--thinking").arg(variant);
-    }
-    command.arg(&options.prompt);
-    for (key, value) in &options.env {
-        command.env(key, value);
-    }
-    command.output().map_err(AgentError::Io)
-}
-
-fn spawn_amp(
-    path: &Path,
-    working_dir: &Path,
-    options: &SpawnOptions,
-) -> Result<std::process::Output, AgentError> {
-    let flags = detect_amp_flags(path, working_dir).unwrap_or_default();
-    let mut args: Vec<&str> = Vec::new();
-    if flags.execute {
-        args.push("--execute");
-        args.push(&options.prompt);
-    }
-    if flags.output_format {
-        args.push("--stream-json");
-    }
-    if flags.dangerously_skip_permissions && options.permission_mode.as_deref() == Some("bypass") {
-        args.push("--dangerously-allow-all");
+    if path.ends_with(".tar.gz") || path.ends_with(".tgz") {
+        let cursor = io::Cursor::new(bytes.to_vec());
+        let mut archive = tar::Archive::new(GzDecoder::new(cursor));
+        archive.unpack(destination)?;
+        return Ok(());
     }
 
-    let mut command = Command::new(path);
-    command.current_dir(working_dir);
-    if let Some(session_id) = options.session_id.as_deref() {
-        command.arg("--continue").arg(session_id);
-    }
-    command.args(&args);
-    for (key, value) in &options.env {
-        command.env(key, value);
-    }
-    let output = command.output().map_err(AgentError::Io)?;
-    if output.status.success() {
-        return Ok(output);
-    }
-
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    if stderr.contains("unknown option")
-        || stderr.contains("unknown flag")
-        || stderr.contains("User message must be provided")
-    {
-        return spawn_amp_fallback(path, working_dir, options);
-    }
-
-    Ok(output)
-}
-
-fn build_amp_command(path: &Path, working_dir: &Path, options: &SpawnOptions) -> Command {
-    let flags = detect_amp_flags(path, working_dir).unwrap_or_default();
-    let mut command = Command::new(path);
-    command.current_dir(working_dir);
-    if let Some(session_id) = options.session_id.as_deref() {
-        command.arg("--continue").arg(session_id);
-    }
-    if flags.execute {
-        command.arg("--execute");
-        command.arg(&options.prompt);
-    }
-    if flags.output_format {
-        command.arg("--stream-json");
-    }
-    if flags.dangerously_skip_permissions && options.permission_mode.as_deref() == Some("bypass") {
-        command.arg("--dangerously-allow-all");
-    }
-    for (key, value) in &options.env {
-        command.env(key, value);
-    }
-    command
-}
-
-#[derive(Debug, Default, Clone, Copy)]
-struct AmpFlags {
-    execute: bool,
-    output_format: bool,
-    dangerously_skip_permissions: bool,
-}
-
-fn detect_amp_flags(path: &Path, working_dir: &Path) -> Option<AmpFlags> {
-    let output = Command::new(path)
-        .current_dir(working_dir)
-        .arg("--help")
-        .output()
-        .ok()?;
-    let text = format!(
-        "{}\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    Some(AmpFlags {
-        execute: text.contains("--execute"),
-        output_format: text.contains("--stream-json"),
-        dangerously_skip_permissions: text.contains("--dangerously-allow-all"),
-    })
-}
-
-fn spawn_amp_fallback(
-    path: &Path,
-    working_dir: &Path,
-    options: &SpawnOptions,
-) -> Result<std::process::Output, AgentError> {
-    let mut attempts: Vec<Vec<&str>> = vec![
-        vec!["--execute"],
-        vec!["stream-json"],
-        vec!["--dangerously-allow-all"],
-        vec![],
-    ];
-    if options.permission_mode.as_deref() != Some("bypass") {
-        attempts.retain(|args| !args.contains(&"--dangerously-allow-all"));
-    }
-
-    for args in attempts {
-        let mut command = Command::new(path);
-        command.current_dir(working_dir);
-        if let Some(session_id) = options.session_id.as_deref() {
-            command.arg("--continue").arg(session_id);
-        }
-        if !args.is_empty() {
-            command.args(&args);
-        }
-        command.arg(&options.prompt);
-        for (key, value) in &options.env {
-            command.env(key, value);
-        }
-        let output = command.output().map_err(AgentError::Io)?;
-        if output.status.success() {
-            return Ok(output);
-        }
-    }
-
-    let mut command = Command::new(path);
-    command.current_dir(working_dir);
-    if let Some(session_id) = options.session_id.as_deref() {
-        command.arg("--continue").arg(session_id);
-    }
-    command.arg(&options.prompt);
-    for (key, value) in &options.env {
-        command.env(key, value);
-    }
-    Ok(command.output().map_err(AgentError::Io)?)
+    Err(AgentError::ExtractFailed(format!(
+        "unsupported archive format: {}",
+        url
+    )))
 }
 
 fn find_in_path(binary_name: &str) -> Option<PathBuf> {
@@ -1398,36 +972,18 @@ fn find_in_path(binary_name: &str) -> Option<PathBuf> {
         if candidate.exists() {
             return Some(candidate);
         }
+        if cfg!(windows) {
+            let candidate_exe = path.join(format!("{binary_name}.exe"));
+            if candidate_exe.exists() {
+                return Some(candidate_exe);
+            }
+        }
     }
     None
 }
 
-fn install_cursor(path: &Path, platform: Platform, _version: Option<&str>) -> Result<(), AgentError> {
-    // Note: cursor-agent binary URL needs to be verified
-    // Cursor Pro includes cursor-agent, typically installed via: curl -fsS https://cursor.com/install | bash
-    // For sandbox-agent, we need standalone cursor-agent binary
-    // TODO: Determine correct download URL for cursor-agent releases
-
-    let platform_segment = match platform {
-        Platform::LinuxX64 | Platform::LinuxX64Musl => "linux-x64",
-        Platform::LinuxArm64 => "linux-arm64",
-        Platform::MacosArm64 => "darwin-arm64",
-        Platform::MacosX64 => "darwin-x64",
-    };
-
-    // Placeholder URL - needs to be updated with actual cursor-agent release URL
-    let url = Url::parse(&format!(
-        "https://cursor.com/api/v1/releases/latest/download/cursor-agent-{platform_segment}",
-        platform_segment = platform_segment
-    ))?;
-
-    let bytes = download_bytes(&url)?;
-    write_executable(path, &bytes)?;
-    Ok(())
-}
-
 fn download_bytes(url: &Url) -> Result<Vec<u8>, AgentError> {
-    let client = crate::http_client::blocking_client_builder().build()?;
+    let client = Client::builder().build()?;
     let mut response = client.get(url.clone()).send()?;
     if !response.status().is_success() {
         return Err(AgentError::DownloadFailed { url: url.clone() });
@@ -1435,28 +991,6 @@ fn download_bytes(url: &Url) -> Result<Vec<u8>, AgentError> {
     let mut bytes = Vec::new();
     response.read_to_end(&mut bytes)?;
     Ok(bytes)
-}
-
-fn install_pi(path: &Path, platform: Platform, version: Option<&str>) -> Result<(), AgentError> {
-    let asset = match platform {
-        Platform::LinuxX64 | Platform::LinuxX64Musl => "pi-linux-x64",
-        Platform::LinuxArm64 => "pi-linux-arm64",
-        Platform::MacosArm64 => "pi-darwin-arm64",
-        Platform::MacosX64 => "pi-darwin-x64",
-    }
-    .to_string();
-    let url = match version {
-        Some(version) => Url::parse(&format!(
-            "https://upd.dev/badlogic/pi-mono/releases/download/{version}/{asset}"
-        ))?,
-        None => Url::parse(&format!(
-            "https://upd.dev/badlogic/pi-mono/releases/latest/download/{asset}"
-        ))?,
-    };
-
-    let bytes = download_bytes(&url)?;
-    write_executable(path, &bytes)?;
-    Ok(())
 }
 
 fn install_claude(
@@ -1482,6 +1016,8 @@ fn install_claude(
         Platform::LinuxArm64 => "linux-arm64",
         Platform::MacosArm64 => "darwin-arm64",
         Platform::MacosX64 => "darwin-x64",
+        Platform::WindowsX64 => "win32-x64",
+        Platform::WindowsArm64 => "win32-arm64",
     };
 
     let url = Url::parse(&format!(
@@ -1510,6 +1046,8 @@ fn install_amp(path: &Path, platform: Platform, version: Option<&str>) -> Result
         Platform::LinuxArm64 => "linux-arm64",
         Platform::MacosArm64 => "darwin-arm64",
         Platform::MacosX64 => "darwin-x64",
+        Platform::WindowsX64 => "win32-x64",
+        Platform::WindowsArm64 => "win32-arm64",
     };
 
     let url = Url::parse(&format!(
@@ -1526,6 +1064,8 @@ fn install_codex(path: &Path, platform: Platform, version: Option<&str>) -> Resu
         Platform::LinuxArm64 => "aarch64-unknown-linux-musl",
         Platform::MacosArm64 => "aarch64-apple-darwin",
         Platform::MacosX64 => "x86_64-apple-darwin",
+        Platform::WindowsX64 => "x86_64-pc-windows-msvc",
+        Platform::WindowsArm64 => "aarch64-pc-windows-msvc",
     };
 
     let url = match version {
@@ -1543,7 +1083,12 @@ fn install_codex(path: &Path, platform: Platform, version: Option<&str>) -> Resu
     let mut archive = tar::Archive::new(GzDecoder::new(cursor));
     archive.unpack(temp_dir.path())?;
 
-    let expected = format!("codex-{target}");
+    let expected = if cfg!(windows) {
+        format!("codex-{target}.exe")
+    } else {
+        format!("codex-{target}")
+    };
+
     let binary = find_file_recursive(temp_dir.path(), &expected)?
         .ok_or_else(|| AgentError::ExtractFailed(format!("missing {expected}")))?;
     move_executable(&binary, path)?;
@@ -1578,11 +1123,13 @@ fn install_opencode(
             };
             install_zip_binary(path, &url, "opencode")
         }
-        Platform::LinuxX64 | Platform::LinuxX64Musl | Platform::LinuxArm64 => {
+        _ => {
             let platform_segment = match platform {
                 Platform::LinuxX64 => "linux-x64",
                 Platform::LinuxX64Musl => "linux-x64-musl",
                 Platform::LinuxArm64 => "linux-arm64",
+                Platform::WindowsX64 => "win32-x64",
+                Platform::WindowsArm64 => "win32-arm64",
                 Platform::MacosArm64 | Platform::MacosX64 => unreachable!(),
             };
             let url = match version {
@@ -1599,7 +1146,8 @@ fn install_opencode(
             let cursor = io::Cursor::new(bytes);
             let mut archive = tar::Archive::new(GzDecoder::new(cursor));
             archive.unpack(temp_dir.path())?;
-            let binary = find_file_recursive(temp_dir.path(), "opencode")?
+            let binary = find_file_recursive(temp_dir.path(), "opencode")
+                .or_else(|_| find_file_recursive(temp_dir.path(), "opencode.exe"))?
                 .ok_or_else(|| AgentError::ExtractFailed("missing opencode".to_string()))?;
             move_executable(&binary, path)?;
             Ok(())
@@ -1617,7 +1165,9 @@ fn install_zip_binary(path: &Path, url: &Url, binary_name: &str) -> Result<(), A
         let mut file = archive
             .by_index(i)
             .map_err(|err| AgentError::ExtractFailed(err.to_string()))?;
-        if !file.name().ends_with(binary_name) {
+        if !file.name().ends_with(binary_name)
+            && !file.name().ends_with(&format!("{binary_name}.exe"))
+        {
             continue;
         }
         let out_path = temp_dir.path().join(binary_name);
@@ -1681,86 +1231,426 @@ fn find_file_recursive(dir: &Path, filename: &str) -> Result<Option<PathBuf>, Ag
     Ok(None)
 }
 
+fn parse_version_output(output: &std::process::Output) -> Option<String> {
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let combined = format!("{}\n{}", stdout, stderr);
+    combined
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(|line| match line.find(" (") {
+            Some(pos) => line[..pos].to_string(),
+            None => line.to_string(),
+        })
+}
+
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
+    use std::io::{Read, Write};
+    use std::net::{TcpListener, TcpStream};
+    use std::sync::{Mutex, OnceLock};
+    use std::thread;
 
-    use super::{
-        extract_result_text, extract_session_id, AgentError, AgentId, AgentManager, SpawnOptions,
-    };
+    use super::*;
 
-    #[test]
-    fn pi_spawn_streaming_fails_fast_with_runtime_contract_error() {
-        let temp_dir = tempfile::tempdir().expect("temp dir");
-        let manager = AgentManager::new(temp_dir.path().join("bin")).expect("agent manager");
-        let err = manager
-            .spawn_streaming(AgentId::Pi, SpawnOptions::new("hello"))
-            .expect_err("expected Pi spawn_streaming to be rejected");
-        assert!(matches!(
-            err,
-            AgentError::UnsupportedRuntimePath {
-                agent: AgentId::Pi,
-                operation: "spawn_streaming",
-                ..
+    fn write_exec(path: &Path, script: &str) {
+        fs::write(path, script).expect("write script");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = fs::metadata(path).expect("metadata").permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(path, perms).expect("set mode");
+        }
+    }
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<std::ffi::OsString>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &std::ffi::OsStr) -> Self {
+            let previous = std::env::var_os(key);
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
             }
-        ));
+        }
     }
 
-    #[test]
-    fn extract_pi_session_id_from_session_event() {
-        let events = vec![json!({
-            "type": "session",
-            "id": "pi-session-123"
-        })];
-        assert_eq!(
-            extract_session_id(AgentId::Pi, &events).as_deref(),
-            Some("pi-session-123")
+    fn serve_registry_once(document: serde_json::Value) -> Url {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind registry server");
+        let addr = listener.local_addr().expect("local addr");
+        let body = document.to_string();
+
+        thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                respond_json(&mut stream, &body);
+            }
+        });
+
+        Url::parse(&format!("http://{addr}/registry.json")).expect("registry url")
+    }
+
+    fn respond_json(stream: &mut TcpStream, body: &str) {
+        let mut buffer = [0_u8; 4096];
+        let _ = stream.read(&mut buffer);
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
         );
+        stream
+            .write_all(response.as_bytes())
+            .expect("write response");
+        stream.flush().expect("flush response");
     }
 
     #[test]
-    fn extract_pi_result_text_from_agent_end_message() {
-        let events = vec![json!({
-            "type": "agent_end",
-            "messages": [
+    fn install_is_idempotent_when_native_and_agent_process_exists() {
+        let temp_dir = tempfile::tempdir().expect("create tempdir");
+        let manager = AgentManager::with_platform(temp_dir.path(), Platform::LinuxX64);
+
+        fs::create_dir_all(temp_dir.path().join("agent_processes"))
+            .expect("create agent processes dir");
+        fs::write(manager.binary_path(AgentId::Codex), b"stub").expect("write native binary");
+        fs::write(manager.agent_process_path(AgentId::Codex), b"stub")
+            .expect("write agent process launcher");
+
+        let result = manager
+            .install(AgentId::Codex, InstallOptions::default())
+            .expect("install should succeed");
+
+        assert!(result.already_installed);
+        assert!(result.artifacts.is_empty());
+    }
+
+    #[test]
+    fn split_package_version_handles_scoped_and_unscoped_packages() {
+        let scoped = split_package_version("@scope/pkg@1.2.3").expect("scoped");
+        assert_eq!(scoped.0, "@scope/pkg");
+        assert_eq!(scoped.1, "1.2.3");
+
+        let unscoped = split_package_version("pkg@2.0.0").expect("unscoped");
+        assert_eq!(unscoped.0, "pkg");
+        assert_eq!(unscoped.1, "2.0.0");
+
+        assert!(split_package_version("pkg").is_none());
+    }
+
+    #[test]
+    fn install_is_idempotent_for_all_supported_agents_when_artifacts_exist() {
+        let temp_dir = tempfile::tempdir().expect("create tempdir");
+        let manager = AgentManager::with_platform(temp_dir.path(), Platform::LinuxX64);
+
+        fs::create_dir_all(temp_dir.path().join("agent_processes"))
+            .expect("create agent processes dir");
+
+        for agent in [AgentId::Claude, AgentId::Codex, AgentId::Opencode] {
+            fs::write(manager.binary_path(agent), b"stub").expect("write native binary");
+            fs::write(manager.agent_process_path(agent), b"stub")
+                .expect("write agent process launcher");
+        }
+
+        // Pi and Cursor only need agent process launchers (native_required = false).
+        for agent in [AgentId::Pi, AgentId::Cursor] {
+            fs::write(manager.agent_process_path(agent), b"stub")
+                .expect("write agent process launcher");
+        }
+
+        for agent in [
+            AgentId::Claude,
+            AgentId::Codex,
+            AgentId::Opencode,
+            AgentId::Pi,
+            AgentId::Cursor,
+            AgentId::Mock,
+        ] {
+            let result = manager
+                .install(agent, InstallOptions::default())
+                .expect("install should succeed");
+            assert!(
+                result.already_installed,
+                "expected idempotent install for {agent}"
+            );
+            assert!(result.artifacts.is_empty(), "no artifacts for {agent}");
+        }
+    }
+
+    #[test]
+    fn install_uses_registry_provenance_with_agent_process_version_override() {
+        let _env_lock = env_lock().lock().expect("env lock");
+
+        let temp_dir = tempfile::tempdir().expect("create tempdir");
+        let mut manager = AgentManager::with_platform(temp_dir.path(), Platform::LinuxX64);
+
+        // Keep native install path satisfied locally so install only provisions agent process.
+        write_exec(
+            &manager.binary_path(AgentId::Codex),
+            "#!/usr/bin/env sh\nexit 0\n",
+        );
+
+        let bin_dir = temp_dir.path().join("bin");
+        fs::create_dir_all(&bin_dir).expect("create bin dir");
+        write_exec(&bin_dir.join("npx"), "#!/usr/bin/env sh\nexit 0\n");
+
+        let original_path = std::env::var_os("PATH").unwrap_or_default();
+        let mut paths = vec![bin_dir.clone()];
+        paths.extend(std::env::split_paths(&original_path));
+        let combined_path = std::env::join_paths(paths).expect("join PATH");
+        let _path_guard = EnvVarGuard::set("PATH", &combined_path);
+
+        let registry_url = serve_registry_once(serde_json::json!({
+            "agents": [
                 {
-                    "role": "assistant",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": "OK"
+                    "id": "codex-acp",
+                    "version": "1.2.3",
+                    "distribution": {
+                        "npx": {
+                            "package": "@example/codex-acp@1.2.3",
+                            "args": [],
+                            "env": {}
                         }
-                    ]
+                    }
                 }
             ]
-        })];
-        assert_eq!(
-            extract_result_text(AgentId::Pi, &events).as_deref(),
-            Some("OK")
+        }));
+        manager.registry_url = registry_url;
+
+        let result = manager
+            .install(
+                AgentId::Codex,
+                InstallOptions {
+                    reinstall: false,
+                    version: None,
+                    agent_process_version: Some("9.9.9".to_string()),
+                },
+            )
+            .expect("install succeeds");
+
+        assert!(!result.already_installed);
+        let agent_process_artifact = result
+            .artifacts
+            .iter()
+            .find(|artifact| artifact.kind == InstalledArtifactKind::AgentProcess)
+            .expect("agent process artifact");
+        assert_eq!(agent_process_artifact.source, InstallSource::Registry);
+        assert_eq!(agent_process_artifact.version.as_deref(), Some("9.9.9"));
+
+        let launcher =
+            fs::read_to_string(manager.agent_process_path(AgentId::Codex)).expect("launcher");
+        assert!(
+            launcher.contains("@example/codex-acp@9.9.9"),
+            "launcher should include overridden package version"
         );
     }
 
     #[test]
-    fn extract_pi_result_text_from_message_update_deltas() {
-        let events = vec![
-            json!({
-                "type": "message_update",
-                "assistantMessageEvent": {
-                    "type": "text_delta",
-                    "delta": "O"
-                }
-            }),
-            json!({
-                "type": "message_update",
-                "assistantMessageEvent": {
-                    "type": "text_delta",
-                    "delta": "K"
-                }
-            }),
-        ];
+    fn install_falls_back_when_registry_entry_missing() {
+        let _env_lock = env_lock().lock().expect("env lock");
+
+        let temp_dir = tempfile::tempdir().expect("create tempdir");
+        let mut manager = AgentManager::with_platform(temp_dir.path(), Platform::LinuxX64);
+
+        write_exec(
+            &manager.binary_path(AgentId::Codex),
+            "#!/usr/bin/env sh\nexit 0\n",
+        );
+
+        let bin_dir = temp_dir.path().join("bin");
+        fs::create_dir_all(&bin_dir).expect("create bin dir");
+        write_exec(&bin_dir.join("npx"), "#!/usr/bin/env sh\nexit 0\n");
+
+        let original_path = std::env::var_os("PATH").unwrap_or_default();
+        let mut paths = vec![bin_dir.clone()];
+        paths.extend(std::env::split_paths(&original_path));
+        let combined_path = std::env::join_paths(paths).expect("join PATH");
+        let _path_guard = EnvVarGuard::set("PATH", &combined_path);
+
+        manager.registry_url = serve_registry_once(serde_json::json!({ "agents": [] }));
+
+        let result = manager
+            .install(AgentId::Codex, InstallOptions::default())
+            .expect("install succeeds");
+        assert!(!result.already_installed);
+        let agent_process_artifact = result
+            .artifacts
+            .iter()
+            .find(|artifact| artifact.kind == InstalledArtifactKind::AgentProcess)
+            .expect("agent process artifact");
+        assert_eq!(agent_process_artifact.source, InstallSource::Fallback);
+    }
+
+    #[test]
+    fn reinstall_mock_returns_agent_process_artifact() {
+        let temp_dir = tempfile::tempdir().expect("create tempdir");
+        let manager = AgentManager::with_platform(temp_dir.path(), Platform::LinuxX64);
+
+        let result = manager
+            .install(
+                AgentId::Mock,
+                InstallOptions {
+                    reinstall: true,
+                    version: None,
+                    agent_process_version: None,
+                },
+            )
+            .expect("mock reinstall");
+
+        assert!(!result.already_installed);
+        assert_eq!(result.artifacts.len(), 1);
         assert_eq!(
-            extract_result_text(AgentId::Pi, &events).as_deref(),
-            Some("OK")
+            result.artifacts[0].kind,
+            InstalledArtifactKind::AgentProcess
+        );
+        assert_eq!(result.artifacts[0].source, InstallSource::Builtin);
+    }
+
+    #[test]
+    fn install_pi_skips_native_and_writes_fallback_npx_launcher() {
+        let _env_lock = env_lock().lock().expect("env lock");
+
+        let temp_dir = tempfile::tempdir().expect("create tempdir");
+        let mut manager = AgentManager::with_platform(temp_dir.path(), Platform::LinuxX64);
+
+        let bin_dir = temp_dir.path().join("bin");
+        fs::create_dir_all(&bin_dir).expect("create bin dir");
+        write_exec(&bin_dir.join("npx"), "#!/usr/bin/env sh\nexit 0\n");
+
+        let original_path = std::env::var_os("PATH").unwrap_or_default();
+        let mut paths = vec![bin_dir.clone()];
+        paths.extend(std::env::split_paths(&original_path));
+        let combined_path = std::env::join_paths(paths).expect("join PATH");
+        let _path_guard = EnvVarGuard::set("PATH", &combined_path);
+
+        // Empty registry so we hit the fallback path.
+        manager.registry_url = serve_registry_once(serde_json::json!({ "agents": [] }));
+
+        let result = manager
+            .install(AgentId::Pi, InstallOptions::default())
+            .expect("pi install succeeds");
+
+        // No native artifact (native_required = false).
+        assert!(
+            !result
+                .artifacts
+                .iter()
+                .any(|a| a.kind == InstalledArtifactKind::NativeAgent),
+            "pi should not produce a native artifact"
+        );
+
+        let agent_process = result
+            .artifacts
+            .iter()
+            .find(|a| a.kind == InstalledArtifactKind::AgentProcess)
+            .expect("pi agent process artifact");
+        assert_eq!(agent_process.source, InstallSource::Fallback);
+
+        let launcher =
+            fs::read_to_string(manager.agent_process_path(AgentId::Pi)).expect("read pi launcher");
+        assert!(
+            launcher.contains("pi-acp"),
+            "pi launcher should reference pi-acp package"
+        );
+
+        // resolve_agent_process should now find it.
+        let spec = manager
+            .resolve_agent_process(AgentId::Pi)
+            .expect("resolve pi agent process");
+        assert_eq!(spec.source, InstallSource::LocalPath);
+
+        // is_installed should return true.
+        assert!(manager.is_installed(AgentId::Pi), "pi should be installed");
+
+        // Second install should be idempotent.
+        // Need a new registry server since the first one was consumed.
+        manager.registry_url = serve_registry_once(serde_json::json!({ "agents": [] }));
+        let result2 = manager
+            .install(AgentId::Pi, InstallOptions::default())
+            .expect("pi re-install succeeds");
+        assert!(
+            result2.already_installed,
+            "pi re-install should be idempotent"
+        );
+    }
+
+    #[test]
+    fn install_cursor_skips_native_and_writes_fallback_npx_launcher() {
+        let _env_lock = env_lock().lock().expect("env lock");
+
+        let temp_dir = tempfile::tempdir().expect("create tempdir");
+        let mut manager = AgentManager::with_platform(temp_dir.path(), Platform::LinuxX64);
+
+        let bin_dir = temp_dir.path().join("bin");
+        fs::create_dir_all(&bin_dir).expect("create bin dir");
+        write_exec(&bin_dir.join("npx"), "#!/usr/bin/env sh\nexit 0\n");
+
+        let original_path = std::env::var_os("PATH").unwrap_or_default();
+        let mut paths = vec![bin_dir.clone()];
+        paths.extend(std::env::split_paths(&original_path));
+        let combined_path = std::env::join_paths(paths).expect("join PATH");
+        let _path_guard = EnvVarGuard::set("PATH", &combined_path);
+
+        manager.registry_url = serve_registry_once(serde_json::json!({ "agents": [] }));
+
+        let result = manager
+            .install(AgentId::Cursor, InstallOptions::default())
+            .expect("cursor install succeeds");
+
+        assert!(
+            !result
+                .artifacts
+                .iter()
+                .any(|a| a.kind == InstalledArtifactKind::NativeAgent),
+            "cursor should not produce a native artifact"
+        );
+
+        let agent_process = result
+            .artifacts
+            .iter()
+            .find(|a| a.kind == InstalledArtifactKind::AgentProcess)
+            .expect("cursor agent process artifact");
+        assert_eq!(agent_process.source, InstallSource::Fallback);
+
+        let launcher = fs::read_to_string(manager.agent_process_path(AgentId::Cursor))
+            .expect("read cursor launcher");
+        assert!(
+            launcher.contains("@blowmage/cursor-agent-acp"),
+            "cursor launcher should reference @blowmage/cursor-agent-acp package"
+        );
+
+        let spec = manager
+            .resolve_agent_process(AgentId::Cursor)
+            .expect("resolve cursor agent process");
+        assert_eq!(spec.source, InstallSource::LocalPath);
+
+        assert!(
+            manager.is_installed(AgentId::Cursor),
+            "cursor should be installed"
+        );
+
+        manager.registry_url = serve_registry_once(serde_json::json!({ "agents": [] }));
+        let result2 = manager
+            .install(AgentId::Cursor, InstallOptions::default())
+            .expect("cursor re-install succeeds");
+        assert!(
+            result2.already_installed,
+            "cursor re-install should be idempotent"
         );
     }
 }

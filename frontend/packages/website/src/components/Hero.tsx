@@ -1,15 +1,13 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
 import { Terminal, Check, ArrowRight } from 'lucide-react';
 
-const ADAPTERS = [
-  { label: 'Claude Code', color: '#D97757', x: 20, y: 70, logo: '/logos/claude.svg' },
-  { label: 'Codex', color: '#10A37F', x: 132, y: 70, logo: 'openai' },
-  { label: 'Pi', color: '#06B6D4', x: 244, y: 70, logo: 'pi' },
-  { label: 'Amp', color: '#F59E0B', x: 76, y: 155, logo: '/logos/amp.svg' },
-  { label: 'OpenCode', color: '#8B5CF6', x: 188, y: 155, logo: 'opencode' },
+const AGENT_PROCESSES = [
+  { label: 'Claude Code', color: '#D97757', x: 35, y: 70, logo: '/logos/claude.svg' },
+  { label: 'Codex', color: '#10A37F', x: 185, y: 70, logo: 'openai' },
+  { label: 'Amp', color: '#F59E0B', x: 35, y: 155, logo: '/logos/amp.svg' },
+  { label: 'OpenCode', color: '#8B5CF6', x: 185, y: 155, logo: 'opencode' },
 ];
 
 function UniversalAPIDiagram() {
@@ -17,20 +15,27 @@ function UniversalAPIDiagram() {
 
   useEffect(() => {
     const interval = setInterval(() => {
-      setActiveIndex((prev) => (prev + 1) % ADAPTERS.length);
+      setActiveIndex((prev) => (prev + 1) % AGENT_PROCESSES.length);
     }, 2000);
     return () => clearInterval(interval);
   }, []);
 
   return (
-    <div className="relative w-full aspect-[16/9] bg-[#050505] rounded-2xl border border-white/10 overflow-hidden flex items-center justify-center shadow-2xl">
-      {/* Background Dots - color changes with active adapter */}
+    <div className="relative w-full aspect-[16/9] bg-[#050505] rounded-xl border border-white/10 overflow-hidden flex items-center justify-center">
+      {/* Background Grid */}
       <div
-        className="absolute inset-0 opacity-[0.15] pointer-events-none transition-all duration-1000"
+        className="absolute inset-0 opacity-[0.03] pointer-events-none"
         style={{
-          backgroundImage: `radial-gradient(circle, ${ADAPTERS[activeIndex].color} 1px, transparent 1px)`,
-          backgroundSize: '24px 24px',
+          backgroundImage:
+            'linear-gradient(#fff 1px, transparent 1px), linear-gradient(90deg, #fff 1px, transparent 1px)',
+          backgroundSize: '40px 40px',
         }}
+      />
+
+      {/* Dynamic Background Glow */}
+      <div
+        className="absolute top-1/2 right-1/4 -translate-y-1/2 w-64 h-64 blur-[100px] rounded-full transition-colors duration-1000 opacity-20"
+        style={{ backgroundColor: AGENT_PROCESSES[activeIndex].color }}
       />
 
       <svg viewBox="0 0 800 450" className="w-full h-full relative z-10">
@@ -44,14 +49,13 @@ function UniversalAPIDiagram() {
           </filter>
         </defs>
 
-        {/* YOUR APP NODE - Glass dark effect with backdrop blur */}
-        <foreignObject x="60" y="175" width="180" height="100">
-          <div
-            className="w-full h-full rounded-2xl border border-white/10 bg-black/40 backdrop-blur-md flex items-center justify-center"
-          >
-            <span className="text-white text-xl font-bold">Your App</span>
-          </div>
-        </foreignObject>
+        {/* YOUR APP NODE */}
+        <g transform="translate(60, 175)">
+          <rect width="180" height="100" rx="16" fill="#0A0A0A" stroke="#333" strokeWidth="2" />
+          <text x="90" y="55" fill="#FFFFFF" textAnchor="middle" fontSize="20" fontWeight="700">
+            Your App
+          </text>
+        </g>
 
         {/* HTTP/SSE LINE */}
         <g>
@@ -69,60 +73,55 @@ function UniversalAPIDiagram() {
           </text>
         </g>
 
-        {/* SANDBOX BOUNDARY - Glass dark effect with backdrop blur */}
-        <foreignObject x="360" y="45" width="410" height="360">
-          <div className="w-full h-full rounded-3xl border border-white/10 bg-black/40 backdrop-blur-md">
-            <div className="text-white text-sm font-extrabold tracking-[0.2em] text-center pt-4">
-              SANDBOX
-            </div>
-          </div>
-        </foreignObject>
+        {/* SANDBOX BOUNDARY */}
+        <g transform="translate(360, 45)">
+          <rect width="380" height="360" rx="24" fill="#080808" stroke="#333" strokeWidth="1.5" />
+          <rect width="380" height="45" rx="12" fill="rgba(255,255,255,0.02)" />
+          <text x="190" y="28" fill="#FFFFFF" textAnchor="middle" fontSize="14" fontWeight="800" letterSpacing="0.2em">
+            SANDBOX
+          </text>
 
-        {/* SANDBOX AGENT SDK */}
-        <g transform="translate(385, 110)">
-            <rect width="360" height="270" rx="20" fill="rgba(0,0,0,0.4)" stroke="rgba(255,255,255,0.2)" strokeWidth="1" />
-            <text x="180" y="35" fill="#FFFFFF" textAnchor="middle" fontSize="18" fontWeight="800">
+          {/* SANDBOX AGENT SDK */}
+          <g transform="translate(25, 65)">
+            <rect width="330" height="270" rx="20" fill="#0D0D0F" stroke="#3B82F6" strokeWidth="2" />
+            <text x="165" y="35" fill="#FFFFFF" textAnchor="middle" fontSize="18" fontWeight="800">
               Sandbox Agent Server
             </text>
+            <line x1="40" y1="50" x2="290" y2="50" stroke="#333" strokeWidth="1" />
 
-            {/* PROVIDER ADAPTERS */}
-            {ADAPTERS.map((p, i) => {
+            {/* PROVIDER AGENT PROCESSES */}
+            {AGENT_PROCESSES.map((p, i) => {
               const isActive = i === activeIndex;
               return (
                 <g key={i} transform={`translate(${p.x}, ${p.y})`}>
                   <rect
-                    width="95"
-                    height="58"
-                    rx="10"
+                    width="110"
+                    height="65"
+                    rx="12"
                     fill={isActive ? '#1A1A1E' : '#111'}
                     stroke={isActive ? p.color : '#333'}
                     strokeWidth={isActive ? 2 : 1.5}
                   />
                   <g opacity={isActive ? 1 : 0.4}>
                     {p.logo === 'openai' ? (
-                      <svg x="36.75" y="8" width="22" height="22" viewBox="0 0 24 24" fill="none">
-                        <path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z" fill="#ffffff" />
+                      <svg x="43" y="10" width="24" height="24" viewBox="0 0 24 24" fill="none">
+                        <path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v 2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v 2.9994l-2.5974 1.4997-2.6067-1.4997Z" fill="#ffffff" />
                       </svg>
                     ) : p.logo === 'opencode' ? (
-                      <svg x="38.5" y="8" width="17" height="22" viewBox="0 0 32 40" fill="none">
+                      <svg x="43" y="10" width="19" height="24" viewBox="0 0 32 40" fill="none">
                         <path d="M24 32H8V16H24V32Z" fill="#4B4646"/>
                         <path d="M24 8H8V32H24V8ZM32 40H0V0H32V40Z" fill="#F1ECEC"/>
                       </svg>
-                    ) : p.logo === 'pi' ? (
-                      <svg x="36.75" y="8" width="22" height="22" viewBox="0 0 800 800" fill="none">
-                        <path fill="#fff" fillRule="evenodd" d="M165.29 165.29H517.36V400H400V517.36H282.65V634.72H165.29ZM282.65 282.65V400H400V282.65Z"/>
-                        <path fill="#fff" d="M517.36 400H634.72V634.72H517.36Z"/>
-                      </svg>
                     ) : (
-                      <image href={p.logo} x="36.75" y="8" width="22" height="22" filter="url(#invert-white)" />
+                      <image href={p.logo} x="43" y="10" width="24" height="24" filter="url(#invert-white)" />
                     )}
                   </g>
                   <text
-                    x="47.5"
-                    y="46"
+                    x="55"
+                    y="52"
                     fill="#FFFFFF"
                     textAnchor="middle"
-                    fontSize="10"
+                    fontSize="11"
                     fontWeight="600"
                     opacity={isActive ? 1 : 0.4}
                   >
@@ -134,18 +133,19 @@ function UniversalAPIDiagram() {
 
             {/* Active Agent Label */}
             <text
-              x="180"
+              x="165"
               y="250"
-              fill={ADAPTERS[activeIndex].color}
+              fill={AGENT_PROCESSES[activeIndex].color}
               textAnchor="middle"
-              fontSize="12"
+              fontSize="10"
               fontWeight="800"
               fontFamily="monospace"
               letterSpacing="0.1em"
             >
-              CONNECTED TO {ADAPTERS[activeIndex].label.toUpperCase()}
+              CONNECTED TO {AGENT_PROCESSES[activeIndex].label.toUpperCase()}
             </text>
           </g>
+        </g>
       </svg>
     </div>
   );
@@ -166,104 +166,47 @@ const CopyInstallButton = () => {
   };
 
   return (
-    <div className="relative group w-full sm:w-auto">
-      <button
-        onClick={handleCopy}
-        className="w-full sm:w-auto inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md border border-white/10 px-4 py-2 text-sm text-zinc-300 transition-colors hover:border-white/20 hover:text-white font-mono"
-      >
-        {copied ? <Check className="h-4 w-4 text-green-400" /> : <Terminal className="h-4 w-4" />}
-        {installCommand}
-      </button>
-      <div className="absolute left-1/2 -translate-x-1/2 top-full mt-3 opacity-0 translate-y-2 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-200 ease-out text-xs text-zinc-500 whitespace-nowrap pointer-events-none font-mono">
-        Give this to your coding agent
-      </div>
-    </div>
+    <button
+      onClick={handleCopy}
+      className='inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md border border-white/10 bg-white/5 px-4 py-2 text-sm text-white subpixel-antialiased shadow-sm transition-colors hover:border-white/20'
+    >
+      {copied ? <Check className='h-4 w-4' /> : <Terminal className='h-4 w-4' />}
+      {installCommand}
+    </button>
   );
 };
 
 export function Hero() {
-  const [scrollOpacity, setScrollOpacity] = useState(1);
-
-  useEffect(() => {
-    const handleScroll = () => {
-      const scrollY = window.scrollY;
-      const windowHeight = window.innerHeight;
-      const isMobile = window.innerWidth < 1024;
-
-      const fadeStart = windowHeight * (isMobile ? 0.3 : 0.15);
-      const fadeEnd = windowHeight * (isMobile ? 0.7 : 0.5);
-      const opacity = 1 - Math.min(1, Math.max(0, (scrollY - fadeStart) / (fadeEnd - fadeStart)));
-      setScrollOpacity(opacity);
-    };
-
-    window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, []);
-
   return (
-    <section className="relative flex min-h-screen flex-col overflow-hidden">
-      {/* Background gradient */}
-      <div className="absolute inset-0 bg-gradient-to-b from-zinc-900/20 via-transparent to-transparent pointer-events-none" />
+    <section className="relative pt-44 pb-24 overflow-hidden">
+      <div className="max-w-7xl mx-auto px-6 relative z-10">
+        <div className="flex flex-col lg:flex-row items-center gap-16">
+          <div className="flex-1 text-center lg:text-left">
+            <h1 className="mb-6 text-3xl font-medium leading-[1.1] tracking-tight text-white sm:text-4xl md:text-5xl lg:text-6xl">
+              Run Coding Agents in Sandboxes.<br />
+              <span className="text-zinc-400">Control Them Over HTTP.</span>
+            </h1>
+            <p className="mt-6 text-lg text-zinc-500 leading-relaxed max-w-xl mx-auto lg:mx-0">
+              The Sandbox Agent SDK is a server that runs inside your sandbox. Your app connects remotely to control Claude Code, Codex, OpenCode, or Amp — streaming events, handling permissions, managing sessions.
+            </p>
 
-      {/* Main content */}
-      <div
-        className="flex flex-1 flex-col justify-start pt-32 lg:justify-center lg:pt-0 lg:pb-20 px-6"
-        style={{ opacity: scrollOpacity, filter: `blur(${(1 - scrollOpacity) * 8}px)` }}
-      >
-        <div className="mx-auto w-full max-w-7xl">
-          <div className="flex flex-col gap-12 lg:flex-row lg:items-center lg:justify-between lg:gap-16 xl:gap-24">
-            {/* Left side - Text content */}
-            <div className="max-w-xl lg:max-w-2xl">
-              <motion.h1
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5 }}
-                className="mb-6 text-3xl font-medium leading-[1.1] tracking-tight text-white md:text-5xl"
+            <div className="mt-10 flex flex-col items-center gap-4 sm:flex-row sm:justify-center lg:justify-start">
+              <a
+                href="/docs"
+                className='inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md border border-white/10 bg-white px-4 py-2 text-sm text-black subpixel-antialiased shadow-sm transition-colors hover:bg-zinc-200'
               >
-                Run Coding Agents in Sandboxes.
-                <br />
-                <span className="text-zinc-400">Control Them Over HTTP.</span>
-              </motion.h1>
-
-              <motion.p
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5, delay: 0.1 }}
-                className="mb-8 text-lg text-zinc-500 leading-relaxed"
-              >
-                The Sandbox Agent SDK is a server that runs inside your sandbox. Your app connects remotely to control Claude Code, Codex, OpenCode, Amp, or Pi — streaming events, handling permissions, managing sessions.
-              </motion.p>
-
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5, delay: 0.2 }}
-                className="flex flex-col gap-3 sm:flex-row"
-              >
-                <a
-                  href="/docs"
-                  className="selection-dark inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md bg-white px-5 py-2.5 text-sm font-medium text-black transition-colors hover:bg-zinc-200"
-                >
-                  Read the Docs
-                  <ArrowRight className="h-4 w-4" />
-                </a>
-                <CopyInstallButton />
-              </motion.div>
+                Read the Docs
+                <ArrowRight className='h-4 w-4' />
+              </a>
+              <CopyInstallButton />
             </div>
+          </div>
 
-            {/* Right side - Diagram */}
-            <motion.div
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.8, delay: 0.3 }}
-              className="flex-1 w-full max-w-2xl"
-            >
-              <UniversalAPIDiagram />
-            </motion.div>
+          <div className="flex-1 w-full max-w-2xl">
+            <UniversalAPIDiagram />
           </div>
         </div>
       </div>
-
     </section>
   );
 }

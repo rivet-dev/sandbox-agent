@@ -1,102 +1,46 @@
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
-use std::convert::Infallible;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
-use std::io::{BufRead, BufReader, Cursor, Write};
-use std::net::TcpListener;
+use std::io::Cursor;
 use std::path::{Path as StdPath, PathBuf};
-use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
-use std::sync::{Arc, Weak};
-use std::time::{Duration, Instant};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use axum::body::Bytes;
 use axum::extract::{Path, Query, State};
-use axum::http::{header, HeaderMap, HeaderValue, Request, StatusCode};
+use axum::http::{header, HeaderMap, Request, StatusCode};
 use axum::middleware::Next;
-use axum::response::sse::Event;
+use axum::response::sse::KeepAlive;
 use axum::response::{IntoResponse, Response, Sse};
 use axum::routing::{delete, get, post};
-use axum::Json;
-use axum::Router;
-use base64::Engine;
-use futures::{stream, StreamExt};
-use reqwest::Client;
-use sandbox_agent_error::{AgentError, ErrorType, ProblemDetails, SandboxError};
-use sandbox_agent_universal_agent_schema::{
-    codex as codex_schema, convert_amp, convert_claude, convert_codex, convert_opencode,
-    convert_pi, opencode as opencode_schema, pi as pi_schema, turn_ended_event,
-    turn_started_event, AgentUnparsedData, ContentPart, ErrorData,
-    EventConversion, EventSource, FileAction, ItemDeltaData, ItemEventData, ItemKind, ItemRole,
-    ItemStatus, PermissionEventData, PermissionStatus, QuestionEventData, QuestionStatus,
-    ReasoningVisibility, SessionEndReason, SessionEndedData, SessionStartedData, StderrOutput,
-    TerminatedBy, TurnEventData, TurnPhase, UniversalEvent, UniversalEventData,
-    UniversalEventType, UniversalItem,
+use axum::{Json, Router};
+use sandbox_agent_agent_management::agents::{
+    AgentId, AgentManager, InstallOptions, InstallResult, InstallSource, InstalledArtifactKind,
 };
+use sandbox_agent_agent_management::credentials::{
+    extract_all_credentials, CredentialExtractionOptions,
+};
+use sandbox_agent_error::{ErrorType, ProblemDetails, SandboxError};
+use sandbox_agent_opencode_adapter::{build_opencode_router, OpenCodeAdapterConfig};
+use sandbox_agent_opencode_server_manager::{OpenCodeServerManager, OpenCodeServerManagerConfig};
 use schemars::JsonSchema;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Map, Value};
+use serde_json::{json, Value};
 use tar::Archive;
-use tokio::sync::futures::OwnedNotified;
-use tokio::sync::{broadcast, mpsc, oneshot, Mutex, Notify};
-use tokio::time::sleep;
-use tokio_stream::wrappers::BroadcastStream;
-use toml_edit::{value, Array, DocumentMut, Item, Table};
 use tower_http::trace::TraceLayer;
 use tracing::Span;
 use utoipa::{Modify, OpenApi, ToSchema};
 
-use crate::agent_server_logs::AgentServerLogs;
-use crate::http_client;
-use crate::opencode_compat::{build_opencode_router, OpenCodeAppState};
+use crate::acp_proxy_runtime::{AcpProxyRuntime, ProxyPostOutcome};
 use crate::ui;
-use sandbox_agent_agent_management::agents::{
-    AgentError as ManagerError, AgentId, AgentManager, InstallOptions, SpawnOptions, StreamingSpawn,
-};
-use sandbox_agent_agent_management::credentials::{
-    extract_all_credentials, AuthType, CredentialExtractionOptions, ExtractedCredentials,
-    ProviderCredentials,
-};
 
-const MOCK_EVENT_DELAY_MS: u64 = 200;
-static USER_MESSAGE_COUNTER: AtomicU64 = AtomicU64::new(1);
-const ANTHROPIC_MODELS_URL: &str = "https://api.anthropic.com/v1/models?beta=true";
-const ANTHROPIC_VERSION: &str = "2023-06-01";
-const CODEX_MODEL_LIST_TIMEOUT_SECS: u64 = 10;
-const SKILL_ROOTS: [&str; 3] = [".agents/skills", ".claude/skills", ".opencode/skill"];
+mod support;
+mod types;
+use self::support::*;
+pub use self::types::*;
 
-fn claude_fallback_models() -> AgentModelsResponse {
-    // Claude Code accepts model aliases: default, sonnet, opus, haiku
-    // These work for both API key and OAuth users
-    AgentModelsResponse {
-        models: vec![
-            AgentModelInfo {
-                id: "default".to_string(),
-                name: Some("Default (recommended)".to_string()),
-                variants: None,
-                default_variant: None,
-            },
-            AgentModelInfo {
-                id: "sonnet".to_string(),
-                name: Some("Sonnet".to_string()),
-                variants: None,
-                default_variant: None,
-            },
-            AgentModelInfo {
-                id: "opus".to_string(),
-                name: Some("Opus".to_string()),
-                variants: None,
-                default_variant: None,
-            },
-            AgentModelInfo {
-                id: "haiku".to_string(),
-                name: Some("Haiku".to_string()),
-                variants: None,
-                default_variant: None,
-            },
-        ],
-        default_model: Some("default".to_string()),
-    }
-}
+const APPLICATION_JSON: &str = "application/json";
+const TEXT_EVENT_STREAM: &str = "text/event-stream";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BrandingMode {
@@ -121,12 +65,20 @@ impl BrandingMode {
     }
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct CachedAgentVersion {
+    pub version: Option<String>,
+    pub path: Option<String>,
+}
+
 #[derive(Debug)]
 pub struct AppState {
     auth: AuthConfig,
     agent_manager: Arc<AgentManager>,
-    session_manager: Arc<SessionManager>,
+    acp_proxy: Arc<AcpProxyRuntime>,
+    opencode_server_manager: Arc<OpenCodeServerManager>,
     pub(crate) branding: BrandingMode,
+    version_cache: Mutex<HashMap<AgentId, CachedAgentVersion>>,
 }
 
 impl AppState {
@@ -140,25 +92,46 @@ impl AppState {
         branding: BrandingMode,
     ) -> Self {
         let agent_manager = Arc::new(agent_manager);
-        let session_manager = Arc::new(SessionManager::new(agent_manager.clone()));
-        session_manager
-            .server_manager
-            .set_owner(Arc::downgrade(&session_manager));
+        let acp_proxy = Arc::new(AcpProxyRuntime::new(agent_manager.clone()));
+        let opencode_server_manager = Arc::new(OpenCodeServerManager::new(
+            agent_manager.clone(),
+            OpenCodeServerManagerConfig {
+                log_dir: default_opencode_server_log_dir(),
+                auto_restart: true,
+            },
+        ));
         Self {
             auth,
             agent_manager,
-            session_manager,
+            acp_proxy,
+            opencode_server_manager,
             branding,
+            version_cache: Mutex::new(HashMap::new()),
         }
     }
 
-    pub(crate) fn session_manager(&self) -> Arc<SessionManager> {
-        self.session_manager.clone()
+    pub(crate) fn acp_proxy(&self) -> Arc<AcpProxyRuntime> {
+        self.acp_proxy.clone()
     }
 
-    pub(crate) async fn ensure_opencode_server(&self) -> Result<String, SandboxError> {
-        self.session_manager.ensure_opencode_server().await
+    pub(crate) fn agent_manager(&self) -> Arc<AgentManager> {
+        self.agent_manager.clone()
     }
+
+    pub(crate) fn opencode_server_manager(&self) -> Arc<OpenCodeServerManager> {
+        self.opencode_server_manager.clone()
+    }
+
+    pub(crate) fn purge_version_cache(&self, agent: AgentId) {
+        self.version_cache.lock().unwrap().remove(&agent);
+    }
+}
+
+fn default_opencode_server_log_dir() -> PathBuf {
+    let mut base = dirs::data_local_dir().unwrap_or_else(std::env::temp_dir);
+    base.push("sandbox-agent");
+    base.push("agent-logs");
+    base
 }
 
 #[derive(Debug, Clone)]
@@ -182,40 +155,34 @@ pub fn build_router(state: AppState) -> Router {
 
 pub fn build_router_with_state(shared: Arc<AppState>) -> (Router, Arc<AppState>) {
     let mut v1_router = Router::new()
-        .route("/health", get(get_health))
-        .route("/agents", get(list_agents))
-        .route("/agents/:agent/install", post(install_agent))
-        .route("/agents/:agent/modes", get(get_agent_modes))
-        .route("/agents/:agent/models", get(get_agent_models))
-        .route("/sessions", get(list_sessions))
-        .route("/sessions/:session_id", post(create_session))
-        .route("/sessions/:session_id/messages", post(post_message))
+        .route("/health", get(get_v1_health))
+        .route("/agents", get(get_v1_agents))
+        .route("/agents/:agent", get(get_v1_agent))
+        .route("/agents/:agent/install", post(post_v1_agent_install))
+        .route("/fs/entries", get(get_v1_fs_entries))
+        .route("/fs/file", get(get_v1_fs_file).put(put_v1_fs_file))
+        .route("/fs/entry", delete(delete_v1_fs_entry))
+        .route("/fs/mkdir", post(post_v1_fs_mkdir))
+        .route("/fs/move", post(post_v1_fs_move))
+        .route("/fs/stat", get(get_v1_fs_stat))
+        .route("/fs/upload-batch", post(post_v1_fs_upload_batch))
         .route(
-            "/sessions/:session_id/messages/stream",
-            post(post_message_stream),
-        )
-        .route("/sessions/:session_id/terminate", post(terminate_session))
-        .route("/sessions/:session_id/events", get(get_events))
-        .route("/sessions/:session_id/events/sse", get(get_events_sse))
-        .route(
-            "/sessions/:session_id/questions/:question_id/reply",
-            post(reply_question),
+            "/config/mcp",
+            get(get_v1_config_mcp)
+                .put(put_v1_config_mcp)
+                .delete(delete_v1_config_mcp),
         )
         .route(
-            "/sessions/:session_id/questions/:question_id/reject",
-            post(reject_question),
+            "/config/skills",
+            get(get_v1_config_skills)
+                .put(put_v1_config_skills)
+                .delete(delete_v1_config_skills),
         )
+        .route("/acp", get(get_v1_acp_servers))
         .route(
-            "/sessions/:session_id/permissions/:permission_id/reply",
-            post(reply_permission),
+            "/acp/:server_id",
+            post(post_v1_acp).get(get_v1_acp).delete(delete_v1_acp),
         )
-        .route("/fs/entries", get(fs_entries))
-        .route("/fs/file", get(fs_read_file).put(fs_write_file))
-        .route("/fs/entry", delete(fs_delete_entry))
-        .route("/fs/mkdir", post(fs_mkdir))
-        .route("/fs/move", post(fs_move))
-        .route("/fs/stat", get(fs_stat))
-        .route("/fs/upload-batch", post(fs_upload_batch))
         .with_state(shared.clone());
 
     if shared.auth.token.is_some() {
@@ -225,25 +192,24 @@ pub fn build_router_with_state(shared: Arc<AppState>) -> (Router, Arc<AppState>)
         ));
     }
 
-    let opencode_state = OpenCodeAppState::new(shared.clone());
-    let mut opencode_router = build_opencode_router(opencode_state.clone());
-    let mut opencode_root_router = build_opencode_router(opencode_state);
-    if shared.auth.token.is_some() {
-        opencode_router = opencode_router.layer(axum::middleware::from_fn_with_state(
-            shared.clone(),
-            require_token,
-        ));
-        opencode_root_router = opencode_root_router.layer(axum::middleware::from_fn_with_state(
-            shared.clone(),
-            require_token,
-        ));
-    }
+    let opencode_router = build_opencode_router(OpenCodeAdapterConfig {
+        auth_token: shared.auth.token.clone(),
+        sqlite_path: std::env::var("OPENCODE_COMPAT_DB_PATH").ok(),
+        native_proxy_base_url: std::env::var("OPENCODE_COMPAT_PROXY_URL").ok(),
+        native_proxy_manager: Some(shared.opencode_server_manager()),
+        acp_dispatch: Some(shared.acp_proxy() as Arc<dyn sandbox_agent_opencode_adapter::AcpDispatch>),
+        provider_payload: Some(build_provider_payload_for_opencode(&shared)),
+        ..OpenCodeAdapterConfig::default()
+    })
+    .unwrap_or_else(|err| {
+        tracing::error!(error = %err, "failed to initialize opencode adapter router; using fallback");
+        Router::new().fallback(opencode_unavailable)
+    });
 
     let mut router = Router::new()
         .route("/", get(get_root))
         .nest("/v1", v1_router)
         .nest("/opencode", opencode_router)
-        .merge(opencode_root_router)
         .fallback(not_found);
 
     router = router.merge(ui::router());
@@ -252,6 +218,7 @@ pub fn build_router_with_state(shared: Arc<AppState>) -> (Router, Arc<AppState>)
         Ok(value) if value == "0" || value.eq_ignore_ascii_case("false") => false,
         _ => true,
     };
+
     if http_logging {
         let include_headers = std::env::var("SANDBOX_AGENT_LOG_HTTP_HEADERS").is_ok();
         let trace_layer = TraceLayer::new_for_http()
@@ -291,70 +258,67 @@ pub fn build_router_with_state(shared: Arc<AppState>) -> (Router, Arc<AppState>)
                     latency_ms = latency.as_millis()
                 );
             });
+
         router = router.layer(trace_layer);
     }
 
     (router, shared)
 }
 
+async fn opencode_unavailable() -> Response {
+    (
+        StatusCode::SERVICE_UNAVAILABLE,
+        Json(json!({
+            "errors": [{"message": "/opencode is unavailable: adapter initialization failed"}]
+        })),
+    )
+        .into_response()
+}
+
 pub async fn shutdown_servers(state: &Arc<AppState>) {
-    state.session_manager.shutdown().await;
+    state.acp_proxy().shutdown_all().await;
+    state.opencode_server_manager().shutdown().await;
 }
 
 #[derive(OpenApi)]
 #[openapi(
     paths(
-        get_health,
-        install_agent,
-        get_agent_modes,
-        get_agent_models,
-        list_agents,
-        list_sessions,
-        create_session,
-        post_message,
-        post_message_stream,
-        terminate_session,
-        get_events,
-        get_events_sse,
-        reply_question,
-        reject_question,
-        reply_permission,
-        fs_entries,
-        fs_read_file,
-        fs_write_file,
-        fs_delete_entry,
-        fs_mkdir,
-        fs_move,
-        fs_stat,
-        fs_upload_batch
+        get_v1_health,
+        get_v1_agents,
+        get_v1_agent,
+        post_v1_agent_install,
+        get_v1_fs_entries,
+        get_v1_fs_file,
+        put_v1_fs_file,
+        delete_v1_fs_entry,
+        post_v1_fs_mkdir,
+        post_v1_fs_move,
+        get_v1_fs_stat,
+        post_v1_fs_upload_batch,
+        get_v1_config_mcp,
+        put_v1_config_mcp,
+        delete_v1_config_mcp,
+        get_v1_config_skills,
+        put_v1_config_skills,
+        delete_v1_config_skills,
+        get_v1_acp_servers,
+        post_v1_acp,
+        get_v1_acp,
+        delete_v1_acp
     ),
     components(
         schemas(
-            AgentInstallRequest,
-            AgentModeInfo,
-            AgentModesResponse,
-            AgentModelInfo,
-            AgentModelsResponse,
+            HealthResponse,
+            ServerStatus,
+            ServerStatusInfo,
             AgentCapabilities,
             AgentInfo,
             AgentListResponse,
-            ServerStatus,
-            ServerStatusInfo,
-            SessionInfo,
-            SessionListResponse,
-            HealthResponse,
-            CreateSessionRequest,
-            SkillsConfig,
-            SkillSource,
-            McpCommand,
-            McpRemoteTransport,
-            McpOAuthConfig,
-            McpOAuthConfigOrDisabled,
-            McpServerConfig,
-            CreateSessionResponse,
+            AgentInstallRequest,
+            AgentInstallArtifact,
+            AgentInstallResponse,
             FsPathQuery,
             FsEntriesQuery,
-            FsSessionQuery,
             FsDeleteQuery,
             FsUploadBatchQuery,
             FsEntryType,
@@ -365,50 +329,21 @@ pub async fn shutdown_servers(state: &Arc<AppState>) {
             FsMoveResponse,
             FsActionResponse,
             FsUploadBatchResponse,
-            MessageRequest,
-            MessageAttachment,
-            EventsQuery,
-            TurnStreamQuery,
-            EventsResponse,
-            UniversalEvent,
-            UniversalEventData,
-            UniversalEventType,
-            EventSource,
-            SessionStartedData,
-            SessionEndedData,
-            TurnEventData,
-            TurnPhase,
-            SessionEndReason,
-            TerminatedBy,
-            StderrOutput,
-            ItemEventData,
-            ItemDeltaData,
-            UniversalItem,
-            ItemKind,
-            ItemRole,
-            ItemStatus,
-            ContentPart,
-            FileAction,
-            ReasoningVisibility,
-            ErrorData,
-            AgentUnparsedData,
-            PermissionEventData,
-            PermissionStatus,
-            QuestionEventData,
-            QuestionStatus,
-            QuestionReplyRequest,
-            PermissionReplyRequest,
-            PermissionReply,
+            AcpPostQuery,
+            AcpServerInfo,
+            AcpServerListResponse,
+            McpConfigQuery,
+            SkillsConfigQuery,
+            McpServerConfig,
+            SkillsConfig,
+            SkillSource,
             ProblemDetails,
             ErrorType,
-            AgentError
+            AcpEnvelope
         )
     ),
     tags(
-        (name = "meta", description = "Service metadata"),
-        (name = "agents", description = "Agent management"),
-        (name = "sessions", description = "Session management"),
-        (name = "fs", description = "Filesystem operations")
+        (name = "v1", description = "ACP proxy v1 API")
     ),
     modifiers(&ServerAddon)
 )]
@@ -430,5746 +365,36 @@ pub enum ApiError {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        let problem: ProblemDetails = match &self {
-            ApiError::Sandbox(err) => err.to_problem_details(),
+        let problem = match &self {
+            ApiError::Sandbox(error) => problem_from_sandbox_error(error),
         };
         let status =
             StatusCode::from_u16(problem.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
-        (status, Json(problem)).into_response()
-    }
-}
-
-#[derive(Debug)]
-struct SessionState {
-    session_id: String,
-    agent: AgentId,
-    agent_mode: String,
-    permission_mode: String,
-    model: Option<String>,
-    variant: Option<String>,
-    working_dir: PathBuf,
-    native_session_id: Option<String>,
-    pi_runtime: Option<Arc<PiSessionRuntime>>,
-    ended: bool,
-    ended_exit_code: Option<i32>,
-    ended_message: Option<String>,
-    ended_reason: Option<SessionEndReason>,
-    terminated_by: Option<TerminatedBy>,
-    next_event_sequence: u64,
-    next_item_id: u64,
-    events: Vec<UniversalEvent>,
-    pending_questions: HashMap<String, PendingQuestion>,
-    pending_permissions: HashMap<String, PendingPermission>,
-    always_allow_actions: HashSet<String>,
-    item_started: HashSet<String>,
-    item_delta_seen: HashSet<String>,
-    item_map: HashMap<String, String>,
-    mock_sequence: u64,
-    broadcaster: broadcast::Sender<UniversalEvent>,
-    opencode_stream_started: bool,
-    codex_sender: Option<mpsc::UnboundedSender<String>>,
-    claude_sender: Option<mpsc::UnboundedSender<String>>,
-    session_started_emitted: bool,
-    last_claude_message_id: Option<String>,
-    claude_message_counter: u64,
-    pending_assistant_native_ids: VecDeque<String>,
-    pending_assistant_counter: u64,
-    created_at: i64,
-    updated_at: i64,
-    directory: Option<String>,
-    title: Option<String>,
-    mcp: Option<BTreeMap<String, McpServerConfig>>,
-    skills: Option<SkillsConfig>,
-}
-
-#[derive(Debug, Clone)]
-struct PendingPermission {
-    action: String,
-    metadata: Option<Value>,
-}
-
-#[derive(Debug, Clone)]
-struct PendingQuestion {
-    prompt: String,
-    options: Vec<String>,
-}
-
-impl SessionState {
-    fn new(
-        session_id: String,
-        agent: AgentId,
-        request: &CreateSessionRequest,
-    ) -> Result<Self, SandboxError> {
-        let (agent_mode, permission_mode) = normalize_modes(
-            agent,
-            request.agent_mode.as_deref(),
-            request.permission_mode.as_deref(),
-        )?;
-        let (broadcaster, _rx) = broadcast::channel(256);
-        let working_dir = std::env::current_dir().map_err(|err| SandboxError::StreamError {
-            message: err.to_string(),
-        })?;
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as i64)
-            .unwrap_or(0);
-
-        Ok(Self {
-            session_id,
-            agent,
-            agent_mode,
-            permission_mode,
-            model: request.model.clone(),
-            variant: request.variant.clone(),
-            working_dir,
-            native_session_id: None,
-            pi_runtime: None,
-            ended: false,
-            ended_exit_code: None,
-            ended_message: None,
-            ended_reason: None,
-            terminated_by: None,
-            next_event_sequence: 0,
-            next_item_id: 0,
-            events: Vec::new(),
-            pending_questions: HashMap::new(),
-            pending_permissions: HashMap::new(),
-            always_allow_actions: HashSet::new(),
-            item_started: HashSet::new(),
-            item_delta_seen: HashSet::new(),
-            item_map: HashMap::new(),
-            mock_sequence: 0,
-            broadcaster,
-            opencode_stream_started: false,
-            codex_sender: None,
-            claude_sender: None,
-            session_started_emitted: false,
-            last_claude_message_id: None,
-            claude_message_counter: 0,
-            pending_assistant_native_ids: VecDeque::new(),
-            pending_assistant_counter: 0,
-            created_at: now,
-            updated_at: now,
-            directory: request.directory.clone(),
-            title: request.title.clone(),
-            mcp: request.mcp.clone(),
-            skills: request.skills.clone(),
-        })
-    }
-
-    fn next_pending_assistant_native_id(&mut self) -> String {
-        self.pending_assistant_counter += 1;
-        format!(
-            "{}_pending_assistant_{}",
-            self.session_id, self.pending_assistant_counter
-        )
-    }
-
-    fn enqueue_pending_assistant_start(&mut self) -> EventConversion {
-        let native_item_id = self.next_pending_assistant_native_id();
-        self.pending_assistant_native_ids
-            .push_back(native_item_id.clone());
-        EventConversion::new(
-            UniversalEventType::ItemStarted,
-            UniversalEventData::Item(ItemEventData {
-                item: UniversalItem {
-                    item_id: String::new(),
-                    native_item_id: Some(native_item_id),
-                    parent_id: None,
-                    kind: ItemKind::Message,
-                    role: Some(ItemRole::Assistant),
-                    content: Vec::new(),
-                    status: ItemStatus::InProgress,
-                },
-            }),
-        )
-        .synthetic()
-    }
-
-    fn record_conversions(&mut self, conversions: Vec<EventConversion>) -> Vec<UniversalEvent> {
-        let mut events = Vec::new();
-        for conversion in conversions {
-            for normalized in self.normalize_conversion(conversion) {
-                if let Some(event) = self.push_event(normalized) {
-                    events.push(event);
-                }
-            }
-        }
-        if !events.is_empty() {
-            self.updated_at = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_millis() as i64)
-                .unwrap_or(self.updated_at);
-        }
-        events
-    }
-
-    fn set_codex_sender(&mut self, sender: Option<mpsc::UnboundedSender<String>>) {
-        self.codex_sender = sender;
-    }
-
-    // Note: This is unused now that Codex uses the shared server model,
-    // but keeping it for potential future use with other agents.
-    #[allow(dead_code)]
-    fn codex_sender(&self) -> Option<mpsc::UnboundedSender<String>> {
-        self.codex_sender.clone()
-    }
-
-    fn set_claude_sender(&mut self, sender: Option<mpsc::UnboundedSender<String>>) {
-        self.claude_sender = sender;
-    }
-
-    #[allow(dead_code)]
-    fn claude_sender(&self) -> Option<mpsc::UnboundedSender<String>> {
-        self.claude_sender.clone()
-    }
-
-    fn normalize_conversion(&mut self, mut conversion: EventConversion) -> Vec<EventConversion> {
-        if self.native_session_id.is_none() && conversion.native_session_id.is_some() {
-            self.native_session_id = conversion.native_session_id.clone();
-        }
-        if conversion.native_session_id.is_none() {
-            conversion.native_session_id = self.native_session_id.clone();
-        }
-
-        let mut conversions = Vec::new();
-        if !agent_supports_item_started(self.agent) {
-            if conversion.event_type == UniversalEventType::ItemStarted {
-                if let UniversalEventData::Item(ref data) = conversion.data {
-                    let is_assistant_message = data.item.kind == ItemKind::Message
-                        && matches!(data.item.role, Some(ItemRole::Assistant));
-                    if is_assistant_message {
-                        let keep = data
-                            .item
-                            .native_item_id
-                            .as_ref()
-                            .map(|id| self.pending_assistant_native_ids.contains(id))
-                            .unwrap_or(false);
-                        if !keep {
-                            return conversions;
-                        }
-                    }
-                }
-            }
-            match conversion.event_type {
-                UniversalEventType::ItemCompleted => {
-                    if let UniversalEventData::Item(ref mut data) = conversion.data {
-                        let is_assistant_message = data.item.kind == ItemKind::Message
-                            && matches!(data.item.role, Some(ItemRole::Assistant));
-                        if is_assistant_message {
-                            if let Some(pending) = self.pending_assistant_native_ids.pop_front() {
-                                data.item.native_item_id = Some(pending);
-                                data.item.item_id.clear();
-                            }
-                        }
-                    }
-                }
-                UniversalEventType::ItemDelta => {
-                    if let UniversalEventData::ItemDelta(ref mut data) = conversion.data {
-                        let is_user = data
-                            .native_item_id
-                            .as_ref()
-                            .is_some_and(|id| id.starts_with("user_"));
-                        if !is_user {
-                            if let Some(pending) = self.pending_assistant_native_ids.front() {
-                                data.native_item_id = Some(pending.clone());
-                                data.item_id.clear();
-                            }
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-        match conversion.event_type {
-            UniversalEventType::ItemStarted | UniversalEventType::ItemCompleted => {
-                if let UniversalEventData::Item(ref mut data) = conversion.data {
-                    self.ensure_item_id(&mut data.item);
-                    self.ensure_parent_id(&mut data.item);
-                    if conversion.event_type == UniversalEventType::ItemCompleted
-                        && !self.item_started.contains(&data.item.item_id)
-                    {
-                        let mut started_item = data.item.clone();
-                        started_item.status = ItemStatus::InProgress;
-                        conversions.push(
-                            EventConversion::new(
-                                UniversalEventType::ItemStarted,
-                                UniversalEventData::Item(ItemEventData { item: started_item }),
-                            )
-                            .synthetic()
-                            .with_native_session(conversion.native_session_id.clone()),
-                        );
-                    }
-                    if conversion.event_type == UniversalEventType::ItemCompleted
-                        && data.item.kind == ItemKind::Message
-                        && !matches!(data.item.role, Some(ItemRole::User))
-                        && !self.item_delta_seen.contains(&data.item.item_id)
-                    {
-                        if let Some(delta) = text_delta_from_parts(&data.item.content) {
-                            conversions.push(
-                                EventConversion::new(
-                                    UniversalEventType::ItemDelta,
-                                    UniversalEventData::ItemDelta(ItemDeltaData {
-                                        item_id: data.item.item_id.clone(),
-                                        native_item_id: data.item.native_item_id.clone(),
-                                        delta,
-                                    }),
-                                )
-                                .synthetic()
-                                .with_native_session(conversion.native_session_id.clone()),
-                            );
-                        }
-                    }
-                }
-            }
-            UniversalEventType::ItemDelta => {
-                if let UniversalEventData::ItemDelta(ref mut data) = conversion.data {
-                    if data.item_id.is_empty() {
-                        data.item_id = match data.native_item_id.as_ref() {
-                            Some(native) => self.item_id_for_native(native),
-                            None => self.next_item_id(),
-                        };
-                    }
-                }
-            }
-            _ => {}
-        }
-
-        conversions.push(conversion);
-        conversions
-    }
-
-    fn push_event(&mut self, conversion: EventConversion) -> Option<UniversalEvent> {
-        if conversion.event_type == UniversalEventType::SessionStarted {
-            if self.session_started_emitted {
-                return None;
-            }
-            self.session_started_emitted = true;
-        }
-        if conversion.event_type == UniversalEventType::SessionEnded
-            && agent_supports_resume(self.agent)
-            && !conversion.synthetic
-        {
-            return None;
-        }
-        if conversion.event_type == UniversalEventType::ItemStarted {
-            if let UniversalEventData::Item(ref data) = conversion.data {
-                if self.item_started.contains(&data.item.item_id) {
-                    return None;
-                }
-            }
-        }
-
-        self.next_event_sequence += 1;
-        let sequence = self.next_event_sequence;
-        let event = UniversalEvent {
-            event_id: format!("evt_{sequence}"),
-            sequence,
-            time: now_rfc3339(),
-            session_id: self.session_id.clone(),
-            native_session_id: conversion.native_session_id.clone(),
-            synthetic: conversion.synthetic,
-            source: conversion.source,
-            event_type: conversion.event_type,
-            data: conversion.data,
-            raw: conversion.raw,
-        };
-
-        self.update_pending(&event);
-        self.update_item_tracking(&event);
-
-        // Suppress question-tool permissions (AskUserQuestion/ExitPlanMode) from frontends.
-        // The permission is still stored in pending_permissions (via update_pending above)
-        // so reply_question/reject_question can find and resolve it internally.
-        if matches!(
-            event.event_type,
-            UniversalEventType::PermissionRequested | UniversalEventType::PermissionResolved
-        ) {
-            if let UniversalEventData::Permission(ref data) = event.data {
-                if is_question_tool_action(&data.action) {
-                    return None;
-                }
-            }
-        }
-        if event.event_type == UniversalEventType::PermissionRequested
-            && self.permission_mode == "acceptEdits"
-        {
-            if let UniversalEventData::Permission(ref data) = event.data {
-                if is_file_change_action(&data.action) {
-                    return None;
-                }
-            }
-        }
-
-        self.events.push(event.clone());
-        let _ = self.broadcaster.send(event.clone());
-        if self.native_session_id.is_none() {
-            self.native_session_id = event.native_session_id.clone();
-        }
-        Some(event)
-    }
-
-    fn update_pending(&mut self, event: &UniversalEvent) {
-        match event.event_type {
-            UniversalEventType::QuestionRequested => {
-                if let UniversalEventData::Question(data) = &event.data {
-                    self.pending_questions.insert(
-                        data.question_id.clone(),
-                        PendingQuestion {
-                            prompt: data.prompt.clone(),
-                            options: data.options.clone(),
-                        },
-                    );
-                }
-            }
-            UniversalEventType::QuestionResolved => {
-                if let UniversalEventData::Question(data) = &event.data {
-                    self.pending_questions.remove(&data.question_id);
-                }
-            }
-            UniversalEventType::PermissionRequested => {
-                if let UniversalEventData::Permission(data) = &event.data {
-                    self.pending_permissions.insert(
-                        data.permission_id.clone(),
-                        PendingPermission {
-                            action: data.action.clone(),
-                            metadata: data.metadata.clone(),
-                        },
-                    );
-                }
-            }
-            UniversalEventType::PermissionResolved => {
-                if let UniversalEventData::Permission(data) = &event.data {
-                    self.pending_permissions.remove(&data.permission_id);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    fn update_item_tracking(&mut self, event: &UniversalEvent) {
-        match event.event_type {
-            UniversalEventType::ItemStarted | UniversalEventType::ItemCompleted => {
-                if let UniversalEventData::Item(data) = &event.data {
-                    self.item_started.insert(data.item.item_id.clone());
-                    if let Some(native) = data.item.native_item_id.as_ref() {
-                        self.item_map
-                            .insert(native.clone(), data.item.item_id.clone());
-                    }
-                }
-            }
-            UniversalEventType::ItemDelta => {
-                if let UniversalEventData::ItemDelta(data) = &event.data {
-                    self.item_delta_seen.insert(data.item_id.clone());
-                    if let Some(native) = data.native_item_id.as_ref() {
-                        self.item_map.insert(native.clone(), data.item_id.clone());
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-
-    fn take_question(&mut self, question_id: &str) -> Option<PendingQuestion> {
-        self.pending_questions.remove(question_id)
-    }
-
-    fn take_permission(&mut self, permission_id: &str) -> Option<PendingPermission> {
-        self.pending_permissions.remove(permission_id)
-    }
-
-    fn remember_permission_allow_for_session(&mut self, action: &str, metadata: &Option<Value>) {
-        for key in permission_cache_keys(action, metadata) {
-            self.always_allow_actions.insert(key);
-        }
-    }
-
-    fn should_auto_approve_permission(&self, action: &str, metadata: &Option<Value>) -> bool {
-        permission_cache_keys(action, metadata)
-            .iter()
-            .any(|key| self.always_allow_actions.contains(key))
-    }
-
-    /// Find and remove a pending permission whose action matches a question tool
-    /// (AskUserQuestion or ExitPlanMode variants). Returns (permission_id, PendingPermission).
-    fn take_question_tool_permission(&mut self) -> Option<(String, PendingPermission)> {
-        let key = self
-            .pending_permissions
-            .iter()
-            .find(|(_, p)| is_question_tool_action(&p.action))
-            .map(|(k, _)| k.clone());
-        key.and_then(|k| self.pending_permissions.remove(&k).map(|p| (k, p)))
-    }
-
-    fn mark_ended(
-        &mut self,
-        exit_code: Option<i32>,
-        message: String,
-        reason: SessionEndReason,
-        terminated_by: TerminatedBy,
-    ) {
-        self.ended = true;
-        self.ended_exit_code = exit_code;
-        self.ended_message = Some(message);
-        self.ended_reason = Some(reason);
-        self.terminated_by = Some(terminated_by);
-    }
-
-    fn ended_error(&self) -> Option<SandboxError> {
-        self.ended_error_for_messages(false)
-    }
-
-    /// Returns an error if the session cannot accept new messages.
-    /// `for_new_message` should be true when checking before sending a new message -
-    /// this allows agents that support resumption (Claude, Amp, OpenCode) to continue
-    /// after their process exits successfully.
-    fn ended_error_for_messages(&self, for_new_message: bool) -> Option<SandboxError> {
-        if !self.ended {
-            return None;
-        }
-        if matches!(self.terminated_by, Some(TerminatedBy::Daemon)) {
-            return Some(SandboxError::InvalidRequest {
-                message: "session terminated".to_string(),
-            });
-        }
-        // For agents that support resumption (Claude, Amp, OpenCode), allow new messages
-        // after the process exits with success (Completed reason). The new message will
-        // spawn a fresh process with --resume/--continue to continue the conversation.
-        if for_new_message
-            && matches!(self.ended_reason, Some(SessionEndReason::Completed))
-            && agent_supports_resume(self.agent)
-        {
-            return None;
-        }
-        Some(SandboxError::AgentProcessExited {
-            agent: self.agent.as_str().to_string(),
-            exit_code: self.ended_exit_code,
-            stderr: self.ended_message.clone(),
-        })
-    }
-
-    fn ensure_item_id(&mut self, item: &mut UniversalItem) {
-        if item.item_id.is_empty() {
-            if let Some(native) = item.native_item_id.as_ref() {
-                item.item_id = self.item_id_for_native(native);
-            } else {
-                item.item_id = self.next_item_id();
-            }
-        }
-    }
-
-    fn ensure_parent_id(&mut self, item: &mut UniversalItem) {
-        let Some(parent_id) = item.parent_id.clone() else {
-            return;
-        };
-        if parent_id.starts_with("itm_") {
-            return;
-        }
-        let mapped = self.item_id_for_native(&parent_id);
-        item.parent_id = Some(mapped);
-    }
-
-    fn item_id_for_native(&mut self, native: &str) -> String {
-        if let Some(item_id) = self.item_map.get(native) {
-            return item_id.clone();
-        }
-        let item_id = self.next_item_id();
-        self.item_map.insert(native.to_string(), item_id.clone());
-        item_id
-    }
-
-    fn next_item_id(&mut self) -> String {
-        self.next_item_id += 1;
-        format!("itm_{}", self.next_item_id)
-    }
-}
-
-#[derive(Debug)]
-enum ManagedServerKind {
-    Http { base_url: String },
-    StdioCodex { server: Arc<CodexServer> },
-}
-
-#[derive(Debug)]
-struct ManagedServer {
-    kind: ManagedServerKind,
-    child: Arc<std::sync::Mutex<Option<std::process::Child>>>,
-    status: ServerStatus,
-    start_time: Option<Instant>,
-    restart_count: u64,
-    last_error: Option<String>,
-    shutdown_requested: bool,
-    instance_id: u64,
-}
-
-#[derive(Debug)]
-struct AgentServerManager {
-    agent_manager: Arc<AgentManager>,
-    servers: Mutex<HashMap<AgentId, ManagedServer>>,
-    sessions: Mutex<HashMap<AgentId, HashSet<String>>>,
-    native_sessions: Mutex<HashMap<AgentId, HashMap<String, String>>>,
-    http_client: Client,
-    log_base_dir: PathBuf,
-    auto_restart: bool,
-    owner: std::sync::Mutex<Option<Weak<SessionManager>>>,
-    #[cfg(feature = "test-utils")]
-    restart_notifier: Mutex<Option<mpsc::UnboundedSender<AgentId>>>,
-}
-
-#[derive(Debug)]
-pub(crate) struct SessionManager {
-    agent_manager: Arc<AgentManager>,
-    sessions: Mutex<Vec<SessionState>>,
-    server_manager: Arc<AgentServerManager>,
-    http_client: Client,
-    model_catalog: Mutex<ModelCatalogState>,
-}
-
-#[derive(Debug, Default)]
-struct ModelCatalogState {
-    models: HashMap<AgentId, AgentModelsResponse>,
-    in_flight: HashMap<AgentId, Arc<Notify>>,
-}
-
-/// Shared Codex app-server process that handles multiple sessions via JSON-RPC.
-/// Similar to OpenCode's server model - a single long-running process that multiplexes
-/// multiple thread (session) conversations.
-struct CodexServer {
-    /// Sender for writing to the process stdin
-    stdin_sender: mpsc::UnboundedSender<String>,
-    /// Pending JSON-RPC requests awaiting responses, keyed by request ID
-    pending_requests: std::sync::Mutex<HashMap<i64, oneshot::Sender<CodexRequestResult>>>,
-    /// Optional mapping from request ID to session ID for routing request-scoped errors
-    request_sessions: std::sync::Mutex<HashMap<i64, String>>,
-    /// Next request ID for JSON-RPC
-    next_id: AtomicI64,
-    /// Whether initialize/initialized handshake has completed
-    initialized: std::sync::Mutex<bool>,
-    /// Serializes initialize handshakes so only one request is in flight at a time.
-    initialize_lock: Mutex<()>,
-    /// Mapping from thread_id to session_id for routing notifications
-    thread_sessions: std::sync::Mutex<HashMap<String, String>>,
-}
-
-impl std::fmt::Debug for CodexServer {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CodexServer")
-            .field("next_id", &self.next_id.load(Ordering::SeqCst))
-            .finish()
-    }
-}
-
-impl CodexServer {
-    fn new(stdin_sender: mpsc::UnboundedSender<String>) -> Self {
-        Self {
-            stdin_sender,
-            pending_requests: std::sync::Mutex::new(HashMap::new()),
-            request_sessions: std::sync::Mutex::new(HashMap::new()),
-            next_id: AtomicI64::new(1),
-            initialized: std::sync::Mutex::new(false),
-            initialize_lock: Mutex::new(()),
-            thread_sessions: std::sync::Mutex::new(HashMap::new()),
-        }
-    }
-
-    fn next_request_id(&self) -> i64 {
-        self.next_id.fetch_add(1, Ordering::SeqCst)
-    }
-
-    fn send_request(
-        &self,
-        id: i64,
-        request: &impl Serialize,
-    ) -> Option<oneshot::Receiver<CodexRequestResult>> {
-        self.send_request_with_session(id, request, None)
-    }
-
-    fn send_request_with_session(
-        &self,
-        id: i64,
-        request: &impl Serialize,
-        session_id: Option<String>,
-    ) -> Option<oneshot::Receiver<CodexRequestResult>> {
-        let (tx, rx) = oneshot::channel();
-        {
-            let mut pending = self.pending_requests.lock().unwrap();
-            pending.insert(id, tx);
-        }
-        if let Some(session_id) = session_id {
-            let mut sessions = self.request_sessions.lock().unwrap();
-            sessions.insert(id, session_id);
-        }
-        let line = serde_json::to_string(request).ok()?;
-        if self.stdin_sender.send(line).is_err() {
-            let mut pending = self.pending_requests.lock().unwrap();
-            pending.remove(&id);
-            let mut sessions = self.request_sessions.lock().unwrap();
-            sessions.remove(&id);
-            return None;
-        }
-        Some(rx)
-    }
-
-    fn send_notification(&self, notification: &impl Serialize) -> bool {
-        let Ok(line) = serde_json::to_string(notification) else {
-            return false;
-        };
-        self.stdin_sender.send(line).is_ok()
-    }
-
-    fn complete_request(&self, id: i64, result: CodexRequestResult) {
-        let tx = {
-            let mut pending = self.pending_requests.lock().unwrap();
-            pending.remove(&id)
-        };
-        if let Some(tx) = tx {
-            let _ = tx.send(result);
-        }
-    }
-
-    fn take_request_session(&self, id: i64) -> Option<String> {
-        let mut sessions = self.request_sessions.lock().unwrap();
-        sessions.remove(&id)
-    }
-
-    fn register_thread(&self, thread_id: String, session_id: String) {
-        let mut sessions = self.thread_sessions.lock().unwrap();
-        sessions.insert(thread_id, session_id);
-    }
-
-    fn session_for_thread(&self, thread_id: &str) -> Option<String> {
-        let sessions = self.thread_sessions.lock().unwrap();
-        sessions.get(thread_id).cloned()
-    }
-
-    fn is_initialized(&self) -> bool {
-        *self.initialized.lock().unwrap()
-    }
-
-    fn set_initialized(&self) {
-        *self.initialized.lock().unwrap() = true;
-    }
-
-    fn clear_pending(&self) {
-        let mut pending = self.pending_requests.lock().unwrap();
-        pending.clear();
-        let mut sessions = self.request_sessions.lock().unwrap();
-        sessions.clear();
-    }
-
-    fn clear_threads(&self) {
-        let mut sessions = self.thread_sessions.lock().unwrap();
-        sessions.clear();
-    }
-}
-
-/// Long-lived Pi RPC process dedicated to exactly one daemon session.
-struct PiSessionRuntime {
-    /// Sender for writing to the process stdin.
-    stdin_sender: mpsc::UnboundedSender<String>,
-    /// Pending RPC requests awaiting responses, keyed by request ID.
-    pending_requests: std::sync::Mutex<HashMap<i64, oneshot::Sender<Value>>>,
-    /// Next request ID for RPC.
-    next_id: AtomicI64,
-    /// Per-session conversion state (partial tool results, reasoning buffers).
-    converter: std::sync::Mutex<convert_pi::PiEventConverter>,
-    /// Child process handle for lifecycle management.
-    child: Arc<std::sync::Mutex<Option<std::process::Child>>>,
-    /// True when daemon-initiated shutdown/terminate requested.
-    shutdown_requested: AtomicBool,
-}
-
-impl std::fmt::Debug for PiSessionRuntime {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("PiSessionRuntime")
-            .field("next_id", &self.next_id.load(Ordering::SeqCst))
-            .field(
-                "shutdown_requested",
-                &self.shutdown_requested.load(Ordering::SeqCst),
-            )
-            .finish()
-    }
-}
-
-impl PiSessionRuntime {
-    fn new(
-        stdin_sender: mpsc::UnboundedSender<String>,
-        child: Arc<std::sync::Mutex<Option<std::process::Child>>>,
-    ) -> Self {
-        Self {
-            stdin_sender,
-            pending_requests: std::sync::Mutex::new(HashMap::new()),
-            next_id: AtomicI64::new(1),
-            converter: std::sync::Mutex::new(convert_pi::PiEventConverter::default()),
-            child,
-            shutdown_requested: AtomicBool::new(false),
-        }
-    }
-
-    fn next_request_id(&self) -> i64 {
-        self.next_id.fetch_add(1, Ordering::SeqCst)
-    }
-
-    fn send_request(&self, id: i64, request: &impl Serialize) -> Option<oneshot::Receiver<Value>> {
-        let (tx, rx) = oneshot::channel();
-        {
-            let mut pending = self.pending_requests.lock().unwrap();
-            pending.insert(id, tx);
-        }
-        let line = serde_json::to_string(request).ok()?;
-        self.stdin_sender.send(line).ok()?;
-        Some(rx)
-    }
-
-    fn complete_request(&self, id: i64, result: Value) {
-        let tx = {
-            let mut pending = self.pending_requests.lock().unwrap();
-            pending.remove(&id)
-        };
-        if let Some(tx) = tx {
-            let _ = tx.send(result);
-        }
-    }
-
-    fn clear_pending(&self) {
-        let mut pending = self.pending_requests.lock().unwrap();
-        pending.clear();
-    }
-
-    fn mark_shutdown_requested(&self) {
-        self.shutdown_requested.store(true, Ordering::SeqCst);
-    }
-
-    fn shutdown_requested(&self) -> bool {
-        self.shutdown_requested.load(Ordering::SeqCst)
-    }
-
-    fn kill_process(&self) {
-        if let Ok(mut guard) = self.child.lock() {
-            if let Some(child) = guard.as_mut() {
-                let _ = child.kill();
-            }
-        }
-    }
-
-    fn shutdown(&self) {
-        self.mark_shutdown_requested();
-        self.clear_pending();
-        self.kill_process();
-    }
-}
-
-#[derive(Debug)]
-struct PiSessionBootstrap {
-    runtime: Arc<PiSessionRuntime>,
-    native_session_id: String,
-    _session_file: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-enum CodexRequestResult {
-    Response(Value),
-    Error(codex_schema::JsonrpcErrorError),
-}
-
-pub(crate) struct SessionSubscription {
-    pub(crate) initial_events: Vec<UniversalEvent>,
-    pub(crate) receiver: broadcast::Receiver<UniversalEvent>,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct PendingPermissionInfo {
-    pub session_id: String,
-    pub permission_id: String,
-    pub action: String,
-    pub metadata: Option<Value>,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct PendingQuestionInfo {
-    pub session_id: String,
-    pub question_id: String,
-    pub prompt: String,
-    pub options: Vec<String>,
-}
-
-impl ManagedServer {
-    fn base_url(&self) -> Option<String> {
-        match &self.kind {
-            ManagedServerKind::Http { base_url } => Some(base_url.clone()),
-            ManagedServerKind::StdioCodex { .. } => None,
-        }
-    }
-
-    fn status_info(&self) -> ServerStatusInfo {
-        let uptime_ms = self
-            .start_time
-            .map(|started| started.elapsed().as_millis() as u64);
-        ServerStatusInfo {
-            status: self.status.clone(),
-            base_url: self.base_url(),
-            uptime_ms,
-            restart_count: self.restart_count,
-            last_error: self.last_error.clone(),
-        }
-    }
-}
-
-impl AgentServerManager {
-    fn new(
-        agent_manager: Arc<AgentManager>,
-        http_client: Client,
-        log_base_dir: PathBuf,
-        auto_restart: bool,
-    ) -> Self {
-        Self {
-            agent_manager,
-            servers: Mutex::new(HashMap::new()),
-            sessions: Mutex::new(HashMap::new()),
-            native_sessions: Mutex::new(HashMap::new()),
-            http_client,
-            log_base_dir,
-            auto_restart,
-            owner: std::sync::Mutex::new(None),
-            #[cfg(feature = "test-utils")]
-            restart_notifier: Mutex::new(None),
-        }
-    }
-
-    fn set_owner(&self, owner: Weak<SessionManager>) {
-        *self.owner.lock().expect("owner lock") = Some(owner);
-    }
-
-    #[cfg(feature = "test-utils")]
-    async fn set_owner_async(&self, owner: Weak<SessionManager>) {
-        *self.owner.lock().expect("owner lock") = Some(owner);
-    }
-
-    #[cfg(feature = "test-utils")]
-    async fn set_restart_notifier(&self, tx: mpsc::UnboundedSender<AgentId>) {
-        *self.restart_notifier.lock().await = Some(tx);
-    }
-
-    async fn register_session(
-        &self,
-        agent: AgentId,
-        session_id: &str,
-        native_session_id: Option<&str>,
-    ) {
-        let mut sessions = self.sessions.lock().await;
-        sessions
-            .entry(agent)
-            .or_insert_with(HashSet::new)
-            .insert(session_id.to_string());
-        drop(sessions);
-        if let Some(native_session_id) = native_session_id {
-            let mut natives = self.native_sessions.lock().await;
-            natives
-                .entry(agent)
-                .or_insert_with(HashMap::new)
-                .insert(native_session_id.to_string(), session_id.to_string());
-        }
-    }
-
-    async fn unregister_session(
-        &self,
-        agent: AgentId,
-        session_id: &str,
-        native_session_id: Option<&str>,
-    ) {
-        let mut clear_agent = false;
-        let mut sessions_map = self.sessions.lock().await;
-        if let Some(session_set) = sessions_map.get_mut(&agent) {
-            session_set.remove(session_id);
-            if session_set.is_empty() {
-                sessions_map.remove(&agent);
-                clear_agent = true;
-            }
-        }
-        drop(sessions_map);
-        if let Some(native_session_id) = native_session_id {
-            let mut natives = self.native_sessions.lock().await;
-            if let Some(natives) = natives.get_mut(&agent) {
-                natives.remove(native_session_id);
-            }
-        }
-        if clear_agent {
-            let mut natives = self.native_sessions.lock().await;
-            natives.remove(&agent);
-        }
-    }
-
-    async fn clear_mappings(&self, agent: AgentId) {
-        let mut sessions = self.sessions.lock().await;
-        sessions.remove(&agent);
-        drop(sessions);
-        let mut natives = self.native_sessions.lock().await;
-        natives.remove(&agent);
-    }
-
-    async fn status_snapshot(&self) -> HashMap<AgentId, ServerStatusInfo> {
-        let servers = self.servers.lock().await;
-        servers
-            .iter()
-            .map(|(agent, server)| (*agent, server.status_info()))
-            .collect()
-    }
-
-    async fn ensure_http_server(self: &Arc<Self>, agent: AgentId) -> Result<String, SandboxError> {
-        {
-            let servers = self.servers.lock().await;
-            if let Some(server) = servers.get(&agent) {
-                if matches!(server.status, ServerStatus::Running) {
-                    if let Some(base_url) = server.base_url() {
-                        return Ok(base_url);
-                    }
-                }
-            }
-        }
-
-        let (base_url, child) = self.spawn_http_server(agent).await?;
-        let restart_count = {
-            let servers = self.servers.lock().await;
-            servers
-                .get(&agent)
-                .map(|server| server.restart_count + 1)
-                .unwrap_or(0)
-        };
-
-        {
-            let mut servers = self.servers.lock().await;
-            if let Some(existing) = servers.get(&agent) {
-                if matches!(existing.status, ServerStatus::Running) {
-                    if let Ok(mut guard) = child.lock() {
-                        if let Some(child) = guard.as_mut() {
-                            let _ = child.kill();
-                        }
-                    }
-                    if let Some(base_url) = existing.base_url() {
-                        return Ok(base_url);
-                    }
-                }
-            }
-
-            servers.insert(
-                agent,
-                ManagedServer {
-                    kind: ManagedServerKind::Http {
-                        base_url: base_url.clone(),
-                    },
-                    child: child.clone(),
-                    status: ServerStatus::Running,
-                    start_time: Some(Instant::now()),
-                    restart_count,
-                    last_error: None,
-                    shutdown_requested: false,
-                    instance_id: restart_count,
-                },
-            );
-        }
-
-        if let Err(err) = self.wait_for_http_server(&base_url).await {
-            if let Ok(mut guard) = child.lock() {
-                if let Some(child) = guard.as_mut() {
-                    let _ = child.kill();
-                }
-            }
-            self.update_server_error(agent, err.to_string()).await;
-            return Err(err);
-        }
-
-        self.spawn_monitor_task(agent, restart_count, child);
-
-        Ok(base_url)
-    }
-
-    async fn ensure_stdio_server(
-        self: &Arc<Self>,
-        agent: AgentId,
-    ) -> Result<(Arc<CodexServer>, Option<mpsc::UnboundedReceiver<String>>), SandboxError> {
-        {
-            let servers = self.servers.lock().await;
-            if let Some(server) = servers.get(&agent) {
-                if matches!(server.status, ServerStatus::Running) {
-                    if let ManagedServerKind::StdioCodex { server } = &server.kind {
-                        return Ok((server.clone(), None));
-                    }
-                }
-            }
-        }
-
-        let (server, stdout_rx, child) = self.spawn_stdio_server(agent).await?;
-        let restart_count = {
-            let servers = self.servers.lock().await;
-            servers
-                .get(&agent)
-                .map(|server| server.restart_count + 1)
-                .unwrap_or(0)
-        };
-
-        {
-            let mut servers = self.servers.lock().await;
-            if let Some(existing) = servers.get(&agent) {
-                if matches!(existing.status, ServerStatus::Running) {
-                    if let Ok(mut guard) = child.lock() {
-                        if let Some(child) = guard.as_mut() {
-                            let _ = child.kill();
-                        }
-                    }
-                    if let ManagedServerKind::StdioCodex { server } = &existing.kind {
-                        return Ok((server.clone(), None));
-                    }
-                }
-            }
-            servers.insert(
-                agent,
-                ManagedServer {
-                    kind: ManagedServerKind::StdioCodex {
-                        server: server.clone(),
-                    },
-                    child: child.clone(),
-                    status: ServerStatus::Running,
-                    start_time: Some(Instant::now()),
-                    restart_count,
-                    last_error: None,
-                    shutdown_requested: false,
-                    instance_id: restart_count,
-                },
-            );
-        }
-
-        self.spawn_monitor_task(agent, restart_count, child);
-
-        Ok((server, Some(stdout_rx)))
-    }
-
-    async fn shutdown(&self) {
-        let mut servers = self.servers.lock().await;
-        for server in servers.values_mut() {
-            server.shutdown_requested = true;
-            server.status = ServerStatus::Stopped;
-            server.start_time = None;
-            if let Ok(mut guard) = server.child.lock() {
-                if let Some(child) = guard.as_mut() {
-                    let _ = child.kill();
-                }
-            }
-            if let ManagedServerKind::StdioCodex { server } = &server.kind {
-                server.clear_pending();
-                server.clear_threads();
-            }
-        }
-    }
-
-    async fn wait_for_http_server(&self, base_url: &str) -> Result<(), SandboxError> {
-        let endpoints = ["health", "healthz", "app/agents", "agents"];
-        for _ in 0..20 {
-            for endpoint in endpoints {
-                let url = format!("{base_url}/{endpoint}");
-                if let Ok(response) = self.http_client.get(&url).send().await {
-                    if response.status().is_success() {
-                        return Ok(());
-                    }
-                }
-            }
-            sleep(Duration::from_millis(150)).await;
-        }
-        Err(SandboxError::StreamError {
-            message: "server health check failed".to_string(),
-        })
-    }
-
-    async fn spawn_http_server(
-        self: &Arc<Self>,
-        agent: AgentId,
-    ) -> Result<(String, Arc<std::sync::Mutex<Option<std::process::Child>>>), SandboxError> {
-        let manager = self.agent_manager.clone();
-        let log_dir = self.log_base_dir.clone();
-        let (base_url, child) = tokio::task::spawn_blocking(
-            move || -> Result<(String, std::process::Child), SandboxError> {
-                let path = manager
-                    .resolve_binary(agent)
-                    .map_err(|err| map_spawn_error(agent, err))?;
-                let port = find_available_port()?;
-                let mut command = std::process::Command::new(path);
-                let stderr = AgentServerLogs::new(log_dir, agent.as_str()).open()?;
-                command
-                    .arg("serve")
-                    .arg("--port")
-                    .arg(port.to_string())
-                    .stdout(Stdio::null())
-                    .stderr(stderr);
-                let child = command.spawn().map_err(|err| SandboxError::StreamError {
-                    message: err.to_string(),
-                })?;
-                Ok((format!("http://127.0.0.1:{port}"), child))
-            },
-        )
-        .await
-        .map_err(|err| SandboxError::StreamError {
-            message: err.to_string(),
-        })??;
-
-        Ok((base_url, Arc::new(std::sync::Mutex::new(Some(child)))))
-    }
-
-    async fn spawn_stdio_server(
-        self: &Arc<Self>,
-        agent: AgentId,
-    ) -> Result<
         (
-            Arc<CodexServer>,
-            mpsc::UnboundedReceiver<String>,
-            Arc<std::sync::Mutex<Option<std::process::Child>>>,
-        ),
-        SandboxError,
-    > {
-        let manager = self.agent_manager.clone();
-        let log_dir = self.log_base_dir.clone();
-        let (stdin_tx, stdin_rx) = mpsc::unbounded_channel::<String>();
-        let (stdout_tx, stdout_rx) = mpsc::unbounded_channel::<String>();
-
-        let child =
-            tokio::task::spawn_blocking(move || -> Result<std::process::Child, SandboxError> {
-                let path = manager
-                    .resolve_binary(agent)
-                    .map_err(|err| map_spawn_error(agent, err))?;
-                let mut command = std::process::Command::new(path);
-                let stderr = AgentServerLogs::new(log_dir, agent.as_str()).open()?;
-                command
-                    .arg("app-server")
-                    .stdin(Stdio::piped())
-                    .stdout(Stdio::piped())
-                    .stderr(stderr);
-
-                let mut child = command.spawn().map_err(|err| SandboxError::StreamError {
-                    message: err.to_string(),
-                })?;
-
-                let stdin = child
-                    .stdin
-                    .take()
-                    .ok_or_else(|| SandboxError::StreamError {
-                        message: "codex stdin unavailable".to_string(),
-                    })?;
-                let stdout = child
-                    .stdout
-                    .take()
-                    .ok_or_else(|| SandboxError::StreamError {
-                        message: "codex stdout unavailable".to_string(),
-                    })?;
-
-                let stdin_rx_mut = std::sync::Mutex::new(stdin_rx);
-                std::thread::spawn(move || {
-                    let mut stdin = stdin;
-                    let mut rx = stdin_rx_mut.lock().unwrap();
-                    while let Some(line) = rx.blocking_recv() {
-                        if writeln!(stdin, "{line}").is_err() {
-                            break;
-                        }
-                        if stdin.flush().is_err() {
-                            break;
-                        }
-                    }
-                });
-
-                std::thread::spawn(move || {
-                    let reader = BufReader::new(stdout);
-                    for line in reader.lines() {
-                        let Ok(line) = line else { break };
-                        if stdout_tx.send(line).is_err() {
-                            break;
-                        }
-                    }
-                });
-
-                Ok(child)
-            })
-            .await
-            .map_err(|err| SandboxError::StreamError {
-                message: err.to_string(),
-            })??;
-
-        let server = Arc::new(CodexServer::new(stdin_tx));
-
-        Ok((
-            server,
-            stdout_rx,
-            Arc::new(std::sync::Mutex::new(Some(child))),
-        ))
-    }
-
-    fn spawn_monitor_task(
-        self: &Arc<Self>,
-        agent: AgentId,
-        instance_id: u64,
-        child: Arc<std::sync::Mutex<Option<std::process::Child>>>,
-    ) {
-        let manager = Arc::clone(self);
-        tokio::spawn(async move {
-            loop {
-                let status = {
-                    let mut guard = match child.lock() {
-                        Ok(guard) => guard,
-                        Err(_) => return,
-                    };
-                    match guard.as_mut() {
-                        Some(child) => match child.try_wait() {
-                            Ok(status) => status,
-                            Err(_) => None,
-                        },
-                        None => return,
-                    }
-                };
-
-                if let Some(status) = status {
-                    manager
-                        .handle_process_exit(agent, instance_id, status)
-                        .await;
-                    break;
-                }
-
-                sleep(Duration::from_millis(500)).await;
-            }
-        });
-    }
-
-    async fn handle_process_exit(
-        self: &Arc<Self>,
-        agent: AgentId,
-        instance_id: u64,
-        status: std::process::ExitStatus,
-    ) {
-        let exit_code = status.code();
-        let message = format!("agent server exited with status {:?}", status);
-        let mut codex_server = None;
-        let mut shutdown_requested = false;
-        {
-            let mut servers = self.servers.lock().await;
-            if let Some(server) = servers.get_mut(&agent) {
-                if server.instance_id != instance_id {
-                    return;
-                }
-                shutdown_requested = server.shutdown_requested;
-                server.status = if shutdown_requested {
-                    ServerStatus::Stopped
-                } else {
-                    ServerStatus::Error
-                };
-                server.start_time = None;
-                if !shutdown_requested {
-                    server.last_error = Some(message.clone());
-                }
-                if let Ok(mut guard) = server.child.lock() {
-                    *guard = None;
-                }
-                if let ManagedServerKind::StdioCodex { server } = &server.kind {
-                    codex_server = Some(server.clone());
-                }
-            }
-        }
-
-        if let Some(server) = codex_server {
-            server.clear_pending();
-            server.clear_threads();
-        }
-
-        if shutdown_requested {
-            self.clear_mappings(agent).await;
-            return;
-        }
-
-        self.notify_sessions_of_error(agent, &message, exit_code)
-            .await;
-
-        if self.auto_restart {
-            #[cfg(feature = "test-utils")]
-            {
-                if let Some(tx) = self.restart_notifier.lock().await.as_ref() {
-                    let _ = tx.send(agent);
-                }
-            }
-            let manager = Arc::clone(self);
-            tokio::spawn(async move {
-                let _ = manager.ensure_server_for_restart(agent).await;
-            });
-        }
-    }
-
-    async fn ensure_server_for_restart(
-        self: Arc<Self>,
-        agent: AgentId,
-    ) -> Result<(), SandboxError> {
-        sleep(Duration::from_millis(500)).await;
-        match agent {
-            AgentId::Opencode => {
-                let _ = self.ensure_http_server(agent).await?;
-            }
-            AgentId::Codex => {
-                let (server, receiver) = self.ensure_stdio_server(agent).await?;
-                if let Some(stdout_rx) = receiver {
-                    let owner = self.owner.lock().expect("owner lock").clone();
-                    if let Some(owner) = owner.as_ref().and_then(|weak| weak.upgrade()) {
-                        let owner_clone = owner.clone();
-                        let server_clone = server.clone();
-                        tokio::spawn(async move {
-                            owner_clone
-                                .handle_codex_server_output(server_clone, stdout_rx)
-                                .await;
-                        });
-                        let _ = owner.codex_server_initialize(&server).await;
-                    }
-                }
-            }
-            _ => {}
-        }
-        Ok(())
-    }
-
-    async fn notify_sessions_of_error(
-        &self,
-        agent: AgentId,
-        message: &str,
-        exit_code: Option<i32>,
-    ) {
-        let session_ids = {
-            let sessions = self.sessions.lock().await;
-            sessions
-                .get(&agent)
-                .cloned()
-                .unwrap_or_default()
-                .into_iter()
-                .collect::<Vec<_>>()
-        };
-
-        let owner = { self.owner.lock().expect("owner lock").clone() };
-        if let Some(owner) = owner.and_then(|weak| weak.upgrade()) {
-            let logs = owner.read_agent_stderr(agent);
-            for session_id in session_ids {
-                owner
-                    .record_error(
-                        &session_id,
-                        message.to_string(),
-                        Some("server_exit".to_string()),
-                        None,
-                    )
-                    .await;
-                owner
-                    .mark_session_ended(
-                        &session_id,
-                        exit_code,
-                        message,
-                        SessionEndReason::Error,
-                        TerminatedBy::Daemon,
-                        logs.clone(),
-                    )
-                    .await;
-            }
-        }
-
-        self.clear_mappings(agent).await;
-    }
-
-    async fn update_server_error(&self, agent: AgentId, message: String) {
-        let mut servers = self.servers.lock().await;
-        if let Some(server) = servers.get_mut(&agent) {
-            server.status = ServerStatus::Error;
-            server.start_time = None;
-            server.last_error = Some(message);
-        }
-    }
-}
-
-impl SessionManager {
-    fn new(agent_manager: Arc<AgentManager>) -> Self {
-        let log_base_dir = default_log_dir();
-        let http_client = http_client::client_builder()
-            .build()
-            .expect("failed to build http client");
-        let server_manager = Arc::new(AgentServerManager::new(
-            agent_manager.clone(),
-            http_client.clone(),
-            log_base_dir,
-            true,
-        ));
-        Self {
-            agent_manager,
-            sessions: Mutex::new(Vec::new()),
-            server_manager,
-            http_client,
-            model_catalog: Mutex::new(ModelCatalogState::default()),
-        }
-    }
-
-    fn session_ref<'a>(sessions: &'a [SessionState], session_id: &str) -> Option<&'a SessionState> {
-        sessions
-            .iter()
-            .find(|session| session.session_id == session_id)
-    }
-
-    fn session_mut<'a>(
-        sessions: &'a mut [SessionState],
-        session_id: &str,
-    ) -> Option<&'a mut SessionState> {
-        sessions
-            .iter_mut()
-            .find(|session| session.session_id == session_id)
-    }
-
-    async fn session_working_dir(&self, session_id: &str) -> Result<PathBuf, SandboxError> {
-        let sessions = self.sessions.lock().await;
-        let session = Self::session_ref(&sessions, session_id).ok_or_else(|| {
-            SandboxError::SessionNotFound {
-                session_id: session_id.to_string(),
-            }
-        })?;
-        Ok(session.working_dir.clone())
-    }
-
-    pub(crate) async fn set_session_overrides(
-        &self,
-        session_id: &str,
-        model: Option<String>,
-        variant: Option<String>,
-    ) -> Result<(), SandboxError> {
-        let mut sessions = self.sessions.lock().await;
-        let session = Self::session_mut(&mut sessions, session_id).ok_or_else(|| {
-            SandboxError::SessionNotFound {
-                session_id: session_id.to_string(),
-            }
-        })?;
-        session.model = model;
-        session.variant = variant;
-        Ok(())
-    }
-
-    /// Read agent stderr for error diagnostics
-    fn read_agent_stderr(&self, agent: AgentId) -> Option<StderrOutput> {
-        let logs = AgentServerLogs::new(self.server_manager.log_base_dir.clone(), agent.as_str());
-        logs.read_stderr()
-    }
-
-    async fn shutdown(&self) {
-        let runtimes = {
-            let mut sessions = self.sessions.lock().await;
-            sessions
-                .iter_mut()
-                .filter_map(|session| session.pi_runtime.take())
-                .collect::<Vec<_>>()
-        };
-        for runtime in runtimes {
-            runtime.shutdown();
-        }
-        self.server_manager.shutdown().await;
-    }
-
-    pub(crate) async fn create_session(
-        self: &Arc<Self>,
-        session_id: String,
-        request: CreateSessionRequest,
-    ) -> Result<CreateSessionResponse, SandboxError> {
-        let agent_id = parse_agent_id(&request.agent)?;
-        {
-            let sessions = self.sessions.lock().await;
-            if sessions
-                .iter()
-                .any(|session| session.session_id == session_id)
-            {
-                return Err(SandboxError::SessionAlreadyExists { session_id });
-            }
-        }
-
-        if agent_id != AgentId::Mock {
-            let manager = self.agent_manager.clone();
-            let agent_version = request.agent_version.clone();
-            let agent_name = request.agent.clone();
-            let install_result = tokio::task::spawn_blocking(move || {
-                manager.install(
-                    agent_id,
-                    InstallOptions {
-                        reinstall: false,
-                        version: agent_version,
-                    },
-                )
-            })
-            .await
-            .map_err(|err| SandboxError::InstallFailed {
-                agent: agent_name,
-                stderr: Some(err.to_string()),
-            })?;
-            install_result.map_err(|err| map_install_error(agent_id, err))?;
-        }
-
-        let skill_dirs = if let Some(skills) = &request.skills {
-            let sources = skills.sources.clone();
-            Some(
-                tokio::task::spawn_blocking(move || install_skill_sources(&sources))
-                    .await
-                    .map_err(|err| SandboxError::StreamError {
-                        message: err.to_string(),
-                    })??,
-            )
-        } else {
-            None
-        };
-
-        if let Some(mcp) = &request.mcp {
-            self.apply_mcp_config(agent_id, mcp).await?;
-        }
-
-        if agent_id == AgentId::Opencode {
-            if let Some(skill_dirs) = skill_dirs.as_ref() {
-                self.apply_opencode_skills(skill_dirs).await?;
-            }
-        }
-
-        // Resolve default model if none was explicitly provided
-        let request = if request.model.is_none() {
-            let mut request = request;
-            if let Ok(models_response) = self.agent_models(agent_id).await {
-                request.model = models_response.default_model;
-            }
-            request
-        } else {
-            request
-        };
-
-        let mut session = SessionState::new(session_id.clone(), agent_id, &request)?;
-        if agent_id == AgentId::Opencode {
-            let opencode_session_id = self.create_opencode_session().await?;
-            session.native_session_id = Some(opencode_session_id);
-        }
-        if agent_id == AgentId::Codex {
-            // Create a thread in the shared Codex app-server
-            let snapshot = SessionSnapshot {
-                session_id: session_id.clone(),
-                agent: agent_id,
-                agent_mode: session.agent_mode.clone(),
-                permission_mode: session.permission_mode.clone(),
-                model: session.model.clone(),
-                variant: session.variant.clone(),
-                native_session_id: None,
-            };
-            let thread_id = self.create_codex_thread(&session_id, &snapshot).await?;
-            session.native_session_id = Some(thread_id);
-        }
-        if agent_id == AgentId::Pi {
-            // Pi uses one dedicated RPC process per daemon session.
-            // This is the canonical runtime path for Pi sessions.
-            let pi = self
-                .create_pi_session(&session_id, session.model.as_deref())
-                .await?;
-            session.native_session_id = Some(pi.native_session_id);
-            session.pi_runtime = Some(pi.runtime.clone());
-            if let Some(variant) = session.variant.as_deref() {
-                if let Err(err) = self.set_pi_thinking_level(&pi.runtime, variant).await {
-                    pi.runtime.shutdown();
-                    return Err(err);
-                }
-            }
-        }
-        if agent_id == AgentId::Mock {
-            session.native_session_id = Some(format!("mock-{session_id}"));
-        }
-
-        let metadata = json!({
-            "agent": request.agent,
-            "agentMode": session.agent_mode,
-            "permissionMode": session.permission_mode,
-            "model": request.model,
-            "variant": request.variant,
-        });
-        let started = EventConversion::new(
-            UniversalEventType::SessionStarted,
-            UniversalEventData::SessionStarted(SessionStartedData {
-                metadata: Some(metadata),
-            }),
+            status,
+            [(header::CONTENT_TYPE, "application/problem+json")],
+            Json(problem),
         )
-        .synthetic()
-        .with_native_session(session.native_session_id.clone());
-        session.record_conversions(vec![started]);
-        if agent_id == AgentId::Mock {
-            // Emit native session.started like real agents do
-            let native_started = EventConversion::new(
-                UniversalEventType::SessionStarted,
-                UniversalEventData::SessionStarted(SessionStartedData {
-                    metadata: Some(json!({ "mock": true })),
-                }),
-            )
-            .with_native_session(session.native_session_id.clone());
-            session.record_conversions(vec![native_started]);
-        }
-
-        let native_session_id = session.native_session_id.clone();
-        let mut sessions = self.sessions.lock().await;
-        sessions.push(session);
-        drop(sessions);
-        if agent_id == AgentId::Opencode || agent_id == AgentId::Codex {
-            self.server_manager
-                .register_session(agent_id, &session_id, native_session_id.as_deref())
-                .await;
-        }
-
-        if agent_id == AgentId::Opencode {
-            self.ensure_opencode_stream(session_id).await?;
-        }
-
-        Ok(CreateSessionResponse {
-            healthy: true,
-            error: None,
-            native_session_id,
-        })
-    }
-
-    async fn apply_mcp_config(
-        self: &Arc<Self>,
-        agent_id: AgentId,
-        mcp: &BTreeMap<String, McpServerConfig>,
-    ) -> Result<(), SandboxError> {
-        if mcp.is_empty() {
-            return Ok(());
-        }
-        match agent_id {
-            AgentId::Claude => {
-                let mcp = mcp.clone();
-                tokio::task::spawn_blocking(move || write_claude_mcp_config(&mcp))
-                    .await
-                    .map_err(|err| SandboxError::StreamError {
-                        message: err.to_string(),
-                    })??;
-                Ok(())
-            }
-            AgentId::Codex => {
-                let mcp = mcp.clone();
-                tokio::task::spawn_blocking(move || write_codex_mcp_config(&mcp))
-                    .await
-                    .map_err(|err| SandboxError::StreamError {
-                        message: err.to_string(),
-                    })??;
-                let server = self.ensure_codex_server().await?;
-                self.reload_codex_mcp(&server).await
-            }
-            AgentId::Opencode => self.apply_opencode_mcp(mcp).await,
-            AgentId::Amp => {
-                let agent_manager = self.agent_manager.clone();
-                let mcp = mcp.clone();
-                tokio::task::spawn_blocking(move || apply_amp_mcp_config(&agent_manager, &mcp))
-                    .await
-                    .map_err(|err| SandboxError::StreamError {
-                        message: err.to_string(),
-                    })??;
-                Ok(())
-            }
-            AgentId::Pi => Ok(()),
-            AgentId::Cursor => Ok(()),
-            AgentId::Mock => Ok(()),
-        }
-    }
-
-    async fn apply_opencode_skills(&self, skill_dirs: &[PathBuf]) -> Result<(), SandboxError> {
-        if skill_dirs.is_empty() {
-            return Ok(());
-        }
-        let base_url = self.ensure_opencode_server().await?;
-        let url = format!("{base_url}/config");
-        let response = self.http_client.get(&url).send().await;
-        let mut existing_paths = Vec::<String>::new();
-        if let Ok(response) = response {
-            if response.status().is_success() {
-                if let Ok(value) = response.json::<Value>().await {
-                    if let Some(paths) = value
-                        .get("skills")
-                        .and_then(|skills| skills.get("paths"))
-                        .and_then(Value::as_array)
-                    {
-                        existing_paths.extend(
-                            paths
-                                .iter()
-                                .filter_map(Value::as_str)
-                                .map(|path| path.to_string()),
-                        );
-                    }
-                }
-            }
-        }
-        let mut merged = existing_paths;
-        for dir in skill_dirs {
-            let path = dir.to_string_lossy().to_string();
-            if !merged.contains(&path) {
-                merged.push(path);
-            }
-        }
-        let body = json!({ "skills": { "paths": merged } });
-        let response = self.http_client.patch(&url).json(&body).send().await;
-        let response = response.map_err(|err| SandboxError::StreamError {
-            message: err.to_string(),
-        })?;
-        if response.status().is_success() {
-            Ok(())
-        } else {
-            Err(SandboxError::StreamError {
-                message: format!("OpenCode config update failed: {}", response.status()),
-            })
-        }
-    }
-
-    pub(crate) async fn set_session_title(
-        &self,
-        session_id: &str,
-        title: String,
-    ) -> Result<(), SandboxError> {
-        let mut sessions = self.sessions.lock().await;
-        let Some(session) = SessionManager::session_mut(&mut sessions, session_id) else {
-            return Err(SandboxError::SessionNotFound {
-                session_id: session_id.to_string(),
-            });
-        };
-        session.title = Some(title);
-        session.updated_at = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as i64)
-            .unwrap_or(session.updated_at);
-        Ok(())
-    }
-
-    async fn clear_codex_session_model_if_unavailable(
-        &self,
-        session_id: &str,
-        model_id: &str,
-    ) -> bool {
-        let mut sessions = self.sessions.lock().await;
-        let Some(session) = SessionManager::session_mut(&mut sessions, session_id) else {
-            return false;
-        };
-        if session.agent == AgentId::Codex && session.model.as_deref() == Some(model_id) {
-            session.model = None;
-            session.updated_at = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_millis() as i64)
-                .unwrap_or(session.updated_at);
-            return true;
-        }
-        false
-    }
-
-    async fn invalidate_codex_model_cache(&self) {
-        let mut catalog = self.model_catalog.lock().await;
-        catalog.models.remove(&AgentId::Codex);
-    }
-
-    async fn codex_native_session_id(&self, session_id: &str) -> Option<String> {
-        let sessions = self.sessions.lock().await;
-        let session = SessionManager::session_ref(&sessions, session_id)?;
-        if session.agent != AgentId::Codex {
-            return None;
-        }
-        session.native_session_id.clone()
-    }
-
-    async fn handle_codex_model_unavailable(
-        &self,
-        session_id: &str,
-        model_id: &str,
-        native_session_id: Option<String>,
-    ) {
-        tracing::warn!(
-            model_id = %model_id,
-            "codex model rejected at runtime; clearing session model and refreshing model cache"
-        );
-        self.invalidate_codex_model_cache().await;
-        if !self
-            .clear_codex_session_model_if_unavailable(session_id, model_id)
-            .await
-        {
-            return;
-        }
-        let native_session_id = match native_session_id {
-            Some(native_session_id) => Some(native_session_id),
-            None => self.codex_native_session_id(session_id).await,
-        };
-        let _ = self
-            .record_conversions(
-                session_id,
-                vec![codex_model_unavailable_status_event(
-                    native_session_id,
-                    model_id,
-                )],
-            )
-            .await;
-    }
-
-    pub(crate) async fn delete_session(&self, session_id: &str) -> Result<(), SandboxError> {
-        let (agent, native_session_id) = {
-            let mut sessions = self.sessions.lock().await;
-            let Some(index) = sessions
-                .iter()
-                .position(|session| session.session_id == session_id)
-            else {
-                return Err(SandboxError::SessionNotFound {
-                    session_id: session_id.to_string(),
-                });
-            };
-            let session = sessions.remove(index);
-            (session.agent, session.native_session_id)
-        };
-
-        if agent == AgentId::Opencode || agent == AgentId::Codex {
-            self.server_manager
-                .unregister_session(agent, session_id, native_session_id.as_deref())
-                .await;
-        }
-
-        Ok(())
-    }
-
-    async fn agent_modes(&self, agent: AgentId) -> Result<Vec<AgentModeInfo>, SandboxError> {
-        if agent != AgentId::Opencode {
-            return Ok(agent_modes_for(agent));
-        }
-
-        match self.fetch_opencode_modes().await {
-            Ok(mut modes) => {
-                ensure_custom_mode(&mut modes);
-                if modes.is_empty() {
-                    Ok(agent_modes_for(agent))
-                } else {
-                    Ok(modes)
-                }
-            }
-            Err(_) => Ok(agent_modes_for(agent)),
-        }
-    }
-
-    pub(crate) async fn agent_models(
-        self: &Arc<Self>,
-        agent: AgentId,
-    ) -> Result<AgentModelsResponse, SandboxError> {
-        enum Acquisition {
-            Hit(AgentModelsResponse),
-            Wait(OwnedNotified),
-            Build(Arc<Notify>),
-        }
-
-        loop {
-            let acquisition = {
-                let mut catalog = self.model_catalog.lock().await;
-                if let Some(response) = catalog.models.get(&agent) {
-                    Acquisition::Hit(response.clone())
-                } else if let Some(notify) = catalog.in_flight.get(&agent) {
-                    Acquisition::Wait(notify.clone().notified_owned())
-                } else {
-                    let notify = Arc::new(Notify::new());
-                    catalog.in_flight.insert(agent, notify.clone());
-                    Acquisition::Build(notify)
-                }
-            };
-
-            match acquisition {
-                Acquisition::Hit(response) => return Ok(response),
-                Acquisition::Wait(waiting) => waiting.await,
-                Acquisition::Build(notify) => {
-                    let response = self.fetch_agent_models_uncached(agent).await;
-                    let mut catalog = self.model_catalog.lock().await;
-                    catalog.in_flight.remove(&agent);
-                    if let Ok(response_value) = &response {
-                        if should_cache_agent_models(agent, response_value) {
-                            catalog.models.insert(agent, response_value.clone());
-                        }
-                    }
-                    notify.notify_waiters();
-                    return response;
-                }
-            }
-        }
-    }
-
-    async fn fetch_agent_models_uncached(
-        self: &Arc<Self>,
-        agent: AgentId,
-    ) -> Result<AgentModelsResponse, SandboxError> {
-        match agent {
-            AgentId::Claude => match self.fetch_claude_models().await {
-                Ok(response) if !response.models.is_empty() => Ok(response),
-                _ => Ok(claude_fallback_models()),
-            },
-            AgentId::Codex => self.fetch_codex_models().await,
-            AgentId::Opencode => match self.fetch_opencode_models().await {
-                Ok(models) => Ok(models),
-                Err(_) => Ok(AgentModelsResponse {
-                    models: Vec::new(),
-                    default_model: None,
-                }),
-            },
-            AgentId::Amp => Ok(amp_models_response()),
-            AgentId::Pi => match self.fetch_pi_models().await {
-                Ok(models) => Ok(models),
-                Err(_) => Ok(AgentModelsResponse {
-                    models: Vec::new(),
-                    default_model: None,
-                }),
-            },
-            AgentId::Cursor => Ok(AgentModelsResponse {
-                models: Vec::new(),
-                default_model: None,
-            }),
-            AgentId::Mock => Ok(mock_models_response()),
-        }
-    }
-
-    pub(crate) async fn send_message(
-        self: &Arc<Self>,
-        session_id: String,
-        message: String,
-        attachments: Vec<MessageAttachment>,
-    ) -> Result<(), SandboxError> {
-        // Use allow_ended=true and do explicit check to allow resumable agents
-        let session_snapshot = self.session_snapshot_for_message(&session_id).await?;
-        let prompt_with_attachments = format_message_with_attachments(&message, &attachments);
-        let prompt = if session_snapshot.agent == AgentId::Opencode {
-            message.clone()
-        } else {
-            prompt_with_attachments
-        };
-        if !agent_emits_turn_started(session_snapshot.agent) {
-            let _ = self
-                .record_conversions(
-                    &session_id,
-                    vec![turn_started_event(None, None).synthetic()],
-                )
-                .await;
-        }
-        if session_snapshot.agent == AgentId::Mock {
-            self.send_mock_message(session_id, prompt).await?;
-            return Ok(());
-        }
-        if matches!(
-            session_snapshot.agent,
-            AgentId::Claude | AgentId::Amp | AgentId::Pi
-        ) {
-            let _ = self
-                .record_conversions(&session_id, user_message_conversions(&prompt))
-                .await;
-        }
-        if session_snapshot.agent == AgentId::Opencode {
-            self.ensure_opencode_stream(session_id.clone()).await?;
-            self.send_opencode_prompt(&session_snapshot, &prompt, &attachments)
-                .await?;
-            if !agent_supports_item_started(session_snapshot.agent) {
-                let _ = self
-                    .emit_synthetic_assistant_start(&session_snapshot.session_id)
-                    .await;
-            }
-            return Ok(());
-        }
-        if session_snapshot.agent == AgentId::Codex {
-            // Use the shared Codex app-server
-            self.send_codex_turn(&session_snapshot, &prompt).await?;
-            if !agent_supports_item_started(session_snapshot.agent) {
-                let _ = self
-                    .emit_synthetic_assistant_start(&session_snapshot.session_id)
-                    .await;
-            }
-            return Ok(());
-        }
-        if session_snapshot.agent == AgentId::Pi {
-            // Pi bypasses generic AgentManager::spawn_streaming and stays on
-            // router-managed per-session RPC runtime for lifecycle isolation.
-            self.send_pi_prompt(&session_snapshot, &message).await?;
-            if !agent_supports_item_started(session_snapshot.agent) {
-                let _ = self
-                    .emit_synthetic_assistant_start(&session_snapshot.session_id)
-                    .await;
-            }
-            return Ok(());
-        }
-
-        // Reopen the session if it was ended (for resumable agents)
-        self.reopen_session_if_ended(&session_id).await;
-
-        let manager = self.agent_manager.clone();
-        let initial_input = if session_snapshot.agent == AgentId::Claude {
-            Some(claude_user_message_line(&session_snapshot, &prompt))
-        } else {
-            None
-        };
-        let credentials = tokio::task::spawn_blocking(move || {
-            let options = CredentialExtractionOptions::new();
-            extract_all_credentials(&options)
-        })
-        .await
-        .map_err(|err| SandboxError::StreamError {
-            message: err.to_string(),
-        })?;
-
-        let spawn_options = build_spawn_options(&session_snapshot, prompt.clone(), credentials);
-        let agent_id = session_snapshot.agent;
-        let spawn_result =
-            tokio::task::spawn_blocking(move || manager.spawn_streaming(agent_id, spawn_options))
-                .await
-                .map_err(|err| SandboxError::StreamError {
-                    message: err.to_string(),
-                })?;
-
-        let spawn_result = spawn_result.map_err(|err| map_spawn_error(agent_id, err))?;
-        if !agent_supports_item_started(session_snapshot.agent) {
-            let _ = self
-                .emit_synthetic_assistant_start(&session_snapshot.session_id)
-                .await;
-        }
-
-        let manager = Arc::clone(self);
-        tokio::spawn(async move {
-            manager
-                .consume_spawn(session_id, agent_id, spawn_result, initial_input)
-                .await;
-        });
-
-        Ok(())
-    }
-
-    async fn emit_synthetic_assistant_start(&self, session_id: &str) -> Result<(), SandboxError> {
-        let conversion = {
-            let mut sessions = self.sessions.lock().await;
-            let session = Self::session_mut(&mut sessions, session_id).ok_or_else(|| {
-                SandboxError::SessionNotFound {
-                    session_id: session_id.to_string(),
-                }
-            })?;
-            session.enqueue_pending_assistant_start()
-        };
-        let _ = self
-            .record_conversions(session_id, vec![conversion])
-            .await?;
-        Ok(())
-    }
-
-    /// Reopens a session that was ended by an agent process completing.
-    /// This allows resumable agents (Claude, Amp, OpenCode) to continue conversations.
-    async fn reopen_session_if_ended(&self, session_id: &str) {
-        let mut sessions = self.sessions.lock().await;
-        if let Some(session) = Self::session_mut(&mut sessions, session_id) {
-            if session.ended && agent_supports_resume(session.agent) {
-                session.ended = false;
-                session.ended_exit_code = None;
-                session.ended_message = None;
-                session.ended_reason = None;
-                session.terminated_by = None;
-            }
-        }
-    }
-
-    async fn terminate_session(&self, session_id: String) -> Result<(), SandboxError> {
-        let mut sessions = self.sessions.lock().await;
-        let session = Self::session_mut(&mut sessions, &session_id).ok_or_else(|| {
-            SandboxError::SessionNotFound {
-                session_id: session_id.clone(),
-            }
-        })?;
-        if session.ended {
-            return Ok(());
-        }
-        session.mark_ended(
-            None,
-            "terminated by daemon".to_string(),
-            SessionEndReason::Terminated,
-            TerminatedBy::Daemon,
-        );
-        let ended = EventConversion::new(
-            UniversalEventType::SessionEnded,
-            UniversalEventData::SessionEnded(SessionEndedData {
-                reason: SessionEndReason::Terminated,
-                terminated_by: TerminatedBy::Daemon,
-                message: None,
-                exit_code: None,
-                stderr: None,
-            }),
-        )
-        .synthetic()
-        .with_native_session(session.native_session_id.clone());
-        session.record_conversions(vec![ended]);
-        let agent = session.agent;
-        let native_session_id = session.native_session_id.clone();
-        let pi_runtime = session.pi_runtime.take();
-        drop(sessions);
-        if let Some(runtime) = pi_runtime {
-            runtime.shutdown();
-        }
-        if agent == AgentId::Opencode || agent == AgentId::Codex {
-            self.server_manager
-                .unregister_session(agent, &session_id, native_session_id.as_deref())
-                .await;
-        }
-        Ok(())
-    }
-
-    async fn events(
-        &self,
-        session_id: &str,
-        offset: u64,
-        limit: Option<u64>,
-        include_raw: bool,
-    ) -> Result<EventsResponse, SandboxError> {
-        let sessions = self.sessions.lock().await;
-        let session = Self::session_ref(&sessions, session_id).ok_or_else(|| {
-            SandboxError::SessionNotFound {
-                session_id: session_id.to_string(),
-            }
-        })?;
-
-        let mut events: Vec<UniversalEvent> = session
-            .events
-            .iter()
-            .filter(|event| event.sequence > offset)
-            .cloned()
-            .map(|mut event| {
-                if !include_raw {
-                    event.raw = None;
-                }
-                event
-            })
-            .collect();
-
-        let has_more = if let Some(limit) = limit {
-            let limit = limit as usize;
-            if events.len() > limit {
-                events.truncate(limit);
-                true
-            } else {
-                false
-            }
-        } else {
-            false
-        };
-
-        Ok(EventsResponse { events, has_more })
-    }
-
-    pub(crate) async fn list_sessions(&self) -> Vec<SessionInfo> {
-        let sessions = self.sessions.lock().await;
-        sessions
-            .iter()
-            .rev()
-            .map(|state| Self::build_session_info(state))
-            .collect()
-    }
-
-    pub(crate) async fn get_session_info(&self, session_id: &str) -> Option<SessionInfo> {
-        let sessions = self.sessions.lock().await;
-        Self::session_ref(&sessions, session_id).map(Self::build_session_info)
-    }
-
-    fn build_session_info(state: &SessionState) -> SessionInfo {
-        SessionInfo {
-            session_id: state.session_id.clone(),
-            agent: state.agent.as_str().to_string(),
-            agent_mode: state.agent_mode.clone(),
-            permission_mode: state.permission_mode.clone(),
-            model: state.model.clone(),
-            variant: state.variant.clone(),
-            native_session_id: state.native_session_id.clone(),
-            ended: state.ended,
-            event_count: state.events.len() as u64,
-            created_at: state.created_at,
-            updated_at: state.updated_at,
-            directory: state.directory.clone(),
-            title: state.title.clone(),
-            mcp: state.mcp.clone(),
-            skills: state.skills.clone(),
-        }
-    }
-
-    pub(crate) async fn subscribe(
-        &self,
-        session_id: &str,
-        offset: u64,
-    ) -> Result<SessionSubscription, SandboxError> {
-        let sessions = self.sessions.lock().await;
-        let session = Self::session_ref(&sessions, session_id).ok_or_else(|| {
-            SandboxError::SessionNotFound {
-                session_id: session_id.to_string(),
-            }
-        })?;
-        let initial_events = session
-            .events
-            .iter()
-            .filter(|event| event.sequence > offset)
-            .cloned()
-            .collect::<Vec<_>>();
-        let receiver = session.broadcaster.subscribe();
-        Ok(SessionSubscription {
-            initial_events,
-            receiver,
-        })
-    }
-
-    pub(crate) async fn list_pending_permissions(&self) -> Vec<PendingPermissionInfo> {
-        let sessions = self.sessions.lock().await;
-        let mut items = Vec::new();
-        for session in sessions.iter() {
-            for (permission_id, pending) in session.pending_permissions.iter() {
-                items.push(PendingPermissionInfo {
-                    session_id: session.session_id.clone(),
-                    permission_id: permission_id.clone(),
-                    action: pending.action.clone(),
-                    metadata: pending.metadata.clone(),
-                });
-            }
-        }
-        items
-    }
-
-    pub(crate) async fn list_pending_questions(&self) -> Vec<PendingQuestionInfo> {
-        let sessions = self.sessions.lock().await;
-        let mut items = Vec::new();
-        for session in sessions.iter() {
-            for (question_id, pending) in session.pending_questions.iter() {
-                items.push(PendingQuestionInfo {
-                    session_id: session.session_id.clone(),
-                    question_id: question_id.clone(),
-                    prompt: pending.prompt.clone(),
-                    options: pending.options.clone(),
-                });
-            }
-        }
-        items
-    }
-
-    async fn subscribe_for_turn(
-        &self,
-        session_id: &str,
-    ) -> Result<(SessionSnapshot, SessionSubscription), SandboxError> {
-        let sessions = self.sessions.lock().await;
-        let session = Self::session_ref(&sessions, session_id).ok_or_else(|| {
-            SandboxError::SessionNotFound {
-                session_id: session_id.to_string(),
-            }
-        })?;
-        if let Some(err) = session.ended_error() {
-            return Err(err);
-        }
-        let offset = session.next_event_sequence;
-        let initial_events = session
-            .events
-            .iter()
-            .filter(|event| event.sequence > offset)
-            .cloned()
-            .collect::<Vec<_>>();
-        let receiver = session.broadcaster.subscribe();
-        let subscription = SessionSubscription {
-            initial_events,
-            receiver,
-        };
-        Ok((SessionSnapshot::from(session), subscription))
-    }
-
-    pub(crate) async fn reply_question(
-        &self,
-        session_id: &str,
-        question_id: &str,
-        answers: Vec<Vec<String>>,
-    ) -> Result<(), SandboxError> {
-        let (agent, native_session_id, pending_question, claude_sender, linked_permission) = {
-            let mut sessions = self.sessions.lock().await;
-            let session = Self::session_mut(&mut sessions, session_id).ok_or_else(|| {
-                SandboxError::SessionNotFound {
-                    session_id: session_id.to_string(),
-                }
-            })?;
-            let pending = session.take_question(question_id);
-            if pending.is_none() {
-                return Err(SandboxError::InvalidRequest {
-                    message: format!("unknown question id: {question_id}"),
-                });
-            }
-            if let Some(err) = session.ended_error() {
-                return Err(err);
-            }
-            // For Claude, check if there's a linked AskUserQuestion/ExitPlanMode permission
-            let linked_perm = if session.agent == AgentId::Claude {
-                session.take_question_tool_permission()
-            } else {
-                None
-            };
-            (
-                session.agent,
-                session.native_session_id.clone(),
-                pending,
-                session.claude_sender(),
-                linked_perm,
-            )
-        };
-
-        let response = answers.first().and_then(|inner| inner.first()).cloned();
-
-        if agent == AgentId::Opencode {
-            let agent_session_id =
-                native_session_id
-                    .clone()
-                    .ok_or_else(|| SandboxError::InvalidRequest {
-                        message: "missing OpenCode session id".to_string(),
-                    })?;
-            self.opencode_question_reply(&agent_session_id, question_id, answers.clone())
-                .await?;
-        } else if agent == AgentId::Claude {
-            let sender = claude_sender.ok_or_else(|| SandboxError::InvalidRequest {
-                message: "Claude session is not active".to_string(),
-            })?;
-            if let Some((perm_id, perm)) = &linked_permission {
-                // Use the permission control response to deliver the answer.
-                // Build updatedInput from the original input with the answers map added.
-                let original_input = perm
-                    .metadata
-                    .as_ref()
-                    .and_then(|m| m.get("input"))
-                    .cloned()
-                    .unwrap_or(Value::Null);
-                let mut updated = match original_input {
-                    Value::Object(map) => map,
-                    _ => serde_json::Map::new(),
-                };
-                // Build answers map: { "0": "selected option", "1": "another option", ... }
-                let answers_map: serde_json::Map<String, Value> = answers
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(i, inner)| {
-                        inner
-                            .first()
-                            .map(|v| (i.to_string(), Value::String(v.clone())))
-                    })
-                    .collect();
-                updated.insert("answers".to_string(), Value::Object(answers_map));
-
-                let mut response_map = serde_json::Map::new();
-                response_map.insert("updatedInput".to_string(), Value::Object(updated));
-                let line =
-                    claude_control_response_line(perm_id, "allow", Value::Object(response_map));
-                sender
-                    .send(line)
-                    .map_err(|_| SandboxError::InvalidRequest {
-                        message: "Claude session is not active".to_string(),
-                    })?;
-            } else {
-                // No linked permission — fall back to tool_result
-                let native_sid = native_session_id
-                    .clone()
-                    .unwrap_or_else(|| session_id.to_string());
-                let response_text = response.clone().unwrap_or_default();
-                let line = claude_tool_result_line(&native_sid, question_id, &response_text, false);
-                sender
-                    .send(line)
-                    .map_err(|_| SandboxError::InvalidRequest {
-                        message: "Claude session is not active".to_string(),
-                    })?;
-            }
-        } else {
-            // TODO: Forward question replies to subprocess agents.
-        }
-
-        // Emit QuestionResolved
-        if let Some(pending) = pending_question {
-            let mut conversions = vec![EventConversion::new(
-                UniversalEventType::QuestionResolved,
-                UniversalEventData::Question(QuestionEventData {
-                    question_id: question_id.to_string(),
-                    prompt: pending.prompt,
-                    options: pending.options,
-                    response,
-                    status: QuestionStatus::Answered,
-                }),
-            )
-            .synthetic()
-            .with_native_session(native_session_id.clone())];
-
-            // Also emit PermissionResolved for the linked permission
-            if let Some((perm_id, perm)) = linked_permission {
-                conversions.push(
-                    EventConversion::new(
-                        UniversalEventType::PermissionResolved,
-                        UniversalEventData::Permission(PermissionEventData {
-                            permission_id: perm_id,
-                            action: perm.action,
-                            status: PermissionStatus::Accept,
-                            metadata: perm.metadata,
-                        }),
-                    )
-                    .synthetic()
-                    .with_native_session(native_session_id),
-                );
-            }
-
-            let _ = self.record_conversions(session_id, conversions).await;
-        }
-
-        Ok(())
-    }
-
-    pub(crate) async fn reject_question(
-        &self,
-        session_id: &str,
-        question_id: &str,
-    ) -> Result<(), SandboxError> {
-        let (agent, native_session_id, pending_question, claude_sender, linked_permission) = {
-            let mut sessions = self.sessions.lock().await;
-            let session = Self::session_mut(&mut sessions, session_id).ok_or_else(|| {
-                SandboxError::SessionNotFound {
-                    session_id: session_id.to_string(),
-                }
-            })?;
-            let pending = session.take_question(question_id);
-            if pending.is_none() {
-                return Err(SandboxError::InvalidRequest {
-                    message: format!("unknown question id: {question_id}"),
-                });
-            }
-            if let Some(err) = session.ended_error() {
-                return Err(err);
-            }
-            let linked_perm = if session.agent == AgentId::Claude {
-                session.take_question_tool_permission()
-            } else {
-                None
-            };
-            (
-                session.agent,
-                session.native_session_id.clone(),
-                pending,
-                session.claude_sender(),
-                linked_perm,
-            )
-        };
-
-        if agent == AgentId::Opencode {
-            let agent_session_id =
-                native_session_id
-                    .clone()
-                    .ok_or_else(|| SandboxError::InvalidRequest {
-                        message: "missing OpenCode session id".to_string(),
-                    })?;
-            self.opencode_question_reject(&agent_session_id, question_id)
-                .await?;
-        } else if agent == AgentId::Claude {
-            let sender = claude_sender.ok_or_else(|| SandboxError::InvalidRequest {
-                message: "Claude session is not active".to_string(),
-            })?;
-            if let Some((perm_id, _)) = &linked_permission {
-                // Deny via the permission control response
-                let mut response_map = serde_json::Map::new();
-                response_map.insert(
-                    "message".to_string(),
-                    Value::String("Permission denied.".to_string()),
-                );
-                let line =
-                    claude_control_response_line(perm_id, "deny", Value::Object(response_map));
-                sender
-                    .send(line)
-                    .map_err(|_| SandboxError::InvalidRequest {
-                        message: "Claude session is not active".to_string(),
-                    })?;
-            } else {
-                let native_sid = native_session_id
-                    .clone()
-                    .unwrap_or_else(|| session_id.to_string());
-                let line = claude_tool_result_line(
-                    &native_sid,
-                    question_id,
-                    "User rejected the question.",
-                    true,
-                );
-                sender
-                    .send(line)
-                    .map_err(|_| SandboxError::InvalidRequest {
-                        message: "Claude session is not active".to_string(),
-                    })?;
-            }
-        } else {
-            // TODO: Forward question rejections to subprocess agents.
-        }
-
-        // Emit QuestionResolved
-        if let Some(pending) = pending_question {
-            let mut conversions = vec![EventConversion::new(
-                UniversalEventType::QuestionResolved,
-                UniversalEventData::Question(QuestionEventData {
-                    question_id: question_id.to_string(),
-                    prompt: pending.prompt,
-                    options: pending.options,
-                    response: None,
-                    status: QuestionStatus::Rejected,
-                }),
-            )
-            .synthetic()
-            .with_native_session(native_session_id.clone())];
-
-            // Also emit PermissionResolved for the linked permission
-            if let Some((perm_id, perm)) = linked_permission {
-                conversions.push(
-                    EventConversion::new(
-                        UniversalEventType::PermissionResolved,
-                        UniversalEventData::Permission(PermissionEventData {
-                            permission_id: perm_id,
-                            action: perm.action,
-                            status: PermissionStatus::Reject,
-                            metadata: perm.metadata,
-                        }),
-                    )
-                    .synthetic()
-                    .with_native_session(native_session_id),
-                );
-            }
-
-            let _ = self.record_conversions(session_id, conversions).await;
-        }
-
-        Ok(())
-    }
-
-    pub(crate) async fn reply_permission(
-        self: &Arc<Self>,
-        session_id: &str,
-        permission_id: &str,
-        reply: PermissionReply,
-    ) -> Result<(), SandboxError> {
-        let reply_for_status = reply.clone();
-        let (agent, native_session_id, pending_permission, claude_sender) = {
-            let mut sessions = self.sessions.lock().await;
-            let session = Self::session_mut(&mut sessions, session_id).ok_or_else(|| {
-                SandboxError::SessionNotFound {
-                    session_id: session_id.to_string(),
-                }
-            })?;
-            let pending = session.take_permission(permission_id);
-            if pending.is_none() {
-                return Err(SandboxError::InvalidRequest {
-                    message: format!("unknown permission id: {permission_id}"),
-                });
-            }
-            if matches!(reply_for_status, PermissionReply::Always) {
-                if let Some(pending) = pending.as_ref() {
-                    session
-                        .remember_permission_allow_for_session(&pending.action, &pending.metadata);
-                }
-            }
-            if let Some(err) = session.ended_error() {
-                return Err(err);
-            }
-            (
-                session.agent,
-                session.native_session_id.clone(),
-                pending,
-                session.claude_sender(),
-            )
-        };
-
-        if agent == AgentId::Codex {
-            // Use the shared Codex server to send the permission reply
-            let server = self.ensure_codex_server().await?;
-            let pending =
-                pending_permission
-                    .clone()
-                    .ok_or_else(|| SandboxError::InvalidRequest {
-                        message: "missing codex permission metadata".to_string(),
-                    })?;
-            let line = codex_permission_response_line(permission_id, &pending, reply.clone())?;
-            server
-                .stdin_sender
-                .send(line)
-                .map_err(|_| SandboxError::InvalidRequest {
-                    message: "codex server not active".to_string(),
-                })?;
-        } else if agent == AgentId::Opencode {
-            let agent_session_id =
-                native_session_id
-                    .clone()
-                    .ok_or_else(|| SandboxError::InvalidRequest {
-                        message: "missing OpenCode session id".to_string(),
-                    })?;
-            self.opencode_permission_reply(&agent_session_id, permission_id, reply.clone())
-                .await?;
-        } else if agent == AgentId::Claude {
-            let sender = claude_sender.ok_or_else(|| SandboxError::InvalidRequest {
-                message: "Claude session is not active".to_string(),
-            })?;
-            let metadata = pending_permission
-                .as_ref()
-                .and_then(|pending| pending.metadata.as_ref())
-                .and_then(Value::as_object);
-            let updated_input = metadata
-                .and_then(|map| map.get("input"))
-                .cloned()
-                .unwrap_or(Value::Null);
-
-            let mut response_map = serde_json::Map::new();
-            match reply {
-                PermissionReply::Reject => {
-                    response_map.insert(
-                        "message".to_string(),
-                        Value::String("Permission denied.".to_string()),
-                    );
-                }
-                PermissionReply::Once | PermissionReply::Always => {
-                    if !updated_input.is_null() {
-                        response_map.insert("updatedInput".to_string(), updated_input);
-                    }
-                }
-            }
-            let response_value = Value::Object(response_map);
-
-            let behavior = match reply {
-                PermissionReply::Reject => "deny",
-                PermissionReply::Once | PermissionReply::Always => "allow",
-            };
-
-            let line = claude_control_response_line(permission_id, behavior, response_value);
-            sender
-                .send(line)
-                .map_err(|_| SandboxError::InvalidRequest {
-                    message: "Claude session is not active".to_string(),
-                })?;
-        } else {
-            // TODO: Forward permission replies to subprocess agents.
-        }
-
-        if let Some(pending) = pending_permission {
-            let status = match reply_for_status {
-                PermissionReply::Reject => PermissionStatus::Reject,
-                PermissionReply::Once => PermissionStatus::Accept,
-                PermissionReply::Always => PermissionStatus::AcceptForSession,
-            };
-            let resolved = EventConversion::new(
-                UniversalEventType::PermissionResolved,
-                UniversalEventData::Permission(PermissionEventData {
-                    permission_id: permission_id.to_string(),
-                    action: pending.action,
-                    status,
-                    metadata: pending.metadata,
-                }),
-            )
-            .synthetic()
-            .with_native_session(native_session_id);
-            let _ = self.record_conversions(session_id, vec![resolved]).await;
-        }
-
-        Ok(())
-    }
-
-    /// Gets a session snapshot for sending a new message.
-    /// Uses the `for_new_message` check which allows agents that support resumption
-    /// (Claude, Amp, OpenCode) to continue after their process exits successfully.
-    async fn session_snapshot_for_message(
-        &self,
-        session_id: &str,
-    ) -> Result<SessionSnapshot, SandboxError> {
-        let sessions = self.sessions.lock().await;
-        let session = Self::session_ref(&sessions, session_id).ok_or_else(|| {
-            SandboxError::SessionNotFound {
-                session_id: session_id.to_string(),
-            }
-        })?;
-        if let Some(err) = session.ended_error_for_messages(true) {
-            return Err(err);
-        }
-        Ok(SessionSnapshot::from(session))
-    }
-
-    async fn send_mock_message(
-        self: &Arc<Self>,
-        session_id: String,
-        message: String,
-    ) -> Result<(), SandboxError> {
-        let prefix = {
-            let mut sessions = self.sessions.lock().await;
-            let session = Self::session_mut(&mut sessions, &session_id).ok_or_else(|| {
-                SandboxError::SessionNotFound {
-                    session_id: session_id.to_string(),
-                }
-            })?;
-            if let Some(err) = session.ended_error() {
-                return Err(err);
-            }
-            session.mock_sequence = session.mock_sequence.saturating_add(1);
-            format!("mock_{}", session.mock_sequence)
-        };
-
-        let mut conversions = Vec::new();
-        let trimmed = message.trim();
-        if !trimmed.is_empty() {
-            conversions.extend(mock_user_message(&prefix, trimmed));
-        }
-        conversions.extend(mock_command_conversions(&prefix, trimmed));
-
-        let manager = Arc::clone(self);
-        tokio::spawn(async move {
-            manager.emit_mock_events(session_id, conversions).await;
-        });
-
-        Ok(())
-    }
-
-    async fn emit_mock_events(
-        self: Arc<Self>,
-        session_id: String,
-        conversions: Vec<EventConversion>,
-    ) {
-        for conversion in conversions {
-            if self
-                .record_conversions(&session_id, vec![conversion])
-                .await
-                .is_err()
-            {
-                return;
-            }
-            sleep(Duration::from_millis(MOCK_EVENT_DELAY_MS)).await;
-        }
-    }
-
-    async fn consume_spawn(
-        self: Arc<Self>,
-        session_id: String,
-        agent: AgentId,
-        spawn: StreamingSpawn,
-        initial_input: Option<String>,
-    ) {
-        let StreamingSpawn {
-            mut child,
-            stdin,
-            stdout,
-            stderr,
-            codex_options,
-        } = spawn;
-        let (tx, mut rx) = mpsc::unbounded_channel::<String>();
-        let mut codex_state = codex_options
-            .filter(|_| agent == AgentId::Codex)
-            .map(CodexAppServerState::new);
-        let mut codex_sender: Option<mpsc::UnboundedSender<String>> = None;
-        let mut terminate_early = false;
-
-        if let Some(stdout) = stdout {
-            let tx_stdout = tx.clone();
-            tokio::task::spawn_blocking(move || {
-                read_lines(stdout, tx_stdout);
-            });
-        }
-        if let Some(stderr) = stderr {
-            let tx_stderr = tx.clone();
-            tokio::task::spawn_blocking(move || {
-                read_lines(stderr, tx_stderr);
-            });
-        }
-        drop(tx);
-
-        if agent == AgentId::Codex {
-            if let Some(stdin) = stdin {
-                let (writer_tx, writer_rx) = mpsc::unbounded_channel::<String>();
-                codex_sender = Some(writer_tx.clone());
-                {
-                    let mut sessions = self.sessions.lock().await;
-                    if let Some(session) = Self::session_mut(&mut sessions, &session_id) {
-                        session.set_codex_sender(Some(writer_tx));
-                    }
-                }
-                tokio::task::spawn_blocking(move || {
-                    write_lines(stdin, writer_rx);
-                });
-            }
-            if let (Some(state), Some(sender)) = (codex_state.as_mut(), codex_sender.as_ref()) {
-                state.start(sender);
-            }
-        } else if agent == AgentId::Claude {
-            if let Some(stdin) = stdin {
-                let (writer_tx, writer_rx) = mpsc::unbounded_channel::<String>();
-                {
-                    let mut sessions = self.sessions.lock().await;
-                    if let Some(session) = Self::session_mut(&mut sessions, &session_id) {
-                        session.set_claude_sender(Some(writer_tx.clone()));
-                    }
-                }
-                if let Some(initial) = initial_input {
-                    let _ = writer_tx.send(initial);
-                }
-                tokio::task::spawn_blocking(move || {
-                    write_lines(stdin, writer_rx);
-                });
-            }
-        }
-
-        while let Some(line) = rx.recv().await {
-            if agent == AgentId::Codex {
-                if let Some(state) = codex_state.as_mut() {
-                    let outcome = state.handle_line(&line);
-                    if !outcome.conversions.is_empty() {
-                        let _ = self
-                            .record_conversions(&session_id, outcome.conversions)
-                            .await;
-                    }
-                    if outcome.should_terminate {
-                        terminate_early = true;
-                        break;
-                    }
-                }
-            } else if agent == AgentId::Claude {
-                if let Ok(value) = serde_json::from_str::<Value>(&line) {
-                    if value.get("type").and_then(Value::as_str) == Some("result") {
-                        let mut sessions = self.sessions.lock().await;
-                        if let Some(session) = Self::session_mut(&mut sessions, &session_id) {
-                            session.set_claude_sender(None);
-                        }
-                    }
-                }
-                let conversions = self.parse_claude_line(&line, &session_id).await;
-                if !conversions.is_empty() {
-                    let _ = self.record_conversions(&session_id, conversions).await;
-                }
-            } else {
-                let conversions = parse_agent_line(agent, &line, &session_id);
-                if !conversions.is_empty() {
-                    let _ = self.record_conversions(&session_id, conversions).await;
-                }
-            }
-        }
-
-        if agent == AgentId::Codex {
-            let mut sessions = self.sessions.lock().await;
-            if let Some(session) = Self::session_mut(&mut sessions, &session_id) {
-                session.set_codex_sender(None);
-            }
-        } else if agent == AgentId::Claude {
-            let mut sessions = self.sessions.lock().await;
-            if let Some(session) = Self::session_mut(&mut sessions, &session_id) {
-                session.set_claude_sender(None);
-            }
-        }
-
-        if terminate_early {
-            let _ = child.kill();
-        }
-        let status = tokio::task::spawn_blocking(move || child.wait()).await;
-        match status {
-            Ok(Ok(status)) if status.success() => {
-                if !agent_supports_resume(agent) {
-                    let message = format!("agent exited with status {:?}", status);
-                    self.mark_session_ended(
-                        &session_id,
-                        status.code(),
-                        &message,
-                        SessionEndReason::Completed,
-                        TerminatedBy::Agent,
-                        None,
-                    )
-                    .await;
-                }
-            }
-            Ok(Ok(status)) => {
-                let message = format!("agent exited with status {:?}", status);
-                if !terminate_early {
-                    self.record_error(
-                        &session_id,
-                        message.clone(),
-                        Some("process_exit".to_string()),
-                        None,
-                    )
-                    .await;
-                }
-                let logs = self.read_agent_stderr(agent);
-                self.mark_session_ended(
-                    &session_id,
-                    status.code(),
-                    &message,
-                    SessionEndReason::Error,
-                    TerminatedBy::Agent,
-                    logs,
-                )
-                .await;
-            }
-            Ok(Err(err)) => {
-                let message = format!("failed to wait for agent: {err}");
-                if !terminate_early {
-                    self.record_error(
-                        &session_id,
-                        message.clone(),
-                        Some("process_wait_failed".to_string()),
-                        None,
-                    )
-                    .await;
-                }
-                let logs = self.read_agent_stderr(agent);
-                self.mark_session_ended(
-                    &session_id,
-                    None,
-                    &message,
-                    SessionEndReason::Error,
-                    TerminatedBy::Daemon,
-                    logs,
-                )
-                .await;
-            }
-            Err(err) => {
-                let message = format!("failed to join agent task: {err}");
-                if !terminate_early {
-                    self.record_error(
-                        &session_id,
-                        message.clone(),
-                        Some("process_wait_failed".to_string()),
-                        None,
-                    )
-                    .await;
-                }
-                let logs = self.read_agent_stderr(agent);
-                self.mark_session_ended(
-                    &session_id,
-                    None,
-                    &message,
-                    SessionEndReason::Error,
-                    TerminatedBy::Daemon,
-                    logs,
-                )
-                .await;
-            }
-        }
-    }
-
-    async fn record_conversions(
-        &self,
-        session_id: &str,
-        conversions: Vec<EventConversion>,
-    ) -> Result<Vec<UniversalEvent>, SandboxError> {
-        let (events, auto_approvals) = {
-            let mut sessions = self.sessions.lock().await;
-            let session = Self::session_mut(&mut sessions, session_id).ok_or_else(|| {
-                SandboxError::SessionNotFound {
-                    session_id: session_id.to_string(),
-                }
-            })?;
-            let mut accept_edits_permission_ids = Vec::new();
-            if session.agent == AgentId::Codex && session.permission_mode == "acceptEdits" {
-                for conversion in &conversions {
-                    if conversion.event_type != UniversalEventType::PermissionRequested {
-                        continue;
-                    }
-                    let UniversalEventData::Permission(data) = &conversion.data else {
-                        continue;
-                    };
-                    if is_file_change_action(&data.action) {
-                        accept_edits_permission_ids.push(data.permission_id.clone());
-                    }
-                }
-            }
-            let events = session.record_conversions(conversions);
-            let mut auto_approvals = Vec::new();
-            let mut seen = HashSet::new();
-            for event in &events {
-                if event.event_type != UniversalEventType::PermissionRequested {
-                    continue;
-                }
-                let UniversalEventData::Permission(data) = &event.data else {
-                    continue;
-                };
-                let cached = session.should_auto_approve_permission(&data.action, &data.metadata);
-                if is_question_tool_action(&data.action) || !cached {
-                    continue;
-                }
-                if let Some(pending) = session.take_permission(&data.permission_id) {
-                    auto_approvals.push((
-                        session.agent,
-                        session.native_session_id.clone(),
-                        session.claude_sender(),
-                        data.permission_id.clone(),
-                        pending,
-                        PermissionReply::Always,
-                    ));
-                    seen.insert(data.permission_id.clone());
-                }
-            }
-            for permission_id in accept_edits_permission_ids {
-                if seen.contains(&permission_id) {
-                    continue;
-                }
-                if let Some(pending) = session.take_permission(&permission_id) {
-                    auto_approvals.push((
-                        session.agent,
-                        session.native_session_id.clone(),
-                        session.claude_sender(),
-                        permission_id.clone(),
-                        pending,
-                        PermissionReply::Always,
-                    ));
-                    seen.insert(permission_id);
-                }
-            }
-            (events, auto_approvals)
-        };
-
-        for (agent, native_session_id, claude_sender, permission_id, pending, reply) in
-            auto_approvals
-        {
-            let reply_for_status = reply.clone();
-            let reply_result = match agent {
-                AgentId::Codex => {
-                    let (server, _) = self
-                        .server_manager
-                        .ensure_stdio_server(AgentId::Codex)
-                        .await?;
-                    let line =
-                        codex_permission_response_line(&permission_id, &pending, reply.clone())?;
-                    server
-                        .stdin_sender
-                        .send(line)
-                        .map_err(|_| SandboxError::InvalidRequest {
-                            message: "codex server not active".to_string(),
-                        })
-                }
-                AgentId::Opencode => {
-                    let agent_session_id =
-                        native_session_id
-                            .clone()
-                            .ok_or_else(|| SandboxError::InvalidRequest {
-                                message: "missing OpenCode session id".to_string(),
-                            });
-                    match agent_session_id {
-                        Ok(agent_session_id) => {
-                            self.opencode_permission_reply(
-                                &agent_session_id,
-                                &permission_id,
-                                reply.clone(),
-                            )
-                            .await
-                        }
-                        Err(err) => Err(err),
-                    }
-                }
-                AgentId::Claude => {
-                    let sender = claude_sender.ok_or_else(|| SandboxError::InvalidRequest {
-                        message: "Claude session is not active".to_string(),
-                    });
-                    match sender {
-                        Ok(sender) => {
-                            let metadata = pending.metadata.as_ref().and_then(Value::as_object);
-                            let updated_input = metadata
-                                .and_then(|map| map.get("input"))
-                                .cloned()
-                                .unwrap_or(Value::Null);
-                            let mut response_map = serde_json::Map::new();
-                            match reply.clone() {
-                                PermissionReply::Reject => {
-                                    response_map.insert(
-                                        "message".to_string(),
-                                        Value::String("Permission denied.".to_string()),
-                                    );
-                                }
-                                PermissionReply::Once | PermissionReply::Always => {
-                                    if !updated_input.is_null() {
-                                        response_map
-                                            .insert("updatedInput".to_string(), updated_input);
-                                    }
-                                }
-                            }
-                            let behavior = match reply.clone() {
-                                PermissionReply::Reject => "deny",
-                                PermissionReply::Once | PermissionReply::Always => "allow",
-                            };
-                            let line = claude_control_response_line(
-                                &permission_id,
-                                behavior,
-                                Value::Object(response_map),
-                            );
-                            sender.send(line).map_err(|_| SandboxError::InvalidRequest {
-                                message: "Claude session is not active".to_string(),
-                            })
-                        }
-                        Err(err) => Err(err),
-                    }
-                }
-                _ => Ok(()),
-            };
-
-            if let Err(err) = reply_result {
-                tracing::warn!(
-                    session_id,
-                    permission_id,
-                    ?err,
-                    "failed to auto-approve cached permission"
-                );
-                let mut sessions = self.sessions.lock().await;
-                if let Some(session) = Self::session_mut(&mut sessions, session_id) {
-                    session
-                        .pending_permissions
-                        .insert(permission_id.clone(), pending.clone());
-                }
-                continue;
-            }
-
-            let resolved = EventConversion::new(
-                UniversalEventType::PermissionResolved,
-                UniversalEventData::Permission(PermissionEventData {
-                    permission_id: permission_id.clone(),
-                    action: pending.action,
-                    status: match reply_for_status {
-                        PermissionReply::Reject => PermissionStatus::Reject,
-                        PermissionReply::Once => PermissionStatus::Accept,
-                        PermissionReply::Always => PermissionStatus::AcceptForSession,
-                    },
-                    metadata: pending.metadata,
-                }),
-            )
-            .synthetic()
-            .with_native_session(native_session_id);
-            let mut sessions = self.sessions.lock().await;
-            if let Some(session) = Self::session_mut(&mut sessions, session_id) {
-                session.record_conversions(vec![resolved]);
-            }
-        }
-
-        Ok(events)
-    }
-
-    async fn parse_claude_line(&self, line: &str, session_id: &str) -> Vec<EventConversion> {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            return Vec::new();
-        }
-        let mut value: Value = match serde_json::from_str(trimmed) {
-            Ok(value) => value,
-            Err(err) => {
-                return vec![agent_unparsed(
-                    "claude",
-                    &err.to_string(),
-                    Value::String(trimmed.to_string()),
-                )];
-            }
-        };
-        let event_type = value.get("type").and_then(Value::as_str).unwrap_or("");
-        let native_session_id = value
-            .get("session_id")
-            .and_then(Value::as_str)
-            .or_else(|| value.get("sessionId").and_then(Value::as_str))
-            .map(|id| id.to_string());
-        if event_type == "assistant" || event_type == "result" || native_session_id.is_some() {
-            let mut sessions = self.sessions.lock().await;
-            if let Some(session) = Self::session_mut(&mut sessions, session_id) {
-                if let Some(native_session_id) = native_session_id.as_ref() {
-                    if session.native_session_id.is_none() {
-                        session.native_session_id = Some(native_session_id.clone());
-                    }
-                }
-                if event_type == "assistant" {
-                    let id = value
-                        .get("message")
-                        .and_then(|message| message.get("id"))
-                        .and_then(Value::as_str)
-                        .map(|id| id.to_string())
-                        .unwrap_or_else(|| {
-                            session.claude_message_counter += 1;
-                            let generated = format!(
-                                "{}_message_{}",
-                                session.session_id, session.claude_message_counter
-                            );
-                            if let Some(message) =
-                                value.get_mut("message").and_then(Value::as_object_mut)
-                            {
-                                message.insert("id".to_string(), Value::String(generated.clone()));
-                            } else if let Some(map) = value.as_object_mut() {
-                                map.insert(
-                                    "message".to_string(),
-                                    serde_json::json!({
-                                        "id": generated
-                                    }),
-                                );
-                            }
-                            generated
-                        });
-                    session.last_claude_message_id = Some(id);
-                } else if event_type == "result" {
-                    let has_message_id =
-                        value.get("message_id").is_some() || value.get("messageId").is_some();
-                    if !has_message_id {
-                        let id = session.last_claude_message_id.take().unwrap_or_else(|| {
-                            session.claude_message_counter += 1;
-                            format!(
-                                "{}_message_{}",
-                                session.session_id, session.claude_message_counter
-                            )
-                        });
-                        if let Some(map) = value.as_object_mut() {
-                            map.insert("message_id".to_string(), Value::String(id));
-                        }
-                    } else {
-                        session.last_claude_message_id = None;
-                    }
-                }
-            }
-        }
-
-        convert_claude::event_to_universal_with_session(&value, session_id.to_string())
-            .unwrap_or_else(|err| vec![agent_unparsed("claude", &err, value)])
-    }
-
-    async fn record_error(
-        &self,
-        session_id: &str,
-        message: String,
-        kind: Option<String>,
-        details: Option<Value>,
-    ) {
-        let error = ErrorData {
-            message,
-            code: kind,
-            details,
-        };
-        let conversion =
-            EventConversion::new(UniversalEventType::Error, UniversalEventData::Error(error))
-                .synthetic();
-        let _ = self.record_conversions(session_id, vec![conversion]).await;
-    }
-
-    async fn mark_session_ended(
-        &self,
-        session_id: &str,
-        exit_code: Option<i32>,
-        message: &str,
-        reason: SessionEndReason,
-        terminated_by: TerminatedBy,
-        stderr: Option<StderrOutput>,
-    ) {
-        let mut sessions = self.sessions.lock().await;
-        if let Some(session) = Self::session_mut(&mut sessions, session_id) {
-            if session.ended {
-                return;
-            }
-            session.mark_ended(
-                exit_code,
-                message.to_string(),
-                reason.clone(),
-                terminated_by.clone(),
-            );
-            let (error_message, error_exit_code, error_stderr) =
-                if reason == SessionEndReason::Error {
-                    (Some(message.to_string()), exit_code, stderr)
-                } else {
-                    (None, None, None)
-                };
-            let ended = EventConversion::new(
-                UniversalEventType::SessionEnded,
-                UniversalEventData::SessionEnded(SessionEndedData {
-                    reason,
-                    terminated_by,
-                    message: error_message,
-                    exit_code: error_exit_code,
-                    stderr: error_stderr,
-                }),
-            )
-            .synthetic()
-            .with_native_session(session.native_session_id.clone());
-            session.record_conversions(vec![ended]);
-        }
-    }
-
-    async fn ensure_opencode_stream(
-        self: &Arc<Self>,
-        session_id: String,
-    ) -> Result<(), SandboxError> {
-        let native_session_id =
-            {
-                let mut sessions = self.sessions.lock().await;
-                let session = Self::session_mut(&mut sessions, &session_id).ok_or_else(|| {
-                    SandboxError::SessionNotFound {
-                        session_id: session_id.clone(),
-                    }
-                })?;
-                if session.opencode_stream_started {
-                    return Ok(());
-                }
-                let native_session_id = session.native_session_id.clone().ok_or_else(|| {
-                    SandboxError::InvalidRequest {
-                        message: "missing OpenCode session id".to_string(),
-                    }
-                })?;
-                session.opencode_stream_started = true;
-                native_session_id
-            };
-
-        let manager = Arc::clone(self);
-        tokio::spawn(async move {
-            manager
-                .stream_opencode_events(session_id, native_session_id)
-                .await;
-        });
-
-        Ok(())
-    }
-
-    async fn stream_opencode_events(
-        self: Arc<Self>,
-        session_id: String,
-        native_session_id: String,
-    ) {
-        let base_url = match self.ensure_opencode_server().await {
-            Ok(base_url) => base_url,
-            Err(err) => {
-                self.record_error(
-                    &session_id,
-                    format!("failed to start OpenCode server: {err}"),
-                    Some("opencode_server".to_string()),
-                    None,
-                )
-                .await;
-                let logs = self.read_agent_stderr(AgentId::Opencode);
-                self.mark_session_ended(
-                    &session_id,
-                    None,
-                    "opencode server unavailable",
-                    SessionEndReason::Error,
-                    TerminatedBy::Daemon,
-                    logs,
-                )
-                .await;
-                return;
-            }
-        };
-
-        let url = format!("{base_url}/event");
-        let response = match self.http_client.get(url).send().await {
-            Ok(response) => response,
-            Err(err) => {
-                self.record_error(
-                    &session_id,
-                    format!("OpenCode SSE connection failed: {err}"),
-                    Some("opencode_stream".to_string()),
-                    None,
-                )
-                .await;
-                let logs = self.read_agent_stderr(AgentId::Opencode);
-                self.mark_session_ended(
-                    &session_id,
-                    None,
-                    "opencode sse connection failed",
-                    SessionEndReason::Error,
-                    TerminatedBy::Daemon,
-                    logs,
-                )
-                .await;
-                return;
-            }
-        };
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            self.record_error(
-                &session_id,
-                format!("OpenCode SSE error {status}: {body}"),
-                Some("opencode_stream".to_string()),
-                None,
-            )
-            .await;
-            let logs = self.read_agent_stderr(AgentId::Opencode);
-            self.mark_session_ended(
-                &session_id,
-                None,
-                "opencode sse error",
-                SessionEndReason::Error,
-                TerminatedBy::Daemon,
-                logs,
-            )
-            .await;
-            return;
-        }
-
-        let mut accumulator = SseAccumulator::new();
-        let mut stream = response.bytes_stream();
-        while let Some(chunk) = stream.next().await {
-            let chunk = match chunk {
-                Ok(chunk) => chunk,
-                Err(err) => {
-                    self.record_error(
-                        &session_id,
-                        format!("OpenCode SSE stream error: {err}"),
-                        Some("opencode_stream".to_string()),
-                        None,
-                    )
-                    .await;
-                    let logs = self.read_agent_stderr(AgentId::Opencode);
-                    self.mark_session_ended(
-                        &session_id,
-                        None,
-                        "opencode sse stream error",
-                        SessionEndReason::Error,
-                        TerminatedBy::Daemon,
-                        logs,
-                    )
-                    .await;
-                    return;
-                }
-            };
-            let text = String::from_utf8_lossy(&chunk);
-            for event_payload in accumulator.push(&text) {
-                let value: Value = match serde_json::from_str(&event_payload) {
-                    Ok(value) => value,
-                    Err(err) => {
-                        let conversion = agent_unparsed(
-                            "opencode",
-                            &err.to_string(),
-                            Value::String(event_payload.clone()),
-                        );
-                        let _ = self.record_conversions(&session_id, vec![conversion]).await;
-                        continue;
-                    }
-                };
-                if !opencode_event_matches_session(&value, &native_session_id) {
-                    continue;
-                }
-                // Manual type-based dispatch to bypass broken #[serde(untagged)]
-                // enum ordering where ServerConnected (variant #5, empty properties)
-                // matches all events before MessageUpdated (variant #10) gets tried.
-                let event_type = value.get("type").and_then(|t| t.as_str()).unwrap_or("");
-                let conversions = match event_type {
-                    "message.updated" => {
-                        match serde_json::from_value::<opencode_schema::EventMessageUpdated>(value.clone()) {
-                            Ok(e) => match convert_opencode::event_to_universal(&opencode_schema::Event::MessageUpdated(e)) {
-                                Ok(c) => c,
-                                Err(err) => vec![agent_unparsed("opencode", &err, value.clone())],
-                            },
-                            Err(err) => vec![agent_unparsed("opencode", &format!("message.updated: {}", err), value.clone())],
-                        }
-                    }
-                    "message.part.updated" => {
-                        match serde_json::from_value::<opencode_schema::EventMessagePartUpdated>(value.clone()) {
-                            Ok(e) => match convert_opencode::event_to_universal(&opencode_schema::Event::MessagePartUpdated(e)) {
-                                Ok(c) => c,
-                                Err(err) => vec![agent_unparsed("opencode", &err, value.clone())],
-                            },
-                            Err(err) => vec![agent_unparsed("opencode", &format!("message.part.updated: {}", err), value.clone())],
-                        }
-                    }
-                    "question.asked" => {
-                        match serde_json::from_value::<opencode_schema::EventQuestionAsked>(value.clone()) {
-                            Ok(e) => match convert_opencode::event_to_universal(&opencode_schema::Event::QuestionAsked(e)) {
-                                Ok(c) => c,
-                                Err(err) => vec![agent_unparsed("opencode", &err, value.clone())],
-                            },
-                            Err(err) => vec![agent_unparsed("opencode", &format!("question.asked: {}", err), value.clone())],
-                        }
-                    }
-                    "permission.asked" => {
-                        match serde_json::from_value::<opencode_schema::EventPermissionAsked>(value.clone()) {
-                            Ok(e) => match convert_opencode::event_to_universal(&opencode_schema::Event::PermissionAsked(e)) {
-                                Ok(c) => c,
-                                Err(err) => vec![agent_unparsed("opencode", &err, value.clone())],
-                            },
-                            Err(err) => vec![agent_unparsed("opencode", &format!("permission.asked: {}", err), value.clone())],
-                        }
-                    }
-                    "session.created" => {
-                        match serde_json::from_value::<opencode_schema::EventSessionCreated>(value.clone()) {
-                            Ok(e) => match convert_opencode::event_to_universal(&opencode_schema::Event::SessionCreated(e)) {
-                                Ok(c) => c,
-                                Err(err) => vec![agent_unparsed("opencode", &err, value.clone())],
-                            },
-                            Err(err) => vec![agent_unparsed("opencode", &format!("session.created: {}", err), value.clone())],
-                        }
-                    }
-                    "session.status" => {
-                        match serde_json::from_value::<opencode_schema::EventSessionStatus>(value.clone()) {
-                            Ok(e) => match convert_opencode::event_to_universal(&opencode_schema::Event::SessionStatus(e)) {
-                                Ok(c) => c,
-                                Err(err) => vec![agent_unparsed("opencode", &err, value.clone())],
-                            },
-                            Err(err) => vec![agent_unparsed("opencode", &format!("session.status: {}", err), value.clone())],
-                        }
-                    }
-                    "session.idle" => {
-                        match serde_json::from_value::<opencode_schema::EventSessionIdle>(value.clone()) {
-                            Ok(e) => match convert_opencode::event_to_universal(&opencode_schema::Event::SessionIdle(e)) {
-                                Ok(c) => c,
-                                Err(err) => vec![agent_unparsed("opencode", &err, value.clone())],
-                            },
-                            Err(err) => vec![agent_unparsed("opencode", &format!("session.idle: {}", err), value.clone())],
-                        }
-                    }
-                    "session.error" => {
-                        match serde_json::from_value::<opencode_schema::EventSessionError>(value.clone()) {
-                            Ok(e) => match convert_opencode::event_to_universal(&opencode_schema::Event::SessionError(e)) {
-                                Ok(c) => c,
-                                Err(err) => vec![agent_unparsed("opencode", &err, value.clone())],
-                            },
-                            Err(err) => vec![agent_unparsed("opencode", &format!("session.error: {}", err), value.clone())],
-                        }
-                    }
-                    // Informational events we can safely skip
-                    "server.connected" | "server.heartbeat" | "session.updated"
-                    | "session.diff" | "file.watcher.updated" => {
-                        continue;
-                    }
-                    _ => {
-                        vec![agent_unparsed("opencode", &format!("unknown event type: {}", event_type), value.clone())]
-                    }
-                };
-                let _ = self.record_conversions(&session_id, conversions).await;
-            }
-        }
-    }
-
-    async fn ensure_opencode_server(&self) -> Result<String, SandboxError> {
-        self.server_manager
-            .ensure_http_server(AgentId::Opencode)
-            .await
-    }
-
-    /// Ensures a shared Codex app-server process is running.
-    /// Spawns the process if not already running, sets up stdin/stdout tasks,
-    /// and performs the initialize handshake if needed.
-    async fn ensure_codex_server(self: &Arc<Self>) -> Result<Arc<CodexServer>, SandboxError> {
-        let (server, receiver) = self
-            .server_manager
-            .ensure_stdio_server(AgentId::Codex)
-            .await?;
-
-        if let Some(stdout_rx) = receiver {
-            let server_for_task = server.clone();
-            let self_for_task = Arc::clone(self);
-            tokio::spawn(async move {
-                self_for_task
-                    .handle_codex_server_output(server_for_task, stdout_rx)
-                    .await;
-            });
-        }
-
-        self.codex_server_initialize(&server).await?;
-
-        Ok(server)
-    }
-
-    /// Handles output from the Codex app-server, routing responses and notifications.
-    async fn handle_codex_server_output(
-        self: Arc<Self>,
-        server: Arc<CodexServer>,
-        mut stdout_rx: mpsc::UnboundedReceiver<String>,
-    ) {
-        while let Some(line) = stdout_rx.recv().await {
-            let trimmed = line.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-
-            let value: Value = match serde_json::from_str(trimmed) {
-                Ok(v) => v,
-                Err(_) => continue,
-            };
-
-            let message: codex_schema::JsonrpcMessage = match serde_json::from_value(value.clone())
-            {
-                Ok(m) => m,
-                Err(_) => continue,
-            };
-
-            match message {
-                codex_schema::JsonrpcMessage::Response(response) => {
-                    // Route response to waiting request
-                    if let Some(id) = codex_request_id_to_i64(&response.id) {
-                        server.take_request_session(id);
-                        server.complete_request(id, CodexRequestResult::Response(response.result));
-                    }
-                }
-                codex_schema::JsonrpcMessage::Notification(_) => {
-                    // Route notification to correct session by thread_id
-                    if let Ok(notification) =
-                        serde_json::from_value::<codex_schema::ServerNotification>(value.clone())
-                    {
-                        if let Some(thread_id) =
-                            codex_thread_id_from_server_notification(&notification)
-                        {
-                            if let Some(session_id) = server.session_for_thread(&thread_id) {
-                                if let codex_schema::ServerNotification::Error(params) =
-                                    &notification
-                                {
-                                    if let Some(model_id) =
-                                        codex_unavailable_model_from_message(&params.error.message)
-                                    {
-                                        self.handle_codex_model_unavailable(
-                                            &session_id,
-                                            &model_id,
-                                            Some(thread_id.clone()),
-                                        )
-                                        .await;
-                                    }
-                                }
-                                let conversions =
-                                    match convert_codex::notification_to_universal(&notification) {
-                                        Ok(c) => c,
-                                        Err(err) => {
-                                            vec![agent_unparsed("codex", &err, value.clone())]
-                                        }
-                                    };
-                                let _ = self.record_conversions(&session_id, conversions).await;
-                            }
-                        }
-                    }
-                }
-                codex_schema::JsonrpcMessage::Request(_) => {
-                    // Handle server requests (permission requests)
-                    if let Ok(request) =
-                        serde_json::from_value::<codex_schema::ServerRequest>(value.clone())
-                    {
-                        if let Some(thread_id) = codex_thread_id_from_server_request(&request) {
-                            if let Some(session_id) = server.session_for_thread(&thread_id) {
-                                match codex_request_to_universal(&request) {
-                                    Ok(mut conversions) => {
-                                        for conversion in &mut conversions {
-                                            conversion.raw = Some(value.clone());
-                                        }
-                                        let _ =
-                                            self.record_conversions(&session_id, conversions).await;
-                                    }
-                                    Err(err) => {
-                                        let _ = self
-                                            .record_conversions(
-                                                &session_id,
-                                                vec![agent_unparsed("codex", &err, value.clone())],
-                                            )
-                                            .await;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                codex_schema::JsonrpcMessage::Error(error) => {
-                    if let Some(id) = codex_request_id_to_i64(&error.id) {
-                        let session_id = server.take_request_session(id);
-                        server.complete_request(id, CodexRequestResult::Error(error.error.clone()));
-                        if let Some(session_id) = session_id {
-                            if let Some(model_id) =
-                                codex_unavailable_model_from_rpc_error(&error.error)
-                            {
-                                self.handle_codex_model_unavailable(&session_id, &model_id, None)
-                                    .await;
-                            }
-                            let _ = self
-                                .record_conversions(
-                                    &session_id,
-                                    vec![codex_rpc_error_to_universal(&error)],
-                                )
-                                .await;
-                        } else {
-                            eprintln!("Codex server error: {:?}", error);
-                        }
-                    } else {
-                        eprintln!("Codex server error: {:?}", error);
-                    }
-                }
-            }
-        }
-    }
-
-    /// Performs the initialize/initialized handshake with the Codex server.
-    async fn codex_server_initialize(&self, server: &CodexServer) -> Result<(), SandboxError> {
-        let _initialize_guard = server.initialize_lock.lock().await;
-        if server.is_initialized() {
-            return Ok(());
-        }
-
-        let id = server.next_request_id();
-        let request = codex_schema::ClientRequest::Initialize {
-            id: codex_schema::RequestId::from(id),
-            params: codex_schema::InitializeParams {
-                client_info: codex_schema::ClientInfo {
-                    name: "sandbox-agent".to_string(),
-                    title: Some("sandbox-agent".to_string()),
-                    version: env!("CARGO_PKG_VERSION").to_string(),
-                },
-            },
-        };
-
-        let rx = server
-            .send_request(id, &request)
-            .ok_or_else(|| SandboxError::StreamError {
-                message: "failed to send initialize request".to_string(),
-            })?;
-
-        // Wait for initialize response with timeout
-        let result = tokio::time::timeout(Duration::from_secs(30), rx).await;
-        match result {
-            Ok(Ok(CodexRequestResult::Response(_))) => {
-                // Send initialized notification
-                let notification = codex_schema::JsonrpcNotification {
-                    method: "initialized".to_string(),
-                    params: None,
-                };
-                server.send_notification(&notification);
-                server.set_initialized();
-                Ok(())
-            }
-            Ok(Ok(CodexRequestResult::Error(error))) => Err(codex_request_error_to_sandbox(
-                "initialize request failed",
-                &error,
-            )),
-            Ok(Err(_)) => Err(SandboxError::StreamError {
-                message: "initialize request cancelled".to_string(),
-            }),
-            Err(_) => Err(SandboxError::StreamError {
-                message: "initialize request timed out".to_string(),
-            }),
-        }
-    }
-
-    async fn reload_codex_mcp(&self, server: &CodexServer) -> Result<(), SandboxError> {
-        let id = server.next_request_id();
-        let request = codex_schema::ClientRequest::ConfigMcpServerReload {
-            id: codex_schema::RequestId::from(id),
-            params: (),
-        };
-        let rx = server
-            .send_request(id, &request)
-            .ok_or_else(|| SandboxError::StreamError {
-                message: "failed to send config/mcpServer/reload request".to_string(),
-            })?;
-        let result = tokio::time::timeout(Duration::from_secs(15), rx).await;
-        match result {
-            Ok(Ok(_)) => Ok(()),
-            Ok(Err(_)) => Err(SandboxError::StreamError {
-                message: "config/mcpServer/reload request cancelled".to_string(),
-            }),
-            Err(_) => Err(SandboxError::StreamError {
-                message: "config/mcpServer/reload request timed out".to_string(),
-            }),
-        }
-    }
-
-    /// Creates a new Codex thread/session via the shared app-server.
-    async fn create_codex_thread(
-        self: &Arc<Self>,
-        session_id: &str,
-        session: &SessionSnapshot,
-    ) -> Result<String, SandboxError> {
-        let server = self.ensure_codex_server().await?;
-
-        let id = server.next_request_id();
-        let mut params = codex_schema::ThreadStartParams::default();
-        params.approval_policy = codex_approval_policy(Some(&session.permission_mode));
-        params.sandbox = codex_sandbox_mode(Some(&session.permission_mode));
-        params.model = session.model.clone();
-
-        let request = codex_schema::ClientRequest::ThreadStart {
-            id: codex_schema::RequestId::from(id),
-            params,
-        };
-
-        let rx = server
-            .send_request(id, &request)
-            .ok_or_else(|| SandboxError::StreamError {
-                message: "failed to send thread/start request".to_string(),
-            })?;
-
-        // Wait for thread/start response
-        let result = tokio::time::timeout(Duration::from_secs(30), rx).await;
-        match result {
-            Ok(Ok(CodexRequestResult::Response(response))) => {
-                // Extract thread_id from response
-                let thread_id = response
-                    .get("thread")
-                    .and_then(|t| t.get("id"))
-                    .and_then(Value::as_str)
-                    .or_else(|| response.get("threadId").and_then(Value::as_str))
-                    .ok_or_else(|| SandboxError::StreamError {
-                        message: "thread/start response missing thread id".to_string(),
-                    })?
-                    .to_string();
-
-                // Register thread -> session mapping
-                server.register_thread(thread_id.clone(), session_id.to_string());
-
-                Ok(thread_id)
-            }
-            Ok(Ok(CodexRequestResult::Error(error))) => Err(codex_request_error_to_sandbox(
-                "thread/start request failed",
-                &error,
-            )),
-            Ok(Err(_)) => Err(SandboxError::StreamError {
-                message: "thread/start request cancelled".to_string(),
-            }),
-            Err(_) => Err(SandboxError::StreamError {
-                message: "thread/start request timed out".to_string(),
-            }),
-        }
-    }
-
-    /// Sends a turn/start request to an existing Codex thread.
-    async fn send_codex_turn(
-        self: &Arc<Self>,
-        session: &SessionSnapshot,
-        prompt: &str,
-    ) -> Result<(), SandboxError> {
-        let server = self.ensure_codex_server().await?;
-
-        let thread_id =
-            session
-                .native_session_id
-                .as_ref()
-                .ok_or_else(|| SandboxError::InvalidRequest {
-                    message: "missing Codex thread id".to_string(),
-                })?;
-
-        let id = server.next_request_id();
-        let prompt_text = codex_prompt_for_mode(prompt, Some(&session.agent_mode));
-        let params = codex_schema::TurnStartParams {
-            approval_policy: codex_approval_policy(Some(&session.permission_mode)),
-            collaboration_mode: None,
-            cwd: None,
-            effort: None,
-            input: vec![codex_schema::UserInput::Text {
-                text: prompt_text,
-                text_elements: Vec::new(),
-            }],
-            model: session.model.clone(),
-            output_schema: None,
-            sandbox_policy: codex_sandbox_policy(Some(&session.permission_mode)),
-            summary: None,
-            thread_id: thread_id.clone(),
-        };
-
-        let request = codex_schema::ClientRequest::TurnStart {
-            id: codex_schema::RequestId::from(id),
-            params,
-        };
-
-        // Send but don't wait for response - notifications will stream back
-        server
-            .send_request_with_session(id, &request, Some(session.session_id.clone()))
-            .ok_or_else(|| SandboxError::StreamError {
-                message: "failed to send turn/start request".to_string(),
-            })?;
-
-        Ok(())
-    }
-
-    fn apply_pi_model_args(command: &mut std::process::Command, model: Option<&str>) {
-        let Some(model) = model else {
-            return;
-        };
-        if let Some((provider, model_id)) = model.split_once('/') {
-            command
-                .arg("--provider")
-                .arg(provider)
-                .arg("--model")
-                .arg(model_id);
-            return;
-        }
-        command.arg("--model").arg(model);
-    }
-
-    async fn spawn_pi_runtime(
-        self: &Arc<Self>,
-        model: Option<&str>,
-    ) -> Result<(Arc<PiSessionRuntime>, mpsc::UnboundedReceiver<String>), SandboxError> {
-        let manager = self.agent_manager.clone();
-        let log_dir = self.server_manager.log_base_dir.clone();
-        let model = model.map(str::to_string);
-        let (stdin_tx, stdin_rx) = mpsc::unbounded_channel::<String>();
-        let (stdout_tx, stdout_rx) = mpsc::unbounded_channel::<String>();
-
-        let child =
-            tokio::task::spawn_blocking(move || -> Result<std::process::Child, SandboxError> {
-                let path = manager
-                    .resolve_binary(AgentId::Pi)
-                    .map_err(|err| map_spawn_error(AgentId::Pi, err))?;
-                let mut command = std::process::Command::new(path);
-                let stderr = AgentServerLogs::new(log_dir, AgentId::Pi.as_str()).open()?;
-                command.arg("--mode").arg("rpc");
-                Self::apply_pi_model_args(&mut command, model.as_deref());
-                command
-                    .stdin(Stdio::piped())
-                    .stdout(Stdio::piped())
-                    .stderr(stderr);
-
-                let mut child = command.spawn().map_err(|err| SandboxError::StreamError {
-                    message: err.to_string(),
-                })?;
-
-                let stdin = child
-                    .stdin
-                    .take()
-                    .ok_or_else(|| SandboxError::StreamError {
-                        message: "pi stdin unavailable".to_string(),
-                    })?;
-                let stdout = child
-                    .stdout
-                    .take()
-                    .ok_or_else(|| SandboxError::StreamError {
-                        message: "pi stdout unavailable".to_string(),
-                    })?;
-
-                let stdin_rx_mut = std::sync::Mutex::new(stdin_rx);
-                std::thread::spawn(move || {
-                    let mut stdin = stdin;
-                    let mut rx = stdin_rx_mut.lock().unwrap();
-                    while let Some(line) = rx.blocking_recv() {
-                        if writeln!(stdin, "{line}").is_err() {
-                            break;
-                        }
-                        if stdin.flush().is_err() {
-                            break;
-                        }
-                    }
-                });
-
-                std::thread::spawn(move || {
-                    let reader = BufReader::new(stdout);
-                    for line in reader.lines() {
-                        let Ok(line) = line else { break };
-                        if stdout_tx.send(line).is_err() {
-                            break;
-                        }
-                    }
-                });
-
-                Ok(child)
-            })
-            .await
-            .map_err(|err| SandboxError::StreamError {
-                message: err.to_string(),
-            })??;
-
-        let child = Arc::new(std::sync::Mutex::new(Some(child)));
-        let runtime = Arc::new(PiSessionRuntime::new(stdin_tx, child));
-        Ok((runtime, stdout_rx))
-    }
-
-    fn spawn_pi_runtime_tasks(
-        self: &Arc<Self>,
-        session_id: String,
-        runtime: Arc<PiSessionRuntime>,
-        stdout_rx: mpsc::UnboundedReceiver<String>,
-    ) {
-        let output_manager = Arc::clone(self);
-        let output_session_id = session_id.clone();
-        let output_runtime = runtime.clone();
-        tokio::spawn(async move {
-            output_manager
-                .handle_pi_runtime_output(output_session_id, output_runtime, stdout_rx)
-                .await;
-        });
-
-        let exit_manager = Arc::clone(self);
-        tokio::spawn(async move {
-            loop {
-                let status = {
-                    let mut guard = match runtime.child.lock() {
-                        Ok(guard) => guard,
-                        Err(_) => return,
-                    };
-                    match guard.as_mut() {
-                        Some(child) => match child.try_wait() {
-                            Ok(status) => status,
-                            Err(_) => None,
-                        },
-                        None => return,
-                    }
-                };
-
-                if let Some(status) = status {
-                    if let Ok(mut guard) = runtime.child.lock() {
-                        *guard = None;
-                    }
-                    exit_manager
-                        .handle_pi_runtime_exit(&session_id, runtime.clone(), status)
-                        .await;
-                    break;
-                }
-
-                sleep(Duration::from_millis(250)).await;
-            }
-        });
-    }
-
-    async fn is_active_pi_runtime(
-        &self,
-        session_id: &str,
-        runtime: &Arc<PiSessionRuntime>,
-    ) -> bool {
-        let sessions = self.sessions.lock().await;
-        let Some(session) = Self::session_ref(&sessions, session_id) else {
-            return false;
-        };
-        session
-            .pi_runtime
-            .as_ref()
-            .is_some_and(|active| Arc::ptr_eq(active, runtime))
-    }
-
-    async fn session_native_session_id(&self, session_id: &str) -> Option<String> {
-        let sessions = self.sessions.lock().await;
-        Self::session_ref(&sessions, session_id)
-            .and_then(|session| session.native_session_id.clone())
-    }
-
-    /// Handles output from one Pi runtime process and routes events to exactly one daemon session.
-    async fn handle_pi_runtime_output(
-        self: Arc<Self>,
-        session_id: String,
-        runtime: Arc<PiSessionRuntime>,
-        mut stdout_rx: mpsc::UnboundedReceiver<String>,
-    ) {
-        while let Some(line) = stdout_rx.recv().await {
-            let trimmed = line.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-
-            let value: Value = match serde_json::from_str(trimmed) {
-                Ok(v) => v,
-                Err(err) => {
-                    if self.is_active_pi_runtime(&session_id, &runtime).await {
-                        self.record_pi_unparsed(
-                            &session_id,
-                            &err.to_string(),
-                            Value::String(trimmed.to_string()),
-                        )
-                        .await;
-                    }
-                    continue;
-                }
-            };
-
-            let message_type = value.get("type").and_then(Value::as_str).unwrap_or("");
-            if message_type == "response" {
-                let id = value
-                    .get("id")
-                    .and_then(Value::as_i64)
-                    .or_else(|| value.get("id").and_then(Value::as_str)?.parse::<i64>().ok());
-                if let Some(id) = id {
-                    runtime.complete_request(id, value.clone());
-                }
-                continue;
-            }
-
-            if !self.is_active_pi_runtime(&session_id, &runtime).await {
-                continue;
-            }
-
-            let event: pi_schema::RpcEvent = match serde_json::from_value(value.clone()) {
-                Ok(event) => event,
-                Err(err) => {
-                    self.record_pi_unparsed(&session_id, &err.to_string(), value.clone())
-                        .await;
-                    continue;
-                }
-            };
-
-            let conversions = {
-                let mut converter = runtime.converter.lock().unwrap();
-                converter.event_to_universal(&event)
-            };
-
-            let mut conversions = match conversions {
-                Ok(conversions) => conversions,
-                Err(err) => {
-                    self.record_pi_unparsed(&session_id, &err, value.clone())
-                        .await;
-                    continue;
-                }
-            };
-
-            let native_session_id = self.session_native_session_id(&session_id).await;
-            for conversion in &mut conversions {
-                if conversion.native_session_id.is_none() {
-                    conversion.native_session_id = native_session_id.clone();
-                }
-                conversion.raw = Some(value.clone());
-            }
-
-            let _ = self.record_conversions(&session_id, conversions).await;
-        }
-    }
-
-    async fn handle_pi_runtime_exit(
-        &self,
-        session_id: &str,
-        runtime: Arc<PiSessionRuntime>,
-        status: std::process::ExitStatus,
-    ) {
-        runtime.clear_pending();
-
-        let should_emit_error = {
-            let mut sessions = self.sessions.lock().await;
-            let Some(session) = Self::session_mut(&mut sessions, session_id) else {
-                return;
-            };
-            let Some(active_runtime) = session.pi_runtime.as_ref() else {
-                return;
-            };
-            if !Arc::ptr_eq(active_runtime, &runtime) {
-                return;
-            }
-            session.pi_runtime = None;
-            !runtime.shutdown_requested() && !session.ended
-        };
-
-        if !should_emit_error {
-            return;
-        }
-
-        let message = format!("pi rpc process exited with status {:?}", status);
-        self.record_error(
-            session_id,
-            message.clone(),
-            Some("server_exit".to_string()),
-            None,
-        )
-        .await;
-        let logs = self.read_agent_stderr(AgentId::Pi);
-        self.mark_session_ended(
-            session_id,
-            status.code(),
-            &message,
-            SessionEndReason::Error,
-            TerminatedBy::Daemon,
-            logs,
-        )
-        .await;
-    }
-
-    async fn create_pi_session(
-        self: &Arc<Self>,
-        session_id: &str,
-        model: Option<&str>,
-    ) -> Result<PiSessionBootstrap, SandboxError> {
-        let (runtime, stdout_rx) = self.spawn_pi_runtime(model).await?;
-        self.spawn_pi_runtime_tasks(session_id.to_string(), runtime.clone(), stdout_rx);
-
-        let result: Result<PiSessionBootstrap, SandboxError> = async {
-            let new_id = runtime.next_request_id();
-            let new_request = json!({
-                "type": "new_session",
-                "id": new_id
-            });
-            let new_rx = runtime.send_request(new_id, &new_request).ok_or_else(|| {
-                SandboxError::StreamError {
-                    message: "failed to send pi new_session request".to_string(),
-                }
-            })?;
-            let new_response = tokio::time::timeout(Duration::from_secs(30), new_rx).await;
-            let new_response = match new_response {
-                Ok(Ok(response)) => response,
-                Ok(Err(_)) => {
-                    return Err(SandboxError::StreamError {
-                        message: "pi new_session request cancelled".to_string(),
-                    })
-                }
-                Err(_) => {
-                    return Err(SandboxError::StreamError {
-                        message: "pi new_session request timed out".to_string(),
-                    })
-                }
-            };
-            if new_response
-                .get("success")
-                .and_then(Value::as_bool)
-                .is_some_and(|success| !success)
-            {
-                return Err(SandboxError::StreamError {
-                    message: format!("pi new_session failed: {new_response}"),
-                });
-            }
-            if new_response
-                .get("data")
-                .and_then(|value| value.get("cancelled"))
-                .and_then(Value::as_bool)
-                .is_some_and(|cancelled| cancelled)
-            {
-                return Err(SandboxError::StreamError {
-                    message: "pi new_session request cancelled".to_string(),
-                });
-            }
-
-            let state_id = runtime.next_request_id();
-            let state_request = json!({
-                "type": "get_state",
-                "id": state_id
-            });
-            let state_rx = runtime
-                .send_request(state_id, &state_request)
-                .ok_or_else(|| SandboxError::StreamError {
-                    message: "failed to send pi get_state request".to_string(),
-                })?;
-            let state_response = tokio::time::timeout(Duration::from_secs(30), state_rx).await;
-            let state_response = match state_response {
-                Ok(Ok(response)) => response,
-                Ok(Err(_)) => {
-                    return Err(SandboxError::StreamError {
-                        message: "pi get_state request cancelled".to_string(),
-                    })
-                }
-                Err(_) => {
-                    return Err(SandboxError::StreamError {
-                        message: "pi get_state request timed out".to_string(),
-                    })
-                }
-            };
-            if state_response
-                .get("success")
-                .and_then(Value::as_bool)
-                .is_some_and(|success| !success)
-            {
-                return Err(SandboxError::StreamError {
-                    message: format!("pi get_state failed: {state_response}"),
-                });
-            }
-
-            let state = state_response.get("data").unwrap_or(&state_response);
-            let native_session_id = state
-                .get("sessionId")
-                .or_else(|| state.get("session_id"))
-                .and_then(Value::as_str)
-                .ok_or_else(|| SandboxError::StreamError {
-                    message: "pi get_state response missing session id".to_string(),
-                })?
-                .to_string();
-            let session_file = state
-                .get("sessionFile")
-                .or_else(|| state.get("session_file"))
-                .and_then(Value::as_str)
-                .map(|value| value.to_string());
-
-            Ok(PiSessionBootstrap {
-                runtime: runtime.clone(),
-                native_session_id,
-                _session_file: session_file,
-            })
-        }
-        .await;
-
-        if result.is_err() {
-            runtime.shutdown();
-        }
-
-        result
-    }
-
-    async fn send_pi_prompt(
-        self: &Arc<Self>,
-        session: &SessionSnapshot,
-        prompt: &str,
-    ) -> Result<(), SandboxError> {
-        let runtime = {
-            let sessions = self.sessions.lock().await;
-            let session_state =
-                Self::session_ref(&sessions, &session.session_id).ok_or_else(|| {
-                    SandboxError::SessionNotFound {
-                        session_id: session.session_id.clone(),
-                    }
-                })?;
-            session_state
-                .pi_runtime
-                .clone()
-                .ok_or_else(|| SandboxError::InvalidRequest {
-                    message: "Pi session runtime is not active".to_string(),
-                })?
-        };
-
-        if let Some(level) = session.variant.as_deref() {
-            self.set_pi_thinking_level(&runtime, level).await?;
-        }
-
-        let id = runtime.next_request_id();
-        let request = json!({
-            "type": "prompt",
-            "id": id,
-            "message": prompt
-        });
-
-        let response_rx =
-            runtime
-                .send_request(id, &request)
-                .ok_or_else(|| SandboxError::StreamError {
-                    message: "failed to send pi prompt request".to_string(),
-                })?;
-        let response = tokio::time::timeout(Duration::from_secs(30), response_rx)
-            .await
-            .map_err(|_| SandboxError::StreamError {
-                message: "pi prompt request timed out".to_string(),
-            })?
-            .map_err(|_| SandboxError::StreamError {
-                message: "pi prompt request cancelled".to_string(),
-            })?;
-        if response
-            .get("success")
-            .and_then(Value::as_bool)
-            .is_some_and(|success| !success)
-        {
-            let detail = response
-                .get("error")
-                .cloned()
-                .or_else(|| {
-                    response
-                        .get("data")
-                        .and_then(|data| data.get("error"))
-                        .cloned()
-                })
-                .unwrap_or_else(|| response.clone());
-            return Err(SandboxError::InvalidRequest {
-                message: format!("pi prompt failed: {detail}"),
-            });
-        }
-
-        Ok(())
-    }
-
-    async fn set_pi_thinking_level(
-        &self,
-        runtime: &Arc<PiSessionRuntime>,
-        level: &str,
-    ) -> Result<(), SandboxError> {
-        let id = runtime.next_request_id();
-        let request = json!({
-            "type": "set_thinking_level",
-            "id": id,
-            "level": level
-        });
-        let response_rx =
-            runtime
-                .send_request(id, &request)
-                .ok_or_else(|| SandboxError::StreamError {
-                    message: "failed to send pi set_thinking_level request".to_string(),
-                })?;
-        let response = tokio::time::timeout(Duration::from_secs(30), response_rx)
-            .await
-            .map_err(|_| SandboxError::StreamError {
-                message: "pi set_thinking_level request timed out".to_string(),
-            })?
-            .map_err(|_| SandboxError::StreamError {
-                message: "pi set_thinking_level request cancelled".to_string(),
-            })?;
-        if response
-            .get("success")
-            .and_then(Value::as_bool)
-            .is_some_and(|success| !success)
-        {
-            let detail = response
-                .get("error")
-                .cloned()
-                .or_else(|| {
-                    response
-                        .get("data")
-                        .and_then(|data| data.get("error"))
-                        .cloned()
-                })
-                .unwrap_or_else(|| response.clone());
-            return Err(SandboxError::InvalidRequest {
-                message: format!("pi set_thinking_level failed for '{level}': {detail}"),
-            });
-        }
-
-        Ok(())
-    }
-
-    async fn record_pi_unparsed(&self, session_id: &str, error: &str, raw: Value) {
-        let _ = self
-            .record_conversions(session_id, vec![agent_unparsed("pi", error, raw)])
-            .await;
-    }
-
-    async fn fetch_opencode_modes(&self) -> Result<Vec<AgentModeInfo>, SandboxError> {
-        let base_url = self.ensure_opencode_server().await?;
-        let endpoints = [
-            format!("{base_url}/app/agents"),
-            format!("{base_url}/agents"),
-        ];
-        for url in endpoints {
-            let response = self.http_client.get(&url).send().await;
-            let response = match response {
-                Ok(response) => response,
-                Err(_) => continue,
-            };
-            if !response.status().is_success() {
-                continue;
-            }
-            let value: Value = response
-                .json()
-                .await
-                .map_err(|err| SandboxError::StreamError {
-                    message: err.to_string(),
-                })?;
-            let modes = parse_opencode_modes(&value);
-            if !modes.is_empty() {
-                return Ok(modes);
-            }
-        }
-        Err(SandboxError::StreamError {
-            message: "OpenCode agent modes unavailable".to_string(),
-        })
-    }
-
-    async fn fetch_claude_models(&self) -> Result<AgentModelsResponse, SandboxError> {
-        let started = Instant::now();
-        let credentials = self.extract_credentials().await?;
-        let Some(cred) = credentials.anthropic else {
-            tracing::info!(
-                elapsed_ms = started.elapsed().as_millis() as u64,
-                "claude model fetch skipped (no anthropic credentials)"
-            );
-            return Ok(AgentModelsResponse {
-                models: Vec::new(),
-                default_model: None,
-            });
-        };
-
-        let headers = build_anthropic_headers(&cred)?;
-        let response = self
-            .http_client
-            .get(ANTHROPIC_MODELS_URL)
-            .headers(headers)
-            .send()
-            .await
-            .map_err(|err| SandboxError::StreamError {
-                message: err.to_string(),
-            })?;
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            if matches!(cred.auth_type, AuthType::Oauth) {
-                tracing::warn!(
-                    status = %status,
-                    elapsed_ms = started.elapsed().as_millis() as u64,
-                    "Anthropic model list rejected OAuth credentials; using Claude OAuth fallback models"
-                );
-                return Ok(claude_fallback_models());
-            }
-            return Err(SandboxError::StreamError {
-                message: format!("Anthropic models request failed {status}: {body}"),
-            });
-        }
-
-        let value: Value = response
-            .json()
-            .await
-            .map_err(|err| SandboxError::StreamError {
-                message: err.to_string(),
-            })?;
-        let data = value
-            .get("data")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default();
-
-        let mut models = Vec::new();
-        let mut default_model: Option<String> = None;
-        let mut default_created: Option<String> = None;
-        for item in data {
-            let Some(id) = item.get("id").and_then(Value::as_str) else {
-                continue;
-            };
-            let name = item
-                .get("display_name")
-                .and_then(Value::as_str)
-                .map(|value| value.to_string());
-            let created = item
-                .get("created_at")
-                .and_then(Value::as_str)
-                .map(|value| value.to_string());
-            if let Some(created) = created.as_ref() {
-                let should_update = match default_created.as_deref() {
-                    Some(current) => created.as_str() > current,
-                    None => true,
-                };
-                if should_update {
-                    default_created = Some(created.clone());
-                    default_model = Some(id.to_string());
-                }
-            }
-            models.push(AgentModelInfo {
-                id: id.to_string(),
-                name,
-                variants: None,
-                default_variant: None,
-            });
-        }
-        models.sort_by(|a, b| a.id.cmp(&b.id));
-        if default_model.is_none() {
-            default_model = models.first().map(|model| model.id.clone());
-        }
-
-        if models.is_empty() && matches!(cred.auth_type, AuthType::Oauth) {
-            tracing::warn!(
-                elapsed_ms = started.elapsed().as_millis() as u64,
-                "Anthropic model list was empty for OAuth credentials; using Claude OAuth fallback models"
-            );
-            return Ok(claude_fallback_models());
-        }
-
-        tracing::info!(
-            elapsed_ms = started.elapsed().as_millis() as u64,
-            model_count = models.len(),
-            has_default = default_model.is_some(),
-            "claude model fetch completed"
-        );
-        Ok(AgentModelsResponse {
-            models,
-            default_model,
-        })
-    }
-
-    async fn fetch_codex_models(self: &Arc<Self>) -> Result<AgentModelsResponse, SandboxError> {
-        let started = Instant::now();
-        let server = self.ensure_codex_server().await?;
-        tracing::info!(
-            elapsed_ms = started.elapsed().as_millis() as u64,
-            "codex model fetch server ready"
-        );
-        let mut models: Vec<AgentModelInfo> = Vec::new();
-        let mut default_model: Option<String> = None;
-        let mut seen = HashSet::new();
-        let mut cursor: Option<String> = None;
-        let mut pages: usize = 0;
-
-        loop {
-            let id = server.next_request_id();
-            let page_started = Instant::now();
-            let request = json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "method": "model/list",
-                "params": {
-                    "cursor": cursor,
-                    "limit": null
-                }
-            });
-            let rx =
-                server
-                    .send_request(id, &request)
-                    .ok_or_else(|| SandboxError::StreamError {
-                        message: "failed to send model/list request".to_string(),
-                    })?;
-
-            let result =
-                tokio::time::timeout(Duration::from_secs(CODEX_MODEL_LIST_TIMEOUT_SECS), rx).await;
-            let value = match result {
-                Ok(Ok(CodexRequestResult::Response(value))) => value,
-                Ok(Ok(CodexRequestResult::Error(error))) => {
-                    tracing::warn!(
-                        elapsed_ms = started.elapsed().as_millis() as u64,
-                        page = pages + 1,
-                        error = %error.message,
-                        "codex model/list request failed"
-                    );
-                    return Err(codex_request_error_to_sandbox(
-                        "model/list request failed",
-                        &error,
-                    ));
-                }
-                Ok(Err(_)) => {
-                    tracing::warn!(
-                        elapsed_ms = started.elapsed().as_millis() as u64,
-                        page = pages + 1,
-                        "codex model/list request cancelled"
-                    );
-                    return Err(SandboxError::StreamError {
-                        message: "model/list request cancelled".to_string(),
-                    });
-                }
-                Err(_) => {
-                    tracing::warn!(
-                        elapsed_ms = started.elapsed().as_millis() as u64,
-                        page = pages + 1,
-                        timeout_secs = CODEX_MODEL_LIST_TIMEOUT_SECS,
-                        "codex model/list request timed out"
-                    );
-                    return Err(SandboxError::StreamError {
-                        message: "model/list request timed out".to_string(),
-                    });
-                }
-            };
-            pages += 1;
-            tracing::info!(
-                page = pages,
-                elapsed_ms = page_started.elapsed().as_millis() as u64,
-                total_elapsed_ms = started.elapsed().as_millis() as u64,
-                "codex model/list page fetched"
-            );
-
-            let data = value
-                .get("data")
-                .and_then(Value::as_array)
-                .cloned()
-                .unwrap_or_default();
-
-            for item in data {
-                let model_id = item
-                    .get("model")
-                    .and_then(Value::as_str)
-                    .or_else(|| item.get("id").and_then(Value::as_str));
-                let Some(model_id) = model_id else {
-                    continue;
-                };
-                if !seen.insert(model_id.to_string()) {
-                    continue;
-                }
-
-                let name = item
-                    .get("displayName")
-                    .and_then(Value::as_str)
-                    .map(|value| value.to_string());
-
-                if default_model.is_none()
-                    && item
-                        .get("isDefault")
-                        .and_then(Value::as_bool)
-                        .unwrap_or(false)
-                {
-                    default_model = Some(model_id.to_string());
-                }
-
-                models.push(AgentModelInfo {
-                    id: model_id.to_string(),
-                    name,
-                    variants: None,
-                    default_variant: None,
-                });
-            }
-
-            let next_cursor = value
-                .get("nextCursor")
-                .and_then(Value::as_str)
-                .map(|value| value.to_string());
-            if next_cursor.is_none() {
-                break;
-            }
-            cursor = next_cursor;
-        }
-
-        models.sort_by(|a, b| a.id.cmp(&b.id));
-        if default_model.is_none() {
-            default_model = models.first().map(|model| model.id.clone());
-        }
-
-        tracing::info!(
-            elapsed_ms = started.elapsed().as_millis() as u64,
-            page_count = pages,
-            model_count = models.len(),
-            has_default = default_model.is_some(),
-            "codex model fetch completed"
-        );
-        Ok(AgentModelsResponse {
-            models,
-            default_model,
-        })
-    }
-
-    async fn fetch_opencode_models(&self) -> Result<AgentModelsResponse, SandboxError> {
-        let started = Instant::now();
-        let base_url = self.ensure_opencode_server().await?;
-        let endpoints = [
-            format!("{base_url}/config/providers"),
-            format!("{base_url}/provider"),
-        ];
-        for url in endpoints {
-            let endpoint_started = Instant::now();
-            let response = self.http_client.get(&url).send().await;
-            let response = match response {
-                Ok(response) => response,
-                Err(err) => {
-                    tracing::warn!(
-                        url,
-                        elapsed_ms = endpoint_started.elapsed().as_millis() as u64,
-                        total_elapsed_ms = started.elapsed().as_millis() as u64,
-                        ?err,
-                        "opencode model endpoint request failed"
-                    );
-                    continue;
-                }
-            };
-            if !response.status().is_success() {
-                tracing::warn!(
-                    url,
-                    status = %response.status(),
-                    elapsed_ms = endpoint_started.elapsed().as_millis() as u64,
-                    total_elapsed_ms = started.elapsed().as_millis() as u64,
-                    "opencode model endpoint returned non-success status"
-                );
-                continue;
-            }
-            let value: Value = response
-                .json()
-                .await
-                .map_err(|err| SandboxError::StreamError {
-                    message: err.to_string(),
-                })?;
-            if let Some(models) = parse_opencode_models(&value) {
-                tracing::info!(
-                    url,
-                    elapsed_ms = endpoint_started.elapsed().as_millis() as u64,
-                    total_elapsed_ms = started.elapsed().as_millis() as u64,
-                    model_count = models.models.len(),
-                    has_default = models.default_model.is_some(),
-                    "opencode model fetch completed"
-                );
-                return Ok(models);
-            }
-            tracing::warn!(
-                url,
-                elapsed_ms = endpoint_started.elapsed().as_millis() as u64,
-                total_elapsed_ms = started.elapsed().as_millis() as u64,
-                "opencode model endpoint parse returned no models"
-            );
-        }
-        tracing::warn!(
-            elapsed_ms = started.elapsed().as_millis() as u64,
-            "opencode model fetch failed"
-        );
-        Err(SandboxError::StreamError {
-            message: "OpenCode models unavailable".to_string(),
-        })
-    }
-
-    async fn fetch_pi_models(&self) -> Result<AgentModelsResponse, SandboxError> {
-        let binary = self
-            .agent_manager
-            .resolve_binary(AgentId::Pi)
-            .map_err(|err| map_spawn_error(AgentId::Pi, err))?;
-        let output = tokio::time::timeout(
-            Duration::from_secs(10),
-            tokio::task::spawn_blocking(move || {
-                std::process::Command::new(binary)
-                    .arg("--list-models")
-                    .output()
-            }),
-        )
-        .await
-        .map_err(|_| SandboxError::StreamError {
-            message: "pi --list-models timed out".to_string(),
-        })?
-        .map_err(|err| SandboxError::StreamError {
-            message: err.to_string(),
-        })?
-        .map_err(|err| SandboxError::StreamError {
-            message: err.to_string(),
-        })?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            let message = if stderr.is_empty() {
-                format!("pi --list-models failed with status {}", output.status)
-            } else {
-                format!(
-                    "pi --list-models failed with status {}: {stderr}",
-                    output.status
-                )
-            };
-            return Err(SandboxError::StreamError { message });
-        }
-
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        Ok(parse_pi_models_output(&stdout))
-    }
-
-    async fn extract_credentials(&self) -> Result<ExtractedCredentials, SandboxError> {
-        tokio::task::spawn_blocking(move || {
-            let options = CredentialExtractionOptions::new();
-            extract_all_credentials(&options)
-        })
-        .await
-        .map_err(|err| SandboxError::StreamError {
-            message: err.to_string(),
-        })
-    }
-
-    async fn create_opencode_session(&self) -> Result<String, SandboxError> {
-        let base_url = self.ensure_opencode_server().await?;
-        let url = format!("{base_url}/session");
-        for _ in 0..10 {
-            let response = self.http_client.post(&url).json(&json!({})).send().await;
-            let response = match response {
-                Ok(response) => response,
-                Err(_) => {
-                    sleep(Duration::from_millis(200)).await;
-                    continue;
-                }
-            };
-            if !response.status().is_success() {
-                sleep(Duration::from_millis(200)).await;
-                continue;
-            }
-            let value: Value = response
-                .json()
-                .await
-                .map_err(|err| SandboxError::StreamError {
-                    message: err.to_string(),
-                })?;
-            if let Some(id) = value.get("id").and_then(Value::as_str) {
-                return Ok(id.to_string());
-            }
-            if let Some(id) = value.get("sessionId").and_then(Value::as_str) {
-                return Ok(id.to_string());
-            }
-            if let Some(id) = value.get("session_id").and_then(Value::as_str) {
-                return Ok(id.to_string());
-            }
-            return Err(SandboxError::StreamError {
-                message: format!("OpenCode session response missing id: {value}"),
-            });
-        }
-        Err(SandboxError::StreamError {
-            message: "OpenCode session create failed after retries".to_string(),
-        })
-    }
-
-    async fn apply_opencode_mcp(
-        &self,
-        mcp: &BTreeMap<String, McpServerConfig>,
-    ) -> Result<(), SandboxError> {
-        if mcp.is_empty() {
-            return Ok(());
-        }
-        let base_url = self.ensure_opencode_server().await?;
-        let url = format!("{base_url}/mcp");
-        let mut existing = HashSet::new();
-        if let Ok(response) = self.http_client.get(&url).send().await {
-            if response.status().is_success() {
-                if let Ok(value) = response.json::<Value>().await {
-                    if let Some(map) = value.as_object() {
-                        for key in map.keys() {
-                            existing.insert(key.clone());
-                        }
-                    }
-                }
-            }
-        }
-
-        for (name, config) in mcp {
-            if existing.contains(name) {
-                continue;
-            }
-            let config_value = opencode_mcp_config(config)?;
-            let body = json!({ "name": name, "config": config_value });
-            let response = self.http_client.post(&url).json(&body).send().await;
-            let response = response.map_err(|err| SandboxError::StreamError {
-                message: err.to_string(),
-            })?;
-            if !response.status().is_success() {
-                return Err(SandboxError::StreamError {
-                    message: format!("OpenCode MCP add failed: {}", response.status()),
-                });
-            }
-        }
-        Ok(())
-    }
-
-    async fn send_opencode_prompt(
-        &self,
-        session: &SessionSnapshot,
-        prompt: &str,
-        attachments: &[MessageAttachment],
-    ) -> Result<(), SandboxError> {
-        let base_url = self.ensure_opencode_server().await?;
-        let session_id =
-            session
-                .native_session_id
-                .as_ref()
-                .ok_or_else(|| SandboxError::InvalidRequest {
-                    message: "missing OpenCode session id".to_string(),
-                })?;
-        let url = format!("{base_url}/session/{session_id}/prompt");
-        let mut parts = vec![json!({ "type": "text", "text": prompt })];
-        for attachment in attachments {
-            parts.push(opencode_file_part_input(attachment));
-        }
-        let mut body = json!({
-            "agent": session.agent_mode.clone(),
-            "parts": parts
-        });
-        if let Some(model) = session.model.as_deref() {
-            if let Some((provider, model_id)) = model.split_once('/') {
-                body["model"] = json!({
-                    "providerID": provider,
-                    "modelID": model_id
-                });
-            } else {
-                body["model"] = json!({ "modelID": model });
-            }
-        }
-        if let Some(variant) = session.variant.as_deref() {
-            body["variant"] = json!(variant);
-        }
-
-        let response = self
-            .http_client
-            .post(url)
-            .json(&body)
-            .send()
-            .await
-            .map_err(|err| SandboxError::StreamError {
-                message: err.to_string(),
-            })?;
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            return Err(SandboxError::StreamError {
-                message: format!("OpenCode prompt failed {status}: {body}"),
-            });
-        }
-
-        Ok(())
-    }
-
-    async fn opencode_question_reply(
-        &self,
-        _session_id: &str,
-        request_id: &str,
-        answers: Vec<Vec<String>>,
-    ) -> Result<(), SandboxError> {
-        let base_url = self.ensure_opencode_server().await?;
-        let url = format!("{base_url}/question/reply");
-        let response = self
-            .http_client
-            .post(url)
-            .json(&json!({
-                "requestID": request_id,
-                "answers": answers
-            }))
-            .send()
-            .await
-            .map_err(|err| SandboxError::StreamError {
-                message: err.to_string(),
-            })?;
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            return Err(SandboxError::StreamError {
-                message: format!("OpenCode question reply failed {status}: {body}"),
-            });
-        }
-        Ok(())
-    }
-
-    async fn opencode_question_reject(
-        &self,
-        _session_id: &str,
-        request_id: &str,
-    ) -> Result<(), SandboxError> {
-        let base_url = self.ensure_opencode_server().await?;
-        let url = format!("{base_url}/question/reject");
-        let response = self
-            .http_client
-            .post(url)
-            .json(&json!({ "requestID": request_id }))
-            .send()
-            .await
-            .map_err(|err| SandboxError::StreamError {
-                message: err.to_string(),
-            })?;
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            return Err(SandboxError::StreamError {
-                message: format!("OpenCode question reject failed {status}: {body}"),
-            });
-        }
-        Ok(())
-    }
-
-    async fn opencode_permission_reply(
-        &self,
-        _session_id: &str,
-        request_id: &str,
-        reply: PermissionReply,
-    ) -> Result<(), SandboxError> {
-        let base_url = self.ensure_opencode_server().await?;
-        let url = format!("{base_url}/permission/reply");
-        let response = self
-            .http_client
-            .post(url)
-            .json(&json!({
-                "requestID": request_id,
-                "reply": reply
-            }))
-            .send()
-            .await
-            .map_err(|err| SandboxError::StreamError {
-                message: err.to_string(),
-            })?;
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            return Err(SandboxError::StreamError {
-                message: format!("OpenCode permission reply failed {status}: {body}"),
-            });
-        }
-        Ok(())
+            .into_response()
     }
 }
 
-async fn require_token(
-    State(state): State<Arc<AppState>>,
-    req: Request<axum::body::Body>,
-    next: Next,
-) -> Result<Response, ApiError> {
-    let path = req.uri().path();
-    if path == "/v1/health" || path == "/health" {
-        return Ok(next.run(req).await);
-    }
-
-    let expected = match &state.auth.token {
-        Some(token) => token.as_str(),
-        None => return Ok(next.run(req).await),
-    };
-
-    let provided = extract_token(req.headers());
-    if provided.as_deref() == Some(expected) {
-        Ok(next.run(req).await)
-    } else {
-        Err(SandboxError::TokenInvalid {
-            message: Some("missing or invalid token".to_string()),
-        }
-        .into())
-    }
-}
-
-fn extract_token(headers: &HeaderMap) -> Option<String> {
-    if let Some(value) = headers.get(axum::http::header::AUTHORIZATION) {
-        if let Ok(value) = value.to_str() {
-            let value = value.trim();
-            if let Some((scheme, rest)) = value.split_once(' ') {
-                let scheme_lower = scheme.to_ascii_lowercase();
-                let rest = rest.trim();
-                match scheme_lower.as_str() {
-                    "bearer" | "token" => {
-                        return Some(rest.to_string());
-                    }
-                    "basic" => {
-                        let engines = [
-                            base64::engine::general_purpose::STANDARD,
-                            base64::engine::general_purpose::STANDARD_NO_PAD,
-                            base64::engine::general_purpose::URL_SAFE,
-                            base64::engine::general_purpose::URL_SAFE_NO_PAD,
-                        ];
-                        for engine in engines {
-                            if let Ok(decoded) = engine.decode(rest) {
-                                if let Ok(decoded_str) = String::from_utf8(decoded) {
-                                    if let Some((_, password)) = decoded_str.split_once(':') {
-                                        return Some(password.to_string());
-                                    }
-                                    if !decoded_str.is_empty() {
-                                        return Some(decoded_str);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-    }
-
-    None
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentInstallRequest {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reinstall: Option<bool>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentModeInfo {
-    pub id: String,
-    pub name: String,
-    pub description: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentModelInfo {
-    pub id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub variants: Option<Vec<String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub default_variant: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentModelsResponse {
-    pub models: Vec<AgentModelInfo>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub default_model: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentModesResponse {
-    pub modes: Vec<AgentModeInfo>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentCapabilities {
-    // TODO: add agent-agnostic tests that cover every capability flag here.
-    pub plan_mode: bool,
-    pub permissions: bool,
-    pub questions: bool,
-    pub tool_calls: bool,
-    pub tool_results: bool,
-    pub text_messages: bool,
-    pub images: bool,
-    pub file_attachments: bool,
-    pub session_lifecycle: bool,
-    pub error_events: bool,
-    pub reasoning: bool,
-    pub status: bool,
-    pub command_execution: bool,
-    pub file_changes: bool,
-    pub mcp_tools: bool,
-    pub streaming_deltas: bool,
-    pub item_started: bool,
-    /// Whether this agent supports thinking/variant modes
-    #[serde(default)]
-    pub variants: bool,
-    /// Whether this agent uses a shared long-running server process (vs per-turn subprocess)
-    pub shared_process: bool,
-}
-
-/// Status of a shared server process for an agent
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum ServerStatus {
-    /// Server is running and accepting requests
-    Running,
-    /// Server is not currently running
-    Stopped,
-    /// Server is running but unhealthy
-    Error,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct ServerStatusInfo {
-    pub status: ServerStatus,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub base_url: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub uptime_ms: Option<u64>,
-    pub restart_count: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_error: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentInfo {
-    pub id: String,
-    pub installed: bool,
-    /// Whether the agent's required provider credentials are available
-    pub credentials_available: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub version: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub path: Option<String>,
-    pub capabilities: AgentCapabilities,
-    /// Status of the shared server process (only present for agents with shared_process=true)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub server_status: Option<ServerStatusInfo>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentListResponse {
-    pub agents: Vec<AgentInfo>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct SessionInfo {
-    pub session_id: String,
-    pub agent: String,
-    pub agent_mode: String,
-    pub permission_mode: String,
-    pub model: Option<String>,
-    pub variant: Option<String>,
-    pub native_session_id: Option<String>,
-    pub ended: bool,
-    pub event_count: u64,
-    pub created_at: i64,
-    pub updated_at: i64,
-    pub directory: Option<String>,
-    pub title: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub mcp: Option<BTreeMap<String, McpServerConfig>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub skills: Option<SkillsConfig>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
-pub struct SessionListResponse {
-    pub sessions: Vec<SessionInfo>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct HealthResponse {
-    pub status: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct FsPathQuery {
-    pub path: String,
-    #[serde(default, skip_serializing_if = "Option::is_none", alias = "session_id")]
-    pub session_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct FsEntriesQuery {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub path: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none", alias = "session_id")]
-    pub session_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct FsSessionQuery {
-    #[serde(default, skip_serializing_if = "Option::is_none", alias = "session_id")]
-    pub session_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct FsDeleteQuery {
-    pub path: String,
-    #[serde(default, skip_serializing_if = "Option::is_none", alias = "session_id")]
-    pub session_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub recursive: Option<bool>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct FsUploadBatchQuery {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub path: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none", alias = "session_id")]
-    pub session_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum FsEntryType {
-    File,
-    Directory,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct FsEntry {
-    pub name: String,
-    pub path: String,
-    pub entry_type: FsEntryType,
-    pub size: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub modified: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct FsStat {
-    pub path: String,
-    pub entry_type: FsEntryType,
-    pub size: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub modified: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct FsWriteResponse {
-    pub path: String,
-    pub bytes_written: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct FsMoveRequest {
-    pub from: String,
-    pub to: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub overwrite: Option<bool>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct FsMoveResponse {
-    pub from: String,
-    pub to: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct FsActionResponse {
-    pub path: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct FsUploadBatchResponse {
-    pub paths: Vec<String>,
-    pub truncated: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct SkillsConfig {
-    pub sources: Vec<SkillSource>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct SkillSource {
-    #[serde(rename = "type")]
-    pub source_type: String,
-    pub source: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub skills: Option<Vec<String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none", rename = "ref")]
-    pub git_ref: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub subpath: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
-#[serde(untagged)]
-pub enum McpCommand {
-    Command(String),
-    CommandWithArgs(Vec<String>),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum McpRemoteTransport {
-    Http,
-    Sse,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct McpOAuthConfig {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub client_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub client_secret: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub scope: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
-#[serde(untagged)]
-pub enum McpOAuthConfigOrDisabled {
-    Config(McpOAuthConfig),
-    Disabled(bool),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
-#[serde(rename_all = "camelCase", tag = "type")]
-pub enum McpServerConfig {
-    #[serde(rename = "local", alias = "stdio")]
-    Local {
-        command: McpCommand,
-        #[serde(default)]
-        args: Vec<String>,
-        #[serde(
-            default,
-            skip_serializing_if = "Option::is_none",
-            alias = "environment"
-        )]
-        env: Option<BTreeMap<String, String>>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        enabled: Option<bool>,
-        #[serde(
-            default,
-            skip_serializing_if = "Option::is_none",
-            rename = "timeoutMs",
-            alias = "timeout"
-        )]
-        #[schema(rename = "timeoutMs")]
-        timeout_ms: Option<u64>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        cwd: Option<String>,
-    },
-    #[serde(rename = "remote", alias = "http")]
-    Remote {
-        url: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        headers: Option<BTreeMap<String, String>>,
-        #[serde(
-            default,
-            skip_serializing_if = "Option::is_none",
-            rename = "bearerTokenEnvVar",
-            alias = "bearerTokenEnvVar",
-            alias = "bearer_token_env_var"
-        )]
-        #[schema(rename = "bearerTokenEnvVar")]
-        bearer_token_env_var: Option<String>,
-        #[serde(
-            default,
-            skip_serializing_if = "Option::is_none",
-            rename = "envHeaders",
-            alias = "envHttpHeaders",
-            alias = "env_http_headers"
-        )]
-        #[schema(rename = "envHeaders")]
-        env_headers: Option<BTreeMap<String, String>>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        oauth: Option<McpOAuthConfigOrDisabled>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        enabled: Option<bool>,
-        #[serde(
-            default,
-            skip_serializing_if = "Option::is_none",
-            rename = "timeoutMs",
-            alias = "timeout"
-        )]
-        #[schema(rename = "timeoutMs")]
-        timeout_ms: Option<u64>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        transport: Option<McpRemoteTransport>,
-    },
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct CreateSessionRequest {
-    pub agent: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub agent_mode: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub permission_mode: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub variant: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub agent_version: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub directory: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub title: Option<String>,
-    pub mcp: Option<BTreeMap<String, McpServerConfig>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub skills: Option<SkillsConfig>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct CreateSessionResponse {
-    pub healthy: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub error: Option<AgentError>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub native_session_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct MessageRequest {
-    pub message: String,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub attachments: Vec<MessageAttachment>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct MessageAttachment {
-    pub path: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub mime: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub filename: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct EventsQuery {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub offset: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub limit: Option<u64>,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        alias = "include_raw"
-    )]
-    pub include_raw: Option<bool>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct TurnStreamQuery {
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        alias = "include_raw"
-    )]
-    pub include_raw: Option<bool>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct EventsResponse {
-    pub events: Vec<UniversalEvent>,
-    pub has_more: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct QuestionReplyRequest {
-    pub answers: Vec<Vec<String>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct PermissionReplyRequest {
-    pub reply: PermissionReply,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum PermissionReply {
-    Once,
-    Always,
-    Reject,
-}
-
-impl std::str::FromStr for PermissionReply {
-    type Err = String;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value.to_ascii_lowercase().as_str() {
-            "once" => Ok(Self::Once),
-            "always" => Ok(Self::Always),
-            "reject" => Ok(Self::Reject),
-            _ => Err(format!("invalid permission reply: {value}")),
-        }
-    }
-}
-
-#[utoipa::path(
-    post,
-    path = "/v1/agents/{agent}/install",
-    request_body = AgentInstallRequest,
-    responses(
-        (status = 204, description = "Agent installed"),
-        (status = 400, description = "Invalid request", body = ProblemDetails),
-        (status = 404, description = "Agent not found", body = ProblemDetails),
-        (status = 500, description = "Installation failed", body = ProblemDetails)
-    ),
-    params(("agent" = String, Path, description = "Agent id")),
-    tag = "agents"
-)]
-/// Install Agent
-///
-/// Installs or updates a coding agent (e.g. claude, codex, opencode, amp).
-async fn install_agent(
-    State(state): State<Arc<AppState>>,
-    Path(agent): Path<String>,
-    Json(request): Json<AgentInstallRequest>,
-) -> Result<StatusCode, ApiError> {
-    let agent_id = parse_agent_id(&agent)?;
-    let reinstall = request.reinstall.unwrap_or(false);
-    let manager = state.agent_manager.clone();
-
-    let result = tokio::task::spawn_blocking(move || {
-        manager.install(
-            agent_id,
-            InstallOptions {
-                reinstall,
-                version: None,
-            },
-        )
-    })
-    .await
-    .map_err(|err| SandboxError::InstallFailed {
-        agent: agent.clone(),
-        stderr: Some(err.to_string()),
-    })?;
-
-    result.map_err(|err| map_install_error(agent_id, err))?;
-    Ok(StatusCode::NO_CONTENT)
-}
-
-#[utoipa::path(
-    get,
-    path = "/v1/agents/{agent}/modes",
-    responses(
-        (status = 200, description = "Available modes", body = AgentModesResponse),
-        (status = 400, description = "Invalid request", body = ProblemDetails)
-    ),
-    params(("agent" = String, Path, description = "Agent id")),
-    tag = "agents"
-)]
-/// List Agent Modes
-///
-/// Returns the available interaction modes for an agent.
-async fn get_agent_modes(
-    State(state): State<Arc<AppState>>,
-    Path(agent): Path<String>,
-) -> Result<Json<AgentModesResponse>, ApiError> {
-    let agent_id = parse_agent_id(&agent)?;
-    let modes = state.session_manager.agent_modes(agent_id).await?;
-    Ok(Json(AgentModesResponse { modes }))
-}
-
-#[utoipa::path(
-    get,
-    path = "/v1/agents/{agent}/models",
-    responses(
-        (status = 200, description = "Available models", body = AgentModelsResponse),
-        (status = 404, description = "Agent not found", body = ProblemDetails)
-    ),
-    params(("agent" = String, Path, description = "Agent id")),
-    tag = "agents"
-)]
-/// List Agent Models
-///
-/// Returns the available LLM models for an agent.
-async fn get_agent_models(
-    State(state): State<Arc<AppState>>,
-    Path(agent): Path<String>,
-) -> Result<Json<AgentModelsResponse>, ApiError> {
-    let agent_id = parse_agent_id(&agent)?;
-    let models = state.session_manager.agent_models(agent_id).await?;
-    Ok(Json(models))
-}
-
-const SERVER_INFO: &str = "\
-This is a Sandbox Agent server. Available endpoints:\n\
-  - GET  /           - Server info\n\
-  - GET  /v1/health  - Health check\n\
-  - GET  /ui/        - Inspector UI\n\n\
-See https://sandboxagent.dev for API documentation.";
-
-async fn get_root() -> &'static str {
-    SERVER_INFO
-}
-
-async fn not_found() -> (StatusCode, String) {
-    (
-        StatusCode::NOT_FOUND,
-        format!("404 Not Found\n\n{SERVER_INFO}"),
-    )
+async fn get_root() -> Json<Value> {
+    Json(json!({
+        "name": "Sandbox Agent",
+        "docs": "https://sandboxagent.dev"
+    }))
 }
 
 #[utoipa::path(
     get,
     path = "/v1/health",
-    responses((status = 200, description = "Server is healthy", body = HealthResponse)),
-    tag = "meta"
+    tag = "v1",
+    responses(
+        (status = 200, description = "Service health response", body = HealthResponse)
+    )
 )]
-/// Health Check
-///
-/// Returns the server health status.
-async fn get_health() -> Json<HealthResponse> {
+async fn get_v1_health() -> Json<HealthResponse> {
     Json(HealthResponse {
         status: "ok".to_string(),
     })
@@ -6178,394 +403,385 @@ async fn get_health() -> Json<HealthResponse> {
 #[utoipa::path(
     get,
     path = "/v1/agents",
-    responses((status = 200, description = "List of available agents", body = AgentListResponse)),
-    tag = "agents"
+    tag = "v1",
+    params(
+        ("config" = Option<bool>, Query, description = "When true, include version/path/configOptions (slower)"),
+        ("no_cache" = Option<bool>, Query, description = "When true, bypass version cache")
+    ),
+    responses(
+        (status = 200, description = "List of v1 agents", body = AgentListResponse),
+        (status = 401, description = "Authentication required", body = ProblemDetails)
+    )
 )]
-/// List Agents
-///
-/// Returns all available coding agents and their installation status.
-async fn list_agents(
+async fn get_v1_agents(
     State(state): State<Arc<AppState>>,
+    Query(query): Query<AgentsQuery>,
 ) -> Result<Json<AgentListResponse>, ApiError> {
-    let manager = state.agent_manager.clone();
-    let server_statuses = state.session_manager.server_manager.status_snapshot().await;
+    let credentials = tokio::task::spawn_blocking(move || {
+        extract_all_credentials(&CredentialExtractionOptions::new())
+    })
+    .await
+    .map_err(|err| SandboxError::StreamError {
+        message: format!("failed to resolve credentials: {err}"),
+    })?;
 
-    let agents =
-        tokio::task::spawn_blocking(move || {
-            let credentials = extract_all_credentials(&CredentialExtractionOptions::new());
-            let has_anthropic = credentials.anthropic.is_some();
-            let has_openai = credentials.openai.is_some();
+    let has_anthropic = credentials.anthropic.is_some();
+    let has_openai = credentials.openai.is_some();
 
-            all_agents()
-                .into_iter()
-                .map(|agent_id| {
-                    let installed = manager.is_installed(agent_id);
-                    let version = manager.version(agent_id).ok().flatten();
-                    let path = manager.resolve_binary(agent_id).ok();
-                    let capabilities = agent_capabilities_for(agent_id);
+    let instances = state.acp_proxy().list_instances().await;
+    let mut active_by_agent = HashMap::<AgentId, Vec<i64>>::new();
+    for instance in instances {
+        active_by_agent
+            .entry(instance.agent)
+            .or_default()
+            .push(instance.created_at_ms);
+    }
 
-                    let credentials_available = match agent_id {
-                        AgentId::Claude | AgentId::Amp => has_anthropic,
-                        AgentId::Codex => has_openai,
-                        AgentId::Opencode => has_anthropic || has_openai,
-                        AgentId::Pi => true,
-                        AgentId::Cursor => true,
-                        AgentId::Mock => true,
-                    };
+    let load_config = query.config.unwrap_or(false);
+    let no_cache = query.no_cache.unwrap_or(false);
 
-                    // Add server_status for agents with shared processes
-                    let server_status =
-                        if capabilities.shared_process {
-                            Some(server_statuses.get(&agent_id).cloned().unwrap_or(
-                                ServerStatusInfo {
-                                    status: ServerStatus::Stopped,
-                                    base_url: None,
-                                    uptime_ms: None,
-                                    restart_count: 0,
-                                    last_error: None,
-                                },
-                            ))
-                        } else {
-                            None
-                        };
+    let mut agents = Vec::new();
+    for agent_id in AgentId::all().iter().copied() {
+        let capabilities = agent_capabilities_for(agent_id);
+        let installed = state.agent_manager().is_installed(agent_id);
+        let credentials_available = credentials_available_for(agent_id, has_anthropic, has_openai);
 
-                    AgentInfo {
-                        id: agent_id.as_str().to_string(),
-                        installed,
-                        credentials_available,
-                        version,
-                        path: path.map(|path| path.to_string_lossy().to_string()),
-                        capabilities,
-                        server_status,
+        let server_status = active_by_agent.get(&agent_id).map(|created_times| {
+            let uptime_ms = created_times
+                .iter()
+                .min()
+                .map(|created| now_ms().saturating_sub(*created) as u64);
+            ServerStatusInfo {
+                status: if created_times.is_empty() {
+                    ServerStatus::Stopped
+                } else {
+                    ServerStatus::Running
+                },
+                uptime_ms,
+            }
+        });
+
+        agents.push(AgentInfo {
+            id: agent_id.as_str().to_string(),
+            installed,
+            credentials_available,
+            version: None,
+            path: None,
+            capabilities,
+            server_status,
+            config_options: None,
+            config_error: None,
+        });
+    }
+
+    if load_config {
+        // Resolve versions/paths (slow — subprocess calls) with caching.
+        // Collect agents that need a fresh lookup.
+        let need_lookup: Vec<(usize, AgentId)> = agents
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, agent)| {
+                let agent_id = AgentId::parse(&agent.id)?;
+                if !no_cache {
+                    if state.version_cache.lock().unwrap().contains_key(&agent_id) {
+                        return None;
                     }
-                })
-                .collect::<Vec<_>>()
-        })
-        .await
-        .map_err(|err| SandboxError::StreamError {
-            message: err.to_string(),
-        })?;
+                }
+                Some((idx, agent_id))
+            })
+            .collect();
+
+        if !need_lookup.is_empty() {
+            let mgr = state.agent_manager();
+            let ids: Vec<AgentId> = need_lookup.iter().map(|(_, id)| *id).collect();
+            let results = tokio::task::spawn_blocking(move || {
+                ids.iter()
+                    .map(|agent_id| {
+                        let version = mgr.version(*agent_id).ok().flatten();
+                        let path = mgr
+                            .resolve_binary(*agent_id)
+                            .ok()
+                            .map(|p| p.to_string_lossy().to_string());
+                        (*agent_id, CachedAgentVersion { version, path })
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .await
+            .unwrap_or_default();
+
+            let mut cache = state.version_cache.lock().unwrap();
+            for (agent_id, entry) in results {
+                cache.insert(agent_id, entry);
+            }
+        }
+
+        // Apply cached version/path + hardcoded config options
+        let cache = state.version_cache.lock().unwrap();
+        for agent in &mut agents {
+            let Some(agent_id) = AgentId::parse(&agent.id) else {
+                continue;
+            };
+            if let Some(cached) = cache.get(&agent_id) {
+                agent.version = cached.version.clone();
+                agent.path = cached.path.clone();
+            }
+            let fallback = fallback_config_options(agent_id);
+            if !fallback.is_empty() {
+                agent.config_options = Some(fallback);
+            }
+        }
+    }
 
     Ok(Json(AgentListResponse { agents }))
 }
 
 #[utoipa::path(
     get,
-    path = "/v1/sessions",
-    responses((status = 200, description = "List of active sessions", body = SessionListResponse)),
-    tag = "sessions"
+    path = "/v1/agents/{agent}",
+    tag = "v1",
+    params(
+        ("agent" = String, Path, description = "Agent id"),
+        ("config" = Option<bool>, Query, description = "When true, include version/path/configOptions (slower)"),
+        ("no_cache" = Option<bool>, Query, description = "When true, bypass version cache")
+    ),
+    responses(
+        (status = 200, description = "Agent info", body = AgentInfo),
+        (status = 400, description = "Unknown agent", body = ProblemDetails),
+        (status = 401, description = "Authentication required", body = ProblemDetails)
+    )
 )]
-/// List Sessions
-///
-/// Returns all active sessions.
-async fn list_sessions(
+async fn get_v1_agent(
     State(state): State<Arc<AppState>>,
-) -> Result<Json<SessionListResponse>, ApiError> {
-    let sessions = state.session_manager.list_sessions().await;
-    Ok(Json(SessionListResponse { sessions }))
+    Path(agent): Path<String>,
+    Query(query): Query<AgentsQuery>,
+) -> Result<Json<AgentInfo>, ApiError> {
+    let agent_id = AgentId::parse(&agent).ok_or_else(|| SandboxError::UnsupportedAgent {
+        agent: agent.clone(),
+    })?;
+
+    let credentials = tokio::task::spawn_blocking(move || {
+        extract_all_credentials(&CredentialExtractionOptions::new())
+    })
+    .await
+    .map_err(|err| SandboxError::StreamError {
+        message: format!("failed to resolve credentials: {err}"),
+    })?;
+
+    let has_anthropic = credentials.anthropic.is_some();
+    let has_openai = credentials.openai.is_some();
+
+    let instances = state.acp_proxy().list_instances().await;
+    let created_times: Vec<i64> = instances
+        .iter()
+        .filter(|i| i.agent == agent_id)
+        .map(|i| i.created_at_ms)
+        .collect();
+
+    let capabilities = agent_capabilities_for(agent_id);
+    let installed = state.agent_manager().is_installed(agent_id);
+    let credentials_available = credentials_available_for(agent_id, has_anthropic, has_openai);
+
+    let server_status = if created_times.is_empty() {
+        None
+    } else {
+        let uptime_ms = created_times
+            .iter()
+            .min()
+            .map(|created| now_ms().saturating_sub(*created) as u64);
+        Some(ServerStatusInfo {
+            status: ServerStatus::Running,
+            uptime_ms,
+        })
+    };
+
+    let mut info = AgentInfo {
+        id: agent_id.as_str().to_string(),
+        installed,
+        credentials_available,
+        version: None,
+        path: None,
+        capabilities,
+        server_status,
+        config_options: None,
+        config_error: None,
+    };
+
+    if query.config.unwrap_or(false) {
+        let no_cache = query.no_cache.unwrap_or(false);
+
+        // Version/path (cached, slow — subprocess calls)
+        let cached = if !no_cache {
+            state.version_cache.lock().unwrap().get(&agent_id).cloned()
+        } else {
+            None
+        };
+        if let Some(cached) = cached {
+            info.version = cached.version;
+            info.path = cached.path;
+        } else {
+            let mgr = state.agent_manager();
+            let aid = agent_id;
+            let result = tokio::task::spawn_blocking(move || {
+                let version = mgr.version(aid).ok().flatten();
+                let path = mgr
+                    .resolve_binary(aid)
+                    .ok()
+                    .map(|p| p.to_string_lossy().to_string());
+                CachedAgentVersion { version, path }
+            })
+            .await
+            .unwrap_or(CachedAgentVersion {
+                version: None,
+                path: None,
+            });
+            info.version = result.version.clone();
+            info.path = result.path.clone();
+            state.version_cache.lock().unwrap().insert(agent_id, result);
+        }
+
+        // Hardcoded config options
+        let fallback = fallback_config_options(agent_id);
+        if !fallback.is_empty() {
+            info.config_options = Some(fallback);
+        }
+    }
+
+    Ok(Json(info))
 }
+
+// TODO: Re-enable ACP config probing once agent processes reliably return
+// configOptions from session/new. Currently all agents return empty configOptions,
+// so we use hardcoded fallbacks in fallback_config_options() instead.
+//
+// const CONFIG_PROBE_TIMEOUT: Duration = Duration::from_secs(15);
+//
+// async fn probe_agent_config(
+//     proxy: &Arc<AcpProxyRuntime>,
+//     agent_id: &str,
+// ) -> Result<Vec<Value>, String> {
+//     let probe_id = PROBE_COUNTER.fetch_add(1, Ordering::Relaxed);
+//     let server_id = format!("_config_probe_{}_{}", agent_id, probe_id);
+//
+//     let agent = AgentId::parse(agent_id).ok_or_else(|| format!("unknown agent: {agent_id}"))?;
+//
+//     let result = tokio::time::timeout(CONFIG_PROBE_TIMEOUT, async {
+//         let init_payload = json!({
+//             "jsonrpc": "2.0",
+//             "id": 1,
+//             "method": "initialize",
+//             "params": {
+//                 "protocolVersion": 1,
+//                 "clientCapabilities": {},
+//                 "clientInfo": { "name": "sandbox-agent", "version": "1.0.0" }
+//             }
+//         });
+//         proxy
+//             .post(&server_id, Some(agent), init_payload)
+//             .await
+//             .map_err(|e| format!("initialize failed: {e}"))?;
+//
+//         let session_payload = json!({
+//             "jsonrpc": "2.0",
+//             "id": 2,
+//             "method": "session/new",
+//             "params": {
+//                 "cwd": "/",
+//                 "_meta": { "sandboxagent.dev": { "agent": agent_id } }
+//             }
+//         });
+//         let outcome = proxy
+//             .post(&server_id, None, session_payload)
+//             .await
+//             .map_err(|e| format!("session/new failed: {e}"))?;
+//
+//         let config_options = match outcome {
+//             ProxyPostOutcome::Response(value) => value
+//                 .pointer("/result/configOptions")
+//                 .cloned()
+//                 .and_then(|v| serde_json::from_value::<Vec<Value>>(v).ok())
+//                 .unwrap_or_default(),
+//             ProxyPostOutcome::Accepted => Vec::new(),
+//         };
+//
+//         Ok::<Vec<Value>, String>(config_options)
+//     })
+//     .await;
+//
+//     let _ = tokio::time::timeout(Duration::from_secs(5), proxy.delete(&server_id)).await;
+//
+//     match result {
+//         Ok(inner) => inner,
+//         Err(_) => Err("config probe timed out".to_string()),
+//     }
+// }
 
 #[utoipa::path(
     post,
-    path = "/v1/sessions/{session_id}",
-    request_body = CreateSessionRequest,
+    path = "/v1/agents/{agent}/install",
+    tag = "v1",
+    params(
+        ("agent" = String, Path, description = "Agent id")
+    ),
+    request_body = AgentInstallRequest,
     responses(
-        (status = 200, description = "Session created", body = CreateSessionResponse),
+        (status = 200, description = "Agent install result", body = AgentInstallResponse),
         (status = 400, description = "Invalid request", body = ProblemDetails),
-        (status = 409, description = "Session already exists", body = ProblemDetails)
-    ),
-    params(("session_id" = String, Path, description = "Client session id")),
-    tag = "sessions"
+        (status = 500, description = "Install failed", body = ProblemDetails)
+    )
 )]
-/// Create Session
-///
-/// Creates a new agent session with the given configuration.
-async fn create_session(
+async fn post_v1_agent_install(
     State(state): State<Arc<AppState>>,
-    Path(session_id): Path<String>,
-    Json(request): Json<CreateSessionRequest>,
-) -> Result<Json<CreateSessionResponse>, ApiError> {
-    let response = state
-        .session_manager
-        .create_session(session_id, request)
-        .await?;
-    Ok(Json(response))
-}
+    Path(agent): Path<String>,
+    Json(request): Json<AgentInstallRequest>,
+) -> Result<Json<AgentInstallResponse>, ApiError> {
+    let agent_id = AgentId::parse(&agent).ok_or_else(|| SandboxError::UnsupportedAgent {
+        agent: agent.clone(),
+    })?;
 
-#[utoipa::path(
-    post,
-    path = "/v1/sessions/{session_id}/messages",
-    request_body = MessageRequest,
-    responses(
-        (status = 204, description = "Message accepted"),
-        (status = 404, description = "Session not found", body = ProblemDetails)
-    ),
-    params(("session_id" = String, Path, description = "Session id")),
-    tag = "sessions"
-)]
-/// Send Message
-///
-/// Sends a message to a session and returns immediately.
-async fn post_message(
-    State(state): State<Arc<AppState>>,
-    Path(session_id): Path<String>,
-    Json(request): Json<MessageRequest>,
-) -> Result<StatusCode, ApiError> {
-    state
-        .session_manager
-        .send_message(session_id, request.message, request.attachments)
-        .await?;
-    Ok(StatusCode::NO_CONTENT)
-}
-
-#[utoipa::path(
-    post,
-    path = "/v1/sessions/{session_id}/messages/stream",
-    request_body = MessageRequest,
-    params(
-        ("session_id" = String, Path, description = "Session id"),
-        ("include_raw" = Option<bool>, Query, description = "Include raw provider payloads")
-    ),
-    responses(
-        (status = 200, description = "SSE event stream"),
-        (status = 404, description = "Session not found", body = ProblemDetails)
-    ),
-    tag = "sessions"
-)]
-/// Send Message (Streaming)
-///
-/// Sends a message and returns an SSE event stream of the agent's response.
-async fn post_message_stream(
-    State(state): State<Arc<AppState>>,
-    Path(session_id): Path<String>,
-    Query(query): Query<TurnStreamQuery>,
-    Json(request): Json<MessageRequest>,
-) -> Result<Sse<impl futures::Stream<Item = Result<Event, Infallible>>>, ApiError> {
-    let include_raw = query.include_raw.unwrap_or(false);
-    let (snapshot, subscription) = state
-        .session_manager
-        .subscribe_for_turn(&session_id)
-        .await?;
-    state
-        .session_manager
-        .send_message(session_id, request.message, request.attachments)
-        .await?;
-    let stream = stream_turn_events(subscription, snapshot.agent, include_raw);
-    Ok(Sse::new(stream))
-}
-
-#[utoipa::path(
-    post,
-    path = "/v1/sessions/{session_id}/terminate",
-    params(("session_id" = String, Path, description = "Session id")),
-    responses(
-        (status = 204, description = "Session terminated"),
-        (status = 404, description = "Session not found", body = ProblemDetails)
-    ),
-    tag = "sessions"
-)]
-/// Terminate Session
-///
-/// Terminates a running session and cleans up resources.
-async fn terminate_session(
-    State(state): State<Arc<AppState>>,
-    Path(session_id): Path<String>,
-) -> Result<StatusCode, ApiError> {
-    state.session_manager.terminate_session(session_id).await?;
-    Ok(StatusCode::NO_CONTENT)
-}
-
-#[utoipa::path(
-    get,
-    path = "/v1/sessions/{session_id}/events",
-    params(
-        ("session_id" = String, Path, description = "Session id"),
-        ("offset" = Option<u64>, Query, description = "Last seen event sequence (exclusive)"),
-        ("limit" = Option<u64>, Query, description = "Max events to return"),
-        ("include_raw" = Option<bool>, Query, description = "Include raw provider payloads")
-    ),
-    responses(
-        (status = 200, description = "Session events", body = EventsResponse),
-        (status = 404, description = "Session not found", body = ProblemDetails)
-    ),
-    tag = "sessions"
-)]
-/// Get Events
-///
-/// Returns session events with optional offset-based pagination.
-async fn get_events(
-    State(state): State<Arc<AppState>>,
-    Path(session_id): Path<String>,
-    Query(query): Query<EventsQuery>,
-) -> Result<Json<EventsResponse>, ApiError> {
-    let offset = query.offset.unwrap_or(0);
-    let response = state
-        .session_manager
-        .events(
-            &session_id,
-            offset,
-            query.limit,
-            query.include_raw.unwrap_or(false),
+    let manager = state.agent_manager();
+    let reinstall = request.reinstall.unwrap_or(false);
+    let install_result = tokio::task::spawn_blocking(move || {
+        manager.install(
+            agent_id,
+            InstallOptions {
+                reinstall,
+                version: request.agent_version,
+                agent_process_version: request.agent_process_version,
+            },
         )
-        .await?;
-    Ok(Json(response))
-}
+    })
+    .await
+    .map_err(|err| SandboxError::InstallFailed {
+        agent,
+        stderr: Some(format!("installer task failed: {err}")),
+    })?
+    .map_err(|err| SandboxError::InstallFailed {
+        agent: agent_id.as_str().to_string(),
+        stderr: Some(err.to_string()),
+    })?;
 
-#[utoipa::path(
-    get,
-    path = "/v1/sessions/{session_id}/events/sse",
-    params(
-        ("session_id" = String, Path, description = "Session id"),
-        ("offset" = Option<u64>, Query, description = "Last seen event sequence (exclusive)"),
-        ("include_raw" = Option<bool>, Query, description = "Include raw provider payloads")
-    ),
-    responses((status = 200, description = "SSE event stream")),
-    tag = "sessions"
-)]
-/// Subscribe to Events (SSE)
-///
-/// Opens an SSE stream for real-time session events.
-async fn get_events_sse(
-    State(state): State<Arc<AppState>>,
-    Path(session_id): Path<String>,
-    Query(query): Query<EventsQuery>,
-) -> Result<Sse<impl futures::Stream<Item = Result<Event, Infallible>>>, ApiError> {
-    let offset = query.offset.unwrap_or(0);
-    let include_raw = query.include_raw.unwrap_or(false);
-    let subscription = state.session_manager.subscribe(&session_id, offset).await?;
-    let initial_events = subscription.initial_events;
-    let receiver = subscription.receiver;
+    // Purge version cache so next ?config=true picks up the new version
+    state.purge_version_cache(agent_id);
 
-    let initial_stream = stream::iter(initial_events.into_iter().map(move |mut event| {
-        if !include_raw {
-            event.raw = None;
-        }
-        Ok::<Event, Infallible>(to_sse_event(event))
-    }));
-
-    let live_stream = BroadcastStream::new(receiver).filter_map(move |result| {
-        let include_raw = include_raw;
-        async move {
-            match result {
-                Ok(mut event) => {
-                    if !include_raw {
-                        event.raw = None;
-                    }
-                    Some(Ok::<Event, Infallible>(to_sse_event(event)))
-                }
-                Err(_) => None,
-            }
-        }
-    });
-
-    let stream = initial_stream.chain(live_stream);
-    Ok(Sse::new(stream))
-}
-
-#[utoipa::path(
-    post,
-    path = "/v1/sessions/{session_id}/questions/{question_id}/reply",
-    request_body = QuestionReplyRequest,
-    responses(
-        (status = 204, description = "Question answered"),
-        (status = 404, description = "Session or question not found", body = ProblemDetails)
-    ),
-    params(
-        ("session_id" = String, Path, description = "Session id"),
-        ("question_id" = String, Path, description = "Question id")
-    ),
-    tag = "sessions"
-)]
-/// Reply to Question
-///
-/// Replies to a human-in-the-loop question from the agent.
-async fn reply_question(
-    State(state): State<Arc<AppState>>,
-    Path((session_id, question_id)): Path<(String, String)>,
-    Json(request): Json<QuestionReplyRequest>,
-) -> Result<StatusCode, ApiError> {
-    state
-        .session_manager
-        .reply_question(&session_id, &question_id, request.answers)
-        .await?;
-    Ok(StatusCode::NO_CONTENT)
-}
-
-#[utoipa::path(
-    post,
-    path = "/v1/sessions/{session_id}/questions/{question_id}/reject",
-    responses(
-        (status = 204, description = "Question rejected"),
-        (status = 404, description = "Session or question not found", body = ProblemDetails)
-    ),
-    params(
-        ("session_id" = String, Path, description = "Session id"),
-        ("question_id" = String, Path, description = "Question id")
-    ),
-    tag = "sessions"
-)]
-/// Reject Question
-///
-/// Rejects a human-in-the-loop question from the agent.
-async fn reject_question(
-    State(state): State<Arc<AppState>>,
-    Path((session_id, question_id)): Path<(String, String)>,
-) -> Result<StatusCode, ApiError> {
-    state
-        .session_manager
-        .reject_question(&session_id, &question_id)
-        .await?;
-    Ok(StatusCode::NO_CONTENT)
-}
-
-#[utoipa::path(
-    post,
-    path = "/v1/sessions/{session_id}/permissions/{permission_id}/reply",
-    request_body = PermissionReplyRequest,
-    responses(
-        (status = 204, description = "Permission reply accepted"),
-        (status = 404, description = "Session or permission not found", body = ProblemDetails)
-    ),
-    params(
-        ("session_id" = String, Path, description = "Session id"),
-        ("permission_id" = String, Path, description = "Permission id")
-    ),
-    tag = "sessions"
-)]
-/// Reply to Permission
-///
-/// Approves or denies a permission request from the agent.
-async fn reply_permission(
-    State(state): State<Arc<AppState>>,
-    Path((session_id, permission_id)): Path<(String, String)>,
-    Json(request): Json<PermissionReplyRequest>,
-) -> Result<StatusCode, ApiError> {
-    state
-        .session_manager
-        .reply_permission(&session_id, &permission_id, request.reply)
-        .await?;
-    Ok(StatusCode::NO_CONTENT)
+    Ok(Json(map_install_result(install_result)))
 }
 
 #[utoipa::path(
     get,
     path = "/v1/fs/entries",
+    tag = "v1",
     params(
-        ("path" = Option<String>, Query, description = "Path to list (relative or absolute)"),
-        ("session_id" = Option<String>, Query, description = "Session id for relative paths")
+        ("path" = Option<String>, Query, description = "Directory path")
     ),
-    responses((status = 200, description = "Directory listing", body = Vec<FsEntry>)),
-    tag = "fs"
+    responses(
+        (status = 200, description = "Directory entries", body = Vec<FsEntry>)
+    )
 )]
-/// List Directory
-///
-/// Lists files and directories at the given path.
-async fn fs_entries(
-    State(state): State<Arc<AppState>>,
+async fn get_v1_fs_entries(
     Query(query): Query<FsEntriesQuery>,
 ) -> Result<Json<Vec<FsEntry>>, ApiError> {
     let path = query.path.unwrap_or_else(|| ".".to_string());
-    let target = resolve_fs_path(&state, query.session_id.as_deref(), &path).await?;
+    let target = resolve_fs_path(&path)?;
     let metadata = fs::metadata(&target).map_err(|err| map_fs_error(&target, err))?;
     if !metadata.is_dir() {
         return Err(SandboxError::InvalidRequest {
@@ -6573,6 +789,7 @@ async fn fs_entries(
         }
         .into());
     }
+
     let mut entries = Vec::new();
     for entry in fs::read_dir(&target).map_err(|err| map_fs_error(&target, err))? {
         let entry = entry.map_err(|err| SandboxError::StreamError {
@@ -6587,11 +804,10 @@ async fn fs_entries(
         } else {
             FsEntryType::File
         };
-        let modified = metadata.modified().ok().and_then(|time| {
-            chrono::DateTime::<chrono::Utc>::from(time)
-                .to_rfc3339()
-                .into()
-        });
+        let modified = metadata
+            .modified()
+            .ok()
+            .map(|time| chrono::DateTime::<chrono::Utc>::from(time).to_rfc3339());
         entries.push(FsEntry {
             name: entry.file_name().to_string_lossy().to_string(),
             path: path.to_string_lossy().to_string(),
@@ -6606,21 +822,16 @@ async fn fs_entries(
 #[utoipa::path(
     get,
     path = "/v1/fs/file",
+    tag = "v1",
     params(
-        ("path" = String, Query, description = "File path (relative or absolute)"),
-        ("session_id" = Option<String>, Query, description = "Session id for relative paths")
+        ("path" = String, Query, description = "File path")
     ),
-    responses((status = 200, description = "File content", body = Vec<u8>)),
-    tag = "fs"
+    responses(
+        (status = 200, description = "File content")
+    )
 )]
-/// Read File
-///
-/// Reads the raw bytes of a file.
-async fn fs_read_file(
-    State(state): State<Arc<AppState>>,
-    Query(query): Query<FsPathQuery>,
-) -> Result<Response, ApiError> {
-    let target = resolve_fs_path(&state, query.session_id.as_deref(), &query.path).await?;
+async fn get_v1_fs_file(Query(query): Query<FsPathQuery>) -> Result<Response, ApiError> {
+    let target = resolve_fs_path(&query.path)?;
     let metadata = fs::metadata(&target).map_err(|err| map_fs_error(&target, err))?;
     if !metadata.is_file() {
         return Err(SandboxError::InvalidRequest {
@@ -6639,23 +850,20 @@ async fn fs_read_file(
 #[utoipa::path(
     put,
     path = "/v1/fs/file",
-    request_body = Vec<u8>,
+    tag = "v1",
     params(
-        ("path" = String, Query, description = "File path (relative or absolute)"),
-        ("session_id" = Option<String>, Query, description = "Session id for relative paths")
+        ("path" = String, Query, description = "File path")
     ),
-    responses((status = 200, description = "Write result", body = FsWriteResponse)),
-    tag = "fs"
+    request_body(content = String, description = "Raw file bytes"),
+    responses(
+        (status = 200, description = "Write result", body = FsWriteResponse)
+    )
 )]
-/// Write File
-///
-/// Writes raw bytes to a file, creating it if it doesn't exist.
-async fn fs_write_file(
-    State(state): State<Arc<AppState>>,
+async fn put_v1_fs_file(
     Query(query): Query<FsPathQuery>,
     body: Bytes,
 ) -> Result<Json<FsWriteResponse>, ApiError> {
-    let target = resolve_fs_path(&state, query.session_id.as_deref(), &query.path).await?;
+    let target = resolve_fs_path(&query.path)?;
     if let Some(parent) = target.parent() {
         fs::create_dir_all(parent).map_err(|err| map_fs_error(parent, err))?;
     }
@@ -6669,22 +877,19 @@ async fn fs_write_file(
 #[utoipa::path(
     delete,
     path = "/v1/fs/entry",
+    tag = "v1",
     params(
         ("path" = String, Query, description = "File or directory path"),
-        ("session_id" = Option<String>, Query, description = "Session id for relative paths"),
-        ("recursive" = Option<bool>, Query, description = "Delete directories recursively")
+        ("recursive" = Option<bool>, Query, description = "Delete directory recursively")
     ),
-    responses((status = 200, description = "Delete result", body = FsActionResponse)),
-    tag = "fs"
+    responses(
+        (status = 200, description = "Delete result", body = FsActionResponse)
+    )
 )]
-/// Delete Entry
-///
-/// Deletes a file or directory.
-async fn fs_delete_entry(
-    State(state): State<Arc<AppState>>,
+async fn delete_v1_fs_entry(
     Query(query): Query<FsDeleteQuery>,
 ) -> Result<Json<FsActionResponse>, ApiError> {
-    let target = resolve_fs_path(&state, query.session_id.as_deref(), &query.path).await?;
+    let target = resolve_fs_path(&query.path)?;
     let metadata = fs::metadata(&target).map_err(|err| map_fs_error(&target, err))?;
     if metadata.is_dir() {
         if query.recursive.unwrap_or(false) {
@@ -6703,21 +908,18 @@ async fn fs_delete_entry(
 #[utoipa::path(
     post,
     path = "/v1/fs/mkdir",
+    tag = "v1",
     params(
-        ("path" = String, Query, description = "Directory path to create"),
-        ("session_id" = Option<String>, Query, description = "Session id for relative paths")
+        ("path" = String, Query, description = "Directory path")
     ),
-    responses((status = 200, description = "Directory created", body = FsActionResponse)),
-    tag = "fs"
+    responses(
+        (status = 200, description = "Directory created", body = FsActionResponse)
+    )
 )]
-/// Create Directory
-///
-/// Creates a directory, including any missing parent directories.
-async fn fs_mkdir(
-    State(state): State<Arc<AppState>>,
+async fn post_v1_fs_mkdir(
     Query(query): Query<FsPathQuery>,
 ) -> Result<Json<FsActionResponse>, ApiError> {
-    let target = resolve_fs_path(&state, query.session_id.as_deref(), &query.path).await?;
+    let target = resolve_fs_path(&query.path)?;
     fs::create_dir_all(&target).map_err(|err| map_fs_error(&target, err))?;
     Ok(Json(FsActionResponse {
         path: target.to_string_lossy().to_string(),
@@ -6727,22 +929,18 @@ async fn fs_mkdir(
 #[utoipa::path(
     post,
     path = "/v1/fs/move",
+    tag = "v1",
     request_body = FsMoveRequest,
-    params(("session_id" = Option<String>, Query, description = "Session id for relative paths")),
-    responses((status = 200, description = "Move result", body = FsMoveResponse)),
-    tag = "fs"
+    responses(
+        (status = 200, description = "Move result", body = FsMoveResponse)
+    )
 )]
-/// Move Entry
-///
-/// Moves or renames a file or directory.
-async fn fs_move(
-    State(state): State<Arc<AppState>>,
-    Query(query): Query<FsSessionQuery>,
+async fn post_v1_fs_move(
     Json(request): Json<FsMoveRequest>,
 ) -> Result<Json<FsMoveResponse>, ApiError> {
-    let session_id = query.session_id.as_deref();
-    let from = resolve_fs_path(&state, session_id, &request.from).await?;
-    let to = resolve_fs_path(&state, session_id, &request.to).await?;
+    let from = resolve_fs_path(&request.from)?;
+    let to = resolve_fs_path(&request.to)?;
+
     if to.exists() {
         if request.overwrite.unwrap_or(false) {
             let metadata = fs::metadata(&to).map_err(|err| map_fs_error(&to, err))?;
@@ -6758,6 +956,7 @@ async fn fs_move(
             .into());
         }
     }
+
     if let Some(parent) = to.parent() {
         fs::create_dir_all(parent).map_err(|err| map_fs_error(parent, err))?;
     }
@@ -6771,32 +970,26 @@ async fn fs_move(
 #[utoipa::path(
     get,
     path = "/v1/fs/stat",
+    tag = "v1",
     params(
-        ("path" = String, Query, description = "Path to stat"),
-        ("session_id" = Option<String>, Query, description = "Session id for relative paths")
+        ("path" = String, Query, description = "Path to stat")
     ),
-    responses((status = 200, description = "File metadata", body = FsStat)),
-    tag = "fs"
+    responses(
+        (status = 200, description = "Path metadata", body = FsStat)
+    )
 )]
-/// Get File Info
-///
-/// Returns metadata (size, timestamps, type) for a path.
-async fn fs_stat(
-    State(state): State<Arc<AppState>>,
-    Query(query): Query<FsPathQuery>,
-) -> Result<Json<FsStat>, ApiError> {
-    let target = resolve_fs_path(&state, query.session_id.as_deref(), &query.path).await?;
+async fn get_v1_fs_stat(Query(query): Query<FsPathQuery>) -> Result<Json<FsStat>, ApiError> {
+    let target = resolve_fs_path(&query.path)?;
     let metadata = fs::metadata(&target).map_err(|err| map_fs_error(&target, err))?;
     let entry_type = if metadata.is_dir() {
         FsEntryType::Directory
     } else {
         FsEntryType::File
     };
-    let modified = metadata.modified().ok().and_then(|time| {
-        chrono::DateTime::<chrono::Utc>::from(time)
-            .to_rfc3339()
-            .into()
-    });
+    let modified = metadata
+        .modified()
+        .ok()
+        .map(|time| chrono::DateTime::<chrono::Utc>::from(time).to_rfc3339());
     Ok(Json(FsStat {
         path: target.to_string_lossy().to_string(),
         entry_type,
@@ -6808,19 +1001,16 @@ async fn fs_stat(
 #[utoipa::path(
     post,
     path = "/v1/fs/upload-batch",
-    request_body = Vec<u8>,
+    tag = "v1",
     params(
-        ("path" = Option<String>, Query, description = "Destination directory for extraction"),
-        ("session_id" = Option<String>, Query, description = "Session id for relative paths")
+        ("path" = Option<String>, Query, description = "Destination path")
     ),
-    responses((status = 200, description = "Upload result", body = FsUploadBatchResponse)),
-    tag = "fs"
+    request_body(content = String, description = "tar archive body"),
+    responses(
+        (status = 200, description = "Upload/extract result", body = FsUploadBatchResponse)
+    )
 )]
-/// Upload Files
-///
-/// Uploads a tar.gz archive and extracts it to the destination directory.
-async fn fs_upload_batch(
-    State(state): State<Arc<AppState>>,
+async fn post_v1_fs_upload_batch(
     headers: HeaderMap,
     Query(query): Query<FsUploadBatchQuery>,
     body: Bytes,
@@ -6835,13 +1025,15 @@ async fn fs_upload_batch(
         }
         .into());
     }
+
     let path = query.path.unwrap_or_else(|| ".".to_string());
-    let base = resolve_fs_path(&state, query.session_id.as_deref(), &path).await?;
+    let base = resolve_fs_path(&path)?;
     fs::create_dir_all(&base).map_err(|err| map_fs_error(&base, err))?;
 
     let mut archive = Archive::new(Cursor::new(body));
     let mut extracted = Vec::new();
     let mut truncated = false;
+
     for entry in archive.entries().map_err(|err| SandboxError::StreamError {
         message: err.to_string(),
     })? {
@@ -6883,5080 +1075,393 @@ async fn fs_upload_batch(
     }))
 }
 
-fn all_agents() -> [AgentId; 7] {
-    [
-        AgentId::Claude,
-        AgentId::Codex,
-        AgentId::Opencode,
-        AgentId::Amp,
-        AgentId::Pi,
-        AgentId::Cursor,
-        AgentId::Mock,
-    ]
-}
-
-/// Returns true if the agent supports resuming a session after its process exits.
-/// These agents can use --resume/--continue to continue a conversation.
-fn agent_supports_resume(agent: AgentId) -> bool {
-    matches!(
-        agent,
-        AgentId::Claude | AgentId::Amp | AgentId::Opencode | AgentId::Codex | AgentId::Pi
+#[utoipa::path(
+    get,
+    path = "/v1/config/mcp",
+    tag = "v1",
+    params(
+        ("directory" = String, Query, description = "Target directory"),
+        ("mcpName" = String, Query, description = "MCP entry name")
+    ),
+    responses(
+        (status = 200, description = "MCP entry", body = McpServerConfig),
+        (status = 404, description = "Entry not found", body = ProblemDetails)
     )
+)]
+async fn get_v1_config_mcp(
+    Query(query): Query<McpConfigQuery>,
+) -> Result<Json<McpServerConfig>, ApiError> {
+    validate_named_query(&query.directory, "directory")?;
+    validate_named_query(&query.mcp_name, "mcpName")?;
+
+    let path = config_file_path(&query.directory, "mcp.json")?;
+    let entries: BTreeMap<String, McpServerConfig> = read_named_config_map(&path)?;
+    let value =
+        entries
+            .get(&query.mcp_name)
+            .cloned()
+            .ok_or_else(|| SandboxError::SessionNotFound {
+                session_id: format!("mcp:{}", query.mcp_name),
+            })?;
+    Ok(Json(value))
 }
 
-fn agent_supports_item_started(agent: AgentId) -> bool {
-    agent_capabilities_for(agent).item_started
+#[utoipa::path(
+    put,
+    path = "/v1/config/mcp",
+    tag = "v1",
+    params(
+        ("directory" = String, Query, description = "Target directory"),
+        ("mcpName" = String, Query, description = "MCP entry name")
+    ),
+    request_body = McpServerConfig,
+    responses(
+        (status = 204, description = "Stored")
+    )
+)]
+async fn put_v1_config_mcp(
+    Query(query): Query<McpConfigQuery>,
+    Json(body): Json<McpServerConfig>,
+) -> Result<StatusCode, ApiError> {
+    validate_named_query(&query.directory, "directory")?;
+    validate_named_query(&query.mcp_name, "mcpName")?;
+
+    let path = config_file_path(&query.directory, "mcp.json")?;
+    let mut entries: BTreeMap<String, McpServerConfig> = read_named_config_map(&path)?;
+    entries.insert(query.mcp_name, body);
+    write_named_config_map(&path, &entries)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
-fn agent_emits_turn_started(agent: AgentId) -> bool {
-    matches!(agent, AgentId::Codex | AgentId::Opencode)
+#[utoipa::path(
+    delete,
+    path = "/v1/config/mcp",
+    tag = "v1",
+    params(
+        ("directory" = String, Query, description = "Target directory"),
+        ("mcpName" = String, Query, description = "MCP entry name")
+    ),
+    responses(
+        (status = 204, description = "Deleted")
+    )
+)]
+async fn delete_v1_config_mcp(Query(query): Query<McpConfigQuery>) -> Result<StatusCode, ApiError> {
+    validate_named_query(&query.directory, "directory")?;
+    validate_named_query(&query.mcp_name, "mcpName")?;
+
+    let path = config_file_path(&query.directory, "mcp.json")?;
+    let mut entries: BTreeMap<String, McpServerConfig> = read_named_config_map(&path)?;
+    entries.remove(&query.mcp_name);
+    write_named_config_map(&path, &entries)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
-fn agent_capabilities_for(agent: AgentId) -> AgentCapabilities {
-    match agent {
-        // Claude CLI supports tool calls/results and permission prompts via the SDK control protocol,
-        // but we still emit synthetic item.started events.
-        AgentId::Claude => AgentCapabilities {
-            plan_mode: false,
-            permissions: true,
-            questions: true,
-            tool_calls: true,
-            tool_results: true,
-            text_messages: true,
-            images: false,
-            file_attachments: false,
-            session_lifecycle: false,
-            error_events: false,
-            reasoning: false,
-            status: false,
-            command_execution: false,
-            file_changes: false,
-            mcp_tools: true,
-            streaming_deltas: true,
-            item_started: false,
-            variants: false,
-            shared_process: false, // per-turn subprocess with --resume
-        },
-        AgentId::Codex => AgentCapabilities {
-            plan_mode: true,
-            permissions: true,
-            questions: false,
-            tool_calls: true,
-            tool_results: true,
-            text_messages: true,
-            images: true,
-            file_attachments: true,
-            session_lifecycle: true,
-            error_events: true,
-            reasoning: true,
-            status: true,
-            command_execution: true,
-            file_changes: true,
-            mcp_tools: true,
-            streaming_deltas: true,
-            item_started: true,
-            variants: false,
-            shared_process: true, // shared app-server via JSON-RPC
-        },
-        AgentId::Opencode => AgentCapabilities {
-            plan_mode: false,
-            permissions: false,
-            questions: false,
-            tool_calls: true,
-            tool_results: true,
-            text_messages: true,
-            images: true,
-            file_attachments: true,
-            session_lifecycle: true,
-            error_events: true,
-            reasoning: false,
-            status: false,
-            command_execution: false,
-            file_changes: false,
-            mcp_tools: true,
-            streaming_deltas: true,
-            item_started: true,
-            variants: false,
-            shared_process: true, // shared HTTP server
-        },
-        AgentId::Amp => AgentCapabilities {
-            plan_mode: false,
-            permissions: false,
-            questions: false,
-            tool_calls: true,
-            tool_results: true,
-            text_messages: true,
-            images: false,
-            file_attachments: false,
-            session_lifecycle: false,
-            error_events: true,
-            reasoning: false,
-            status: false,
-            command_execution: false,
-            file_changes: false,
-            mcp_tools: true,
-            streaming_deltas: false,
-            item_started: false,
-            variants: false,
-            shared_process: false, // per-turn subprocess with --continue
-        },
-        AgentId::Pi => AgentCapabilities {
-            plan_mode: false,
-            permissions: false,
-            questions: false,
-            tool_calls: true,
-            tool_results: true,
-            text_messages: true,
-            images: true,
-            file_attachments: false,
-            session_lifecycle: false,
-            error_events: true,
-            reasoning: true,
-            status: true,
-            command_execution: false,
-            file_changes: false,
-            mcp_tools: false,
-            streaming_deltas: true,
-            item_started: true,
-            variants: true,
-            shared_process: false, // one dedicated rpc process per session
-        },
-        AgentId::Cursor => AgentCapabilities {
-            plan_mode: false,
-            permissions: false,
-            questions: false,
-            tool_calls: false,
-            tool_results: false,
-            text_messages: true,
-            images: false,
-            file_attachments: false,
-            session_lifecycle: false,
-            error_events: false,
-            reasoning: false,
-            status: false,
-            command_execution: false,
-            file_changes: false,
-            mcp_tools: false,
-            streaming_deltas: false,
-            item_started: false,
-            variants: false,
-            shared_process: false,
-        },
-        AgentId::Mock => AgentCapabilities {
-            plan_mode: true,
-            permissions: true,
-            questions: true,
-            tool_calls: true,
-            tool_results: true,
-            text_messages: true,
-            images: true,
-            file_attachments: true,
-            session_lifecycle: true,
-            error_events: true,
-            reasoning: true,
-            status: true,
-            command_execution: true,
-            file_changes: true,
-            mcp_tools: true,
-            streaming_deltas: true,
-            item_started: true,
-            variants: false,
-            shared_process: false, // in-memory mock (no subprocess)
-        },
-    }
+#[utoipa::path(
+    get,
+    path = "/v1/config/skills",
+    tag = "v1",
+    params(
+        ("directory" = String, Query, description = "Target directory"),
+        ("skillName" = String, Query, description = "Skill entry name")
+    ),
+    responses(
+        (status = 200, description = "Skills entry", body = SkillsConfig),
+        (status = 404, description = "Entry not found", body = ProblemDetails)
+    )
+)]
+async fn get_v1_config_skills(
+    Query(query): Query<SkillsConfigQuery>,
+) -> Result<Json<SkillsConfig>, ApiError> {
+    validate_named_query(&query.directory, "directory")?;
+    validate_named_query(&query.skill_name, "skillName")?;
+
+    let path = config_file_path(&query.directory, "skills.json")?;
+    let entries: BTreeMap<String, SkillsConfig> = read_named_config_map(&path)?;
+    let value =
+        entries
+            .get(&query.skill_name)
+            .cloned()
+            .ok_or_else(|| SandboxError::SessionNotFound {
+                session_id: format!("skills:{}", query.skill_name),
+            })?;
+    Ok(Json(value))
 }
 
-fn parse_agent_id(agent: &str) -> Result<AgentId, SandboxError> {
-    AgentId::parse(agent).ok_or_else(|| SandboxError::UnsupportedAgent {
-        agent: agent.to_string(),
-    })
+#[utoipa::path(
+    put,
+    path = "/v1/config/skills",
+    tag = "v1",
+    params(
+        ("directory" = String, Query, description = "Target directory"),
+        ("skillName" = String, Query, description = "Skill entry name")
+    ),
+    request_body = SkillsConfig,
+    responses(
+        (status = 204, description = "Stored")
+    )
+)]
+async fn put_v1_config_skills(
+    Query(query): Query<SkillsConfigQuery>,
+    Json(body): Json<SkillsConfig>,
+) -> Result<StatusCode, ApiError> {
+    validate_named_query(&query.directory, "directory")?;
+    validate_named_query(&query.skill_name, "skillName")?;
+
+    let path = config_file_path(&query.directory, "skills.json")?;
+    let mut entries: BTreeMap<String, SkillsConfig> = read_named_config_map(&path)?;
+    entries.insert(query.skill_name, body);
+    write_named_config_map(&path, &entries)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
-fn agent_modes_for(agent: AgentId) -> Vec<AgentModeInfo> {
-    match agent {
-        AgentId::Opencode => vec![
-            AgentModeInfo {
-                id: "build".to_string(),
-                name: "Build".to_string(),
-                description: "Default build mode".to_string(),
-            },
-            AgentModeInfo {
-                id: "plan".to_string(),
-                name: "Plan".to_string(),
-                description: "Planning mode".to_string(),
-            },
-            AgentModeInfo {
-                id: "custom".to_string(),
-                name: "Custom".to_string(),
-                description: "Any user-defined OpenCode agent name".to_string(),
-            },
-        ],
-        AgentId::Codex => vec![
-            AgentModeInfo {
-                id: "build".to_string(),
-                name: "Build".to_string(),
-                description: "Default build mode".to_string(),
-            },
-            AgentModeInfo {
-                id: "plan".to_string(),
-                name: "Plan".to_string(),
-                description: "Planning mode via prompt prefix".to_string(),
-            },
-        ],
-        AgentId::Claude => vec![
-            AgentModeInfo {
-                id: "build".to_string(),
-                name: "Build".to_string(),
-                description: "Default build mode".to_string(),
-            },
-            AgentModeInfo {
-                id: "plan".to_string(),
-                name: "Plan".to_string(),
-                description: "Plan mode (prompt-only)".to_string(),
-            },
-        ],
-        AgentId::Amp => vec![AgentModeInfo {
-            id: "build".to_string(),
-            name: "Build".to_string(),
-            description: "Default build mode".to_string(),
-        }],
-        AgentId::Pi => vec![AgentModeInfo {
-            id: "build".to_string(),
-            name: "Build".to_string(),
-            description: "Default build mode".to_string(),
-        }],
-        AgentId::Cursor => vec![AgentModeInfo {
-            id: "build".to_string(),
-            name: "Build".to_string(),
-            description: "Default build mode".to_string(),
-        }],
-        AgentId::Mock => vec![
-            AgentModeInfo {
-                id: "build".to_string(),
-                name: "Build".to_string(),
-                description: "Mock agent for UI testing".to_string(),
-            },
-            AgentModeInfo {
-                id: "plan".to_string(),
-                name: "Plan".to_string(),
-                description: "Plan-only mock mode".to_string(),
-            },
-        ],
-    }
+#[utoipa::path(
+    delete,
+    path = "/v1/config/skills",
+    tag = "v1",
+    params(
+        ("directory" = String, Query, description = "Target directory"),
+        ("skillName" = String, Query, description = "Skill entry name")
+    ),
+    responses(
+        (status = 204, description = "Deleted")
+    )
+)]
+async fn delete_v1_config_skills(
+    Query(query): Query<SkillsConfigQuery>,
+) -> Result<StatusCode, ApiError> {
+    validate_named_query(&query.directory, "directory")?;
+    validate_named_query(&query.skill_name, "skillName")?;
+
+    let path = config_file_path(&query.directory, "skills.json")?;
+    let mut entries: BTreeMap<String, SkillsConfig> = read_named_config_map(&path)?;
+    entries.remove(&query.skill_name);
+    write_named_config_map(&path, &entries)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
-fn amp_models_response() -> AgentModelsResponse {
-    let models = vec![AgentModelInfo {
-        id: "amp-default".to_string(),
-        name: Some("Amp Default".to_string()),
-        variants: None,
-        default_variant: None,
-    }];
-    AgentModelsResponse {
-        models,
-        default_model: Some("amp-default".to_string()),
-    }
-}
-
-fn mock_models_response() -> AgentModelsResponse {
-    AgentModelsResponse {
-        models: vec![AgentModelInfo {
-            id: "mock".to_string(),
-            name: Some("Mock".to_string()),
-            variants: None,
-            default_variant: None,
-        }],
-        default_model: Some("mock".to_string()),
-    }
-}
-
-fn should_cache_agent_models(agent: AgentId, response: &AgentModelsResponse) -> bool {
-    if agent == AgentId::Opencode && response.models.is_empty() {
-        return false;
-    }
-    true
-}
-
-fn pi_variants() -> Vec<String> {
-    vec!["off", "minimal", "low", "medium", "high", "xhigh"]
+#[utoipa::path(
+    get,
+    path = "/v1/acp",
+    tag = "v1",
+    responses(
+        (status = 200, description = "Active ACP server instances", body = AcpServerListResponse)
+    )
+)]
+async fn get_v1_acp_servers(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<AcpServerListResponse>, ApiError> {
+    let servers = state
+        .acp_proxy()
+        .list_instances()
+        .await
         .into_iter()
-        .map(|value| value.to_string())
-        .collect()
+        .map(|instance| AcpServerInfo {
+            server_id: instance.server_id,
+            agent: instance.agent.as_str().to_string(),
+            created_at_ms: instance.created_at_ms,
+        })
+        .collect::<Vec<_>>();
+
+    Ok(Json(AcpServerListResponse { servers }))
 }
 
-fn parse_pi_models_output(output: &str) -> AgentModelsResponse {
-    let mut models = Vec::new();
-    let mut seen = HashSet::new();
-    let mut provider_col: Option<usize> = None;
-    let mut model_col: Option<usize> = None;
-    let mut thinking_col: Option<usize> = None;
-
-    for line in output.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-
-        let parts = trimmed.split_whitespace().collect::<Vec<_>>();
-        if parts.len() < 2 {
-            continue;
-        }
-        if parts.iter().all(|part| {
-            part.chars()
-                .all(|ch| matches!(ch, '-' | '=' | '+' | '|' | ':'))
-        }) {
-            continue;
-        }
-
-        let lower = parts
-            .iter()
-            .map(|part| part.to_ascii_lowercase())
-            .collect::<Vec<_>>();
-        if let (Some(provider_idx), Some(model_idx)) = (
-            lower.iter().position(|part| part == "provider"),
-            lower.iter().position(|part| part == "model"),
-        ) {
-            provider_col = Some(provider_idx);
-            model_col = Some(model_idx);
-            thinking_col = lower.iter().position(|part| part == "thinking");
-            continue;
-        }
-
-        let provider_idx = provider_col.unwrap_or(0);
-        let model_idx = model_col.unwrap_or(1);
-        let Some(provider) = parts.get(provider_idx).copied() else {
-            continue;
-        };
-        let Some(model) = parts.get(model_idx).copied() else {
-            continue;
-        };
-
-        if provider.chars().all(|ch| ch == '-' || ch == '=')
-            && model.chars().all(|ch| ch == '-' || ch == '=')
-        {
-            continue;
-        }
-
-        let thinking_value = thinking_col
-            .and_then(|idx| parts.get(idx).copied())
-            .or_else(|| {
-                parts.iter().rev().copied().find(|value| {
-                    value.eq_ignore_ascii_case("yes") || value.eq_ignore_ascii_case("no")
-                })
-            });
-        let supports_thinking =
-            thinking_value.is_some_and(|value| value.eq_ignore_ascii_case("yes"));
-        let (variants, default_variant) = if supports_thinking {
-            (Some(pi_variants()), Some("medium".to_string()))
-        } else {
-            (Some(vec!["off".to_string()]), Some("off".to_string()))
-        };
-
-        let id = format!("{provider}/{model}");
-        if !seen.insert(id.clone()) {
-            continue;
-        }
-
-        models.push(AgentModelInfo {
-            id,
-            name: None,
-            variants,
-            default_variant,
-        });
-    }
-
-    models.sort_by(|a, b| a.id.cmp(&b.id));
-
-    AgentModelsResponse {
-        models,
-        default_model: None,
-    }
-}
-
-fn parse_opencode_models(value: &Value) -> Option<AgentModelsResponse> {
-    let providers = value
-        .get("providers")
-        .and_then(Value::as_array)
-        .or_else(|| value.get("all").and_then(Value::as_array))?;
-    let default_map = value
-        .get("default")
-        .and_then(Value::as_object)
-        .cloned()
-        .unwrap_or_default();
-
-    let mut models = Vec::new();
-    let mut provider_order = Vec::new();
-    for provider in providers {
-        let provider_id = provider.get("id").and_then(Value::as_str)?;
-        provider_order.push(provider_id.to_string());
-        let Some(model_map) = provider.get("models").and_then(Value::as_object) else {
-            continue;
-        };
-        for (key, model) in model_map {
-            let model_id = model
-                .get("id")
-                .and_then(Value::as_str)
-                .unwrap_or(key.as_str());
-            let name = model
-                .get("name")
-                .and_then(Value::as_str)
-                .map(|value| value.to_string());
-            let mut variants = model
-                .get("variants")
-                .and_then(Value::as_object)
-                .map(|map| map.keys().cloned().collect::<Vec<_>>());
-            if let Some(variants) = variants.as_mut() {
-                variants.sort();
-            }
-            models.push(AgentModelInfo {
-                id: format!("{provider_id}/{model_id}"),
-                name,
-                variants,
-                default_variant: None,
-            });
-        }
-    }
-    models.sort_by(|a, b| a.id.cmp(&b.id));
-
-    let mut default_model = None;
-    for provider_id in provider_order {
-        if let Some(model_id) = default_map.get(&provider_id).and_then(Value::as_str) {
-            default_model = Some(format!("{provider_id}/{model_id}"));
-            break;
-        }
-    }
-    if default_model.is_none() {
-        default_model = models.first().map(|model| model.id.clone());
-    }
-
-    Some(AgentModelsResponse {
-        models,
-        default_model,
-    })
-}
-
-fn normalize_agent_mode(agent: AgentId, agent_mode: Option<&str>) -> Result<String, SandboxError> {
-    let mode = agent_mode.unwrap_or("build");
-    match agent {
-        AgentId::Opencode => Ok(mode.to_string()),
-        AgentId::Codex => match mode {
-            "build" | "plan" => Ok(mode.to_string()),
-            value => Err(SandboxError::ModeNotSupported {
-                agent: agent.as_str().to_string(),
-                mode: value.to_string(),
-            }
-            .into()),
-        },
-        AgentId::Claude => match mode {
-            "build" | "plan" => Ok(mode.to_string()),
-            value => Err(SandboxError::ModeNotSupported {
-                agent: agent.as_str().to_string(),
-                mode: value.to_string(),
-            }
-            .into()),
-        },
-        AgentId::Amp => match mode {
-            "build" => Ok("build".to_string()),
-            value => Err(SandboxError::ModeNotSupported {
-                agent: agent.as_str().to_string(),
-                mode: value.to_string(),
-            }
-            .into()),
-        },
-        AgentId::Pi => match mode {
-            "build" => Ok("build".to_string()),
-            value => Err(SandboxError::ModeNotSupported {
-                agent: agent.as_str().to_string(),
-                mode: value.to_string(),
-            }
-            .into()),
-        },
-        AgentId::Cursor => match mode {
-            "build" => Ok("build".to_string()),
-            value => Err(SandboxError::ModeNotSupported {
-                agent: agent.as_str().to_string(),
-                mode: value.to_string(),
-            }
-            .into()),
-        },
-        AgentId::Mock => match mode {
-            "build" | "plan" => Ok(mode.to_string()),
-            value => Err(SandboxError::ModeNotSupported {
-                agent: agent.as_str().to_string(),
-                mode: value.to_string(),
-            }
-            .into()),
-        },
-    }
-}
-
-/// Check if the current process is running as root (uid 0)
-fn is_running_as_root() -> bool {
-    #[cfg(unix)]
-    {
-        unsafe { libc::getuid() == 0 }
-    }
-    #[cfg(not(unix))]
-    {
-        false
-    }
-}
-
-fn normalize_permission_mode(
-    agent: AgentId,
-    permission_mode: Option<&str>,
-) -> Result<String, SandboxError> {
-    let mut mode = match permission_mode.unwrap_or("default") {
-        "default" | "plan" | "bypass" | "acceptEdits" => permission_mode.unwrap_or("default"),
-        value => {
-            return Err(SandboxError::InvalidRequest {
-                message: format!("invalid permission mode: {value}"),
-            }
-            .into())
-        }
-    };
-    if agent != AgentId::Claude && mode == "acceptEdits" && agent != AgentId::Codex {
-        // acceptEdits is Claude-only unless explicitly handled; treat it as a no-op for other agents.
-        mode = "default";
-    }
-    if agent == AgentId::Claude {
-        // Claude refuses --dangerously-skip-permissions when running as root,
-        // which is common in container environments (Docker, Daytona, E2B).
-        // Return an error if user explicitly requests bypass while running as root.
-        if mode == "bypass" && is_running_as_root() {
-            return Err(SandboxError::InvalidRequest {
-                message: "permission mode 'bypass' is not supported when running as root (Claude refuses --dangerously-skip-permissions with root privileges)".to_string(),
-            }
-            .into());
-        }
-        // Pass through bypass/acceptEdits/plan if explicitly requested, otherwise use default
-        if mode == "bypass" || mode == "acceptEdits" || mode == "plan" {
-            return Ok(mode.to_string());
-        }
-        return Ok("default".to_string());
-    }
-    let supported = match agent {
-        AgentId::Claude => false,
-        AgentId::Codex => matches!(mode, "default" | "plan" | "bypass" | "acceptEdits"),
-        AgentId::Amp => matches!(mode, "default" | "bypass"),
-        AgentId::Opencode => matches!(mode, "default" | "bypass"),
-        AgentId::Pi => matches!(mode, "default"),
-        AgentId::Cursor => matches!(mode, "default"),
-        AgentId::Mock => matches!(mode, "default" | "plan" | "bypass"),
-    };
-    if !supported {
-        return Err(SandboxError::ModeNotSupported {
-            agent: agent.as_str().to_string(),
-            mode: mode.to_string(),
+#[utoipa::path(
+    post,
+    path = "/v1/acp/{server_id}",
+    tag = "v1",
+    params(
+        ("server_id" = String, Path, description = "Client-defined ACP server id"),
+        ("agent" = Option<String>, Query, description = "Agent id required for first POST")
+    ),
+    request_body = AcpEnvelope,
+    responses(
+        (status = 200, description = "JSON-RPC response envelope", body = AcpEnvelope),
+        (status = 202, description = "JSON-RPC notification accepted"),
+        (status = 406, description = "Client does not accept JSON responses", body = ProblemDetails),
+        (status = 415, description = "Unsupported media type", body = ProblemDetails),
+        (status = 400, description = "Invalid ACP envelope", body = ProblemDetails),
+        (status = 404, description = "Unknown ACP server", body = ProblemDetails),
+        (status = 409, description = "ACP server bound to different agent", body = ProblemDetails),
+        (status = 504, description = "ACP agent process response timeout", body = ProblemDetails)
+    )
+)]
+async fn post_v1_acp(
+    State(state): State<Arc<AppState>>,
+    Path(server_id): Path<String>,
+    Query(query): Query<AcpPostQuery>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response, ApiError> {
+    if !content_type_is(&headers, APPLICATION_JSON) {
+        return Err(SandboxError::UnsupportedMediaType {
+            message: "content-type must be application/json".to_string(),
         }
         .into());
     }
-    Ok(mode.to_string())
-}
-
-fn normalize_modes(
-    agent: AgentId,
-    agent_mode: Option<&str>,
-    permission_mode: Option<&str>,
-) -> Result<(String, String), SandboxError> {
-    let agent_mode = normalize_agent_mode(agent, agent_mode)?;
-    let permission_mode = normalize_permission_mode(agent, permission_mode)?;
-    Ok((agent_mode, permission_mode))
-}
-
-fn map_install_error(agent: AgentId, err: ManagerError) -> SandboxError {
-    match err {
-        ManagerError::UnsupportedAgent { agent } => SandboxError::UnsupportedAgent { agent },
-        ManagerError::BinaryNotFound { .. } => SandboxError::AgentNotInstalled {
-            agent: agent.as_str().to_string(),
-        },
-        ManagerError::ResumeUnsupported { agent } => SandboxError::InvalidRequest {
-            message: format!("resume unsupported for {agent}"),
-        },
-        ManagerError::UnsupportedRuntimePath { .. } => SandboxError::InvalidRequest {
-            message: err.to_string(),
-        },
-        ManagerError::UnsupportedPlatform { .. }
-        | ManagerError::DownloadFailed { .. }
-        | ManagerError::Http(_)
-        | ManagerError::UrlParse(_)
-        | ManagerError::Io(_)
-        | ManagerError::ExtractFailed(_) => SandboxError::InstallFailed {
-            agent: agent.as_str().to_string(),
-            stderr: Some(err.to_string()),
-        },
-    }
-}
-
-fn map_spawn_error(agent: AgentId, err: ManagerError) -> SandboxError {
-    match err {
-        ManagerError::BinaryNotFound { .. } => SandboxError::AgentNotInstalled {
-            agent: agent.as_str().to_string(),
-        },
-        ManagerError::ResumeUnsupported { agent } => SandboxError::InvalidRequest {
-            message: format!("resume unsupported for {agent}"),
-        },
-        ManagerError::UnsupportedRuntimePath { .. } => SandboxError::InvalidRequest {
-            message: err.to_string(),
-        },
-        _ => SandboxError::AgentProcessExited {
-            agent: agent.as_str().to_string(),
-            exit_code: None,
-            stderr: Some(err.to_string()),
-        },
-    }
-}
-
-fn build_spawn_options(
-    session: &SessionSnapshot,
-    prompt: String,
-    credentials: ExtractedCredentials,
-) -> SpawnOptions {
-    let mut options = SpawnOptions::new(prompt);
-    options.model = session.model.clone();
-    options.variant = session.variant.clone();
-    options.agent_mode = Some(session.agent_mode.clone());
-    options.permission_mode = Some(session.permission_mode.clone());
-    options.session_id = session.native_session_id.clone().or_else(|| {
-        if session.agent == AgentId::Opencode {
-            Some(session.session_id.clone())
-        } else {
-            None
+    if !accept_allows(&headers, APPLICATION_JSON) {
+        return Err(SandboxError::NotAcceptable {
+            message: "accept must allow application/json".to_string(),
         }
-    });
-    if let Some(anthropic) = credentials.anthropic {
-        let should_inject_claude_env = !(session.agent == AgentId::Claude
-            && anthropic.source == "claude-code"
-            && anthropic.provider == "anthropic");
-        if should_inject_claude_env {
-            if session.agent == AgentId::Claude && anthropic.auth_type == AuthType::Oauth {
-                options
-                    .env
-                    .entry("CLAUDE_CODE_OAUTH_TOKEN".to_string())
-                    .or_insert(anthropic.api_key.clone());
-                options
-                    .env
-                    .entry("ANTHROPIC_AUTH_TOKEN".to_string())
-                    .or_insert(anthropic.api_key);
-            } else {
-                options
-                    .env
-                    .entry("ANTHROPIC_API_KEY".to_string())
-                    .or_insert(anthropic.api_key.clone());
-                options
-                    .env
-                    .entry("CLAUDE_API_KEY".to_string())
-                    .or_insert(anthropic.api_key);
-            }
-        }
-    }
-    if let Some(openai) = credentials.openai {
-        options
-            .env
-            .entry("OPENAI_API_KEY".to_string())
-            .or_insert(openai.api_key.clone());
-        options
-            .env
-            .entry("CODEX_API_KEY".to_string())
-            .or_insert(openai.api_key);
-    }
-    options
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Mutex to serialize tests that change the process-global CWD.
-    static CWD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-    fn test_snapshot(agent: AgentId) -> SessionSnapshot {
-        SessionSnapshot {
-            session_id: "test-session".to_string(),
-            agent,
-            agent_mode: "build".to_string(),
-            permission_mode: "default".to_string(),
-            model: None,
-            variant: None,
-            native_session_id: None,
-        }
+        .into());
     }
 
-    fn claude_code_api_key_credentials() -> ExtractedCredentials {
-        ExtractedCredentials {
-            anthropic: Some(ProviderCredentials {
-                api_key: "sk-ant-test".to_string(),
-                source: "claude-code".to_string(),
-                auth_type: AuthType::ApiKey,
-                provider: "anthropic".to_string(),
-            }),
-            openai: None,
-            other: HashMap::new(),
-        }
-    }
-
-    fn environment_oauth_credentials() -> ExtractedCredentials {
-        ExtractedCredentials {
-            anthropic: Some(ProviderCredentials {
-                api_key: "oauth-token".to_string(),
-                source: "environment".to_string(),
-                auth_type: AuthType::Oauth,
-                provider: "anthropic".to_string(),
-            }),
-            openai: None,
-            other: HashMap::new(),
-        }
-    }
-
-    #[test]
-    fn build_spawn_options_skips_claude_env_for_claude_code_source() {
-        let options = build_spawn_options(
-            &test_snapshot(AgentId::Claude),
-            "hello".to_string(),
-            claude_code_api_key_credentials(),
-        );
-
-        assert!(!options.env.contains_key("ANTHROPIC_API_KEY"));
-        assert!(!options.env.contains_key("CLAUDE_API_KEY"));
-    }
-
-    #[test]
-    fn build_spawn_options_keeps_anthropic_env_for_non_claude_agent() {
-        let options = build_spawn_options(
-            &test_snapshot(AgentId::Amp),
-            "hello".to_string(),
-            claude_code_api_key_credentials(),
-        );
-
-        assert_eq!(
-            options.env.get("ANTHROPIC_API_KEY").map(String::as_str),
-            Some("sk-ant-test")
-        );
-        assert_eq!(
-            options.env.get("CLAUDE_API_KEY").map(String::as_str),
-            Some("sk-ant-test")
-        );
-    }
-
-    #[test]
-    fn build_spawn_options_uses_oauth_env_for_claude_oauth_credentials() {
-        let options = build_spawn_options(
-            &test_snapshot(AgentId::Claude),
-            "hello".to_string(),
-            environment_oauth_credentials(),
-        );
-
-        assert_eq!(
-            options
-                .env
-                .get("CLAUDE_CODE_OAUTH_TOKEN")
-                .map(String::as_str),
-            Some("oauth-token")
-        );
-        assert_eq!(
-            options.env.get("ANTHROPIC_AUTH_TOKEN").map(String::as_str),
-            Some("oauth-token")
-        );
-        assert!(!options.env.contains_key("ANTHROPIC_API_KEY"));
-        assert!(!options.env.contains_key("CLAUDE_API_KEY"));
-    }
-
-    #[test]
-    fn codex_unavailable_model_parser_handles_requested_model_message() {
-        let message = "The requested model 'gpt-5.3-codex' does not exist.";
-        assert_eq!(
-            codex_unavailable_model_from_message(message),
-            Some("gpt-5.3-codex".to_string())
-        );
-    }
-
-    #[test]
-    fn codex_unavailable_model_parser_handles_chatgpt_account_message() {
-        let message = "The 'gpt-5.3-codex-NOTREAL' model is not supported when using Codex with a ChatGPT account.";
-        assert_eq!(
-            codex_unavailable_model_from_message(message),
-            Some("gpt-5.3-codex-NOTREAL".to_string())
-        );
-    }
-
-    #[test]
-    fn codex_unavailable_model_parser_ignores_non_model_messages() {
-        let message = "Network error while contacting provider.";
-        assert_eq!(codex_unavailable_model_from_message(message), None);
-    }
-
-    #[test]
-    fn codex_unavailable_model_parser_ignores_non_unavailable_model_messages() {
-        let message = "using model 'gpt-5.3-codex' for this turn";
-        assert_eq!(codex_unavailable_model_from_message(message), None);
-    }
-
-    #[test]
-    fn codex_unavailable_model_parser_handles_embedded_json_detail_message() {
-        let message = "http 400 Bad Request: Some(\"{\\\"detail\\\":\\\"The 'gpt-5.3-codex-NOTREAL' model is not supported when using Codex with a ChatGPT account.\\\"}\")";
-        assert_eq!(
-            codex_unavailable_model_from_message(message),
-            Some("gpt-5.3-codex-NOTREAL".to_string())
-        );
-    }
-
-    // ── Skill source tests ──────────────────────────────────────────
-
-    fn make_skill_dir(base: &StdPath, name: &str) -> PathBuf {
-        let dir = base.join(name);
-        fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("SKILL.md"), format!("# {name}")).unwrap();
-        dir
-    }
-
-    #[test]
-    fn skill_source_serde_github_roundtrip() {
-        let json = r#"{"type":"github","source":"rivet-dev/skills","skills":["sandbox-agent"],"ref":"main"}"#;
-        let source: SkillSource = serde_json::from_str(json).unwrap();
-        assert_eq!(source.source_type, "github");
-        assert_eq!(source.source, "rivet-dev/skills");
-        assert_eq!(source.skills, Some(vec!["sandbox-agent".to_string()]));
-        assert_eq!(source.git_ref, Some("main".to_string()));
-        assert_eq!(source.subpath, None);
-
-        let roundtrip = serde_json::to_string(&source).unwrap();
-        let back: SkillSource = serde_json::from_str(&roundtrip).unwrap();
-        assert_eq!(back.source_type, source.source_type);
-        assert_eq!(back.source, source.source);
-    }
-
-    #[test]
-    fn skill_source_serde_local_minimal() {
-        let json = r#"{"type":"local","source":"/workspace/my-skill"}"#;
-        let source: SkillSource = serde_json::from_str(json).unwrap();
-        assert_eq!(source.source_type, "local");
-        assert_eq!(source.source, "/workspace/my-skill");
-        assert_eq!(source.skills, None);
-        assert_eq!(source.git_ref, None);
-        assert_eq!(source.subpath, None);
-    }
-
-    #[test]
-    fn skills_config_serde_roundtrip() {
-        let json = r#"{"sources":[{"type":"github","source":"owner/repo"},{"type":"local","source":"/path"}]}"#;
-        let config: SkillsConfig = serde_json::from_str(json).unwrap();
-        assert_eq!(config.sources.len(), 2);
-        assert_eq!(config.sources[0].source_type, "github");
-        assert_eq!(config.sources[1].source_type, "local");
-    }
-
-    #[test]
-    fn discover_skills_finds_root_skill() {
-        let tmp = tempfile::tempdir().unwrap();
-        make_skill_dir(tmp.path(), ".");
-        // SKILL.md is directly in the search dir
-        fs::write(tmp.path().join("SKILL.md"), "# root skill").unwrap();
-
-        let found = discover_skills_in_dir(tmp.path(), None).unwrap();
-        assert_eq!(found.len(), 1);
-        assert_eq!(found[0], tmp.path().to_path_buf());
-    }
-
-    #[test]
-    fn discover_skills_finds_skills_subdir() {
-        let tmp = tempfile::tempdir().unwrap();
-        make_skill_dir(&tmp.path().join("skills"), "alpha");
-        make_skill_dir(&tmp.path().join("skills"), "beta");
-
-        let found = discover_skills_in_dir(tmp.path(), None).unwrap();
-        let names: Vec<String> = found
-            .iter()
-            .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
-            .collect();
-        assert!(names.contains(&"alpha".to_string()));
-        assert!(names.contains(&"beta".to_string()));
-    }
-
-    #[test]
-    fn discover_skills_finds_top_level_children() {
-        let tmp = tempfile::tempdir().unwrap();
-        make_skill_dir(tmp.path(), "my-skill");
-
-        let found = discover_skills_in_dir(tmp.path(), None).unwrap();
-        assert_eq!(found.len(), 1);
-        assert!(found[0].ends_with("my-skill"));
-    }
-
-    #[test]
-    fn discover_skills_deduplicates_children_and_skills_subdir() {
-        let tmp = tempfile::tempdir().unwrap();
-        // Put a skill both at top level and in skills/ subdir with same name
-        make_skill_dir(tmp.path(), "dupe");
-        make_skill_dir(&tmp.path().join("skills"), "dupe");
-
-        let found = discover_skills_in_dir(tmp.path(), None).unwrap();
-        let dupe_count = found
-            .iter()
-            .filter(|p| p.file_name().map(|n| n == "dupe").unwrap_or(false))
-            .count();
-        // Both should be present since they're different paths
-        assert_eq!(dupe_count, 2);
-    }
-
-    #[test]
-    fn discover_skills_respects_subpath() {
-        let tmp = tempfile::tempdir().unwrap();
-        make_skill_dir(&tmp.path().join("nested/skills"), "deep-skill");
-        // Also put a skill at root that should NOT be discovered
-        make_skill_dir(tmp.path(), "root-skill");
-
-        let found = discover_skills_in_dir(tmp.path(), Some("nested")).unwrap();
-        let names: Vec<String> = found
-            .iter()
-            .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
-            .collect();
-        assert!(names.contains(&"deep-skill".to_string()));
-        assert!(!names.contains(&"root-skill".to_string()));
-    }
-
-    #[test]
-    fn discover_skills_empty_dir_returns_empty() {
-        let tmp = tempfile::tempdir().unwrap();
-        let found = discover_skills_in_dir(tmp.path(), None).unwrap();
-        assert!(found.is_empty());
-    }
-
-    #[test]
-    fn discover_skills_missing_subpath_returns_error() {
-        let tmp = tempfile::tempdir().unwrap();
-        let result = discover_skills_in_dir(tmp.path(), Some("nonexistent"));
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn discover_skills_ignores_non_skill_dirs() {
-        let tmp = tempfile::tempdir().unwrap();
-        // Create a directory without SKILL.md
-        fs::create_dir_all(tmp.path().join("not-a-skill")).unwrap();
-        fs::write(tmp.path().join("not-a-skill/README.md"), "# readme").unwrap();
-        // Create an actual skill
-        make_skill_dir(tmp.path(), "real-skill");
-
-        let found = discover_skills_in_dir(tmp.path(), None).unwrap();
-        assert_eq!(found.len(), 1);
-        assert!(found[0].ends_with("real-skill"));
-    }
-
-    #[test]
-    fn resolve_skill_source_local_absolute() {
-        let tmp = tempfile::tempdir().unwrap();
-        let skill = make_skill_dir(tmp.path(), "my-skill");
-        let source = SkillSource {
-            source_type: "local".to_string(),
-            source: skill.to_string_lossy().to_string(),
-            skills: None,
-            git_ref: None,
-            subpath: None,
-        };
-        let result = resolve_skill_source(&source, tmp.path()).unwrap();
-        assert_eq!(result, skill);
-    }
-
-    #[test]
-    fn resolve_skill_source_local_relative() {
-        let tmp = tempfile::tempdir().unwrap();
-        make_skill_dir(tmp.path(), "my-skill");
-        let source = SkillSource {
-            source_type: "local".to_string(),
-            source: "my-skill".to_string(),
-            skills: None,
-            git_ref: None,
-            subpath: None,
-        };
-        let result = resolve_skill_source(&source, tmp.path()).unwrap();
-        assert_eq!(result, tmp.path().join("my-skill"));
-    }
-
-    #[test]
-    fn resolve_skill_source_local_missing_dir_errors() {
-        let tmp = tempfile::tempdir().unwrap();
-        let source = SkillSource {
-            source_type: "local".to_string(),
-            source: "/nonexistent/path".to_string(),
-            skills: None,
-            git_ref: None,
-            subpath: None,
-        };
-        let result = resolve_skill_source(&source, tmp.path());
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn resolve_skill_source_unsupported_type_errors() {
-        let tmp = tempfile::tempdir().unwrap();
-        let source = SkillSource {
-            source_type: "s3".to_string(),
-            source: "bucket/key".to_string(),
-            skills: None,
-            git_ref: None,
-            subpath: None,
-        };
-        let result = resolve_skill_source(&source, tmp.path());
-        assert!(result.is_err());
-        let msg = result.unwrap_err().to_string();
-        assert!(
-            msg.contains("unsupported"),
-            "expected 'unsupported' in: {msg}"
-        );
-    }
-
-    #[test]
-    fn install_skill_sources_local_single() {
-        let _lock = CWD_LOCK.lock().unwrap();
-        let tmp = tempfile::tempdir().unwrap();
-        make_skill_dir(tmp.path(), "alpha");
-
-        let sources = vec![SkillSource {
-            source_type: "local".to_string(),
-            source: tmp.path().join("alpha").to_string_lossy().to_string(),
-            skills: None,
-            git_ref: None,
-            subpath: None,
-        }];
-
-        // Run from a temp working directory so symlinks go there
-        let work = tempfile::tempdir().unwrap();
-        let prev = std::env::current_dir().unwrap();
-        std::env::set_current_dir(work.path()).unwrap();
-        let result = install_skill_sources(&sources);
-        std::env::set_current_dir(prev).unwrap();
-
-        let dirs = result.unwrap();
-        assert_eq!(dirs.len(), 1);
-        // Verify symlinks were created
-        for root in SKILL_ROOTS {
-            let link = work.path().join(root).join("alpha");
-            assert!(link.exists(), "expected skill link at {}", link.display());
-            assert!(link.join("SKILL.md").exists());
-        }
-    }
-
-    #[test]
-    fn install_skill_sources_filters_by_name() {
-        let _lock = CWD_LOCK.lock().unwrap();
-        let tmp = tempfile::tempdir().unwrap();
-        // Repo-like layout with skills/ subdir containing two skills
-        make_skill_dir(&tmp.path().join("skills"), "wanted");
-        make_skill_dir(&tmp.path().join("skills"), "unwanted");
-
-        let sources = vec![SkillSource {
-            source_type: "local".to_string(),
-            source: tmp.path().to_string_lossy().to_string(),
-            skills: Some(vec!["wanted".to_string()]),
-            git_ref: None,
-            subpath: None,
-        }];
-
-        let work = tempfile::tempdir().unwrap();
-        let prev = std::env::current_dir().unwrap();
-        std::env::set_current_dir(work.path()).unwrap();
-        let result = install_skill_sources(&sources);
-        std::env::set_current_dir(prev).unwrap();
-
-        let dirs = result.unwrap();
-        assert_eq!(dirs.len(), 1);
-        assert!(dirs[0].ends_with("wanted"));
-    }
-
-    #[test]
-    fn install_skill_sources_errors_when_filter_matches_nothing() {
-        let _lock = CWD_LOCK.lock().unwrap();
-        let tmp = tempfile::tempdir().unwrap();
-        make_skill_dir(&tmp.path().join("skills"), "alpha");
-
-        let sources = vec![SkillSource {
-            source_type: "local".to_string(),
-            source: tmp.path().to_string_lossy().to_string(),
-            skills: Some(vec!["nonexistent".to_string()]),
-            git_ref: None,
-            subpath: None,
-        }];
-
-        let work = tempfile::tempdir().unwrap();
-        let prev = std::env::current_dir().unwrap();
-        std::env::set_current_dir(work.path()).unwrap();
-        let result = install_skill_sources(&sources);
-        std::env::set_current_dir(prev).unwrap();
-
-        assert!(result.is_err());
-        let msg = result.unwrap_err().to_string();
-        assert!(
-            msg.contains("no skills found"),
-            "expected 'no skills found' in: {msg}"
-        );
-    }
-
-    #[test]
-    fn install_skill_sources_multiple_sources() {
-        let _lock = CWD_LOCK.lock().unwrap();
-        let tmp1 = tempfile::tempdir().unwrap();
-        let tmp2 = tempfile::tempdir().unwrap();
-        make_skill_dir(tmp1.path(), "skill-a");
-        make_skill_dir(tmp2.path(), "skill-b");
-
-        let sources = vec![
-            SkillSource {
-                source_type: "local".to_string(),
-                source: tmp1.path().join("skill-a").to_string_lossy().to_string(),
-                skills: None,
-                git_ref: None,
-                subpath: None,
-            },
-            SkillSource {
-                source_type: "local".to_string(),
-                source: tmp2.path().join("skill-b").to_string_lossy().to_string(),
-                skills: None,
-                git_ref: None,
-                subpath: None,
-            },
-        ];
-
-        let work = tempfile::tempdir().unwrap();
-        let prev = std::env::current_dir().unwrap();
-        std::env::set_current_dir(work.path()).unwrap();
-        let result = install_skill_sources(&sources);
-        std::env::set_current_dir(prev).unwrap();
-
-        let dirs = result.unwrap();
-        assert_eq!(dirs.len(), 2);
-    }
-
-    #[test]
-    fn install_skill_sources_deduplicates_same_skill() {
-        let _lock = CWD_LOCK.lock().unwrap();
-        let tmp = tempfile::tempdir().unwrap();
-        let skill = make_skill_dir(tmp.path(), "shared");
-        let path_str = skill.to_string_lossy().to_string();
-
-        let sources = vec![
-            SkillSource {
-                source_type: "local".to_string(),
-                source: path_str.clone(),
-                skills: None,
-                git_ref: None,
-                subpath: None,
-            },
-            SkillSource {
-                source_type: "local".to_string(),
-                source: path_str,
-                skills: None,
-                git_ref: None,
-                subpath: None,
-            },
-        ];
-
-        let work = tempfile::tempdir().unwrap();
-        let prev = std::env::current_dir().unwrap();
-        std::env::set_current_dir(work.path()).unwrap();
-        let result = install_skill_sources(&sources);
-        std::env::set_current_dir(prev).unwrap();
-
-        let dirs = result.unwrap();
-        assert_eq!(dirs.len(), 1, "duplicate skill should be deduplicated");
-    }
-
-    #[test]
-    fn ensure_skill_link_replaces_dangling_symlink() {
-        let work = tempfile::tempdir().unwrap();
-        let dest = work.path().join("test-link");
-
-        // Create a dangling symlink (target doesn't exist)
-        #[cfg(unix)]
-        std::os::unix::fs::symlink("/nonexistent/target", &dest).unwrap();
-        #[cfg(windows)]
-        std::os::windows::fs::symlink_dir("/nonexistent/target", &dest).unwrap();
-
-        assert!(dest.symlink_metadata().is_ok(), "symlink should exist");
-        assert!(!dest.exists(), "symlink target should not exist (dangling)");
-
-        // Create a real skill directory as the new target
-        let skill = tempfile::tempdir().unwrap();
-        std::fs::write(skill.path().join("SKILL.md"), "# Test").unwrap();
-
-        // ensure_skill_link should replace the dangling symlink
-        let result = ensure_skill_link(skill.path(), &dest);
-        assert!(
-            result.is_ok(),
-            "should replace dangling symlink: {result:?}"
-        );
-        assert!(dest.exists(), "link should now point to valid target");
-        assert!(dest.join("SKILL.md").exists());
-    }
-
-    #[test]
-    fn download_github_zip_extracts_correctly() {
-        use std::io::Write;
-
-        // Build a zip in memory with GitHub-style prefix directory
-        let buf = Vec::new();
-        let cursor = std::io::Cursor::new(buf);
-        let mut zip_writer = zip::ZipWriter::new(cursor);
-
-        let options =
-            zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
-
-        // GitHub wraps all content under "owner-repo-sha/"
-        zip_writer
-            .add_directory("owner-repo-abc123/", options)
-            .unwrap();
-
-        zip_writer
-            .start_file("owner-repo-abc123/SKILL.md", options)
-            .unwrap();
-        zip_writer.write_all(b"# Test Skill").unwrap();
-
-        zip_writer
-            .add_directory("owner-repo-abc123/sub/", options)
-            .unwrap();
-
-        zip_writer
-            .start_file("owner-repo-abc123/sub/nested.txt", options)
-            .unwrap();
-        zip_writer.write_all(b"nested content").unwrap();
-
-        let zip_bytes = zip_writer.finish().unwrap().into_inner();
-
-        // Extract using the same logic as download_github_zip (minus HTTP)
-        let work = tempfile::tempdir().unwrap();
-        let dest = work.path().join("test-skill");
-
-        let reader = std::io::Cursor::new(&zip_bytes);
-        let mut archive = zip::ZipArchive::new(reader).unwrap();
-
-        // Detect prefix
-        let prefix = {
-            let first = archive.by_index(0).unwrap();
-            let name = first.name().to_string();
-            match name.find('/') {
-                Some(pos) => name[..=pos].to_string(),
-                None => String::new(),
-            }
-        };
-
-        fs::create_dir_all(&dest).unwrap();
-
-        for i in 0..archive.len() {
-            let mut file = archive.by_index(i).unwrap();
-            let full_name = file.name().to_string();
-
-            let relative = if !prefix.is_empty() && full_name.starts_with(&prefix) {
-                &full_name[prefix.len()..]
-            } else {
-                &full_name
-            };
-
-            if relative.is_empty() {
-                continue;
-            }
-
-            let out_path = dest.join(relative);
-            if !out_path.starts_with(&dest) {
-                continue;
-            }
-
-            if file.is_dir() {
-                fs::create_dir_all(&out_path).unwrap();
-            } else {
-                if let Some(parent) = out_path.parent() {
-                    fs::create_dir_all(parent).unwrap();
-                }
-                let mut out_file = fs::File::create(&out_path).unwrap();
-                std::io::copy(&mut file, &mut out_file).unwrap();
-            }
-        }
-
-        // Verify files were extracted without the prefix directory
-        assert!(
-            dest.join("SKILL.md").exists(),
-            "SKILL.md should exist at root"
-        );
-        assert_eq!(
-            fs::read_to_string(dest.join("SKILL.md")).unwrap(),
-            "# Test Skill"
-        );
-        assert!(
-            dest.join("sub/nested.txt").exists(),
-            "nested file should exist"
-        );
-        assert_eq!(
-            fs::read_to_string(dest.join("sub/nested.txt")).unwrap(),
-            "nested content"
-        );
-        // Ensure no prefix directory leaked through
-        assert!(
-            !dest.join("owner-repo-abc123").exists(),
-            "prefix dir should be stripped"
-        );
-    }
-}
-
-fn install_skill_sources(sources: &[SkillSource]) -> Result<Vec<PathBuf>, SandboxError> {
-    let cwd = std::env::current_dir().map_err(|err| SandboxError::StreamError {
-        message: err.to_string(),
-    })?;
-    let mut skill_dirs = Vec::new();
-
-    for source in sources {
-        let base_dir = resolve_skill_source(source, &cwd)?;
-        let discovered = discover_skills_in_dir(&base_dir, source.subpath.as_deref())?;
-
-        let filtered: Vec<PathBuf> = if let Some(filter) = &source.skills {
-            discovered
-                .into_iter()
-                .filter(|p| {
-                    p.file_name()
-                        .map(|n| filter.iter().any(|f| f == n.to_string_lossy().as_ref()))
-                        .unwrap_or(false)
-                })
-                .collect()
-        } else {
-            discovered
-        };
-
-        if filtered.is_empty() {
-            let filter_msg = source
-                .skills
-                .as_ref()
-                .map(|f| format!(" (filter: {})", f.join(", ")))
-                .unwrap_or_default();
-            return Err(SandboxError::InvalidRequest {
-                message: format!(
-                    "no skills found in {} ({}){filter_msg}",
-                    source.source, source.source_type
-                ),
-            });
-        }
-
-        for skill_path in &filtered {
-            let canonical =
-                fs::canonicalize(skill_path).map_err(|err| SandboxError::StreamError {
-                    message: err.to_string(),
-                })?;
-            if !skill_dirs.contains(&canonical) {
-                skill_dirs.push(canonical.clone());
-            }
-            let skill_name = canonical
-                .file_name()
-                .ok_or_else(|| SandboxError::InvalidRequest {
-                    message: format!("invalid skill directory: {}", canonical.display()),
-                })?
-                .to_string_lossy()
-                .to_string();
-            for root in SKILL_ROOTS {
-                let dest = cwd.join(root).join(&skill_name);
-                ensure_skill_link(&canonical, &dest)?;
-            }
-        }
-    }
-
-    Ok(skill_dirs)
-}
-
-fn skills_cache_dir() -> Result<PathBuf, SandboxError> {
-    let home = std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .map_err(|_| SandboxError::StreamError {
-            message: "cannot determine home directory".to_string(),
-        })?;
-    let cache = PathBuf::from(home).join(".sandbox-agent/skills-cache");
-    fs::create_dir_all(&cache).map_err(|err| SandboxError::StreamError {
-        message: format!("failed to create skills cache: {err}"),
-    })?;
-    Ok(cache)
-}
-
-fn download_github_zip(
-    owner_repo: &str,
-    cache_name: &str,
-    git_ref: Option<&str>,
-) -> Result<PathBuf, SandboxError> {
-    let cache = skills_cache_dir()?;
-    let dest = cache.join(cache_name);
-
-    // Remove existing cache dir if present (no .git state to preserve)
-    if dest.is_dir() {
-        fs::remove_dir_all(&dest).map_err(|err| SandboxError::StreamError {
-            message: format!("failed to remove old skills cache: {err}"),
-        })?;
-    }
-
-    let git_ref = git_ref.unwrap_or("HEAD");
-    let url = format!(
-        "https://api.github.com/repos/{}/zipball/{}",
-        owner_repo, git_ref
-    );
-
-    let client = reqwest::blocking::Client::new();
-    let response = client
-        .get(&url)
-        .header("User-Agent", "sandbox-agent")
-        .send()
-        .map_err(|err| SandboxError::StreamError {
-            message: format!("failed to download github zip for {owner_repo}: {err}"),
+    let payload =
+        serde_json::from_slice::<Value>(&body).map_err(|err| SandboxError::InvalidRequest {
+            message: format!("invalid JSON body: {err}"),
         })?;
 
-    if !response.status().is_success() {
-        return Err(SandboxError::StreamError {
-            message: format!(
-                "github zip download failed for {owner_repo}: HTTP {}",
-                response.status()
-            ),
-        });
-    }
-
-    let bytes = response.bytes().map_err(|err| SandboxError::StreamError {
-        message: format!("failed to read github zip response: {err}"),
-    })?;
-
-    let reader = std::io::Cursor::new(bytes);
-    let mut archive = zip::ZipArchive::new(reader).map_err(|err| SandboxError::StreamError {
-        message: format!("failed to open github zip archive: {err}"),
-    })?;
-
-    // GitHub zipball wraps contents in a {owner}-{repo}-{sha}/ prefix directory.
-    // Detect this prefix from the first entry and strip it during extraction.
-    let prefix = {
-        let first = archive
-            .by_index(0)
-            .map_err(|err| SandboxError::StreamError {
-                message: format!("failed to read zip entry: {err}"),
-            })?;
-        let name = first.name().to_string();
-        // The first entry is typically the top-level directory itself (e.g. "owner-repo-sha/")
-        match name.find('/') {
-            Some(pos) => name[..=pos].to_string(),
-            None => String::new(),
+    let bootstrap_agent = match query.agent {
+        Some(agent) => {
+            Some(
+                AgentId::parse(&agent).ok_or_else(|| SandboxError::UnsupportedAgent {
+                    agent: agent.clone(),
+                })?,
+            )
         }
+        None => None,
     };
 
-    fs::create_dir_all(&dest).map_err(|err| SandboxError::StreamError {
-        message: format!("failed to create skills cache dir: {err}"),
-    })?;
-
-    for i in 0..archive.len() {
-        let mut file = archive
-            .by_index(i)
-            .map_err(|err| SandboxError::StreamError {
-                message: format!("failed to read zip entry: {err}"),
-            })?;
-
-        let full_name = file.name().to_string();
-
-        // Strip the GitHub prefix directory
-        let relative = if !prefix.is_empty() && full_name.starts_with(&prefix) {
-            &full_name[prefix.len()..]
-        } else {
-            &full_name
-        };
-
-        // Skip the prefix directory entry itself and empty paths
-        if relative.is_empty() {
-            continue;
-        }
-
-        let out_path = dest.join(relative);
-
-        // Prevent path traversal
-        if !out_path.starts_with(&dest) {
-            continue;
-        }
-
-        if file.is_dir() {
-            fs::create_dir_all(&out_path).map_err(|err| SandboxError::StreamError {
-                message: format!("failed to create directory: {err}"),
-            })?;
-        } else {
-            if let Some(parent) = out_path.parent() {
-                fs::create_dir_all(parent).map_err(|err| SandboxError::StreamError {
-                    message: format!("failed to create parent directory: {err}"),
-                })?;
-            }
-            let mut out_file =
-                fs::File::create(&out_path).map_err(|err| SandboxError::StreamError {
-                    message: format!("failed to create file: {err}"),
-                })?;
-            std::io::copy(&mut file, &mut out_file).map_err(|err| SandboxError::StreamError {
-                message: format!("failed to write file: {err}"),
-            })?;
-        }
-    }
-
-    Ok(dest)
-}
-
-fn clone_or_update_repo(
-    url: &str,
-    cache_name: &str,
-    git_ref: Option<&str>,
-) -> Result<PathBuf, SandboxError> {
-    let cache = skills_cache_dir()?;
-    let dest = cache.join(cache_name);
-
-    if dest.join(".git").is_dir() {
-        // Update existing clone
-        let mut cmd = std::process::Command::new("git");
-        cmd.arg("-C").arg(&dest).arg("pull").arg("--ff-only");
-        let output = cmd.output().map_err(|err| SandboxError::StreamError {
-            message: format!("git pull failed: {err}"),
-        })?;
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            tracing::warn!("git pull failed for {cache_name}, re-cloning: {stderr}");
-            fs::remove_dir_all(&dest).map_err(|err| SandboxError::StreamError {
-                message: format!("failed to remove stale cache: {err}"),
-            })?;
-            return clone_or_update_repo(url, cache_name, git_ref);
-        }
-    } else {
-        // Fresh clone
-        let mut cmd = std::process::Command::new("git");
-        cmd.arg("clone").arg("--depth").arg("1");
-        if let Some(r) = git_ref {
-            cmd.arg("--branch").arg(r);
-        }
-        cmd.arg(url).arg(&dest);
-        let output = cmd.output().map_err(|err| SandboxError::StreamError {
-            message: format!("git clone failed: {err}"),
-        })?;
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(SandboxError::StreamError {
-                message: format!("git clone failed for {url}: {stderr}"),
-            });
-        }
-    }
-
-    Ok(dest)
-}
-
-fn resolve_skill_source(source: &SkillSource, cwd: &StdPath) -> Result<PathBuf, SandboxError> {
-    match source.source_type.as_str() {
-        "github" => {
-            let cache_name = source.source.replace('/', "-");
-            download_github_zip(&source.source, &cache_name, source.git_ref.as_deref())
-        }
-        "git" => {
-            use std::collections::hash_map::DefaultHasher;
-            use std::hash::{Hash, Hasher};
-            let mut hasher = DefaultHasher::new();
-            source.source.hash(&mut hasher);
-            let hash = format!("{:016x}", hasher.finish());
-            clone_or_update_repo(&source.source, &hash, source.git_ref.as_deref())
-        }
-        "local" => {
-            let mut path = PathBuf::from(&source.source);
-            if path.is_relative() {
-                path = cwd.join(path);
-            }
-            if !path.is_dir() {
-                return Err(SandboxError::InvalidRequest {
-                    message: format!("local skill directory not found: {}", path.display()),
-                });
-            }
-            Ok(path)
-        }
-        other => Err(SandboxError::InvalidRequest {
-            message: format!("unsupported skill source type: {other}"),
-        }),
+    match state
+        .acp_proxy()
+        .post(&server_id, bootstrap_agent, payload)
+        .await?
+    {
+        ProxyPostOutcome::Response(value) => Ok((StatusCode::OK, Json(value)).into_response()),
+        ProxyPostOutcome::Accepted => Ok(StatusCode::ACCEPTED.into_response()),
     }
 }
 
-fn discover_skills_in_dir(
-    base: &StdPath,
-    subpath: Option<&str>,
-) -> Result<Vec<PathBuf>, SandboxError> {
-    let search_dir = if let Some(sub) = subpath {
-        base.join(sub)
-    } else {
-        base.to_path_buf()
-    };
-
-    if !search_dir.is_dir() {
-        return Err(SandboxError::InvalidRequest {
-            message: format!("skill search directory not found: {}", search_dir.display()),
-        });
-    }
-
-    let mut skills = Vec::new();
-
-    // Check if the search dir itself is a skill
-    if search_dir.join("SKILL.md").exists() {
-        skills.push(search_dir.clone());
-    }
-
-    // Check skills/ subdirectory
-    let skills_subdir = search_dir.join("skills");
-    if skills_subdir.is_dir() {
-        if let Ok(entries) = fs::read_dir(&skills_subdir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_dir() && path.join("SKILL.md").exists() {
-                    skills.push(path);
-                }
-            }
+#[utoipa::path(
+    get,
+    path = "/v1/acp/{server_id}",
+    tag = "v1",
+    params(
+        ("server_id" = String, Path, description = "Client-defined ACP server id")
+    ),
+    responses(
+        (status = 200, description = "SSE stream of ACP envelopes"),
+        (status = 406, description = "Client does not accept SSE responses", body = ProblemDetails),
+        (status = 404, description = "Unknown ACP server", body = ProblemDetails),
+        (status = 400, description = "Invalid request", body = ProblemDetails)
+    )
+)]
+async fn get_v1_acp(
+    State(state): State<Arc<AppState>>,
+    Path(server_id): Path<String>,
+    headers: HeaderMap,
+) -> Result<Sse<PinBoxSseStream>, ApiError> {
+    if !accept_allows(&headers, TEXT_EVENT_STREAM) {
+        return Err(SandboxError::NotAcceptable {
+            message: "accept must allow text/event-stream".to_string(),
         }
+        .into());
     }
 
-    // Check immediate children of search dir (for repos with skills at top level)
-    if let Ok(entries) = fs::read_dir(&search_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() && path.join("SKILL.md").exists() && !skills.contains(&path) {
-                skills.push(path);
-            }
-        }
-    }
+    let last_event_id = parse_last_event_id(&headers)?;
+    let stream = state.acp_proxy().sse(&server_id, last_event_id).await?;
 
-    Ok(skills)
-}
-
-fn ensure_skill_link(target: &StdPath, dest: &StdPath) -> Result<(), SandboxError> {
-    if dest.exists() {
-        if dest.is_dir() && dest.join("SKILL.md").exists() {
-            return Ok(());
-        }
-        if let Ok(link_target) = fs::read_link(dest) {
-            if link_target == target {
-                return Ok(());
-            }
-        }
-        return Err(SandboxError::InvalidRequest {
-            message: format!("skill path conflict: {} already exists", dest.display()),
-        });
-    }
-    // Remove dangling symlinks (exists() follows symlinks and returns false for dangling ones)
-    if dest.symlink_metadata().is_ok() {
-        let _ = fs::remove_file(dest);
-    }
-    if let Some(parent) = dest.parent() {
-        fs::create_dir_all(parent).map_err(|err| SandboxError::StreamError {
-            message: err.to_string(),
-        })?;
-    }
-    if let Err(err) = create_symlink_dir(target, dest) {
-        copy_dir_recursive(target, dest).map_err(|copy_err| SandboxError::StreamError {
-            message: format!("{err}; fallback copy failed: {copy_err}"),
-        })?;
-    }
-    Ok(())
-}
-
-#[cfg(unix)]
-fn create_symlink_dir(target: &StdPath, dest: &StdPath) -> std::io::Result<()> {
-    std::os::unix::fs::symlink(target, dest)
-}
-
-#[cfg(windows)]
-fn create_symlink_dir(target: &StdPath, dest: &StdPath) -> std::io::Result<()> {
-    std::os::windows::fs::symlink_dir(target, dest)
-}
-
-#[cfg(not(any(unix, windows)))]
-fn create_symlink_dir(_target: &StdPath, _dest: &StdPath) -> std::io::Result<()> {
-    Err(std::io::Error::new(
-        std::io::ErrorKind::Other,
-        "symlinks unsupported",
+    Ok(Sse::new(stream).keep_alive(
+        KeepAlive::new()
+            .interval(Duration::from_secs(15))
+            .text("heartbeat"),
     ))
 }
 
-fn copy_dir_recursive(src: &StdPath, dest: &StdPath) -> std::io::Result<()> {
-    fs::create_dir_all(dest)?;
-    for entry in fs::read_dir(src)? {
-        let entry = entry?;
-        let file_type = entry.file_type()?;
-        let src_path = entry.path();
-        let dest_path = dest.join(entry.file_name());
-        if file_type.is_dir() {
-            copy_dir_recursive(&src_path, &dest_path)?;
-        } else {
-            fs::copy(&src_path, &dest_path)?;
-        }
-    }
-    Ok(())
-}
-
-fn write_claude_mcp_config(mcp: &BTreeMap<String, McpServerConfig>) -> Result<(), SandboxError> {
-    let cwd = std::env::current_dir().map_err(|err| SandboxError::StreamError {
-        message: err.to_string(),
-    })?;
-    let path = cwd.join(".mcp.json");
-    let mut root = if path.exists() {
-        let text = fs::read_to_string(&path).map_err(|err| SandboxError::StreamError {
-            message: err.to_string(),
-        })?;
-        serde_json::from_str::<Value>(&text).map_err(|err| SandboxError::InvalidRequest {
-            message: format!("invalid .mcp.json: {err}"),
-        })?
-    } else {
-        Value::Object(Map::new())
-    };
-    let Some(object) = root.as_object_mut() else {
-        return Err(SandboxError::InvalidRequest {
-            message: "invalid .mcp.json: expected object".to_string(),
-        });
-    };
-    let servers = object
-        .entry("mcpServers")
-        .or_insert_with(|| Value::Object(Map::new()));
-    let Some(server_map) = servers.as_object_mut() else {
-        return Err(SandboxError::InvalidRequest {
-            message: "invalid .mcp.json: mcpServers must be an object".to_string(),
-        });
-    };
-    for (name, config) in mcp {
-        server_map.insert(name.clone(), claude_mcp_entry(config)?);
-    }
-    fs::write(
-        &path,
-        serde_json::to_string_pretty(&root).map_err(|err| SandboxError::StreamError {
-            message: err.to_string(),
-        })?,
+#[utoipa::path(
+    delete,
+    path = "/v1/acp/{server_id}",
+    tag = "v1",
+    params(
+        ("server_id" = String, Path, description = "Client-defined ACP server id")
+    ),
+    responses(
+        (status = 204, description = "ACP server closed")
     )
-    .map_err(|err| SandboxError::StreamError {
-        message: err.to_string(),
-    })?;
+)]
+async fn delete_v1_acp(
+    State(state): State<Arc<AppState>>,
+    Path(server_id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    state.acp_proxy().delete(&server_id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+fn validate_named_query(value: &str, field_name: &str) -> Result<(), SandboxError> {
+    if value.trim().is_empty() {
+        return Err(SandboxError::InvalidRequest {
+            message: format!("missing required '{field_name}' query parameter"),
+        });
+    }
     Ok(())
 }
 
-fn write_codex_mcp_config(mcp: &BTreeMap<String, McpServerConfig>) -> Result<(), SandboxError> {
-    let cwd = std::env::current_dir().map_err(|err| SandboxError::StreamError {
+fn config_file_path(directory: &str, filename: &str) -> Result<PathBuf, SandboxError> {
+    if directory.trim().is_empty() {
+        return Err(SandboxError::InvalidRequest {
+            message: "missing required 'directory' query parameter".to_string(),
+        });
+    }
+
+    let base_dir = PathBuf::from(directory);
+    let root = if base_dir.is_absolute() {
+        base_dir
+    } else {
+        std::env::current_dir()
+            .map_err(|err| SandboxError::StreamError {
+                message: err.to_string(),
+            })?
+            .join(base_dir)
+    };
+
+    Ok(root.join(".sandbox-agent").join("config").join(filename))
+}
+
+fn read_named_config_map<T>(path: &StdPath) -> Result<BTreeMap<String, T>, SandboxError>
+where
+    T: DeserializeOwned,
+{
+    if !path.exists() {
+        return Ok(BTreeMap::new());
+    }
+
+    let text = fs::read_to_string(path).map_err(|err| SandboxError::StreamError {
         message: err.to_string(),
     })?;
-    let path = cwd.join(".codex").join("config.toml");
-    let mut doc = if path.exists() {
-        let text = fs::read_to_string(&path).map_err(|err| SandboxError::StreamError {
-            message: err.to_string(),
-        })?;
-        text.parse::<DocumentMut>()
-            .map_err(|err| SandboxError::InvalidRequest {
-                message: format!("invalid Codex config.toml: {err}"),
-            })?
-    } else {
-        DocumentMut::new()
-    };
-    let mcp_item = doc
-        .entry("mcp_servers")
-        .or_insert(Item::Table(Table::new()));
-    let mcp_table = mcp_item
-        .as_table_mut()
-        .ok_or_else(|| SandboxError::InvalidRequest {
-            message: "invalid Codex config.toml: mcp_servers must be a table".to_string(),
-        })?;
-    for (name, config) in mcp {
-        let table = codex_mcp_table(config)?;
-        mcp_table.insert(name, Item::Table(table));
+
+    if text.trim().is_empty() {
+        return Ok(BTreeMap::new());
     }
+
+    serde_json::from_str::<BTreeMap<String, T>>(&text).map_err(|err| SandboxError::InvalidRequest {
+        message: format!("invalid config file {}: {err}", path.display()),
+    })
+}
+
+fn write_named_config_map<T>(
+    path: &StdPath,
+    values: &BTreeMap<String, T>,
+) -> Result<(), SandboxError>
+where
+    T: Serialize,
+{
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|err| SandboxError::StreamError {
             message: err.to_string(),
         })?;
     }
-    fs::write(&path, doc.to_string()).map_err(|err| SandboxError::StreamError {
+
+    let body = serde_json::to_string_pretty(values).map_err(|err| SandboxError::StreamError {
         message: err.to_string(),
     })?;
-    Ok(())
-}
 
-fn apply_amp_mcp_config(
-    agent_manager: &AgentManager,
-    mcp: &BTreeMap<String, McpServerConfig>,
-) -> Result<(), SandboxError> {
-    let path = agent_manager.resolve_binary(AgentId::Amp).map_err(|_| {
-        SandboxError::AgentNotInstalled {
-            agent: "amp".to_string(),
-        }
-    })?;
-    let cwd = std::env::current_dir().map_err(|err| SandboxError::StreamError {
-        message: err.to_string(),
-    })?;
-    for (name, config) in mcp {
-        let mut cmd = Command::new(&path);
-        cmd.current_dir(&cwd);
-        cmd.arg("mcp").arg("add").arg(name);
-        match config {
-            McpServerConfig::Local { command, args, .. } => {
-                let (cmd_name, cmd_args) = mcp_command_parts(command, args)?;
-                cmd.arg("--").arg(cmd_name).args(cmd_args);
-            }
-            McpServerConfig::Remote {
-                url,
-                headers,
-                bearer_token_env_var,
-                env_headers,
-                ..
-            } => {
-                let merged = merged_headers(
-                    headers.as_ref(),
-                    bearer_token_env_var.as_ref(),
-                    env_headers.as_ref(),
-                );
-                for (key, value) in merged {
-                    cmd.arg("--header").arg(format!("{key}: {value}"));
-                }
-                cmd.arg(url);
-            }
-        }
-        let output = cmd.output().map_err(|err| SandboxError::StreamError {
-            message: err.to_string(),
-        })?;
-        if !output.status.success() {
-            return Err(SandboxError::StreamError {
-                message: format!("amp mcp add failed for {name}: {}", output.status),
-            });
-        }
-    }
-    Ok(())
-}
-
-fn opencode_mcp_config(config: &McpServerConfig) -> Result<Value, SandboxError> {
-    match config {
-        McpServerConfig::Local {
-            command,
-            args,
-            env,
-            enabled,
-            timeout_ms,
-            ..
-        } => {
-            let (cmd_name, cmd_args) = mcp_command_parts(command, args)?;
-            let mut map = Map::new();
-            map.insert("type".to_string(), Value::String("local".to_string()));
-            let mut command_parts = vec![Value::String(cmd_name)];
-            command_parts.extend(cmd_args.into_iter().map(Value::String));
-            map.insert("command".to_string(), Value::Array(command_parts));
-            if let Some(env) = env {
-                map.insert("environment".to_string(), json!(env));
-            }
-            if let Some(enabled) = enabled {
-                map.insert("enabled".to_string(), Value::Bool(*enabled));
-            }
-            if let Some(timeout) = timeout_ms {
-                map.insert(
-                    "timeout".to_string(),
-                    Value::Number(serde_json::Number::from(*timeout)),
-                );
-            }
-            Ok(Value::Object(map))
-        }
-        McpServerConfig::Remote {
-            url,
-            headers,
-            bearer_token_env_var,
-            env_headers,
-            oauth,
-            enabled,
-            timeout_ms,
-            ..
-        } => {
-            let mut map = Map::new();
-            map.insert("type".to_string(), Value::String("remote".to_string()));
-            map.insert("url".to_string(), Value::String(url.clone()));
-            let merged = merged_headers(
-                headers.as_ref(),
-                bearer_token_env_var.as_ref(),
-                env_headers.as_ref(),
-            );
-            if !merged.is_empty() {
-                map.insert("headers".to_string(), json!(merged));
-            }
-            if let Some(oauth) = oauth {
-                map.insert(
-                    "oauth".to_string(),
-                    serde_json::to_value(oauth).map_err(|err| SandboxError::StreamError {
-                        message: err.to_string(),
-                    })?,
-                );
-            }
-            if let Some(enabled) = enabled {
-                map.insert("enabled".to_string(), Value::Bool(*enabled));
-            }
-            if let Some(timeout) = timeout_ms {
-                map.insert(
-                    "timeout".to_string(),
-                    Value::Number(serde_json::Number::from(*timeout)),
-                );
-            }
-            Ok(Value::Object(map))
-        }
-    }
-}
-
-fn claude_mcp_entry(config: &McpServerConfig) -> Result<Value, SandboxError> {
-    match config {
-        McpServerConfig::Local {
-            command, args, env, ..
-        } => {
-            let (cmd_name, cmd_args) = mcp_command_parts(command, args)?;
-            let mut map = Map::new();
-            map.insert("command".to_string(), Value::String(cmd_name));
-            if !cmd_args.is_empty() {
-                map.insert(
-                    "args".to_string(),
-                    Value::Array(cmd_args.into_iter().map(Value::String).collect()),
-                );
-            }
-            if let Some(env) = env {
-                map.insert("env".to_string(), json!(env));
-            }
-            Ok(Value::Object(map))
-        }
-        McpServerConfig::Remote {
-            url,
-            headers,
-            bearer_token_env_var,
-            env_headers,
-            transport,
-            ..
-        } => {
-            let mut map = Map::new();
-            let transport = transport.clone().unwrap_or(McpRemoteTransport::Http);
-            map.insert(
-                "type".to_string(),
-                Value::String(
-                    match transport {
-                        McpRemoteTransport::Http => "http",
-                        McpRemoteTransport::Sse => "sse",
-                    }
-                    .to_string(),
-                ),
-            );
-            map.insert("url".to_string(), Value::String(url.clone()));
-            let merged = merged_headers(
-                headers.as_ref(),
-                bearer_token_env_var.as_ref(),
-                env_headers.as_ref(),
-            );
-            if !merged.is_empty() {
-                map.insert("headers".to_string(), json!(merged));
-            }
-            Ok(Value::Object(map))
-        }
-    }
-}
-
-fn codex_mcp_table(config: &McpServerConfig) -> Result<Table, SandboxError> {
-    let mut table = Table::new();
-    match config {
-        McpServerConfig::Local {
-            command,
-            args,
-            env,
-            enabled,
-            timeout_ms,
-            ..
-        } => {
-            let (cmd_name, cmd_args) = mcp_command_parts(command, args)?;
-            table.insert("command", value(cmd_name));
-            if !cmd_args.is_empty() {
-                let mut array = Array::new();
-                for arg in cmd_args {
-                    array.push(arg);
-                }
-                table.insert("args", value(array));
-            }
-            if let Some(env) = env {
-                let mut env_table = Table::new();
-                for (key, val) in env {
-                    env_table.insert(key, value(val.clone()));
-                }
-                table.insert("env", Item::Table(env_table));
-            }
-            if let Some(enabled) = enabled {
-                table.insert("enabled", value(*enabled));
-            }
-            if let Some(timeout) = timeout_ms {
-                let seconds = (*timeout + 999) / 1000;
-                table.insert("tool_timeout_sec", value(seconds as i64));
-            }
-        }
-        McpServerConfig::Remote {
-            url,
-            headers,
-            bearer_token_env_var,
-            env_headers,
-            enabled,
-            timeout_ms,
-            ..
-        } => {
-            table.insert("url", value(url.clone()));
-            if let Some(headers) = headers {
-                let mut header_table = Table::new();
-                for (key, val) in headers {
-                    header_table.insert(key, value(val.clone()));
-                }
-                table.insert("http_headers", Item::Table(header_table));
-            }
-            if let Some(env_headers) = env_headers {
-                let mut header_table = Table::new();
-                for (key, val) in env_headers {
-                    header_table.insert(key, value(val.clone()));
-                }
-                table.insert("env_http_headers", Item::Table(header_table));
-            }
-            if let Some(bearer) = bearer_token_env_var {
-                table.insert("bearer_token_env_var", value(bearer.clone()));
-            }
-            if let Some(enabled) = enabled {
-                table.insert("enabled", value(*enabled));
-            }
-            if let Some(timeout) = timeout_ms {
-                let seconds = (*timeout + 999) / 1000;
-                table.insert("tool_timeout_sec", value(seconds as i64));
-            }
-        }
-    }
-    Ok(table)
-}
-
-fn mcp_command_parts(
-    command: &McpCommand,
-    args: &[String],
-) -> Result<(String, Vec<String>), SandboxError> {
-    match command {
-        McpCommand::Command(value) => Ok((value.clone(), args.to_vec())),
-        McpCommand::CommandWithArgs(values) => {
-            if values.is_empty() {
-                return Err(SandboxError::InvalidRequest {
-                    message: "mcp command cannot be empty".to_string(),
-                });
-            }
-            let mut iter = values.iter();
-            let cmd = iter.next().map(|value| value.to_string()).ok_or_else(|| {
-                SandboxError::InvalidRequest {
-                    message: "mcp command cannot be empty".to_string(),
-                }
-            })?;
-            let mut cmd_args = iter.map(|value| value.to_string()).collect::<Vec<_>>();
-            cmd_args.extend(args.iter().cloned());
-            Ok((cmd, cmd_args))
-        }
-    }
-}
-
-fn merged_headers(
-    headers: Option<&BTreeMap<String, String>>,
-    bearer_token_env_var: Option<&String>,
-    env_headers: Option<&BTreeMap<String, String>>,
-) -> BTreeMap<String, String> {
-    let mut merged = headers.cloned().unwrap_or_default();
-    if let Some(env_var) = bearer_token_env_var {
-        merged
-            .entry("Authorization".to_string())
-            .or_insert_with(|| format!("Bearer ${env_var}"));
-    }
-    if let Some(env_headers) = env_headers {
-        for (key, value) in env_headers {
-            merged
-                .entry(key.clone())
-                .or_insert_with(|| format!("${value}"));
-        }
-    }
-    merged
-}
-
-async fn resolve_fs_path(
-    state: &Arc<AppState>,
-    session_id: Option<&str>,
-    raw_path: &str,
-) -> Result<PathBuf, SandboxError> {
-    let path = PathBuf::from(raw_path);
-    if path.is_absolute() {
-        return Ok(path);
-    }
-    let root = resolve_fs_root(state, session_id).await?;
-    let relative = sanitize_relative_path(&path)?;
-    Ok(root.join(relative))
-}
-
-async fn resolve_fs_root(
-    state: &Arc<AppState>,
-    session_id: Option<&str>,
-) -> Result<PathBuf, SandboxError> {
-    if let Some(session_id) = session_id {
-        return state.session_manager.session_working_dir(session_id).await;
-    }
-    let home = dirs::home_dir().ok_or_else(|| SandboxError::InvalidRequest {
-        message: "home directory unavailable".to_string(),
-    })?;
-    Ok(home)
-}
-
-fn sanitize_relative_path(path: &StdPath) -> Result<PathBuf, SandboxError> {
-    use std::path::Component;
-    let mut sanitized = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::CurDir => {}
-            Component::Normal(value) => sanitized.push(value),
-            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
-                return Err(SandboxError::InvalidRequest {
-                    message: format!("invalid relative path: {}", path.display()),
-                });
-            }
-        }
-    }
-    Ok(sanitized)
-}
-
-fn map_fs_error(path: &StdPath, err: std::io::Error) -> SandboxError {
-    if err.kind() == std::io::ErrorKind::NotFound {
-        SandboxError::InvalidRequest {
-            message: format!("path not found: {}", path.display()),
-        }
-    } else {
-        SandboxError::StreamError {
-            message: err.to_string(),
-        }
-    }
-}
-
-fn format_message_with_attachments(message: &str, attachments: &[MessageAttachment]) -> String {
-    if attachments.is_empty() {
-        return message.to_string();
-    }
-    let mut combined = String::new();
-    combined.push_str(message);
-    combined.push_str("\n\nAttachments:\n");
-    for attachment in attachments {
-        combined.push_str("- ");
-        combined.push_str(&attachment.path);
-        combined.push('\n');
-    }
-    combined
-}
-
-fn opencode_file_part_input(attachment: &MessageAttachment) -> Value {
-    let path = attachment.path.as_str();
-    let url = if path.starts_with("file://") {
-        path.to_string()
-    } else {
-        format!("file://{path}")
-    };
-    let filename = attachment.filename.clone().or_else(|| {
-        let clean = path.strip_prefix("file://").unwrap_or(path);
-        StdPath::new(clean)
-            .file_name()
-            .map(|name| name.to_string_lossy().to_string())
-    });
-    let mut map = serde_json::Map::new();
-    map.insert("type".to_string(), json!("file"));
-    map.insert(
-        "mime".to_string(),
-        json!(attachment
-            .mime
-            .clone()
-            .unwrap_or_else(|| "application/octet-stream".to_string())),
-    );
-    map.insert("url".to_string(), json!(url));
-    if let Some(filename) = filename {
-        map.insert("filename".to_string(), json!(filename));
-    }
-    Value::Object(map)
-}
-
-fn claude_input_session_id(session: &SessionSnapshot) -> String {
-    session
-        .native_session_id
-        .clone()
-        .unwrap_or_else(|| session.session_id.clone())
-}
-
-fn claude_user_message_line(session: &SessionSnapshot, message: &str) -> String {
-    let session_id = claude_input_session_id(session);
-    serde_json::json!({
-        "type": "user",
-        "message": {
-            "role": "user",
-            "content": message,
-        },
-        "parent_tool_use_id": null,
-        "session_id": session_id,
-    })
-    .to_string()
-}
-
-fn claude_tool_result_line(
-    session_id: &str,
-    tool_use_id: &str,
-    content: &str,
-    is_error: bool,
-) -> String {
-    serde_json::json!({
-        "type": "user",
-        "message": {
-            "role": "user",
-            "content": [{
-                "type": "tool_result",
-                "tool_use_id": tool_use_id,
-                "content": content,
-                "is_error": is_error,
-            }],
-        },
-        "parent_tool_use_id": null,
-        "session_id": session_id,
-    })
-    .to_string()
-}
-
-fn claude_control_response_line(request_id: &str, behavior: &str, response: Value) -> String {
-    let mut response_obj = serde_json::Map::new();
-    response_obj.insert("behavior".to_string(), Value::String(behavior.to_string()));
-    if let Some(message) = response.get("message") {
-        response_obj.insert("message".to_string(), message.clone());
-    }
-    if let Some(updated_input) = response.get("updatedInput") {
-        response_obj.insert("updatedInput".to_string(), updated_input.clone());
-    }
-    if let Some(updated_permissions) = response.get("updatedPermissions") {
-        response_obj.insert(
-            "updatedPermissions".to_string(),
-            updated_permissions.clone(),
-        );
-    }
-    if let Some(interrupt) = response.get("interrupt") {
-        response_obj.insert("interrupt".to_string(), interrupt.clone());
-    }
-
-    serde_json::json!({
-        "type": "control_response",
-        "response": {
-            "subtype": "success",
-            "request_id": request_id,
-            "response": Value::Object(response_obj),
-        }
-    })
-    .to_string()
-}
-
-/// Returns true if the given action name corresponds to a question tool
-/// (AskUserQuestion or ExitPlanMode in any casing convention).
-pub(crate) fn is_question_tool_action(action: &str) -> bool {
-    matches!(
-        action,
-        "AskUserQuestion"
-            | "ask_user_question"
-            | "askUserQuestion"
-            | "ask-user-question"
-            | "ExitPlanMode"
-            | "exit_plan_mode"
-            | "exitPlanMode"
-            | "exit-plan-mode"
-    )
-}
-
-fn is_file_change_action(action: &str) -> bool {
-    matches!(action, "fileChange" | "file_change" | "file-change")
-        || action.eq_ignore_ascii_case("filechange")
-}
-
-fn permission_cache_keys(action: &str, metadata: &Option<Value>) -> Vec<String> {
-    let mut keys = Vec::new();
-    push_permission_cache_key(&mut keys, action);
-    if let Some(metadata) = metadata.as_ref().and_then(Value::as_object) {
-        if let Some(permission) = metadata.get("permission").and_then(Value::as_str) {
-            push_permission_cache_key(&mut keys, permission);
-        }
-        if let Some(kind) = metadata.get("codexRequestKind").and_then(Value::as_str) {
-            push_permission_cache_key(&mut keys, kind);
-        }
-        if let Some(tool_name) = metadata
-            .get("toolName")
-            .or_else(|| metadata.get("tool_name"))
-            .and_then(Value::as_str)
-        {
-            push_permission_cache_key(&mut keys, tool_name);
-        }
-    }
-    keys.sort_unstable();
-    keys.dedup();
-    keys
-}
-
-fn push_permission_cache_key(keys: &mut Vec<String>, raw: &str) {
-    let raw = raw.trim();
-    if raw.is_empty() {
-        return;
-    }
-    keys.push(raw.to_string());
-    if let Some(category) = permission_action_category(raw) {
-        keys.push(category);
-    }
-}
-
-fn permission_action_category(action: &str) -> Option<String> {
-    let first = action.split_whitespace().next().unwrap_or(action);
-    let stripped = first
-        .split_once(':')
-        .map(|(prefix, _)| prefix)
-        .unwrap_or(first)
-        .trim();
-    if stripped.is_empty() {
-        return None;
-    }
-    if stripped
-        .chars()
-        .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' || ch == '.')
-    {
-        Some(stripped.to_ascii_lowercase())
-    } else {
-        None
-    }
-}
-
-fn read_lines<R: std::io::Read>(reader: R, sender: mpsc::UnboundedSender<String>) {
-    let mut reader = BufReader::new(reader);
-    let mut line = String::new();
-    loop {
-        line.clear();
-        match reader.read_line(&mut line) {
-            Ok(0) => break,
-            Ok(_) => {
-                let trimmed = line.trim_end_matches(&['\r', '\n'][..]).to_string();
-                if sender.send(trimmed).is_err() {
-                    break;
-                }
-            }
-            Err(_) => break,
-        }
-    }
-}
-
-fn write_lines(mut stdin: std::process::ChildStdin, mut receiver: mpsc::UnboundedReceiver<String>) {
-    while let Some(line) = receiver.blocking_recv() {
-        if writeln!(stdin, "{line}").is_err() {
-            break;
-        }
-        if stdin.flush().is_err() {
-            break;
-        }
-    }
-}
-
-#[derive(Default)]
-struct CodexLineOutcome {
-    conversions: Vec<EventConversion>,
-    should_terminate: bool,
-}
-
-struct CodexAppServerState {
-    init_id: Option<String>,
-    thread_start_id: Option<String>,
-    init_done: bool,
-    thread_start_sent: bool,
-    turn_start_sent: bool,
-    thread_id: Option<String>,
-    next_id: i64,
-    prompt: String,
-    model: Option<String>,
-    cwd: Option<String>,
-    approval_policy: Option<codex_schema::AskForApproval>,
-    sandbox_mode: Option<codex_schema::SandboxMode>,
-    sandbox_policy: Option<codex_schema::SandboxPolicy>,
-    sender: Option<mpsc::UnboundedSender<String>>,
-}
-
-impl CodexAppServerState {
-    fn new(options: SpawnOptions) -> Self {
-        let prompt = codex_prompt_for_mode(&options.prompt, options.agent_mode.as_deref());
-        let cwd = options
-            .working_dir
-            .as_ref()
-            .map(|path| path.to_string_lossy().to_string());
-        Self {
-            init_id: None,
-            thread_start_id: None,
-            init_done: false,
-            thread_start_sent: false,
-            turn_start_sent: false,
-            thread_id: None,
-            next_id: 1,
-            prompt,
-            model: options.model.clone(),
-            cwd,
-            approval_policy: codex_approval_policy(options.permission_mode.as_deref()),
-            sandbox_mode: codex_sandbox_mode(options.permission_mode.as_deref()),
-            sandbox_policy: codex_sandbox_policy(options.permission_mode.as_deref()),
-            sender: None,
-        }
-    }
-
-    fn start(&mut self, sender: &mpsc::UnboundedSender<String>) {
-        self.sender = Some(sender.clone());
-        let request_id = self.next_request_id();
-        self.init_id = Some(request_id.to_string());
-        let request = codex_schema::ClientRequest::Initialize {
-            id: request_id,
-            params: codex_schema::InitializeParams {
-                client_info: codex_schema::ClientInfo {
-                    name: "sandbox-agent".to_string(),
-                    title: Some("sandbox-agent".to_string()),
-                    version: env!("CARGO_PKG_VERSION").to_string(),
-                },
-            },
-        };
-        self.send_json(&request);
-    }
-
-    fn handle_line(&mut self, line: &str) -> CodexLineOutcome {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            return CodexLineOutcome::default();
-        }
-        let value: Value = match serde_json::from_str(trimmed) {
-            Ok(value) => value,
-            Err(err) => {
-                return CodexLineOutcome {
-                    conversions: vec![agent_unparsed(
-                        "codex",
-                        &err.to_string(),
-                        Value::String(trimmed.to_string()),
-                    )],
-                    should_terminate: false,
-                };
-            }
-        };
-        let message: codex_schema::JsonrpcMessage = match serde_json::from_value(value.clone()) {
-            Ok(message) => message,
-            Err(err) => {
-                return CodexLineOutcome {
-                    conversions: vec![agent_unparsed("codex", &err.to_string(), value)],
-                    should_terminate: false,
-                };
-            }
-        };
-
-        match message {
-            codex_schema::JsonrpcMessage::Response(response) => {
-                self.handle_response(&response);
-                CodexLineOutcome::default()
-            }
-            codex_schema::JsonrpcMessage::Notification(_) => {
-                if let Ok(notification) =
-                    serde_json::from_value::<codex_schema::ServerNotification>(value.clone())
-                {
-                    self.maybe_capture_thread_id(&notification);
-                    let should_terminate = matches!(
-                        notification,
-                        codex_schema::ServerNotification::TurnCompleted(_)
-                            | codex_schema::ServerNotification::Error(_)
-                    );
-                    if codex_should_emit_notification(&notification) {
-                        match convert_codex::notification_to_universal(&notification) {
-                            Ok(conversions) => CodexLineOutcome {
-                                conversions,
-                                should_terminate,
-                            },
-                            Err(err) => CodexLineOutcome {
-                                conversions: vec![agent_unparsed("codex", &err, value)],
-                                should_terminate,
-                            },
-                        }
-                    } else {
-                        CodexLineOutcome {
-                            conversions: Vec::new(),
-                            should_terminate,
-                        }
-                    }
-                } else {
-                    CodexLineOutcome {
-                        conversions: vec![agent_unparsed("codex", "invalid notification", value)],
-                        should_terminate: false,
-                    }
-                }
-            }
-            codex_schema::JsonrpcMessage::Request(_) => {
-                if let Ok(request) =
-                    serde_json::from_value::<codex_schema::ServerRequest>(value.clone())
-                {
-                    match codex_request_to_universal(&request) {
-                        Ok(mut conversions) => {
-                            for conversion in &mut conversions {
-                                conversion.raw = Some(value.clone());
-                            }
-                            CodexLineOutcome {
-                                conversions,
-                                should_terminate: false,
-                            }
-                        }
-                        Err(err) => CodexLineOutcome {
-                            conversions: vec![agent_unparsed("codex", &err, value)],
-                            should_terminate: false,
-                        },
-                    }
-                } else {
-                    CodexLineOutcome {
-                        conversions: vec![agent_unparsed("codex", "invalid request", value)],
-                        should_terminate: false,
-                    }
-                }
-            }
-            codex_schema::JsonrpcMessage::Error(error) => CodexLineOutcome {
-                conversions: vec![codex_rpc_error_to_universal(&error)],
-                should_terminate: true,
-            },
-        }
-    }
-
-    fn handle_response(&mut self, response: &codex_schema::JsonrpcResponse) {
-        let response_id = response.id.to_string();
-        if !self.init_done {
-            if self.init_id.as_ref().is_some_and(|id| id == &response_id) {
-                self.init_done = true;
-                self.send_initialized();
-                self.send_thread_start();
-            }
-            return;
-        }
-        if self.thread_id.is_none()
-            && self
-                .thread_start_id
-                .as_ref()
-                .is_some_and(|id| id == &response_id)
-        {
-            self.send_turn_start();
-        }
-    }
-
-    fn maybe_capture_thread_id(&mut self, notification: &codex_schema::ServerNotification) {
-        if self.thread_id.is_some() {
-            return;
-        }
-        let thread_id = match notification {
-            codex_schema::ServerNotification::ThreadStarted(params) => {
-                Some(params.thread.id.clone())
-            }
-            codex_schema::ServerNotification::TurnStarted(params) => Some(params.thread_id.clone()),
-            codex_schema::ServerNotification::TurnCompleted(params) => {
-                Some(params.thread_id.clone())
-            }
-            codex_schema::ServerNotification::ItemStarted(params) => Some(params.thread_id.clone()),
-            codex_schema::ServerNotification::ItemCompleted(params) => {
-                Some(params.thread_id.clone())
-            }
-            codex_schema::ServerNotification::ItemAgentMessageDelta(params) => {
-                Some(params.thread_id.clone())
-            }
-            codex_schema::ServerNotification::ItemReasoningTextDelta(params) => {
-                Some(params.thread_id.clone())
-            }
-            codex_schema::ServerNotification::ItemReasoningSummaryTextDelta(params) => {
-                Some(params.thread_id.clone())
-            }
-            codex_schema::ServerNotification::ItemCommandExecutionOutputDelta(params) => {
-                Some(params.thread_id.clone())
-            }
-            codex_schema::ServerNotification::ItemFileChangeOutputDelta(params) => {
-                Some(params.thread_id.clone())
-            }
-            codex_schema::ServerNotification::ItemMcpToolCallProgress(params) => {
-                Some(params.thread_id.clone())
-            }
-            codex_schema::ServerNotification::ThreadTokenUsageUpdated(params) => {
-                Some(params.thread_id.clone())
-            }
-            codex_schema::ServerNotification::TurnDiffUpdated(params) => {
-                Some(params.thread_id.clone())
-            }
-            codex_schema::ServerNotification::TurnPlanUpdated(params) => {
-                Some(params.thread_id.clone())
-            }
-            codex_schema::ServerNotification::ItemCommandExecutionTerminalInteraction(params) => {
-                Some(params.thread_id.clone())
-            }
-            codex_schema::ServerNotification::ItemReasoningSummaryPartAdded(params) => {
-                Some(params.thread_id.clone())
-            }
-            codex_schema::ServerNotification::ThreadCompacted(params) => {
-                Some(params.thread_id.clone())
-            }
-            _ => None,
-        };
-        if let Some(thread_id) = thread_id {
-            self.thread_id = Some(thread_id);
-            self.send_turn_start();
-        }
-    }
-
-    fn send_initialized(&self) {
-        let notification = codex_schema::JsonrpcNotification {
-            method: "initialized".to_string(),
-            params: None,
-        };
-        self.send_json(&notification);
-    }
-
-    fn send_thread_start(&mut self) {
-        if self.thread_start_sent {
-            return;
-        }
-        let request_id = self.next_request_id();
-        self.thread_start_id = Some(request_id.to_string());
-        let mut params = codex_schema::ThreadStartParams::default();
-        params.approval_policy = self.approval_policy;
-        params.sandbox = self.sandbox_mode;
-        params.model = self.model.clone();
-        params.cwd = self.cwd.clone();
-        let request = codex_schema::ClientRequest::ThreadStart {
-            id: request_id,
-            params,
-        };
-        self.thread_start_sent = true;
-        self.send_json(&request);
-    }
-
-    fn send_turn_start(&mut self) {
-        if self.turn_start_sent {
-            return;
-        }
-        let thread_id = match self.thread_id.clone() {
-            Some(thread_id) => thread_id,
-            None => return,
-        };
-        let request_id = self.next_request_id();
-        let params = codex_schema::TurnStartParams {
-            approval_policy: self.approval_policy,
-            collaboration_mode: None,
-            cwd: self.cwd.clone(),
-            effort: None,
-            input: vec![codex_schema::UserInput::Text {
-                text: self.prompt.clone(),
-                text_elements: Vec::new(),
-            }],
-            model: self.model.clone(),
-            output_schema: None,
-            sandbox_policy: self.sandbox_policy.clone(),
-            summary: None,
-            thread_id,
-        };
-        let request = codex_schema::ClientRequest::TurnStart {
-            id: request_id,
-            params,
-        };
-        self.turn_start_sent = true;
-        self.send_json(&request);
-    }
-
-    fn next_request_id(&mut self) -> codex_schema::RequestId {
-        let id = self.next_id;
-        self.next_id += 1;
-        codex_schema::RequestId::from(id)
-    }
-
-    fn send_json<T: Serialize>(&self, payload: &T) {
-        let Some(sender) = self.sender.as_ref() else {
-            return;
-        };
-        let Ok(line) = serde_json::to_string(payload) else {
-            return;
-        };
-        let _ = sender.send(line);
-    }
-}
-
-fn codex_prompt_for_mode(prompt: &str, mode: Option<&str>) -> String {
-    match mode {
-        Some("plan") => format!("Make a plan before acting.\n\n{prompt}"),
-        _ => prompt.to_string(),
-    }
-}
-
-fn codex_approval_policy(mode: Option<&str>) -> Option<codex_schema::AskForApproval> {
-    match mode {
-        Some("plan") => Some(codex_schema::AskForApproval::Untrusted),
-        Some("bypass") => Some(codex_schema::AskForApproval::Never),
-        _ => None,
-    }
-}
-
-fn codex_sandbox_mode(mode: Option<&str>) -> Option<codex_schema::SandboxMode> {
-    match mode {
-        Some("plan") => Some(codex_schema::SandboxMode::ReadOnly),
-        Some("bypass") => Some(codex_schema::SandboxMode::DangerFullAccess),
-        _ => None,
-    }
-}
-
-fn codex_sandbox_policy(mode: Option<&str>) -> Option<codex_schema::SandboxPolicy> {
-    match mode {
-        Some("plan") => Some(codex_schema::SandboxPolicy::ReadOnly),
-        Some("bypass") => Some(codex_schema::SandboxPolicy::DangerFullAccess),
-        _ => None,
-    }
-}
-
-fn codex_should_emit_notification(notification: &codex_schema::ServerNotification) -> bool {
-    let _ = notification;
-    true
-}
-
-/// Extracts thread_id from a Codex server notification.
-fn codex_thread_id_from_server_notification(
-    notification: &codex_schema::ServerNotification,
-) -> Option<String> {
-    match notification {
-        codex_schema::ServerNotification::ThreadStarted(params) => Some(params.thread.id.clone()),
-        codex_schema::ServerNotification::TurnStarted(params) => Some(params.thread_id.clone()),
-        codex_schema::ServerNotification::TurnCompleted(params) => Some(params.thread_id.clone()),
-        codex_schema::ServerNotification::ItemStarted(params) => Some(params.thread_id.clone()),
-        codex_schema::ServerNotification::ItemCompleted(params) => Some(params.thread_id.clone()),
-        codex_schema::ServerNotification::ItemAgentMessageDelta(params) => {
-            Some(params.thread_id.clone())
-        }
-        codex_schema::ServerNotification::ItemReasoningTextDelta(params) => {
-            Some(params.thread_id.clone())
-        }
-        codex_schema::ServerNotification::ItemReasoningSummaryTextDelta(params) => {
-            Some(params.thread_id.clone())
-        }
-        codex_schema::ServerNotification::ItemCommandExecutionOutputDelta(params) => {
-            Some(params.thread_id.clone())
-        }
-        codex_schema::ServerNotification::ItemFileChangeOutputDelta(params) => {
-            Some(params.thread_id.clone())
-        }
-        codex_schema::ServerNotification::ItemMcpToolCallProgress(params) => {
-            Some(params.thread_id.clone())
-        }
-        codex_schema::ServerNotification::ThreadTokenUsageUpdated(params) => {
-            Some(params.thread_id.clone())
-        }
-        codex_schema::ServerNotification::TurnDiffUpdated(params) => Some(params.thread_id.clone()),
-        codex_schema::ServerNotification::TurnPlanUpdated(params) => Some(params.thread_id.clone()),
-        codex_schema::ServerNotification::ItemCommandExecutionTerminalInteraction(params) => {
-            Some(params.thread_id.clone())
-        }
-        codex_schema::ServerNotification::ItemReasoningSummaryPartAdded(params) => {
-            Some(params.thread_id.clone())
-        }
-        codex_schema::ServerNotification::ThreadCompacted(params) => Some(params.thread_id.clone()),
-        _ => None,
-    }
-}
-
-/// Extracts thread_id from a Codex server request.
-fn codex_thread_id_from_server_request(request: &codex_schema::ServerRequest) -> Option<String> {
-    match request {
-        codex_schema::ServerRequest::ItemCommandExecutionRequestApproval { params, .. } => {
-            Some(params.thread_id.clone())
-        }
-        codex_schema::ServerRequest::ItemFileChangeRequestApproval { params, .. } => {
-            Some(params.thread_id.clone())
-        }
-        _ => None,
-    }
-}
-
-fn codex_request_to_universal(
-    request: &codex_schema::ServerRequest,
-) -> Result<Vec<EventConversion>, String> {
-    match request {
-        codex_schema::ServerRequest::ItemCommandExecutionRequestApproval { id, params } => {
-            let mut metadata = serde_json::Map::new();
-            metadata.insert(
-                "codexRequestKind".to_string(),
-                Value::String("commandExecution".to_string()),
-            );
-            metadata.insert(
-                "codexRequestId".to_string(),
-                serde_json::to_value(id).unwrap_or(Value::Null),
-            );
-            metadata.insert(
-                "threadId".to_string(),
-                Value::String(params.thread_id.clone()),
-            );
-            metadata.insert("turnId".to_string(), Value::String(params.turn_id.clone()));
-            metadata.insert("itemId".to_string(), Value::String(params.item_id.clone()));
-            if let Some(command) = params.command.as_ref() {
-                metadata.insert("command".to_string(), Value::String(command.clone()));
-            }
-            if let Some(reason) = params.reason.as_ref() {
-                metadata.insert("reason".to_string(), Value::String(reason.clone()));
-            }
-            let permission = PermissionEventData {
-                permission_id: id.to_string(),
-                action: "commandExecution".to_string(),
-                status: PermissionStatus::Requested,
-                metadata: Some(Value::Object(metadata)),
-            };
-            Ok(vec![EventConversion::new(
-                UniversalEventType::PermissionRequested,
-                UniversalEventData::Permission(permission),
-            )
-            .with_native_session(Some(params.thread_id.clone()))])
-        }
-        codex_schema::ServerRequest::ItemFileChangeRequestApproval { id, params } => {
-            let mut metadata = serde_json::Map::new();
-            metadata.insert(
-                "codexRequestKind".to_string(),
-                Value::String("fileChange".to_string()),
-            );
-            metadata.insert(
-                "codexRequestId".to_string(),
-                serde_json::to_value(id).unwrap_or(Value::Null),
-            );
-            metadata.insert(
-                "threadId".to_string(),
-                Value::String(params.thread_id.clone()),
-            );
-            metadata.insert("turnId".to_string(), Value::String(params.turn_id.clone()));
-            metadata.insert("itemId".to_string(), Value::String(params.item_id.clone()));
-            if let Some(reason) = params.reason.as_ref() {
-                metadata.insert("reason".to_string(), Value::String(reason.clone()));
-            }
-            if let Some(grant_root) = params.grant_root.as_ref() {
-                metadata.insert("grantRoot".to_string(), Value::String(grant_root.clone()));
-            }
-            let permission = PermissionEventData {
-                permission_id: id.to_string(),
-                action: "fileChange".to_string(),
-                status: PermissionStatus::Requested,
-                metadata: Some(Value::Object(metadata)),
-            };
-            Ok(vec![EventConversion::new(
-                UniversalEventType::PermissionRequested,
-                UniversalEventData::Permission(permission),
-            )
-            .with_native_session(Some(params.thread_id.clone()))])
-        }
-        _ => Err("unsupported codex request".to_string()),
-    }
-}
-
-fn codex_rpc_error_to_universal(error: &codex_schema::JsonrpcError) -> EventConversion {
-    let data = ErrorData {
-        message: error.error.message.clone(),
-        code: Some("jsonrpc.error".to_string()),
-        details: serde_json::to_value(error).ok(),
-    };
-    EventConversion::new(UniversalEventType::Error, UniversalEventData::Error(data))
-}
-
-fn codex_request_error_to_sandbox(
-    context: &str,
-    error: &codex_schema::JsonrpcErrorError,
-) -> SandboxError {
-    SandboxError::StreamError {
-        message: format!("{context}: {} (code {})", error.message, error.code),
-    }
-}
-
-fn codex_model_unavailable_status_event(
-    native_session_id: Option<String>,
-    model_id: &str,
-) -> EventConversion {
-    EventConversion::new(
-        UniversalEventType::ItemCompleted,
-        UniversalEventData::Item(ItemEventData {
-            item: UniversalItem {
-                item_id: String::new(),
-                native_item_id: None,
-                parent_id: None,
-                kind: ItemKind::Status,
-                role: Some(ItemRole::System),
-                content: vec![ContentPart::Status {
-                    label: "codex.model.unavailable".to_string(),
-                    detail: Some(format!(
-                        "Model '{}' was rejected by provider; falling back to default for this session.",
-                        model_id
-                    )),
-                }],
-                status: ItemStatus::Completed,
-            },
-        }),
-    )
-    .synthetic()
-    .with_native_session(native_session_id)
-}
-
-fn codex_unavailable_model_from_message(message: &str) -> Option<String> {
-    let normalized = message.to_ascii_lowercase();
-    if !normalized.contains("model") {
-        return None;
-    }
-    let is_known_unavailable_shape = normalized.contains("does not exist")
-        || normalized.contains("model_not_found")
-        || normalized.contains("requested model")
-        || normalized.contains("not supported when using codex with a chatgpt account");
-    if !is_known_unavailable_shape {
-        return None;
-    }
-    for token in extract_quoted_tokens(message, '\'')
-        .into_iter()
-        .chain(extract_quoted_tokens(message, '"').into_iter())
-    {
-        if is_likely_model_id(token) {
-            return Some(token.to_string());
-        }
-    }
-    None
-}
-
-fn codex_unavailable_model_from_rpc_error(
-    error: &codex_schema::JsonrpcErrorError,
-) -> Option<String> {
-    codex_unavailable_model_from_message(&error.message).or_else(|| {
-        error
-            .data
-            .as_ref()
-            .and_then(|data| codex_unavailable_model_from_message(&data.to_string()))
-    })
-}
-
-fn extract_quoted_tokens<'a>(message: &'a str, quote: char) -> Vec<&'a str> {
-    let mut out = Vec::new();
-    let mut start: Option<usize> = None;
-    for (idx, ch) in message.char_indices() {
-        if ch != quote {
-            continue;
-        }
-        if let Some(open) = start.take() {
-            if open < idx {
-                out.push(&message[open..idx]);
-            }
-        } else {
-            start = Some(idx + ch.len_utf8());
-        }
-    }
-    out
-}
-
-fn is_likely_model_id(candidate: &str) -> bool {
-    if candidate.len() < 3 || candidate.len() > 128 {
-        return false;
-    }
-    if candidate.chars().any(|ch| ch.is_whitespace()) {
-        return false;
-    }
-    if !candidate
-        .chars()
-        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
-    {
-        return false;
-    }
-    candidate.contains('-')
-}
-
-fn codex_permission_response_line(
-    permission_id: &str,
-    pending: &PendingPermission,
-    reply: PermissionReply,
-) -> Result<String, SandboxError> {
-    let metadata = pending.metadata.clone().unwrap_or(Value::Null);
-    let request_id = codex_request_id_from_metadata(&metadata)
-        .or_else(|| codex_request_id_from_string(permission_id))
-        .ok_or_else(|| SandboxError::InvalidRequest {
-            message: "invalid codex permission request id".to_string(),
-        })?;
-    let request_kind = metadata
-        .get("codexRequestKind")
-        .and_then(Value::as_str)
-        .unwrap_or("");
-    let response_value = match request_kind {
-        "commandExecution" => {
-            let decision = codex_command_decision_for_reply(reply);
-            let response = codex_schema::CommandExecutionRequestApprovalResponse { decision };
-            serde_json::to_value(response).map_err(|err| SandboxError::InvalidRequest {
-                message: err.to_string(),
-            })?
-        }
-        "fileChange" => {
-            let decision = codex_file_change_decision_for_reply(reply);
-            let response = codex_schema::FileChangeRequestApprovalResponse { decision };
-            serde_json::to_value(response).map_err(|err| SandboxError::InvalidRequest {
-                message: err.to_string(),
-            })?
-        }
-        _ => {
-            return Err(SandboxError::InvalidRequest {
-                message: "unsupported codex permission request".to_string(),
-            });
-        }
-    };
-    let response = codex_schema::JsonrpcResponse {
-        id: request_id,
-        result: response_value,
-    };
-    serde_json::to_string(&response).map_err(|err| SandboxError::InvalidRequest {
+    fs::write(path, body).map_err(|err| SandboxError::StreamError {
         message: err.to_string(),
     })
 }
 
-fn codex_request_id_from_metadata(metadata: &Value) -> Option<codex_schema::RequestId> {
-    let metadata = metadata.as_object()?;
-    let value = metadata.get("codexRequestId")?;
-    codex_request_id_from_value(value)
-}
-
-fn codex_request_id_from_string(value: &str) -> Option<codex_schema::RequestId> {
-    if let Ok(number) = value.parse::<i64>() {
-        return Some(codex_schema::RequestId::from(number));
-    }
-    Some(codex_schema::RequestId::Variant0(value.to_string()))
-}
-
-fn codex_request_id_from_value(value: &Value) -> Option<codex_schema::RequestId> {
-    match value {
-        Value::String(value) => Some(codex_schema::RequestId::Variant0(value.clone())),
-        Value::Number(value) => value.as_i64().map(codex_schema::RequestId::from),
-        _ => None,
-    }
-}
-
-/// Extracts i64 from a RequestId (for matching request/response pairs).
-fn codex_request_id_to_i64(id: &codex_schema::RequestId) -> Option<i64> {
-    match id {
-        codex_schema::RequestId::Variant1(n) => Some(*n),
-        codex_schema::RequestId::Variant0(s) => s.parse().ok(),
-    }
-}
-
-fn codex_command_decision_for_reply(
-    reply: PermissionReply,
-) -> codex_schema::CommandExecutionApprovalDecision {
-    match reply {
-        PermissionReply::Once => codex_schema::CommandExecutionApprovalDecision::Accept,
-        PermissionReply::Always => codex_schema::CommandExecutionApprovalDecision::AcceptForSession,
-        PermissionReply::Reject => codex_schema::CommandExecutionApprovalDecision::Decline,
-    }
-}
-
-fn codex_file_change_decision_for_reply(
-    reply: PermissionReply,
-) -> codex_schema::FileChangeApprovalDecision {
-    match reply {
-        PermissionReply::Once => codex_schema::FileChangeApprovalDecision::Accept,
-        PermissionReply::Always => codex_schema::FileChangeApprovalDecision::AcceptForSession,
-        PermissionReply::Reject => codex_schema::FileChangeApprovalDecision::Decline,
-    }
-}
-
-fn parse_agent_line(agent: AgentId, line: &str, session_id: &str) -> Vec<EventConversion> {
-    let trimmed = line.trim();
-    if trimmed.is_empty() {
-        return Vec::new();
-    }
-    let value: Value = match serde_json::from_str(trimmed) {
-        Ok(value) => value,
-        Err(err) => {
-            return vec![agent_unparsed(
-                agent.as_str(),
-                &err.to_string(),
-                Value::String(trimmed.to_string()),
-            )];
-        }
-    };
-    match agent {
-        AgentId::Claude => {
-            convert_claude::event_to_universal_with_session(&value, session_id.to_string())
-                .unwrap_or_else(|err| vec![agent_unparsed("claude", &err, value)])
-        }
-        AgentId::Codex => match serde_json::from_value(value.clone()) {
-            Ok(notification) => convert_codex::notification_to_universal(&notification)
-                .unwrap_or_else(|err| vec![agent_unparsed("codex", &err, value)]),
-            Err(err) => vec![agent_unparsed("codex", &err.to_string(), value)],
-        },
-        AgentId::Opencode => match serde_json::from_value(value.clone()) {
-            Ok(event) => convert_opencode::event_to_universal(&event)
-                .unwrap_or_else(|err| vec![agent_unparsed("opencode", &err, value)]),
-            Err(err) => vec![agent_unparsed("opencode", &err.to_string(), value)],
-        },
-        AgentId::Amp => match serde_json::from_value(value.clone()) {
-            Ok(event) => convert_amp::event_to_universal(&event)
-                .unwrap_or_else(|err| vec![agent_unparsed("amp", &err, value)]),
-            Err(err) => vec![agent_unparsed("amp", &err.to_string(), value)],
-        },
-        AgentId::Pi => match serde_json::from_value(value.clone()) {
-            Ok(event) => convert_pi::event_to_universal(&event)
-                .unwrap_or_else(|err| vec![agent_unparsed("pi", &err, value)]),
-            Err(err) => vec![agent_unparsed("pi", &err.to_string(), value)],
-        },
-        AgentId::Cursor => vec![agent_unparsed(
-            "cursor",
-            "cursor agent does not parse streaming output",
-            value,
-        )],
-        AgentId::Mock => vec![agent_unparsed(
-            "mock",
-            "mock agent does not parse streaming output",
-            value,
-        )],
-    }
-}
-
-fn opencode_event_matches_session(value: &Value, session_id: &str) -> bool {
-    match extract_opencode_session_id(value) {
-        Some(id) => id == session_id,
-        None => false,
-    }
-}
-
-fn extract_opencode_session_id(value: &Value) -> Option<String> {
-    if let Some(id) = value.get("session_id").and_then(Value::as_str) {
-        return Some(id.to_string());
-    }
-    if let Some(id) = value.get("sessionID").and_then(Value::as_str) {
-        return Some(id.to_string());
-    }
-    if let Some(id) = value.get("sessionId").and_then(Value::as_str) {
-        return Some(id.to_string());
-    }
-    if let Some(id) = extract_nested_string(value, &["properties", "sessionID"]) {
-        return Some(id);
-    }
-    if let Some(id) = extract_nested_string(value, &["properties", "part", "sessionID"]) {
-        return Some(id);
-    }
-    if let Some(id) = extract_nested_string(value, &["session", "id"]) {
-        return Some(id);
-    }
-    if let Some(id) = extract_nested_string(value, &["properties", "session", "id"]) {
-        return Some(id);
-    }
-    None
-}
-
-fn extract_nested_string(value: &Value, path: &[&str]) -> Option<String> {
-    let mut current = value;
-    for key in path {
-        if let Ok(index) = key.parse::<usize>() {
-            current = current.get(index)?;
-        } else {
-            current = current.get(*key)?;
-        }
-    }
-    current.as_str().map(|s| s.to_string())
-}
-
-#[cfg(test)]
-mod pi_model_parser_tests {
-    use super::*;
-
-    #[test]
-    fn parse_pi_models_output_parses_variants_from_thinking_column() {
-        let output = r#"
-provider    model                          aliases         thinking
-openai      gpt-4.1                        gpt-4.1-latest  yes
-anthropic   claude-sonnet-4-5-20250929    sonnet          no
-"#;
-
-        let parsed = parse_pi_models_output(output);
-        let anthropic = parsed
-            .models
-            .iter()
-            .find(|model| model.id == "anthropic/claude-sonnet-4-5-20250929")
-            .expect("anthropic model");
-        assert_eq!(
-            anthropic.variants.as_deref(),
-            Some(&["off".to_string()][..])
-        );
-        assert_eq!(anthropic.default_variant.as_deref(), Some("off"));
-
-        let openai = parsed
-            .models
-            .iter()
-            .find(|model| model.id == "openai/gpt-4.1")
-            .expect("openai model");
-        assert_eq!(openai.variants.as_ref(), Some(&pi_variants()));
-        assert_eq!(openai.default_variant.as_deref(), Some("medium"));
-        assert_eq!(parsed.default_model, None);
-    }
-
-    #[test]
-    fn parse_pi_models_output_skips_blank_header_separator_and_malformed_rows() {
-        let output = r#"
-provider model aliases thinking
--------- ----- ------- --------
-
-openai
-malformed-row
-groq llama-3.3-70b-versatile alias no
-"#;
-
-        let parsed = parse_pi_models_output(output);
-        let models = parsed
-            .models
-            .iter()
-            .map(|model| (model.id.as_str(), model.default_variant.as_deref()))
-            .collect::<Vec<_>>();
-
-        assert_eq!(models, vec![("groq/llama-3.3-70b-versatile", Some("off"))]);
-    }
-
-    #[test]
-    fn parse_pi_models_output_handles_model_ids_with_slashes() {
-        let output = "openrouter qwen/qwen3-32b alias yes";
-
-        let parsed = parse_pi_models_output(output);
-        let models = parsed
-            .models
-            .iter()
-            .map(|model| {
-                (
-                    model.id.as_str(),
-                    model.variants.clone().unwrap_or_default(),
-                    model.default_variant.as_deref(),
-                )
-            })
-            .collect::<Vec<_>>();
-
-        assert_eq!(
-            models,
-            vec![("openrouter/qwen/qwen3-32b", pi_variants(), Some("medium"))]
-        );
-    }
-
-    #[test]
-    fn parse_pi_models_output_deduplicates_and_sorts_stably() {
-        let output = r#"
-zeta z-model yes
-alpha a-model no
-zeta z-model no
-beta b-model yes
-alpha a-model yes
-"#;
-
-        let parsed = parse_pi_models_output(output);
-        let ids = parsed
-            .models
-            .iter()
-            .map(|model| model.id.as_str())
-            .collect::<Vec<_>>();
-
-        assert_eq!(ids, vec!["alpha/a-model", "beta/b-model", "zeta/z-model"]);
-        assert_eq!(parsed.default_model, None);
-    }
-
-    #[test]
-    fn parse_pi_models_output_defaults_to_off_when_thinking_column_missing() {
-        let output = r#"
-provider model aliases
-openai gpt-4.1 gpt-4.1-latest
-"#;
-
-        let parsed = parse_pi_models_output(output);
-        assert_eq!(parsed.models.len(), 1);
-        assert_eq!(
-            parsed.models[0].variants.as_deref(),
-            Some(&["off".to_string()][..])
-        );
-        assert_eq!(parsed.models[0].default_variant.as_deref(), Some("off"));
-    }
-}
-
-#[cfg(test)]
-mod agent_capabilities_tests {
-    use super::*;
-
-    #[test]
-    fn pi_capabilities_enable_variants() {
-        assert!(agent_capabilities_for(AgentId::Pi).variants);
-    }
-}
-
-#[cfg(test)]
-mod runtime_contract_tests {
-    use super::*;
-
-    #[test]
-    fn map_spawn_error_maps_unsupported_runtime_path_to_invalid_request() {
-        let error = map_spawn_error(
-            AgentId::Pi,
-            ManagerError::UnsupportedRuntimePath {
-                agent: AgentId::Pi,
-                operation: "spawn_streaming",
-                recommended_path: "router-managed per-session RPC runtime",
-            },
-        );
-        match error {
-            SandboxError::InvalidRequest { message } => {
-                assert!(message.contains("spawn_streaming"), "{message}");
-                assert!(
-                    message.contains("router-managed per-session RPC runtime"),
-                    "{message}"
-                );
-            }
-            other => panic!("expected InvalidRequest, got {other:?}"),
-        }
-    }
-}
-
-#[cfg(test)]
-mod pi_runtime_tests {
-    use super::*;
-    use tempfile::TempDir;
-
-    fn test_request(agent: AgentId) -> CreateSessionRequest {
-        CreateSessionRequest {
-            agent: agent.as_str().to_string(),
-            agent_mode: None,
-            permission_mode: Some("default".to_string()),
-            model: None,
-            variant: None,
-            agent_version: None,
-        }
-    }
-
-    #[test]
-    fn pi_model_args_with_provider_and_model() {
-        let mut command = std::process::Command::new("pi");
-        SessionManager::apply_pi_model_args(&mut command, Some("openai/gpt-5.2-codex"));
-        let args = command
-            .get_args()
-            .map(|arg| arg.to_string_lossy().to_string())
-            .collect::<Vec<_>>();
-        assert_eq!(
-            args,
-            vec!["--provider", "openai", "--model", "gpt-5.2-codex"]
-        );
-    }
-
-    #[test]
-    fn pi_model_args_with_slashes_in_model_id() {
-        let mut command = std::process::Command::new("pi");
-        SessionManager::apply_pi_model_args(
-            &mut command,
-            Some("openrouter/meta-llama/llama-3.1-8b-instruct"),
-        );
-        let args = command
-            .get_args()
-            .map(|arg| arg.to_string_lossy().to_string())
-            .collect::<Vec<_>>();
-        assert_eq!(
-            args,
-            vec![
-                "--provider",
-                "openrouter",
-                "--model",
-                "meta-llama/llama-3.1-8b-instruct"
-            ]
-        );
-    }
-
-    #[test]
-    fn pi_model_args_with_model_only() {
-        let mut command = std::process::Command::new("pi");
-        SessionManager::apply_pi_model_args(&mut command, Some("gpt-5.2-codex"));
-        let args = command
-            .get_args()
-            .map(|arg| arg.to_string_lossy().to_string())
-            .collect::<Vec<_>>();
-        assert_eq!(args, vec!["--model", "gpt-5.2-codex"]);
-    }
-
-    async fn setup_pi_session_with_stdin(
-        session_id: &str,
-    ) -> (
-        Arc<SessionManager>,
-        Arc<PiSessionRuntime>,
-        mpsc::UnboundedReceiver<String>,
-        TempDir,
-    ) {
-        let temp_dir = TempDir::new().expect("temp dir");
-        let agent_manager = Arc::new(AgentManager::new(temp_dir.path()).expect("agent manager"));
-        let http_client = Client::builder().no_proxy().build().expect("http client");
-        let server_manager = Arc::new(AgentServerManager::new(
-            agent_manager.clone(),
-            http_client.clone(),
-            temp_dir.path().join("logs"),
-            false,
-        ));
-        let session_manager = Arc::new(SessionManager {
-            agent_manager,
-            sessions: Mutex::new(Vec::new()),
-            server_manager,
-            http_client,
-        });
-        session_manager
-            .server_manager
-            .set_owner(Arc::downgrade(&session_manager));
-
-        let (stdin_tx, stdin_rx) = mpsc::unbounded_channel::<String>();
-        let runtime = Arc::new(PiSessionRuntime::new(
-            stdin_tx,
-            Arc::new(std::sync::Mutex::new(None)),
-        ));
-
-        let mut session = SessionState::new(
-            session_id.to_string(),
-            AgentId::Pi,
-            &test_request(AgentId::Pi),
-        )
-        .expect("session");
-        session.native_session_id = Some(format!("native-{session_id}"));
-        session.pi_runtime = Some(runtime.clone());
-        session_manager.sessions.lock().await.push(session);
-
-        (session_manager, runtime, stdin_rx, temp_dir)
-    }
-
-    async fn setup_pi_session(
-        session_id: &str,
-    ) -> (Arc<SessionManager>, Arc<PiSessionRuntime>, TempDir) {
-        let (session_manager, runtime, _stdin_rx, temp_dir) =
-            setup_pi_session_with_stdin(session_id).await;
-        (session_manager, runtime, temp_dir)
-    }
-
-    #[tokio::test]
-    async fn pi_runtime_correlates_multiple_inflight_requests() {
-        let (stdin_tx, mut stdin_rx) = mpsc::unbounded_channel::<String>();
-        let runtime = PiSessionRuntime::new(stdin_tx, Arc::new(std::sync::Mutex::new(None)));
-
-        let id1 = runtime.next_request_id();
-        let id2 = runtime.next_request_id();
-        let rx1 = runtime
-            .send_request(id1, &json!({ "type": "one", "id": id1 }))
-            .expect("request 1");
-        let rx2 = runtime
-            .send_request(id2, &json!({ "type": "two", "id": id2 }))
-            .expect("request 2");
-
-        let line1 = stdin_rx.recv().await.expect("line1");
-        let line2 = stdin_rx.recv().await.expect("line2");
-        assert!(line1.contains("\"id\":1") || line2.contains("\"id\":1"));
-        assert!(line1.contains("\"id\":2") || line2.contains("\"id\":2"));
-
-        runtime.complete_request(id2, json!({ "type": "response", "id": id2, "ok": true }));
-        runtime.complete_request(id1, json!({ "type": "response", "id": id1, "ok": true }));
-
-        let result2 = rx2.await.expect("response 2");
-        let result1 = rx1.await.expect("response 1");
-        assert_eq!(result2.get("id").and_then(Value::as_i64), Some(id2));
-        assert_eq!(result1.get("id").and_then(Value::as_i64), Some(id1));
-    }
-
-    #[tokio::test]
-    async fn pi_set_thinking_level_sends_rpc_and_waits_for_success() {
-        let (session_manager, runtime, mut stdin_rx, _temp_dir) =
-            setup_pi_session_with_stdin("pi-thinking-success").await;
-        let runtime_for_task = runtime.clone();
-        let manager_for_task = session_manager.clone();
-        let task = tokio::spawn(async move {
-            manager_for_task
-                .set_pi_thinking_level(&runtime_for_task, "high")
-                .await
-        });
-
-        let line = stdin_rx.recv().await.expect("set_thinking_level request");
-        let request: Value = serde_json::from_str(&line).expect("json request");
-        assert_eq!(
-            request.get("type").and_then(Value::as_str),
-            Some("set_thinking_level")
-        );
-        assert_eq!(request.get("level").and_then(Value::as_str), Some("high"));
-        let request_id = request
-            .get("id")
-            .and_then(Value::as_i64)
-            .expect("request id");
-        runtime.complete_request(
-            request_id,
-            json!({
-                "type": "response",
-                "id": request_id,
-                "success": true
-            }),
-        );
-
-        task.await.expect("join").expect("set_thinking_level ok");
-    }
-
-    #[tokio::test]
-    async fn pi_set_thinking_level_maps_explicit_rpc_error_to_invalid_request() {
-        let (session_manager, runtime, mut stdin_rx, _temp_dir) =
-            setup_pi_session_with_stdin("pi-thinking-error").await;
-        let runtime_for_task = runtime.clone();
-        let manager_for_task = session_manager.clone();
-        let task = tokio::spawn(async move {
-            manager_for_task
-                .set_pi_thinking_level(&runtime_for_task, "invalid-level")
-                .await
-        });
-
-        let line = stdin_rx.recv().await.expect("set_thinking_level request");
-        let request: Value = serde_json::from_str(&line).expect("json request");
-        let request_id = request
-            .get("id")
-            .and_then(Value::as_i64)
-            .expect("request id");
-        runtime.complete_request(
-            request_id,
-            json!({
-                "type": "response",
-                "id": request_id,
-                "success": false,
-                "error": "unsupported level"
-            }),
-        );
-
-        let err = task
-            .await
-            .expect("join")
-            .expect_err("set_thinking_level should fail");
-        match err {
-            SandboxError::InvalidRequest { message } => {
-                assert!(message.contains("unsupported level"), "{message}");
-            }
-            other => panic!("expected InvalidRequest, got {other:?}"),
-        }
-    }
-
-    #[tokio::test]
-    async fn send_pi_prompt_reapplies_variant_before_prompt() {
-        let (session_manager, runtime, mut stdin_rx, _temp_dir) =
-            setup_pi_session_with_stdin("pi-prompt-variant").await;
-        let snapshot = SessionSnapshot {
-            session_id: "pi-prompt-variant".to_string(),
-            agent: AgentId::Pi,
-            agent_mode: "build".to_string(),
-            permission_mode: "default".to_string(),
-            model: None,
-            variant: Some("high".to_string()),
-            native_session_id: Some("native-pi-prompt-variant".to_string()),
-        };
-        let manager_for_task = session_manager.clone();
-        let task =
-            tokio::spawn(async move { manager_for_task.send_pi_prompt(&snapshot, "Hello").await });
-
-        let set_line = stdin_rx.recv().await.expect("set_thinking_level request");
-        let set_request: Value = serde_json::from_str(&set_line).expect("json request");
-        assert_eq!(
-            set_request.get("type").and_then(Value::as_str),
-            Some("set_thinking_level")
-        );
-        let set_id = set_request
-            .get("id")
-            .and_then(Value::as_i64)
-            .expect("set id");
-        runtime.complete_request(
-            set_id,
-            json!({
-                "type": "response",
-                "id": set_id,
-                "success": true
-            }),
-        );
-
-        let prompt_line = stdin_rx.recv().await.expect("prompt request");
-        let prompt_request: Value = serde_json::from_str(&prompt_line).expect("json request");
-        assert_eq!(
-            prompt_request.get("type").and_then(Value::as_str),
-            Some("prompt")
-        );
-        assert_eq!(
-            prompt_request.get("message").and_then(Value::as_str),
-            Some("Hello")
-        );
-        let prompt_id = prompt_request
-            .get("id")
-            .and_then(Value::as_i64)
-            .expect("prompt id");
-        runtime.complete_request(
-            prompt_id,
-            json!({
-                "type": "response",
-                "id": prompt_id,
-                "success": true
-            }),
-        );
-
-        task.await.expect("join").expect("send_pi_prompt ok");
-    }
-
-    #[tokio::test]
-    async fn send_pi_prompt_maps_explicit_rpc_error_to_invalid_request() {
-        let (session_manager, runtime, mut stdin_rx, _temp_dir) =
-            setup_pi_session_with_stdin("pi-prompt-error").await;
-        let snapshot = SessionSnapshot {
-            session_id: "pi-prompt-error".to_string(),
-            agent: AgentId::Pi,
-            agent_mode: "build".to_string(),
-            permission_mode: "default".to_string(),
-            model: None,
-            variant: None,
-            native_session_id: Some("native-pi-prompt-error".to_string()),
-        };
-        let manager_for_task = session_manager.clone();
-        let task =
-            tokio::spawn(async move { manager_for_task.send_pi_prompt(&snapshot, "Hello").await });
-
-        let prompt_line = stdin_rx.recv().await.expect("prompt request");
-        let prompt_request: Value = serde_json::from_str(&prompt_line).expect("json request");
-        assert_eq!(
-            prompt_request.get("type").and_then(Value::as_str),
-            Some("prompt")
-        );
-        let prompt_id = prompt_request
-            .get("id")
-            .and_then(Value::as_i64)
-            .expect("prompt id");
-        runtime.complete_request(
-            prompt_id,
-            json!({
-                "type": "response",
-                "id": prompt_id,
-                "success": false,
-                "error": "turn already in progress"
-            }),
-        );
-
-        let err = task
-            .await
-            .expect("join")
-            .expect_err("send_pi_prompt should fail");
-        match err {
-            SandboxError::InvalidRequest { message } => {
-                assert!(message.contains("turn already in progress"), "{message}");
-            }
-            other => panic!("expected InvalidRequest, got {other:?}"),
-        }
-    }
-
-    #[tokio::test]
-    async fn send_pi_prompt_reports_cancelled_response() {
-        let (session_manager, runtime, mut stdin_rx, _temp_dir) =
-            setup_pi_session_with_stdin("pi-prompt-cancelled").await;
-        let snapshot = SessionSnapshot {
-            session_id: "pi-prompt-cancelled".to_string(),
-            agent: AgentId::Pi,
-            agent_mode: "build".to_string(),
-            permission_mode: "default".to_string(),
-            model: None,
-            variant: None,
-            native_session_id: Some("native-pi-prompt-cancelled".to_string()),
-        };
-        let manager_for_task = session_manager.clone();
-        let task = tokio::spawn(async move {
-            manager_for_task
-                .send_pi_prompt(&snapshot, "This should cancel")
-                .await
-        });
-
-        let _ = stdin_rx.recv().await.expect("prompt request");
-        runtime.clear_pending();
-
-        let err = task
-            .await
-            .expect("join")
-            .expect_err("send_pi_prompt should fail");
-        match err {
-            SandboxError::StreamError { message } => {
-                assert!(message.contains("pi prompt request cancelled"), "{message}");
-            }
-            other => panic!("expected StreamError, got {other:?}"),
-        }
-    }
-
-    #[tokio::test]
-    async fn pi_runtime_output_non_json_emits_agent_unparsed() {
-        let (session_manager, runtime, _temp_dir) = setup_pi_session("pi-unparsed").await;
-        let (tx, rx) = mpsc::unbounded_channel::<String>();
-        tx.send("not-json".to_string()).expect("send malformed");
-        drop(tx);
-
-        session_manager
-            .clone()
-            .handle_pi_runtime_output("pi-unparsed".to_string(), runtime, rx)
-            .await;
-
-        let events = session_manager
-            .events("pi-unparsed", 0, None, true)
-            .await
-            .expect("events")
-            .events;
-        assert!(events.iter().any(|event| {
-            event.event_type == UniversalEventType::AgentUnparsed
-                && matches!(event.source, EventSource::Daemon)
-                && event.synthetic
-        }));
-    }
-
-    #[tokio::test]
-    async fn pi_runtime_converter_continuity_for_incremental_deltas() {
-        let (session_manager, runtime, _temp_dir) = setup_pi_session("pi-delta").await;
-        let (tx, rx) = mpsc::unbounded_channel::<String>();
-        let lines = [
-            json!({
-                "type": "message_update",
-                "assistantMessageEvent": { "type": "text_delta", "delta": "Hel" }
-            }),
-            json!({
-                "type": "message_update",
-                "assistantMessageEvent": { "type": "text_delta", "delta": "lo" }
-            }),
-            json!({
-                "type": "message_update",
-                "assistantMessageEvent": { "type": "done" }
-            }),
-        ];
-        for line in lines {
-            tx.send(line.to_string()).expect("send line");
-        }
-        drop(tx);
-
-        session_manager
-            .clone()
-            .handle_pi_runtime_output("pi-delta".to_string(), runtime, rx)
-            .await;
-
-        let events = session_manager
-            .events("pi-delta", 0, None, true)
-            .await
-            .expect("events")
-            .events;
-        let deltas = events
-            .iter()
-            .filter_map(|event| match &event.data {
-                UniversalEventData::ItemDelta(delta) => {
-                    Some((delta.item_id.clone(), delta.delta.clone()))
-                }
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(deltas.len(), 2);
-        assert_eq!(deltas[0].0, deltas[1].0, "deltas should share one item");
-        assert_eq!(deltas[0].1, "Hel");
-        assert_eq!(deltas[1].1, "lo");
-
-        let completed = events.iter().find_map(|event| match &event.data {
-            UniversalEventData::Item(item)
-                if event.event_type == UniversalEventType::ItemCompleted =>
-            {
-                Some(item.item.clone())
-            }
-            _ => None,
-        });
-        let completed = completed.expect("completed item");
-        assert_eq!(completed.kind, ItemKind::Message);
-        let text = completed
-            .content
-            .iter()
-            .find_map(|part| match part {
-                ContentPart::Text { text } => Some(text.clone()),
-                _ => None,
-            })
-            .unwrap_or_default();
-        assert_eq!(text, "Hello");
-    }
-}
-
-#[cfg(feature = "test-utils")]
-pub mod test_utils {
-    use super::*;
-    use std::process::Command;
-    use tempfile::TempDir;
-
-    pub struct TestHarness {
-        session_manager: Arc<SessionManager>,
-        _temp_dir: TempDir,
-    }
-
-    impl TestHarness {
-        pub async fn new() -> Self {
-            let temp_dir = TempDir::new().expect("temp dir");
-            let agent_manager =
-                Arc::new(AgentManager::new(temp_dir.path()).expect("agent manager"));
-            let session_manager = Arc::new(SessionManager::new(agent_manager));
-            session_manager
-                .server_manager
-                .set_owner_async(Arc::downgrade(&session_manager))
-                .await;
-            Self {
-                session_manager,
-                _temp_dir: temp_dir,
-            }
-        }
-
-        pub async fn register_session(
-            &self,
-            agent: AgentId,
-            session_id: &str,
-            native_session_id: Option<&str>,
-        ) {
-            self.session_manager
-                .server_manager
-                .register_session(agent, session_id, native_session_id)
-                .await;
-        }
-
-        pub async fn unregister_session(
-            &self,
-            agent: AgentId,
-            session_id: &str,
-            native_session_id: Option<&str>,
-        ) {
-            self.session_manager
-                .server_manager
-                .unregister_session(agent, session_id, native_session_id)
-                .await;
-        }
-
-        pub async fn has_session_mapping(&self, agent: AgentId, session_id: &str) -> bool {
-            let sessions = self.session_manager.server_manager.sessions.lock().await;
-            sessions
-                .get(&agent)
-                .map(|set| set.contains(session_id))
-                .unwrap_or(false)
-        }
-
-        pub async fn native_mapping(
-            &self,
-            agent: AgentId,
-            native_session_id: &str,
-        ) -> Option<String> {
-            let natives = self
-                .session_manager
-                .server_manager
-                .native_sessions
-                .lock()
-                .await;
-            natives
-                .get(&agent)
-                .and_then(|map| map.get(native_session_id))
-                .cloned()
-        }
-
-        pub async fn insert_session(
-            &self,
-            session_id: &str,
-            agent: AgentId,
-            native_session_id: Option<&str>,
-        ) {
-            let request = CreateSessionRequest {
-                agent: agent.as_str().to_string(),
-                agent_mode: None,
-                permission_mode: None,
-                model: None,
-                variant: None,
-                agent_version: None,
-                directory: None,
-                title: None,
-                mcp: None,
-                skills: None,
-            };
-            let mut session =
-                SessionState::new(session_id.to_string(), agent, &request).expect("session");
-            session.native_session_id = native_session_id.map(|id| id.to_string());
-            self.session_manager.sessions.lock().await.push(session);
-        }
-
-        pub async fn insert_stdio_server(
-            &self,
-            agent: AgentId,
-            child: Option<std::process::Child>,
-            instance_id: u64,
-        ) -> Arc<std::sync::Mutex<Option<std::process::Child>>> {
-            let (stdin_tx, _stdin_rx) = mpsc::unbounded_channel::<String>();
-            let server = Arc::new(CodexServer::new(stdin_tx));
-            let child = Arc::new(std::sync::Mutex::new(child));
-            self.session_manager
-                .server_manager
-                .servers
-                .lock()
-                .await
-                .insert(
-                    agent,
-                    ManagedServer {
-                        kind: ManagedServerKind::StdioCodex { server },
-                        child: child.clone(),
-                        status: ServerStatus::Running,
-                        start_time: Some(Instant::now()),
-                        restart_count: 0,
-                        last_error: None,
-                        shutdown_requested: false,
-                        instance_id,
-                    },
-                );
-            child
-        }
-
-        pub async fn insert_http_server(&self, agent: AgentId, instance_id: u64) {
-            self.session_manager
-                .server_manager
-                .servers
-                .lock()
-                .await
-                .insert(
-                    agent,
-                    ManagedServer {
-                        kind: ManagedServerKind::Http {
-                            base_url: "http://127.0.0.1:1".to_string(),
-                        },
-                        child: Arc::new(std::sync::Mutex::new(None)),
-                        status: ServerStatus::Running,
-                        start_time: Some(Instant::now()),
-                        restart_count: 0,
-                        last_error: None,
-                        shutdown_requested: false,
-                        instance_id,
-                    },
-                );
-        }
-
-        pub async fn handle_process_exit(
-            &self,
-            agent: AgentId,
-            instance_id: u64,
-            status: std::process::ExitStatus,
-        ) {
-            self.session_manager
-                .server_manager
-                .handle_process_exit(agent, instance_id, status)
-                .await;
-        }
-
-        pub async fn shutdown(&self) {
-            self.session_manager.shutdown().await;
-        }
-
-        pub async fn server_status(&self, agent: AgentId) -> Option<ServerStatus> {
-            let servers = self.session_manager.server_manager.servers.lock().await;
-            servers.get(&agent).map(|server| server.status.clone())
-        }
-
-        pub async fn server_last_error(&self, agent: AgentId) -> Option<String> {
-            let servers = self.session_manager.server_manager.servers.lock().await;
-            servers
-                .get(&agent)
-                .and_then(|server| server.last_error.clone())
-        }
-
-        pub async fn session_ended(&self, session_id: &str) -> bool {
-            let sessions = self.session_manager.sessions.lock().await;
-            sessions
-                .iter()
-                .find(|session| session.session_id == session_id)
-                .map(|session| session.ended)
-                .unwrap_or(false)
-        }
-
-        pub async fn session_end_reason(&self, session_id: &str) -> Option<SessionEndReason> {
-            let sessions = self.session_manager.sessions.lock().await;
-            sessions
-                .iter()
-                .find(|session| session.session_id == session_id)
-                .and_then(|session| session.ended_reason.clone())
-        }
-
-        pub async fn set_restart_notifier(&self, tx: mpsc::UnboundedSender<AgentId>) {
-            self.session_manager
-                .server_manager
-                .set_restart_notifier(tx)
-                .await;
-        }
-    }
-
-    pub fn spawn_sleep_process() -> std::process::Child {
-        #[cfg(windows)]
-        {
-            Command::new("cmd")
-                .args(["/C", "ping", "127.0.0.1", "-n", "60"])
-                .spawn()
-                .expect("spawn sleep")
-        }
-        #[cfg(not(windows))]
-        {
-            Command::new("sh")
-                .args(["-c", "sleep 60"])
-                .spawn()
-                .expect("spawn sleep")
-        }
-    }
-
-    #[cfg(unix)]
-    pub fn exit_status(code: i32) -> std::process::ExitStatus {
-        use std::os::unix::process::ExitStatusExt;
-        std::process::ExitStatus::from_raw(code << 8)
-    }
-
-    #[cfg(windows)]
-    pub fn exit_status(code: i32) -> std::process::ExitStatus {
-        use std::os::windows::process::ExitStatusExt;
-        std::process::ExitStatus::from_raw(code as u32)
-    }
-}
-
-fn default_log_dir() -> PathBuf {
-    dirs::data_dir()
-        .map(|dir| dir.join("sandbox-agent").join("logs").join("servers"))
-        .unwrap_or_else(|| {
-            PathBuf::from(".")
-                .join(".sandbox-agent")
-                .join("logs")
-                .join("servers")
-        })
-}
-
-fn find_available_port() -> Result<u16, SandboxError> {
-    for port in 4200..=4300 {
-        if TcpListener::bind(("127.0.0.1", port)).is_ok() {
-            return Ok(port);
-        }
-    }
-    Err(SandboxError::StreamError {
-        message: "no available OpenCode port".to_string(),
-    })
-}
-
-struct SseAccumulator {
-    buffer: String,
-    data_lines: Vec<String>,
-}
-
-impl SseAccumulator {
-    fn new() -> Self {
-        Self {
-            buffer: String::new(),
-            data_lines: Vec::new(),
-        }
-    }
-
-    fn push(&mut self, chunk: &str) -> Vec<String> {
-        self.buffer.push_str(chunk);
-        let mut events = Vec::new();
-        while let Some(pos) = self.buffer.find('\n') {
-            let mut line = self.buffer[..pos].to_string();
-            self.buffer.drain(..=pos);
-            if line.ends_with('\r') {
-                line.pop();
-            }
-            if line.is_empty() {
-                if !self.data_lines.is_empty() {
-                    events.push(self.data_lines.join("\n"));
-                    self.data_lines.clear();
-                }
-                continue;
-            }
-            if let Some(data) = line.strip_prefix("data:") {
-                self.data_lines.push(data.trim_start().to_string());
-            }
-        }
-        events
-    }
-}
-
-fn parse_opencode_modes(value: &Value) -> Vec<AgentModeInfo> {
-    let mut modes = Vec::new();
-    let mut seen = HashSet::new();
-
-    let items = value
-        .as_array()
-        .or_else(|| value.get("agents").and_then(Value::as_array))
-        .or_else(|| value.get("data").and_then(Value::as_array));
-
-    let Some(items) = items else { return modes };
-
-    for item in items {
-        let id = item
-            .get("id")
-            .and_then(Value::as_str)
-            .or_else(|| item.get("slug").and_then(Value::as_str))
-            .or_else(|| item.get("name").and_then(Value::as_str));
-        let Some(id) = id else { continue };
-        if !seen.insert(id.to_string()) {
-            continue;
-        }
-        let name = item
-            .get("name")
-            .and_then(Value::as_str)
-            .unwrap_or(id)
-            .to_string();
-        let description = item
-            .get("description")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string();
-        modes.push(AgentModeInfo {
-            id: id.to_string(),
-            name,
-            description,
-        });
-    }
-
-    modes
-}
-
-fn ensure_custom_mode(modes: &mut Vec<AgentModeInfo>) {
-    if modes.iter().any(|mode| mode.id == "custom") {
-        return;
-    }
-    modes.push(AgentModeInfo {
-        id: "custom".to_string(),
-        name: "Custom".to_string(),
-        description: "Any user-defined OpenCode agent name".to_string(),
-    });
-}
-
-fn text_delta_from_parts(parts: &[ContentPart]) -> Option<String> {
-    let mut delta = String::new();
-    for part in parts {
-        if let ContentPart::Text { text } = part {
-            if !delta.is_empty() {
-                delta.push_str("\n");
-            }
-            delta.push_str(text);
-        }
-    }
-    if delta.is_empty() {
-        None
-    } else {
-        Some(delta)
-    }
-}
-
-const MOCK_OK_PROMPT: &str = "Reply with exactly the single word OK.";
-const MOCK_FIRST_PROMPT: &str = "Reply with exactly the word FIRST.";
-const MOCK_SECOND_PROMPT: &str = "Reply with exactly the word SECOND.";
-const MOCK_PERMISSION_PROMPT: &str = "List files in the current directory using available tools.";
-const MOCK_TOOL_PROMPT: &str =
-    "Use the bash tool to run `ls` in the current directory. Do not answer without using the tool.";
-const MOCK_QUESTION_PROMPT: &str =
-    "Use the AskUserQuestion tool to ask exactly one yes/no question, then wait for a reply. Do not answer yourself.";
-const MOCK_QUESTION_PROMPT_ALT: &str =
-    "Call the AskUserQuestion tool with exactly one yes/no question and wait for a reply. Do not answer yourself.";
-const MOCK_REASONING_PROMPT: &str = "Answer briefly and include your reasoning.";
-const MOCK_STATUS_PROMPT: &str = "Provide a short status update.";
-
-fn mock_command_conversions(prefix: &str, input: &str) -> Vec<EventConversion> {
-    let trimmed = input.trim();
-    if trimmed.is_empty() {
-        return vec![];
-    }
-    let mut events = mock_command_events(prefix, trimmed);
-    if should_append_turn_ended(&events) {
-        events.push(turn_ended_event(None, None).synthetic());
-    }
-    events
-}
-
-fn should_append_turn_ended(events: &[EventConversion]) -> bool {
-    let Some(last) = events.last() else {
-        return false;
-    };
-    !matches!(
-        last.event_type,
-        UniversalEventType::SessionEnded
-            | UniversalEventType::PermissionRequested
-            | UniversalEventType::QuestionRequested
-    )
-}
-
-fn mock_command_events(prefix: &str, trimmed: &str) -> Vec<EventConversion> {
-    if trimmed.eq_ignore_ascii_case(MOCK_OK_PROMPT) {
-        return mock_assistant_message(format!("{prefix}_ok"), "OK".to_string());
-    }
-    if trimmed.eq_ignore_ascii_case(MOCK_FIRST_PROMPT) {
-        return mock_assistant_message(format!("{prefix}_first"), "FIRST".to_string());
-    }
-    if trimmed.eq_ignore_ascii_case(MOCK_SECOND_PROMPT) {
-        return mock_assistant_message(format!("{prefix}_second"), "SECOND".to_string());
-    }
-    if trimmed.eq_ignore_ascii_case(MOCK_REASONING_PROMPT) {
-        return mock_assistant_rich(prefix);
-    }
-    if trimmed.eq_ignore_ascii_case(MOCK_STATUS_PROMPT) {
-        return mock_status_sequence(prefix);
-    }
-    if trimmed.eq_ignore_ascii_case(MOCK_PERMISSION_PROMPT) {
-        return mock_permission_request(prefix);
-    }
-    if trimmed.eq_ignore_ascii_case(MOCK_TOOL_PROMPT) {
-        let mut events = Vec::new();
-        events.extend(mock_permission_request(prefix));
-        events.extend(mock_tool_sequence(prefix));
-        return events;
-    }
-    if trimmed.eq_ignore_ascii_case(MOCK_QUESTION_PROMPT)
-        || trimmed.eq_ignore_ascii_case(MOCK_QUESTION_PROMPT_ALT)
-    {
-        return mock_question_request(prefix);
-    }
-
-    let mut parts = trimmed.split_whitespace();
-    let command = parts.next().unwrap_or("").to_lowercase();
-    let rest = parts.collect::<Vec<_>>().join(" ");
-
-    let mut marker_index = 0_u32;
-    match command.as_str() {
-        "help" => mock_help_message(prefix),
-        "demo" => {
-            let mut events = Vec::new();
-            events.extend(mock_marker(
-                prefix,
-                &mut marker_index,
-                "Next: system message (system role).",
-            ));
-            events.extend(mock_system_message(prefix));
-            events.extend(mock_marker(
-                prefix,
-                &mut marker_index,
-                "Next: assistant message with deltas, reasoning, and JSON content parts.",
-            ));
-            events.extend(mock_assistant_rich(prefix));
-            events.extend(mock_marker(
-                prefix,
-                &mut marker_index,
-                "Next: status item updates.",
-            ));
-            events.extend(mock_status_sequence(prefix));
-            events.extend(mock_marker(
-                prefix,
-                &mut marker_index,
-                "Next: markdown rendering + streaming markdown deltas.",
-            ));
-            events.extend(mock_markdown_sequence(prefix));
-            events.extend(mock_marker(
-                prefix,
-                &mut marker_index,
-                "Next: tool call item.",
-            ));
-            events.extend(mock_tool_sequence(prefix));
-            events.extend(mock_marker(
-                prefix,
-                &mut marker_index,
-                "Next: image output content part.",
-            ));
-            events.extend(mock_image_sequence(prefix));
-            events.extend(mock_marker(
-                prefix,
-                &mut marker_index,
-                "Next: unknown item kind.",
-            ));
-            events.extend(mock_unknown_sequence(prefix));
-            events.extend(mock_marker(
-                prefix,
-                &mut marker_index,
-                "Next: permission requests (pending).",
-            ));
-            events.extend(mock_permission_requests(prefix));
-            events.extend(mock_marker(
-                prefix,
-                &mut marker_index,
-                "Next: question requests (pending).",
-            ));
-            events.extend(mock_question_requests(prefix));
-            events.extend(mock_marker(
-                prefix,
-                &mut marker_index,
-                "Next: error and agent.unparsed events.",
-            ));
-            events.extend(mock_error_sequence(prefix));
-            events
-        }
-        "markdown" => mock_markdown_sequence(prefix),
-        "tool" | "tools" | "tooling" => mock_tool_sequence(prefix),
-        "status" => mock_status_sequence(prefix),
-        "image" => mock_image_sequence(prefix),
-        "unknown" => mock_unknown_sequence(prefix),
-        "permission" | "permissions" => mock_permission_requests(prefix),
-        "question" | "questions" => mock_question_requests(prefix),
-        "error" => mock_error_sequence(prefix),
-        "unparsed" => mock_unparsed_sequence(prefix),
-        "end" | "ended" | "session.end" => mock_session_end_sequence(prefix),
-        "echo" | "say" => {
-            if rest.is_empty() {
-                mock_assistant_message(
-                    format!("{prefix}_echo"),
-                    "Tell me what to say after `echo`.".to_string(),
-                )
-            } else {
-                mock_assistant_message(format!("{prefix}_echo"), rest)
-            }
-        }
-        _ => mock_assistant_message(format!("{prefix}_reply"), trimmed.to_string()),
-    }
-}
-
-fn mock_help_message(prefix: &str) -> Vec<EventConversion> {
-    let message = [
-        "Mock agent commands:",
-        "- demo: run a full UI coverage sequence with markers.",
-        "- markdown: streaming markdown fixture.",
-        "- tool: tool call + tool result with file refs.",
-        "- status: status item updates.",
-        "- image: message with image content part.",
-        "- unknown: item.kind=unknown example.",
-        "- permission: permission requests (pending).",
-        "- question: question requests (pending).",
-        "- error: error + agent.unparsed events.",
-        "- unparsed: emit agent.unparsed only.",
-        "- end: emit session.ended.",
-        "",
-        "Any other text will be echoed as an assistant message.",
-    ]
-    .join("\n");
-    mock_assistant_message(format!("{prefix}_help"), message)
-}
-
-fn mock_user_message(prefix: &str, text: &str) -> Vec<EventConversion> {
-    let native_item_id = format!("{prefix}_user");
-    let content = vec![ContentPart::Text {
-        text: text.to_string(),
-    }];
-    vec![
-        mock_item_event(
-            UniversalEventType::ItemStarted,
-            mock_item(
-                native_item_id.clone(),
-                ItemKind::Message,
-                ItemRole::User,
-                ItemStatus::InProgress,
-                content.clone(),
-            ),
-        ),
-        mock_item_event(
-            UniversalEventType::ItemCompleted,
-            mock_item(
-                native_item_id,
-                ItemKind::Message,
-                ItemRole::User,
-                ItemStatus::Completed,
-                content,
-            ),
-        ),
-    ]
-}
-
-fn user_message_conversions(text: &str) -> Vec<EventConversion> {
-    let id = USER_MESSAGE_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let native_item_id = format!("user_{id}");
-    let content = vec![ContentPart::Text {
-        text: text.to_string(),
-    }];
-    vec![
-        EventConversion::new(
-            UniversalEventType::ItemStarted,
-            UniversalEventData::Item(ItemEventData {
-                item: UniversalItem {
-                    item_id: String::new(),
-                    native_item_id: Some(native_item_id.clone()),
-                    parent_id: None,
-                    kind: ItemKind::Message,
-                    role: Some(ItemRole::User),
-                    content: content.clone(),
-                    status: ItemStatus::InProgress,
-                },
-            }),
-        )
-        .synthetic(),
-        EventConversion::new(
-            UniversalEventType::ItemCompleted,
-            UniversalEventData::Item(ItemEventData {
-                item: UniversalItem {
-                    item_id: String::new(),
-                    native_item_id: Some(native_item_id),
-                    parent_id: None,
-                    kind: ItemKind::Message,
-                    role: Some(ItemRole::User),
-                    content,
-                    status: ItemStatus::Completed,
-                },
-            }),
-        )
-        .synthetic(),
-    ]
-}
-
-fn mock_assistant_message(native_item_id: String, text: String) -> Vec<EventConversion> {
-    let content = vec![ContentPart::Text { text }];
-    vec![
-        mock_item_event(
-            UniversalEventType::ItemStarted,
-            mock_item(
-                native_item_id.clone(),
-                ItemKind::Message,
-                ItemRole::Assistant,
-                ItemStatus::InProgress,
-                content.clone(),
-            ),
-        ),
-        mock_item_event(
-            UniversalEventType::ItemCompleted,
-            mock_item(
-                native_item_id,
-                ItemKind::Message,
-                ItemRole::Assistant,
-                ItemStatus::Completed,
-                content,
-            ),
-        ),
-    ]
-}
-
-fn mock_system_message(prefix: &str) -> Vec<EventConversion> {
-    let native_item_id = format!("{prefix}_system");
-    let content = vec![ContentPart::Text {
-        text: "System ready for mock events.".to_string(),
-    }];
-    vec![
-        mock_item_event(
-            UniversalEventType::ItemStarted,
-            mock_item(
-                native_item_id.clone(),
-                ItemKind::System,
-                ItemRole::System,
-                ItemStatus::InProgress,
-                content.clone(),
-            ),
-        ),
-        mock_item_event(
-            UniversalEventType::ItemCompleted,
-            mock_item(
-                native_item_id,
-                ItemKind::System,
-                ItemRole::System,
-                ItemStatus::Completed,
-                content,
-            ),
-        ),
-    ]
-}
-
-fn mock_assistant_rich(prefix: &str) -> Vec<EventConversion> {
-    let native_item_id = format!("{prefix}_assistant_rich");
-    let parts = vec![
-        ContentPart::Text {
-            text: "Mock assistant response with rich content.".to_string(),
-        },
-        ContentPart::Reasoning {
-            text: "Public reasoning for display.".to_string(),
-            visibility: ReasoningVisibility::Public,
-        },
-        ContentPart::Reasoning {
-            text: "Private reasoning hidden by default.".to_string(),
-            visibility: ReasoningVisibility::Private,
-        },
-        ContentPart::Json {
-            json: json!({
-                "stage": "analysis",
-                "ok": true
-            }),
-        },
-    ];
-    let mut events = vec![mock_item_event(
-        UniversalEventType::ItemStarted,
-        mock_item(
-            native_item_id.clone(),
-            ItemKind::Message,
-            ItemRole::Assistant,
-            ItemStatus::InProgress,
-            parts.clone(),
-        ),
-    )];
-    events.push(mock_delta(native_item_id.clone(), "Mock assistant "));
-    events.push(mock_delta(native_item_id.clone(), "streaming delta."));
-    events.push(mock_item_event(
-        UniversalEventType::ItemCompleted,
-        mock_item(
-            native_item_id,
-            ItemKind::Message,
-            ItemRole::Assistant,
-            ItemStatus::Completed,
-            parts,
-        ),
-    ));
-    events
-}
-
-fn mock_status_sequence(prefix: &str) -> Vec<EventConversion> {
-    let native_item_id = format!("{prefix}_status");
-    vec![
-        mock_item_event(
-            UniversalEventType::ItemStarted,
-            mock_item(
-                native_item_id.clone(),
-                ItemKind::Status,
-                ItemRole::Assistant,
-                ItemStatus::InProgress,
-                vec![ContentPart::Status {
-                    label: "Indexing".to_string(),
-                    detail: Some("2 files".to_string()),
-                }],
-            ),
-        ),
-        mock_item_event(
-            UniversalEventType::ItemCompleted,
-            mock_item(
-                native_item_id,
-                ItemKind::Status,
-                ItemRole::Assistant,
-                ItemStatus::Completed,
-                vec![ContentPart::Status {
-                    label: "Indexing".to_string(),
-                    detail: Some("Done".to_string()),
-                }],
-            ),
-        ),
-    ]
-}
-
-fn mock_markdown_sequence(prefix: &str) -> Vec<EventConversion> {
-    let native_item_id = format!("{prefix}_markdown");
-    let markdown_text = [
-        "# Markdown Demo",
-        "",
-        "**Bold**, *italic*, ***bold-italic***, and ~~strikethrough~~.",
-        "",
-        "Inline code: `const x = 1`.",
-        "",
-        "## Lists",
-        "- Item one",
-        "  - Nested item",
-        "- Item two",
-        "",
-        "1. First",
-        "2. Second",
-        "",
-        "> Blockquote with **bold** text.",
-        "",
-        "## Code",
-        "```ts",
-        "const answer: number = 42;",
-        "console.log(answer);",
-        "```",
-        "",
-        "## Table",
-        "| Column A | Column B |",
-        "|:---------|---------:|",
-        "| Left     | Right    |",
-        "| Alpha    | Beta     |",
-        "",
-        "## Link",
-        "[Example](https://example.com)",
-        "",
-        "---",
-        "",
-        "End of markdown demo.",
-    ]
-    .join("\n");
-    let markdown_parts = vec![ContentPart::Text {
-        text: markdown_text.clone(),
-    }];
-
-    let mut events = Vec::new();
-    events.push(mock_item_event(
-        UniversalEventType::ItemStarted,
-        mock_item(
-            native_item_id.clone(),
-            ItemKind::Message,
-            ItemRole::Assistant,
-            ItemStatus::InProgress,
-            vec![ContentPart::Text {
-                text: "Markdown demo (streaming follows)...".to_string(),
-            }],
-        ),
-    ));
-    let markdown_deltas = [
-        "# Markdown Demo\n\n**Bo",
-        "ld**, *ita",
-        "lic*, ***bold-",
-        "italic***, and ~~stri",
-        "kethrough~~.\n\nInline code: `const x = 1`.\n\n## Lists\n- Item one\n  - Nested item\n- Item two\n\n1.",
-        " First\n2. Second\n\n> Blockquote with **bold** text.\n\n## Code\n```t",
-        "s\nconst answer: number = 42;\nconsole.log(answer);\n```\n\n## Table\n| Column A | Column B |\n|:---------|---------:|\n| Left",
-        "     | Right    |\n| Alpha    | Beta     |\n\n## Link\n[Example](https://example.com)\n\n---\n\nEnd of markdown demo.",
-    ];
-    for chunk in markdown_deltas {
-        events.push(mock_delta(native_item_id.clone(), chunk));
-    }
-    events.push(mock_item_event(
-        UniversalEventType::ItemCompleted,
-        mock_item(
-            native_item_id,
-            ItemKind::Message,
-            ItemRole::Assistant,
-            ItemStatus::Completed,
-            markdown_parts,
-        ),
-    ));
-    events
-}
-
-fn mock_tool_sequence(prefix: &str) -> Vec<EventConversion> {
-    let tool_call_native = format!("{prefix}_tool_call");
-    let tool_result_native = format!("{prefix}_tool_result");
-    let call_id = format!("{prefix}_call");
-    let tool_call_part = ContentPart::ToolCall {
-        name: "mock.search".to_string(),
-        arguments: "{\"query\":\"example\"}".to_string(),
-        call_id: call_id.clone(),
-    };
-    let mut events = Vec::new();
-    events.push(mock_item_event(
-        UniversalEventType::ItemStarted,
-        mock_item(
-            tool_call_native.clone(),
-            ItemKind::ToolCall,
-            ItemRole::Assistant,
-            ItemStatus::InProgress,
-            vec![tool_call_part.clone()],
-        ),
-    ));
-    events.push(mock_item_event(
-        UniversalEventType::ItemCompleted,
-        mock_item(
-            tool_call_native,
-            ItemKind::ToolCall,
-            ItemRole::Assistant,
-            ItemStatus::Completed,
-            vec![tool_call_part],
-        ),
-    ));
-
-    let tool_result_parts = vec![
-        ContentPart::ToolResult {
-            call_id: call_id.clone(),
-            output: "mock search results".to_string(),
-        },
-        ContentPart::FileRef {
-            path: format!("{prefix}/readme.md"),
-            action: FileAction::Read,
-            diff: None,
-        },
-        ContentPart::FileRef {
-            path: format!("{prefix}/output.txt"),
-            action: FileAction::Write,
-            diff: Some("+mock output\n".to_string()),
-        },
-        ContentPart::FileRef {
-            path: format!("{prefix}/patch.txt"),
-            action: FileAction::Patch,
-            diff: Some("@@ -1,1 +1,1 @@\n-old\n+new\n".to_string()),
-        },
-    ];
-    events.push(mock_item_event(
-        UniversalEventType::ItemStarted,
-        mock_item(
-            tool_result_native.clone(),
-            ItemKind::ToolResult,
-            ItemRole::Tool,
-            ItemStatus::InProgress,
-            tool_result_parts.clone(),
-        ),
-    ));
-    events.push(mock_item_event(
-        UniversalEventType::ItemCompleted,
-        mock_item(
-            tool_result_native,
-            ItemKind::ToolResult,
-            ItemRole::Tool,
-            ItemStatus::Failed,
-            tool_result_parts,
-        ),
-    ));
-
-    events
-}
-
-fn mock_image_sequence(prefix: &str) -> Vec<EventConversion> {
-    let native_item_id = format!("{prefix}_image");
-    let image_parts = vec![
-        ContentPart::Text {
-            text: "Here is a mock image output.".to_string(),
-        },
-        ContentPart::Image {
-            path: format!("{prefix}/image.png"),
-            mime: Some("image/png".to_string()),
-        },
-    ];
-    vec![
-        mock_item_event(
-            UniversalEventType::ItemStarted,
-            mock_item(
-                native_item_id.clone(),
-                ItemKind::Message,
-                ItemRole::Assistant,
-                ItemStatus::InProgress,
-                image_parts.clone(),
-            ),
-        ),
-        mock_item_event(
-            UniversalEventType::ItemCompleted,
-            mock_item(
-                native_item_id,
-                ItemKind::Message,
-                ItemRole::Assistant,
-                ItemStatus::Completed,
-                image_parts,
-            ),
-        ),
-    ]
-}
-
-fn mock_unknown_sequence(prefix: &str) -> Vec<EventConversion> {
-    let native_item_id = format!("{prefix}_unknown");
-    vec![
-        mock_item_event(
-            UniversalEventType::ItemStarted,
-            mock_item(
-                native_item_id.clone(),
-                ItemKind::Unknown,
-                ItemRole::Assistant,
-                ItemStatus::InProgress,
-                vec![ContentPart::Text {
-                    text: "Unknown item kind example.".to_string(),
-                }],
-            ),
-        ),
-        mock_item_event(
-            UniversalEventType::ItemCompleted,
-            mock_item(
-                native_item_id,
-                ItemKind::Unknown,
-                ItemRole::Assistant,
-                ItemStatus::Completed,
-                vec![ContentPart::Text {
-                    text: "Unknown item kind example.".to_string(),
-                }],
-            ),
-        ),
-    ]
-}
-
-fn mock_permission_request(prefix: &str) -> Vec<EventConversion> {
-    let permission_id = format!("{prefix}_permission");
-    let metadata = json!({
-        "codexRequestKind": "commandExecution",
-        "command": "ls"
-    });
-    vec![EventConversion::new(
-        UniversalEventType::PermissionRequested,
-        UniversalEventData::Permission(PermissionEventData {
-            permission_id,
-            action: "command_execution".to_string(),
-            status: PermissionStatus::Requested,
-            metadata: Some(metadata),
-        }),
-    )]
-}
-
-fn mock_question_request(prefix: &str) -> Vec<EventConversion> {
-    let question_id = format!("{prefix}_question");
-    vec![EventConversion::new(
-        UniversalEventType::QuestionRequested,
-        UniversalEventData::Question(QuestionEventData {
-            question_id,
-            prompt: "Proceed?".to_string(),
-            options: vec!["Yes".to_string(), "No".to_string()],
-            response: None,
-            status: QuestionStatus::Requested,
-        }),
-    )]
-}
-
-fn mock_permission_requests(prefix: &str) -> Vec<EventConversion> {
-    let permission_id = format!("{prefix}_permission");
-    let permission_deny_id = format!("{prefix}_permission_denied");
-    let permission_metadata = json!({
-        "codexRequestKind": "commandExecution",
-        "command": "echo mock"
-    });
-    let permission_metadata_deny = json!({
-        "codexRequestKind": "fileChange",
-        "path": format!("{prefix}/deny.txt")
-    });
-    vec![
-        EventConversion::new(
-            UniversalEventType::PermissionRequested,
-            UniversalEventData::Permission(PermissionEventData {
-                permission_id: permission_id,
-                action: "command_execution".to_string(),
-                status: PermissionStatus::Requested,
-                metadata: Some(permission_metadata),
-            }),
-        ),
-        EventConversion::new(
-            UniversalEventType::PermissionRequested,
-            UniversalEventData::Permission(PermissionEventData {
-                permission_id: permission_deny_id,
-                action: "file_change".to_string(),
-                status: PermissionStatus::Requested,
-                metadata: Some(permission_metadata_deny),
-            }),
-        ),
-    ]
-}
-
-fn mock_question_requests(prefix: &str) -> Vec<EventConversion> {
-    let question_id = format!("{prefix}_question");
-    let question_reject_id = format!("{prefix}_question_reject");
-    vec![
-        EventConversion::new(
-            UniversalEventType::QuestionRequested,
-            UniversalEventData::Question(QuestionEventData {
-                question_id,
-                prompt: "Choose a color".to_string(),
-                options: vec!["Red".to_string(), "Blue".to_string()],
-                response: None,
-                status: QuestionStatus::Requested,
-            }),
-        ),
-        EventConversion::new(
-            UniversalEventType::QuestionRequested,
-            UniversalEventData::Question(QuestionEventData {
-                question_id: question_reject_id,
-                prompt: "Allow mock experiment?".to_string(),
-                options: vec!["Yes".to_string(), "No".to_string()],
-                response: None,
-                status: QuestionStatus::Requested,
-            }),
-        ),
-    ]
-}
-
-fn mock_error_sequence(_prefix: &str) -> Vec<EventConversion> {
-    vec![
-        EventConversion::new(
-            UniversalEventType::Error,
-            UniversalEventData::Error(ErrorData {
-                message: "Mock error event.".to_string(),
-                code: Some("mock_error".to_string()),
-                details: Some(json!({ "mock": true })),
-            }),
-        )
-        .synthetic(),
-        agent_unparsed(
-            "mock.stream",
-            "unsupported payload",
-            json!({ "raw": "mock" }),
-        ),
-    ]
-}
-
-fn mock_unparsed_sequence(_prefix: &str) -> Vec<EventConversion> {
-    vec![agent_unparsed(
-        "mock.stream",
-        "unsupported payload",
-        json!({ "raw": "mock" }),
-    )]
-}
-
-fn mock_session_end_sequence(_prefix: &str) -> Vec<EventConversion> {
-    vec![EventConversion::new(
-        UniversalEventType::SessionEnded,
-        UniversalEventData::SessionEnded(SessionEndedData {
-            reason: SessionEndReason::Completed,
-            terminated_by: TerminatedBy::Agent,
-            message: None,
-            exit_code: None,
-            stderr: None,
-        }),
-    )
-    .synthetic()]
-}
-
-fn mock_item(
-    native_item_id: String,
-    kind: ItemKind,
-    role: ItemRole,
-    status: ItemStatus,
-    content: Vec<ContentPart>,
-) -> UniversalItem {
-    UniversalItem {
-        item_id: String::new(),
-        native_item_id: Some(native_item_id),
-        parent_id: None,
-        kind,
-        role: Some(role),
-        content,
-        status,
-    }
-}
-
-fn mock_item_event(event_type: UniversalEventType, item: UniversalItem) -> EventConversion {
-    EventConversion::new(event_type, UniversalEventData::Item(ItemEventData { item }))
-}
-
-fn mock_marker(prefix: &str, marker_index: &mut u32, message: &str) -> Vec<EventConversion> {
-    *marker_index = marker_index.saturating_add(1);
-    let native_item_id = format!("{prefix}_marker_{marker_index}");
-    let content = vec![ContentPart::Text {
-        text: message.to_string(),
-    }];
-    vec![
-        mock_item_event(
-            UniversalEventType::ItemStarted,
-            mock_item(
-                native_item_id.clone(),
-                ItemKind::Message,
-                ItemRole::Assistant,
-                ItemStatus::InProgress,
-                content.clone(),
-            ),
-        ),
-        mock_item_event(
-            UniversalEventType::ItemCompleted,
-            mock_item(
-                native_item_id,
-                ItemKind::Message,
-                ItemRole::Assistant,
-                ItemStatus::Completed,
-                content,
-            ),
-        ),
-    ]
-}
-
-fn mock_delta(native_item_id: String, delta: &str) -> EventConversion {
-    EventConversion::new(
-        UniversalEventType::ItemDelta,
-        UniversalEventData::ItemDelta(ItemDeltaData {
-            item_id: String::new(),
-            native_item_id: Some(native_item_id),
-            delta: delta.to_string(),
-        }),
-    )
-}
-
-fn agent_unparsed(location: &str, error: &str, raw: Value) -> EventConversion {
-    EventConversion::new(
-        UniversalEventType::AgentUnparsed,
-        UniversalEventData::AgentUnparsed(AgentUnparsedData {
-            error: error.to_string(),
-            location: location.to_string(),
-            raw_hash: None,
-        }),
-    )
-    .synthetic()
-    .with_raw(Some(raw))
-}
-
-fn now_rfc3339() -> String {
-    time::OffsetDateTime::now_utc()
-        .format(&time::format_description::well_known::Rfc3339)
-        .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
-}
-
-struct TurnStreamState {
-    initial_events: VecDeque<UniversalEvent>,
-    receiver: broadcast::Receiver<UniversalEvent>,
-    include_raw: bool,
-    done: bool,
-    agent: AgentId,
-}
-
-fn stream_turn_events(
-    subscription: SessionSubscription,
-    agent: AgentId,
-    include_raw: bool,
-) -> impl futures::Stream<Item = Result<Event, Infallible>> {
-    let state = TurnStreamState {
-        initial_events: VecDeque::from(subscription.initial_events),
-        receiver: subscription.receiver,
-        include_raw,
-        done: false,
-        agent,
-    };
-    stream::unfold(state, |mut state| async move {
-        if state.done {
-            return None;
-        }
-
-        let mut event = if let Some(event) = state.initial_events.pop_front() {
-            event
-        } else {
-            loop {
-                match state.receiver.recv().await {
-                    Ok(event) => break event,
-                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                    Err(broadcast::error::RecvError::Closed) => return None,
-                }
-            }
-        };
-
-        if !state.include_raw {
-            event.raw = None;
-        }
-
-        if is_turn_terminal(&event, state.agent) {
-            state.done = true;
-        }
-
-        Some((Ok::<Event, Infallible>(to_sse_event(event)), state))
-    })
-}
-
-fn is_turn_terminal(event: &UniversalEvent, _agent: AgentId) -> bool {
-    match event.event_type {
-        UniversalEventType::TurnEnded
-        | UniversalEventType::SessionEnded
-        | UniversalEventType::Error
-        | UniversalEventType::AgentUnparsed
-        | UniversalEventType::PermissionRequested
-        | UniversalEventType::QuestionRequested => true,
-        _ => false,
-    }
-}
-
-fn to_sse_event(event: UniversalEvent) -> Event {
-    Event::default()
-        .json_data(&event)
-        .unwrap_or_else(|_| Event::default().data("{}"))
-}
-
-#[derive(Clone, Debug)]
-struct SessionSnapshot {
-    session_id: String,
-    agent: AgentId,
-    agent_mode: String,
-    permission_mode: String,
-    model: Option<String>,
-    variant: Option<String>,
-    native_session_id: Option<String>,
-}
-
-impl From<&SessionState> for SessionSnapshot {
-    fn from(session: &SessionState) -> Self {
-        Self {
-            session_id: session.session_id.clone(),
-            agent: session.agent,
-            agent_mode: session.agent_mode.clone(),
-            permission_mode: session.permission_mode.clone(),
-            model: session.model.clone(),
-            variant: session.variant.clone(),
-            native_session_id: session.native_session_id.clone(),
-        }
-    }
-}
-
-pub fn add_token_header(headers: &mut HeaderMap, token: &str) {
-    let value = format!("Bearer {token}");
-    if let Ok(header) = HeaderValue::from_str(&value) {
-        headers.insert(axum::http::header::AUTHORIZATION, header);
-    }
-}
-
-fn build_anthropic_headers(
-    credentials: &ProviderCredentials,
-) -> Result<reqwest::header::HeaderMap, SandboxError> {
-    let mut headers = reqwest::header::HeaderMap::new();
-    match credentials.auth_type {
-        AuthType::ApiKey => {
-            let value =
-                reqwest::header::HeaderValue::from_str(&credentials.api_key).map_err(|_| {
-                    SandboxError::StreamError {
-                        message: "invalid anthropic api key header".to_string(),
-                    }
-                })?;
-            headers.insert("x-api-key", value);
-        }
-        AuthType::Oauth => {
-            let value = format!("Bearer {}", credentials.api_key);
-            let header = reqwest::header::HeaderValue::from_str(&value).map_err(|_| {
-                SandboxError::StreamError {
-                    message: "invalid anthropic oauth header".to_string(),
-                }
-            })?;
-            headers.insert(reqwest::header::AUTHORIZATION, header);
-        }
-    }
-    headers.insert(
-        "anthropic-version",
-        reqwest::header::HeaderValue::from_static(ANTHROPIC_VERSION),
-    );
-    Ok(headers)
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as i64)
+        .unwrap_or(0)
 }

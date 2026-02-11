@@ -8,7 +8,8 @@
   },
   "dependencies": {
     "@sandbox-agent/example-shared": "workspace:*",
-    "computesdk": "latest"
+    "computesdk": "latest",
+    "sandbox-agent": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "latest",

@@ -9,7 +9,8 @@ import {
   type ExplicitComputeConfig,
   type ProviderName,
 } from "computesdk";
-import { runPrompt, waitForHealth } from "@sandbox-agent/example-shared";
+import { SandboxAgent } from "sandbox-agent";
+import { detectAgent, buildInspectorUrl, waitForHealth } from "@sandbox-agent/example-shared";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 
@@ -140,8 +141,15 @@ export async function runComputeSdkExample(): Promise<void> {
   process.once("SIGINT", handleExit);
   process.once("SIGTERM", handleExit);
 
-  await runPrompt(baseUrl);
-  await cleanup();
+  const client = await SandboxAgent.connect({ baseUrl });
+  const session = await client.createSession({ agent: detectAgent(), sessionInit: { cwd: "/root", mcpServers: [] } });
+  const sessionId = session.id;
+
+  console.log(`  UI: ${buildInspectorUrl({ baseUrl, sessionId })}`);
+  console.log("  Press Ctrl+C to stop.");
+
+  // Keep alive until SIGINT/SIGTERM triggers cleanup above
+  await new Promise(() => {});
 }
 
 const isDirectRun = Boolean(
