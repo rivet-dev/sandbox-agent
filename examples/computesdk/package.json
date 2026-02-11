@@ -7,8 +7,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "computesdk": "^2.2.0",
+    "dotenv": "^16.0.0",
     "@sandbox-agent/example-shared": "workspace:*",
-    "computesdk": "latest",
     "sandbox-agent": "workspace:*"
   },
   "devDependencies": {
