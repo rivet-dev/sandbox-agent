@@ -1,6 +1,8 @@
 import { Download, Loader2, RefreshCw } from "lucide-react";
 import { useState } from "react";
-import type { AgentInfo, AgentModeInfo } from "../../types/legacyApi";
+import type { AgentInfo } from "sandbox-agent";
+
+type AgentModeInfo = { id: string; name: string; description: string };
 import FeatureCoverageBadges from "../agents/FeatureCoverageBadges";
 import { emptyFeatureCoverage } from "../../types/agents";
 
@@ -52,9 +54,9 @@ const AgentsTab = ({
             id,
             installed: false,
             credentialsAvailable: false,
-            version: undefined,
-            path: undefined,
-            capabilities: emptyFeatureCoverage
+            version: undefined as string | undefined,
+            path: undefined as string | undefined,
+            capabilities: emptyFeatureCoverage as AgentInfo["capabilities"],
           }))).map((agent) => {
         const isInstalling = installingAgent === agent.id;
         return (

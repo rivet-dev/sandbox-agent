@@ -18,173 +18,43 @@
     }
   ],
   "paths": {
-    "/v2/fs/file": {
+    "/v1/acp": {
       "get": {
         "tags": [
-          "v2"
+          "v1"
         ],
-        "operationId": "get_v2_fs_file",
+        "operationId": "get_v1_acp_servers",
+        "responses": {
+          "200": {
+            "description": "Active ACP server instances",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcpServerListResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/acp/{server_id}": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "operationId": "get_v1_acp",
         "parameters": [
           {
-            "name": "path",
-            "in": "query",
-            "description": "File path",
+            "name": "server_id",
+            "in": "path",
+            "description": "Client-defined ACP server id",
             "required": true,
             "schema": {
               "type": "string"
             }
-          },
-          {
-            "name": "session_id",
-            "in": "query",
-            "description": "Session id for relative path base",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "nullable": true
-            }
           }
         ],
-        "responses": {
-          "200": {
-            "description": "File content"
-          }
-        }
-      },
-      "put": {
-        "tags": [
-          "v2"
-        ],
-        "operationId": "put_v2_fs_file",
-        "parameters": [
-          {
-            "name": "path",
-            "in": "query",
-            "description": "File path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "session_id",
-            "in": "query",
-            "description": "Session id for relative path base",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "nullable": true
-            }
-          }
-        ],
-        "requestBody": {
-          "description": "Raw file bytes",
-          "content": {
-            "text/plain": {
-              "schema": {
-                "type": "string"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Write result",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FsWriteResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v2/fs/upload-batch": {
-      "post": {
-        "tags": [
-          "v2"
-        ],
-        "operationId": "post_v2_fs_upload_batch",
-        "parameters": [
-          {
-            "name": "path",
-            "in": "query",
-            "description": "Destination path",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "nullable": true
-            }
-          },
-          {
-            "name": "session_id",
-            "in": "query",
-            "description": "Session id for relative path base",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "nullable": true
-            }
-          }
-        ],
-        "requestBody": {
-          "description": "tar archive body",
-          "content": {
-            "text/plain": {
-              "schema": {
-                "type": "string"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Upload/extract result",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FsUploadBatchResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v2/health": {
-      "get": {
-        "tags": [
-          "v2"
-        ],
-        "summary": "v2 Health",
-        "description": "Returns server health for the v2 ACP surface.",
-        "operationId": "get_v2_health",
-        "responses": {
-          "200": {
-            "description": "Service health response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HealthResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v2/rpc": {
-      "get": {
-        "tags": [
-          "v2"
-        ],
-        "summary": "ACP SSE",
-        "description": "Streams ACP JSON-RPC envelopes for an ACP client over SSE.",
-        "operationId": "get_v2_acp",
         "responses": {
           "200": {
             "description": "SSE stream of ACP envelopes"
@@ -200,7 +70,7 @@
             }
           },
           "404": {
-            "description": "Unknown ACP client",
+            "description": "Unknown ACP server",
             "content": {
               "application/json": {
                 "schema": {
@@ -218,26 +88,35 @@
                 }
               }
             }
-          },
-          "409": {
-            "description": "ACP client already has an active SSE stream",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
           }
         }
       },
       "post": {
         "tags": [
-          "v2"
+          "v1"
         ],
-        "summary": "ACP POST",
-        "description": "Sends ACP JSON-RPC envelopes to an ACP client and returns request responses.",
-        "operationId": "post_v2_acp",
+        "operationId": "post_v1_acp",
+        "parameters": [
+          {
+            "name": "server_id",
+            "in": "path",
+            "description": "Client-defined ACP server id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "agent",
+            "in": "query",
+            "description": "Agent id required for first POST",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -273,7 +152,7 @@
             }
           },
           "404": {
-            "description": "Unknown ACP client",
+            "description": "Unknown ACP server",
             "content": {
               "application/json": {
                 "schema": {
@@ -284,6 +163,16 @@
           },
           "406": {
             "description": "Client does not accept JSON responses",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ACP server bound to different agent",
             "content": {
               "application/json": {
                 "schema": {
@@ -316,14 +205,187 @@
       },
       "delete": {
         "tags": [
-          "v2"
+          "v1"
         ],
-        "summary": "ACP Close",
-        "description": "Closes an ACP client and releases agent process resources.",
-        "operationId": "delete_v2_acp",
+        "operationId": "delete_v1_acp",
+        "parameters": [
+          {
+            "name": "server_id",
+            "in": "path",
+            "description": "Client-defined ACP server id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "204": {
-            "description": "ACP client closed"
+            "description": "ACP server closed"
+          }
+        }
+      }
+    },
+    "/v1/agents": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "operationId": "get_v1_agents",
+        "parameters": [
+          {
+            "name": "config",
+            "in": "query",
+            "description": "When true, include version/path/configOptions (slower)",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "nullable": true
+            }
+          },
+          {
+            "name": "no_cache",
+            "in": "query",
+            "description": "When true, bypass version cache",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of v1 agents",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/agents/{agent}": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "operationId": "get_v1_agent",
+        "parameters": [
+          {
+            "name": "agent",
+            "in": "path",
+            "description": "Agent id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "config",
+            "in": "query",
+            "description": "When true, include version/path/configOptions (slower)",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "nullable": true
+            }
+          },
+          {
+            "name": "no_cache",
+            "in": "query",
+            "description": "When true, bypass version cache",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Agent info",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentInfo"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/agents/{agent}/install": {
+      "post": {
+        "tags": [
+          "v1"
+        ],
+        "operationId": "post_v1_agent_install",
+        "parameters": [
+          {
+            "name": "agent",
+            "in": "path",
+            "description": "Agent id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentInstallRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Agent install result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentInstallResponse"
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid request",
@@ -335,12 +397,551 @@
               }
             }
           },
-          "404": {
-            "description": "Unknown ACP client",
+          "500": {
+            "description": "Install failed",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/config/mcp": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "operationId": "get_v1_config_mcp",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "description": "Target directory",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "mcpName",
+            "in": "query",
+            "description": "MCP entry name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "MCP entry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpServerConfig"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Entry not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "v1"
+        ],
+        "operationId": "put_v1_config_mcp",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "description": "Target directory",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "mcpName",
+            "in": "query",
+            "description": "MCP entry name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpServerConfig"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Stored"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "v1"
+        ],
+        "operationId": "delete_v1_config_mcp",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "description": "Target directory",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "mcpName",
+            "in": "query",
+            "description": "MCP entry name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          }
+        }
+      }
+    },
+    "/v1/config/skills": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "operationId": "get_v1_config_skills",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "description": "Target directory",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "skillName",
+            "in": "query",
+            "description": "Skill entry name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Skills entry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillsConfig"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Entry not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "v1"
+        ],
+        "operationId": "put_v1_config_skills",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "description": "Target directory",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "skillName",
+            "in": "query",
+            "description": "Skill entry name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SkillsConfig"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Stored"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "v1"
+        ],
+        "operationId": "delete_v1_config_skills",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "description": "Target directory",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "skillName",
+            "in": "query",
+            "description": "Skill entry name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          }
+        }
+      }
+    },
+    "/v1/fs/entries": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "operationId": "get_v1_fs_entries",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "query",
+            "description": "Directory path",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Directory entries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/FsEntry"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/fs/entry": {
+      "delete": {
+        "tags": [
+          "v1"
+        ],
+        "operationId": "delete_v1_fs_entry",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "query",
+            "description": "File or directory path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "recursive",
+            "in": "query",
+            "description": "Delete directory recursively",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Delete result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FsActionResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/fs/file": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "operationId": "get_v1_fs_file",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "query",
+            "description": "File path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "File content"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "v1"
+        ],
+        "operationId": "put_v1_fs_file",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "query",
+            "description": "File path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Raw file bytes",
+          "content": {
+            "text/plain": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Write result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FsWriteResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/fs/mkdir": {
+      "post": {
+        "tags": [
+          "v1"
+        ],
+        "operationId": "post_v1_fs_mkdir",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "query",
+            "description": "Directory path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Directory created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FsActionResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/fs/move": {
+      "post": {
+        "tags": [
+          "v1"
+        ],
+        "operationId": "post_v1_fs_move",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FsMoveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Move result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FsMoveResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/fs/stat": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "operationId": "get_v1_fs_stat",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "query",
+            "description": "Path to stat",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Path metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FsStat"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/fs/upload-batch": {
+      "post": {
+        "tags": [
+          "v1"
+        ],
+        "operationId": "post_v1_fs_upload_batch",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "query",
+            "description": "Destination path",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "tar archive body",
+          "content": {
+            "text/plain": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Upload/extract result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FsUploadBatchResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/health": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "operationId": "get_v1_health",
+        "responses": {
+          "200": {
+            "description": "Service health response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
                 }
               }
             }
@@ -375,6 +976,49 @@
           },
           "result": {
             "nullable": true
+          }
+        }
+      },
+      "AcpPostQuery": {
+        "type": "object",
+        "properties": {
+          "agent": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "AcpServerInfo": {
+        "type": "object",
+        "required": [
+          "serverId",
+          "agent",
+          "createdAtMs"
+        ],
+        "properties": {
+          "agent": {
+            "type": "string"
+          },
+          "createdAtMs": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "serverId": {
+            "type": "string"
+          }
+        }
+      },
+      "AcpServerListResponse": {
+        "type": "object",
+        "required": [
+          "servers"
+        ],
+        "properties": {
+          "servers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AcpServerInfo"
+            }
           }
         }
       },
@@ -469,32 +1113,23 @@
           "capabilities": {
             "$ref": "#/components/schemas/AgentCapabilities"
           },
-          "credentialsAvailable": {
-            "type": "boolean"
-          },
-          "defaultModel": {
+          "configError": {
             "type": "string",
             "nullable": true
+          },
+          "configOptions": {
+            "type": "array",
+            "items": {},
+            "nullable": true
+          },
+          "credentialsAvailable": {
+            "type": "boolean"
           },
           "id": {
             "type": "string"
           },
           "installed": {
             "type": "boolean"
-          },
-          "models": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/AgentModelInfo"
-            },
-            "nullable": true
-          },
-          "modes": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/AgentModeInfo"
-            },
-            "nullable": true
           },
           "path": {
             "type": "string",
@@ -586,51 +1221,6 @@
           }
         }
       },
-      "AgentModeInfo": {
-        "type": "object",
-        "required": [
-          "id",
-          "name",
-          "description"
-        ],
-        "properties": {
-          "description": {
-            "type": "string"
-          },
-          "id": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          }
-        }
-      },
-      "AgentModelInfo": {
-        "type": "object",
-        "required": [
-          "id"
-        ],
-        "properties": {
-          "defaultVariant": {
-            "type": "string",
-            "nullable": true
-          },
-          "id": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string",
-            "nullable": true
-          },
-          "variants": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "nullable": true
-          }
-        }
-      },
       "ErrorType": {
         "type": "string",
         "enum": [
@@ -674,10 +1264,6 @@
           "recursive": {
             "type": "boolean",
             "nullable": true
-          },
-          "sessionId": {
-            "type": "string",
-            "nullable": true
           }
         }
       },
@@ -685,10 +1271,6 @@
         "type": "object",
         "properties": {
           "path": {
-            "type": "string",
-            "nullable": true
-          },
-          "sessionId": {
             "type": "string",
             "nullable": true
           }
@@ -772,19 +1354,6 @@
         "properties": {
           "path": {
             "type": "string"
-          },
-          "sessionId": {
-            "type": "string",
-            "nullable": true
-          }
-        }
-      },
-      "FsSessionQuery": {
-        "type": "object",
-        "properties": {
-          "sessionId": {
-            "type": "string",
-            "nullable": true
           }
         }
       },
@@ -817,10 +1386,6 @@
         "type": "object",
         "properties": {
           "path": {
-            "type": "string",
-            "nullable": true
-          },
-          "sessionId": {
             "type": "string",
             "nullable": true
           }
@@ -872,6 +1437,135 @@
           }
         }
       },
+      "McpConfigQuery": {
+        "type": "object",
+        "required": [
+          "directory",
+          "mcpName"
+        ],
+        "properties": {
+          "directory": {
+            "type": "string"
+          },
+          "mcpName": {
+            "type": "string"
+          }
+        }
+      },
+      "McpServerConfig": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "command",
+              "type"
+            ],
+            "properties": {
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "command": {
+                "$ref": "#/components/schemas/McpCommand"
+              },
+              "cwd": {
+                "type": "string",
+                "nullable": true
+              },
+              "enabled": {
+                "type": "boolean",
+                "nullable": true
+              },
+              "env": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "nullable": true
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "format": "int64",
+                "nullable": true,
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "local"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "url",
+              "type"
+            ],
+            "properties": {
+              "bearerTokenEnvVar": {
+                "type": "string",
+                "nullable": true
+              },
+              "enabled": {
+                "type": "boolean",
+                "nullable": true
+              },
+              "envHeaders": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "nullable": true
+              },
+              "headers": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "nullable": true
+              },
+              "oauth": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/McpOAuthConfigOrDisabled"
+                  }
+                ],
+                "nullable": true
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "format": "int64",
+                "nullable": true,
+                "minimum": 0
+              },
+              "transport": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/McpRemoteTransport"
+                  }
+                ],
+                "nullable": true
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "remote"
+                ]
+              },
+              "url": {
+                "type": "string"
+              }
+            }
+          }
+        ],
+        "discriminator": {
+          "propertyName": "type"
+        }
+      },
       "ProblemDetails": {
         "type": "object",
         "required": [
@@ -906,30 +1600,15 @@
         "type": "string",
         "enum": [
           "running",
-          "stopped",
-          "error"
+          "stopped"
         ]
       },
       "ServerStatusInfo": {
         "type": "object",
         "required": [
-          "status",
-          "restartCount"
+          "status"
         ],
         "properties": {
-          "baseUrl": {
-            "type": "string",
-            "nullable": true
-          },
-          "lastError": {
-            "type": "string",
-            "nullable": true
-          },
-          "restartCount": {
-            "type": "integer",
-            "format": "int64",
-            "minimum": 0
-          },
           "status": {
             "$ref": "#/components/schemas/ServerStatus"
           },
@@ -941,139 +1620,61 @@
           }
         }
       },
-      "SessionInfo": {
+      "SkillSource": {
         "type": "object",
         "required": [
-          "sessionId",
-          "agent",
-          "agentMode",
-          "permissionMode",
-          "ended",
-          "eventCount",
-          "createdAt",
-          "updatedAt"
+          "type",
+          "source"
         ],
         "properties": {
-          "agent": {
-            "type": "string"
-          },
-          "agentMode": {
-            "type": "string"
-          },
-          "createdAt": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "directory": {
+          "ref": {
             "type": "string",
             "nullable": true
           },
-          "ended": {
-            "type": "boolean"
-          },
-          "eventCount": {
-            "type": "integer",
-            "format": "int64",
-            "minimum": 0
-          },
-          "model": {
-            "type": "string",
+          "skills": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
             "nullable": true
           },
-          "nativeSessionId": {
-            "type": "string",
-            "nullable": true
-          },
-          "permissionMode": {
+          "source": {
             "type": "string"
           },
-          "sessionId": {
-            "type": "string"
-          },
-          "terminationInfo": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TerminationInfo"
-              }
-            ],
-            "nullable": true
-          },
-          "title": {
+          "subpath": {
             "type": "string",
             "nullable": true
           },
-          "updatedAt": {
-            "type": "integer",
-            "format": "int64"
+          "type": {
+            "type": "string"
           }
         }
       },
-      "SessionListResponse": {
+      "SkillsConfig": {
         "type": "object",
         "required": [
-          "sessions"
+          "sources"
         ],
         "properties": {
-          "sessions": {
+          "sources": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/SessionInfo"
+              "$ref": "#/components/schemas/SkillSource"
             }
           }
         }
       },
-      "StderrOutput": {
+      "SkillsConfigQuery": {
         "type": "object",
         "required": [
-          "truncated"
+          "directory",
+          "skillName"
         ],
         "properties": {
-          "head": {
-            "type": "string",
-            "nullable": true
-          },
-          "tail": {
-            "type": "string",
-            "nullable": true
-          },
-          "totalLines": {
-            "type": "integer",
-            "nullable": true,
-            "minimum": 0
-          },
-          "truncated": {
-            "type": "boolean"
-          }
-        }
-      },
-      "TerminationInfo": {
-        "type": "object",
-        "required": [
-          "reason",
-          "terminatedBy"
-        ],
-        "properties": {
-          "exitCode": {
-            "type": "integer",
-            "format": "int32",
-            "nullable": true
-          },
-          "message": {
-            "type": "string",
-            "nullable": true
-          },
-          "reason": {
+          "directory": {
             "type": "string"
           },
-          "stderr": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/StderrOutput"
-              }
-            ],
-            "nullable": true
-          },
-          "terminatedBy": {
+          "skillName": {
             "type": "string"
           }
         }
@@ -1082,8 +1683,8 @@
   },
   "tags": [
     {
-      "name": "v2",
-      "description": "ACP-native v2 API"
+      "name": "v1",
+      "description": "ACP proxy v1 API"
     }
   ]
 }

@@ -1,0 +1,174 @@
+---
+title: "SDK Overview"
+description: "Use the TypeScript SDK to manage Sandbox Agent sessions and APIs."
+icon: "compass"
+---
+
+The TypeScript SDK is centered on `sandbox-agent` and its `SandboxAgent` class.
+
+## Install
+
+<Tabs>
+  <Tab title="npm">
+    ```bash
+    npm install sandbox-agent@0.2.x
+    ```
+  </Tab>
+  <Tab title="bun">
+    ```bash
+    bun add sandbox-agent@0.2.x
+    # Allow Bun to run postinstall scripts for native binaries (required for SandboxAgent.start()).
+    bun pm trust @sandbox-agent/cli-linux-x64 @sandbox-agent/cli-darwin-arm64 @sandbox-agent/cli-darwin-x64 @sandbox-agent/cli-win32-x64
+    ```
+  </Tab>
+</Tabs>
+
+## Optional persistence drivers
+
+```bash
+npm install @sandbox-agent/persist-indexeddb@0.2.x @sandbox-agent/persist-sqlite@0.2.x @sandbox-agent/persist-postgres@0.2.x
+```
+
+## Create a client
+
+```ts
+import { SandboxAgent } from "sandbox-agent";
+
+const sdk = await SandboxAgent.connect({
+  baseUrl: "http://127.0.0.1:2468",
+});
+```
+
+With persistence:
+
+```ts
+import { SandboxAgent } from "sandbox-agent";
+import { SQLiteSessionPersistDriver } from "@sandbox-agent/persist-sqlite";
+
+const persist = new SQLiteSessionPersistDriver({
+  filename: "./sessions.db",
+});
+
+const sdk = await SandboxAgent.connect({
+  baseUrl: "http://127.0.0.1:2468",
+  persist,
+});
+```
+
+Local autospawn (Node.js only):
+
+```ts
+import { SandboxAgent } from "sandbox-agent";
+
+const localSdk = await SandboxAgent.start();
+
+await localSdk.dispose();
+```
+
+## Session flow
+
+```ts
+const session = await sdk.createSession({
+  agent: "mock",
+  sessionInit: {
+    cwd: "/",
+    mcpServers: [],
+  },
+});
+
+const prompt = await session.prompt([
+  { type: "text", text: "Summarize this repository." },
+]);
+
+console.log(prompt.stopReason);
+```
+
+Load and destroy:
+
+```ts
+const restored = await sdk.resumeSession(session.id);
+await restored.prompt([{ type: "text", text: "Continue from previous context." }]);
+
+await sdk.destroySession(restored.id);
+```
+
+## Events
+
+Subscribe to live events:
+
+```ts
+const unsubscribe = session.onEvent((event) => {
+  console.log(event.eventIndex, event.sender, event.payload);
+});
+
+await session.prompt([{ type: "text", text: "Give me a short summary." }]);
+unsubscribe();
+```
+
+Fetch persisted events:
+
+```ts
+const page = await sdk.getEvents({
+  sessionId: session.id,
+  limit: 100,
+});
+
+console.log(page.items.length);
+```
+
+## Control-plane and HTTP helpers
+
+```ts
+const health = await sdk.getHealth();
+const agents = await sdk.listAgents();
+await sdk.installAgent("codex", { reinstall: true });
+
+const entries = await sdk.listFsEntries({ path: "." });
+const writeResult = await sdk.writeFsFile({ path: "./hello.txt" }, "hello");
+
+console.log(health.status, agents.agents.length, entries.length, writeResult.path);
+```
+
+## Error handling
+
+```ts
+import { SandboxAgentError } from "sandbox-agent";
+
+try {
+  await sdk.listAgents();
+} catch (error) {
+  if (error instanceof SandboxAgentError) {
+    console.error(error.status, error.problem);
+  }
+}
+```
+
+## Inspector URL
+
+```ts
+import { buildInspectorUrl } from "sandbox-agent";
+
+const url = buildInspectorUrl({
+  baseUrl: "https://your-sandbox-agent.example.com",
+  headers: { "X-Custom-Header": "value" },
+});
+
+console.log(url);
+```
+
+Parameters:
+
+- `baseUrl` (required): Sandbox Agent server URL
+- `token` (optional): Bearer token for authenticated servers
+- `headers` (optional): Additional request headers
+
+## Types
+
+```ts
+import type {
+  AgentInfo,
+  HealthResponse,
+  SessionEvent,
+  SessionRecord,
+} from "sandbox-agent";
+```

@@ -5,119 +5,80 @@ sidebarTitle: "MCP"
 icon: "plug"
 ---
 
-MCP (Model Context Protocol) servers extend agents with tools. Sandbox Agent can auto-load MCP servers when a session starts by passing an `mcp` map in the create-session request.
+MCP (Model Context Protocol) servers extend agents with tools and external context.
 
-## Session Config
+## Configuring MCP servers
 
-The `mcp` field is a map of server name to config. Use `type: "local"` for stdio servers and `type: "remote"` for HTTP/SSE servers:
+The HTTP config endpoints let you store/retrieve MCP server configs by directory + name.
 
-<CodeGroup>
-
-```ts TypeScript
-import { SandboxAgentClient } from "sandbox-agent";
-
-const client = new SandboxAgentClient({
-  baseUrl: "http://127.0.0.1:2468",
-  token: process.env.SANDBOX_TOKEN,
-  agent: "mock",
-  });
-
-await client.createSession("claude-mcp", {
-  agent: "claude",
-  mcp: {
-    filesystem: {
-      type: "local",
-      command: "my-mcp-server",
-      args: ["--root", "."],
-    },
-    github: {
-      type: "remote",
-      url: "https://example.com/mcp",
-      headers: {
-        Authorization: "Bearer ${GITHUB_TOKEN}",
-      },
-    },
+```ts
+// Create MCP config
+await sdk.setMcpConfig(
+  {
+    directory: "/workspace",
+    mcpName: "github",
   },
+  {
+    type: "remote",
+    url: "https://example.com/mcp",
+  },
+);
+
+// Create a session using the configured MCP servers
+const session = await sdk.createSession({
+  agent: "claude",
+  sessionInit: {
+    cwd: "/workspace",
+  },
+});
+
+await session.prompt([
+  { type: "text", text: "Use available MCP servers to help with this task." },
+]);
+
+// List MCP configs
+const config = await sdk.getMcpConfig({
+  directory: "/workspace",
+  mcpName: "github",
+});
+
+console.log(config.type);
+
+// Delete MCP config
+await sdk.deleteMcpConfig({
+  directory: "/workspace",
+  mcpName: "github",
 });
 ```
 
-```bash cURL
-curl -X POST "http://127.0.0.1:2468/v1/sessions/claude-mcp" \
-  -H "Authorization: Bearer $SANDBOX_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "agent": "claude",
-    "mcp": {
-      "filesystem": {
-        "type": "local",
-        "command": "my-mcp-server",
-        "args": ["--root", "."]
-      },
-      "github": {
-        "type": "remote",
-        "url": "https://example.com/mcp",
-        "headers": {
-          "Authorization": "Bearer ${GITHUB_TOKEN}"
-        }
-      }
-    }
-  }'
-```
+## Config fields
 
-</CodeGroup>
-
-## Config Fields
-
-### Local Server
-
-Stdio servers that run inside the sandbox.
+### Local server
 
 | Field | Description |
 |---|---|
 | `type` | `local` |
-| `command` | string or array (`["node", "server.js"]`) |
-| `args` | array of string arguments |
-| `env` | environment variables map |
-| `enabled` | enable or disable the server |
-| `timeoutMs` | tool timeout override |
-| `cwd` | working directory for the MCP process |
+| `command` | executable path |
+| `args` | array of CLI args |
+| `env` | environment variable map |
+| `cwd` | working directory |
+| `enabled` | enable/disable server |
+| `timeoutMs` | timeout override |
 
-```json
-{
-  "type": "local",
-  "command": ["node", "./mcp/server.js"],
-  "args": ["--root", "."],
-  "env": { "LOG_LEVEL": "debug" },
-  "cwd": "/workspace"
-}
-```
-
-### Remote Server
-
-HTTP/SSE servers accessed over the network.
+### Remote server
 
 | Field | Description |
 |---|---|
 | `type` | `remote` |
 | `url` | MCP server URL |
-| `headers` | static headers map |
-| `bearerTokenEnvVar` | env var name to inject into `Authorization: Bearer ...` |
-| `envHeaders` | map of header name to env var name |
-| `oauth` | object with `clientId`, `clientSecret`, `scope`, or `false` to disable |
-| `enabled` | enable or disable the server |
-| `timeoutMs` | tool timeout override |
 | `transport` | `http` or `sse` |
+| `headers` | static headers map |
+| `bearerTokenEnvVar` | env var name to inject in auth header |
+| `envHeaders` | header name to env var map |
+| `oauth` | optional OAuth config object |
+| `enabled` | enable/disable server |
+| `timeoutMs` | timeout override |
 
-```json
-{
-  "type": "remote",
-  "url": "https://example.com/mcp",
-  "headers": { "x-client": "sandbox-agent" },
-  "bearerTokenEnvVar": "MCP_TOKEN",
-  "transport": "sse"
-}
-```
-
-## Custom MCP Servers
+## Custom MCP servers
 
 To bundle and upload your own MCP server into the sandbox, see [Custom Tools](/custom-tools).

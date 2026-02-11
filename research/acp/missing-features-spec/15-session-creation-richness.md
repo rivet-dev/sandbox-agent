@@ -4,13 +4,13 @@
 
 ## Summary
 
-v1 `CreateSessionRequest` had `mcp` (full MCP server config with OAuth, env headers, bearer tokens), `skills` (sources with git refs), `agent_version`, `directory`. v2 needs to support these at session creation time.
+v1 `CreateSessionRequest` had `mcp` (full MCP server config with OAuth, env headers, bearer tokens), `skills` (sources with git refs), `agent_version`, `directory`. v1 needs to support these at session creation time.
 
-## Current v2 State — MOSTLY IMPLEMENTED
+## Current v1 State — MOSTLY IMPLEMENTED
 
 Investigation shows that **most of these are already supported** via `_meta.sandboxagent.dev` passthrough in `session/new`:
 
-| Field | v1 | v2 Status | v2 Mechanism |
+| Field | v1 | v1 Status | v1 Mechanism |
 |-------|-----|-----------|-------------|
 | `directory` | `CreateSessionRequest.directory` | **Implemented** | `cwd` parameter extracted from payload |
 | `agent_version` | `CreateSessionRequest.agent_version` | **Implemented** | `_meta.sandboxagent.dev.agentVersionRequested` (stored, forwarded) |

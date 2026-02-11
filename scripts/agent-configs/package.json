@@ -1,0 +1,19 @@
+{
+	"name": "agent-configs",
+	"version": "1.0.0",
+	"description": "Fetches model/mode lists from agent backends and dumps them to JSON",
+	"scripts": {
+		"dump": "npx tsx dump.ts",
+		"dump:claude": "npx tsx dump.ts --agent claude",
+		"dump:codex": "npx tsx dump.ts --agent codex",
+		"dump:opencode": "npx tsx dump.ts --agent opencode",
+		"dump:cursor": "npx tsx dump.ts --agent cursor",
+		"check-types": "tsc --noEmit"
+	},
+	"packageManager": "pnpm@10.13.1",
+	"devDependencies": {
+		"@types/node": "^24.3.0",
+		"tsx": "^4.19.0",
+		"typescript": "^5.8.0"
+	}
+}

@@ -1,23 +1,22 @@
 import { getAvatarLabel, getMessageClass } from "./messageUtils";
-import renderContentPart from "./renderContentPart";
 import type { TimelineEntry } from "./types";
+import { formatJson } from "../../utils/format";
 
 const ChatMessages = ({
   entries,
   sessionError,
-  eventError,
   messagesEndRef
 }: {
   entries: TimelineEntry[];
   sessionError: string | null;
-  eventError: string | null;
   messagesEndRef: React.RefObject<HTMLDivElement>;
 }) => {
   return (
     <div className="messages">
       {entries.map((entry) => {
+        const messageClass = getMessageClass(entry);
+
         if (entry.kind === "meta") {
-          const messageClass = entry.meta?.severity === "error" ? "error" : "system";
           return (
             <div key={entry.id} className={`message ${messageClass}`}>
               <div className="avatar">{getAvatarLabel(messageClass)}</div>
@@ -31,53 +30,73 @@ const ChatMessages = ({
           );
         }
 
-        const item = entry.item;
-        if (!item) return null;
-        const hasParts = (item.content ?? []).length > 0;
-        const isInProgress = item.status === "in_progress";
-        const isFailed = item.status === "failed";
-        const messageClass = getMessageClass(item);
-        const statusValue = item.status ?? "";
-        const statusLabel =
-          statusValue && statusValue !== "completed" ? statusValue.replace("_", " ") : "";
-        const kindLabel = item.kind.replace("_", " ");
-
-        return (
-          <div key={entry.id} className={`message ${messageClass} ${isFailed ? "error" : ""}`}>
-            <div className="avatar">{getAvatarLabel(isFailed ? "error" : messageClass)}</div>
-            <div className="message-content">
-              {(item.kind !== "message" || item.status !== "completed") && (
+        if (entry.kind === "reasoning") {
+          return (
+            <div key={entry.id} className="message assistant">
+              <div className="avatar">AI</div>
+              <div className="message-content">
                 <div className="message-meta">
-                  <span>{kindLabel}</span>
-                  {statusLabel && (
-                    <span className={`pill ${item.status === "failed" ? "danger" : "accent"}`}>
-                      {statusLabel}
+                  <span>reasoning - {entry.reasoning?.visibility ?? "public"}</span>
+                </div>
+                <div className="part-body muted">{entry.reasoning?.text ?? ""}</div>
+              </div>
+            </div>
+          );
+        }
+
+        if (entry.kind === "tool") {
+          const isComplete = entry.toolStatus === "completed" || entry.toolStatus === "failed";
+          const isFailed = entry.toolStatus === "failed";
+          return (
+            <div key={entry.id} className={`message tool ${isFailed ? "error" : ""}`}>
+              <div className="avatar">{getAvatarLabel(isFailed ? "error" : "tool")}</div>
+              <div className="message-content">
+                <div className="message-meta">
+                  <span>tool call - {entry.toolName}</span>
+                  {entry.toolStatus && entry.toolStatus !== "completed" && (
+                    <span className={`pill ${isFailed ? "danger" : "accent"}`}>
+                      {entry.toolStatus.replace("_", " ")}
                     </span>
                   )}
                 </div>
-              )}
-              {hasParts ? (
-                (item.content ?? []).map(renderContentPart)
-              ) : entry.deltaText ? (
-                <span>
-                  {entry.deltaText}
-                  {isInProgress && <span className="cursor" />}
-                </span>
-              ) : isInProgress ? (
+                {entry.toolInput && <pre className="code-block">{entry.toolInput}</pre>}
+                {isComplete && entry.toolOutput && (
+                  <div className="part">
+                    <div className="part-title">result</div>
+                    <pre className="code-block">{entry.toolOutput}</pre>
+                  </div>
+                )}
+                {!isComplete && !entry.toolInput && (
+                  <span className="thinking-indicator">
+                    <span className="thinking-dot" />
+                    <span className="thinking-dot" />
+                    <span className="thinking-dot" />
+                  </span>
+                )}
+              </div>
+            </div>
+          );
+        }
+
+        // Message (user or assistant)
+        return (
+          <div key={entry.id} className={`message ${messageClass}`}>
+            <div className="avatar">{getAvatarLabel(messageClass)}</div>
+            <div className="message-content">
+              {entry.text ? (
+                <div className="part-body">{entry.text}</div>
+              ) : (
                 <span className="thinking-indicator">
                   <span className="thinking-dot" />
                   <span className="thinking-dot" />
                   <span className="thinking-dot" />
                 </span>
-              ) : (
-                <span className="muted">No content yet.</span>
               )}
             </div>
           </div>
         );
       })}
       {sessionError && <div className="message-error">{sessionError}</div>}
-      {eventError && <div className="message-error">{eventError}</div>}
       <div ref={messagesEndRef} />
     </div>
   );

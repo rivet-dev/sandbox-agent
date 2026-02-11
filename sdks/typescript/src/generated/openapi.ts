@@ -5,36 +5,57 @@
 
 
 export interface paths {
-  "/v2/fs/file": {
-    get: operations["get_v2_fs_file"];
-    put: operations["put_v2_fs_file"];
+  "/v1/acp": {
+    get: operations["get_v1_acp_servers"];
   };
-  "/v2/fs/upload-batch": {
-    post: operations["post_v2_fs_upload_batch"];
+  "/v1/acp/{server_id}": {
+    get: operations["get_v1_acp"];
+    post: operations["post_v1_acp"];
+    delete: operations["delete_v1_acp"];
   };
-  "/v2/health": {
-    /**
-     * v2 Health
-     * @description Returns server health for the v2 ACP surface.
-     */
-    get: operations["get_v2_health"];
+  "/v1/agents": {
+    get: operations["get_v1_agents"];
   };
-  "/v2/rpc": {
-    /**
-     * ACP SSE
-     * @description Streams ACP JSON-RPC envelopes for an ACP client over SSE.
-     */
-    get: operations["get_v2_acp"];
-    /**
-     * ACP POST
-     * @description Sends ACP JSON-RPC envelopes to an ACP client and returns request responses.
-     */
-    post: operations["post_v2_acp"];
-    /**
-     * ACP Close
-     * @description Closes an ACP client and releases agent process resources.
-     */
-    delete: operations["delete_v2_acp"];
+  "/v1/agents/{agent}": {
+    get: operations["get_v1_agent"];
+  };
+  "/v1/agents/{agent}/install": {
+    post: operations["post_v1_agent_install"];
+  };
+  "/v1/config/mcp": {
+    get: operations["get_v1_config_mcp"];
+    put: operations["put_v1_config_mcp"];
+    delete: operations["delete_v1_config_mcp"];
+  };
+  "/v1/config/skills": {
+    get: operations["get_v1_config_skills"];
+    put: operations["put_v1_config_skills"];
+    delete: operations["delete_v1_config_skills"];
+  };
+  "/v1/fs/entries": {
+    get: operations["get_v1_fs_entries"];
+  };
+  "/v1/fs/entry": {
+    delete: operations["delete_v1_fs_entry"];
+  };
+  "/v1/fs/file": {
+    get: operations["get_v1_fs_file"];
+    put: operations["put_v1_fs_file"];
+  };
+  "/v1/fs/mkdir": {
+    post: operations["post_v1_fs_mkdir"];
+  };
+  "/v1/fs/move": {
+    post: operations["post_v1_fs_move"];
+  };
+  "/v1/fs/stat": {
+    get: operations["get_v1_fs_stat"];
+  };
+  "/v1/fs/upload-batch": {
+    post: operations["post_v1_fs_upload_batch"];
+  };
+  "/v1/health": {
+    get: operations["get_v1_health"];
   };
 }
 
@@ -49,6 +70,18 @@ export interface components {
       method?: string | null;
       params?: unknown;
       result?: unknown;
+    };
+    AcpPostQuery: {
+      agent?: string | null;
+    };
+    AcpServerInfo: {
+      agent: string;
+      /** Format: int64 */
+      createdAtMs: number;
+      serverId: string;
+    };
+    AcpServerListResponse: {
+      servers: components["schemas"]["AcpServerInfo"][];
     };
     AgentCapabilities: {
       commandExecution: boolean;
@@ -72,12 +105,11 @@ export interface components {
     };
     AgentInfo: {
       capabilities: components["schemas"]["AgentCapabilities"];
+      configError?: string | null;
+      configOptions?: unknown[] | null;
       credentialsAvailable: boolean;
-      defaultModel?: string | null;
       id: string;
       installed: boolean;
-      models?: components["schemas"]["AgentModelInfo"][] | null;
-      modes?: components["schemas"]["AgentModeInfo"][] | null;
       path?: string | null;
       serverStatus?: components["schemas"]["ServerStatusInfo"] | null;
       version?: string | null;
@@ -100,28 +132,17 @@ export interface components {
     AgentListResponse: {
       agents: components["schemas"]["AgentInfo"][];
     };
-    AgentModeInfo: {
-      description: string;
-      id: string;
-      name: string;
-    };
-    AgentModelInfo: {
-      id: string;
-      name?: string | null;
-    };
     /** @enum {string} */
-    ErrorType: "invalid_request" | "unsupported_agent" | "agent_not_installed" | "install_failed" | "agent_process_exited" | "token_invalid" | "permission_denied" | "session_not_found" | "session_already_exists" | "mode_not_supported" | "stream_error" | "timeout";
+    ErrorType: "invalid_request" | "conflict" | "unsupported_agent" | "agent_not_installed" | "install_failed" | "agent_process_exited" | "token_invalid" | "permission_denied" | "not_acceptable" | "unsupported_media_type" | "session_not_found" | "session_already_exists" | "mode_not_supported" | "stream_error" | "timeout";
     FsActionResponse: {
       path: string;
     };
     FsDeleteQuery: {
       path: string;
       recursive?: boolean | null;
-      sessionId?: string | null;
     };
     FsEntriesQuery: {
       path?: string | null;
-      sessionId?: string | null;
     };
     FsEntry: {
       entryType: components["schemas"]["FsEntryType"];
@@ -144,10 +165,6 @@ export interface components {
     };
     FsPathQuery: {
       path: string;
-      sessionId?: string | null;
-    };
-    FsSessionQuery: {
-      sessionId?: string | null;
     };
     FsStat: {
       entryType: components["schemas"]["FsEntryType"];
@@ -158,7 +175,6 @@ export interface components {
     };
     FsUploadBatchQuery: {
       path?: string | null;
-      sessionId?: string | null;
     };
     FsUploadBatchResponse: {
       paths: string[];
@@ -172,6 +188,39 @@ export interface components {
     HealthResponse: {
       status: string;
     };
+    McpConfigQuery: {
+      directory: string;
+      mcpName: string;
+    };
+    McpServerConfig: ({
+      args?: string[];
+      command: string;
+      cwd?: string | null;
+      enabled?: boolean | null;
+      env?: {
+        [key: string]: string;
+      } | null;
+      /** Format: int64 */
+      timeoutMs?: number | null;
+      /** @enum {string} */
+      type: "local";
+    }) | ({
+      bearerTokenEnvVar?: string | null;
+      enabled?: boolean | null;
+      envHeaders?: {
+        [key: string]: string;
+      } | null;
+      headers?: {
+        [key: string]: string;
+      } | null;
+      oauth?: Record<string, unknown> | null | null;
+      /** Format: int64 */
+      timeoutMs?: number | null;
+      transport?: string | null;
+      /** @enum {string} */
+      type: "remote";
+      url: string;
+    });
     ProblemDetails: {
       detail?: string | null;
       instance?: string | null;
@@ -182,50 +231,25 @@ export interface components {
       [key: string]: unknown;
     };
     /** @enum {string} */
-    ServerStatus: "running" | "stopped" | "error";
+    ServerStatus: "running" | "stopped";
     ServerStatusInfo: {
-      baseUrl?: string | null;
-      lastError?: string | null;
-      /** Format: int64 */
-      restartCount: number;
       status: components["schemas"]["ServerStatus"];
       /** Format: int64 */
       uptimeMs?: number | null;
     };
-    SessionInfo: {
-      agent: string;
-      agentMode: string;
-      /** Format: int64 */
-      createdAt: number;
-      directory?: string | null;
-      ended: boolean;
-      /** Format: int64 */
-      eventCount: number;
-      model?: string | null;
-      nativeSessionId?: string | null;
-      permissionMode: string;
-      sessionId: string;
-      terminationInfo?: components["schemas"]["TerminationInfo"] | null;
-      title?: string | null;
-      /** Format: int64 */
-      updatedAt: number;
+    SkillSource: {
+      ref?: string | null;
+      skills?: string[] | null;
+      source: string;
+      subpath?: string | null;
+      type: string;
     };
-    SessionListResponse: {
-      sessions: components["schemas"]["SessionInfo"][];
+    SkillsConfig: {
+      sources: components["schemas"]["SkillSource"][];
     };
-    StderrOutput: {
-      head?: string | null;
-      tail?: string | null;
-      totalLines?: number | null;
-      truncated: boolean;
-    };
-    TerminationInfo: {
-      /** Format: int32 */
-      exitCode?: number | null;
-      message?: string | null;
-      reason: string;
-      stderr?: components["schemas"]["StderrOutput"] | null;
-      terminatedBy: string;
+    SkillsConfigQuery: {
+      directory: string;
+      skillName: string;
     };
   };
   responses: never;
@@ -241,89 +265,23 @@ export type external = Record<string, never>;
 
 export interface operations {
 
-  get_v2_fs_file: {
-    parameters: {
-      query: {
-        /** @description File path */
-        path: string;
-        /** @description Session id for relative path base */
-        session_id?: string | null;
-      };
-    };
+  get_v1_acp_servers: {
     responses: {
-      /** @description File content */
-      200: {
-        content: never;
-      };
-    };
-  };
-  put_v2_fs_file: {
-    parameters: {
-      query: {
-        /** @description File path */
-        path: string;
-        /** @description Session id for relative path base */
-        session_id?: string | null;
-      };
-    };
-    /** @description Raw file bytes */
-    requestBody: {
-      content: {
-        "text/plain": string;
-      };
-    };
-    responses: {
-      /** @description Write result */
+      /** @description Active ACP server instances */
       200: {
         content: {
-          "application/json": components["schemas"]["FsWriteResponse"];
+          "application/json": components["schemas"]["AcpServerListResponse"];
         };
       };
     };
   };
-  post_v2_fs_upload_batch: {
+  get_v1_acp: {
     parameters: {
-      query?: {
-        /** @description Destination path */
-        path?: string | null;
-        /** @description Session id for relative path base */
-        session_id?: string | null;
+      path: {
+        /** @description Client-defined ACP server id */
+        server_id: string;
       };
     };
-    /** @description tar archive body */
-    requestBody: {
-      content: {
-        "text/plain": string;
-      };
-    };
-    responses: {
-      /** @description Upload/extract result */
-      200: {
-        content: {
-          "application/json": components["schemas"]["FsUploadBatchResponse"];
-        };
-      };
-    };
-  };
-  /**
-   * v2 Health
-   * @description Returns server health for the v2 ACP surface.
-   */
-  get_v2_health: {
-    responses: {
-      /** @description Service health response */
-      200: {
-        content: {
-          "application/json": components["schemas"]["HealthResponse"];
-        };
-      };
-    };
-  };
-  /**
-   * ACP SSE
-   * @description Streams ACP JSON-RPC envelopes for an ACP client over SSE.
-   */
-  get_v2_acp: {
     responses: {
       /** @description SSE stream of ACP envelopes */
       200: {
@@ -335,19 +293,31 @@ export interface operations {
           "application/json": components["schemas"]["ProblemDetails"];
         };
       };
-      /** @description Unknown ACP client */
+      /** @description Unknown ACP server */
       404: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Client does not accept SSE responses */
+      406: {
         content: {
           "application/json": components["schemas"]["ProblemDetails"];
         };
       };
     };
   };
-  /**
-   * ACP POST
-   * @description Sends ACP JSON-RPC envelopes to an ACP client and returns request responses.
-   */
-  post_v2_acp: {
+  post_v1_acp: {
+    parameters: {
+      query?: {
+        /** @description Agent id required for first POST */
+        agent?: string | null;
+      };
+      path: {
+        /** @description Client-defined ACP server id */
+        server_id: string;
+      };
+    };
     requestBody: {
       content: {
         "application/json": components["schemas"]["AcpEnvelope"];
@@ -370,8 +340,26 @@ export interface operations {
           "application/json": components["schemas"]["ProblemDetails"];
         };
       };
-      /** @description Unknown ACP client */
+      /** @description Unknown ACP server */
       404: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Client does not accept JSON responses */
+      406: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description ACP server bound to different agent */
+      409: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Unsupported media type */
+      415: {
         content: {
           "application/json": components["schemas"]["ProblemDetails"];
         };
@@ -384,15 +372,96 @@ export interface operations {
       };
     };
   };
-  /**
-   * ACP Close
-   * @description Closes an ACP client and releases agent process resources.
-   */
-  delete_v2_acp: {
+  delete_v1_acp: {
+    parameters: {
+      path: {
+        /** @description Client-defined ACP server id */
+        server_id: string;
+      };
+    };
     responses: {
-      /** @description ACP client closed */
+      /** @description ACP server closed */
       204: {
         content: never;
+      };
+    };
+  };
+  get_v1_agents: {
+    parameters: {
+      query?: {
+        /** @description When true, include version/path/configOptions (slower) */
+        config?: boolean | null;
+        /** @description When true, bypass version cache */
+        no_cache?: boolean | null;
+      };
+    };
+    responses: {
+      /** @description List of v1 agents */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AgentListResponse"];
+        };
+      };
+      /** @description Authentication required */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  get_v1_agent: {
+    parameters: {
+      query?: {
+        /** @description When true, include version/path/configOptions (slower) */
+        config?: boolean | null;
+        /** @description When true, bypass version cache */
+        no_cache?: boolean | null;
+      };
+      path: {
+        /** @description Agent id */
+        agent: string;
+      };
+    };
+    responses: {
+      /** @description Agent info */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AgentInfo"];
+        };
+      };
+      /** @description Unknown agent */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Authentication required */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  post_v1_agent_install: {
+    parameters: {
+      path: {
+        /** @description Agent id */
+        agent: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AgentInstallRequest"];
+      };
+    };
+    responses: {
+      /** @description Agent install result */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AgentInstallResponse"];
+        };
       };
       /** @description Invalid request */
       400: {
@@ -400,10 +469,281 @@ export interface operations {
           "application/json": components["schemas"]["ProblemDetails"];
         };
       };
-      /** @description Unknown ACP client */
+      /** @description Install failed */
+      500: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  get_v1_config_mcp: {
+    parameters: {
+      query: {
+        /** @description Target directory */
+        directory: string;
+        /** @description MCP entry name */
+        mcpName: string;
+      };
+    };
+    responses: {
+      /** @description MCP entry */
+      200: {
+        content: {
+          "application/json": components["schemas"]["McpServerConfig"];
+        };
+      };
+      /** @description Entry not found */
       404: {
         content: {
           "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  put_v1_config_mcp: {
+    parameters: {
+      query: {
+        /** @description Target directory */
+        directory: string;
+        /** @description MCP entry name */
+        mcpName: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["McpServerConfig"];
+      };
+    };
+    responses: {
+      /** @description Stored */
+      204: {
+        content: never;
+      };
+    };
+  };
+  delete_v1_config_mcp: {
+    parameters: {
+      query: {
+        /** @description Target directory */
+        directory: string;
+        /** @description MCP entry name */
+        mcpName: string;
+      };
+    };
+    responses: {
+      /** @description Deleted */
+      204: {
+        content: never;
+      };
+    };
+  };
+  get_v1_config_skills: {
+    parameters: {
+      query: {
+        /** @description Target directory */
+        directory: string;
+        /** @description Skill entry name */
+        skillName: string;
+      };
+    };
+    responses: {
+      /** @description Skills entry */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SkillsConfig"];
+        };
+      };
+      /** @description Entry not found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  put_v1_config_skills: {
+    parameters: {
+      query: {
+        /** @description Target directory */
+        directory: string;
+        /** @description Skill entry name */
+        skillName: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SkillsConfig"];
+      };
+    };
+    responses: {
+      /** @description Stored */
+      204: {
+        content: never;
+      };
+    };
+  };
+  delete_v1_config_skills: {
+    parameters: {
+      query: {
+        /** @description Target directory */
+        directory: string;
+        /** @description Skill entry name */
+        skillName: string;
+      };
+    };
+    responses: {
+      /** @description Deleted */
+      204: {
+        content: never;
+      };
+    };
+  };
+  get_v1_fs_entries: {
+    parameters: {
+      query?: {
+        /** @description Directory path */
+        path?: string | null;
+      };
+    };
+    responses: {
+      /** @description Directory entries */
+      200: {
+        content: {
+          "application/json": components["schemas"]["FsEntry"][];
+        };
+      };
+    };
+  };
+  delete_v1_fs_entry: {
+    parameters: {
+      query: {
+        /** @description File or directory path */
+        path: string;
+        /** @description Delete directory recursively */
+        recursive?: boolean | null;
+      };
+    };
+    responses: {
+      /** @description Delete result */
+      200: {
+        content: {
+          "application/json": components["schemas"]["FsActionResponse"];
+        };
+      };
+    };
+  };
+  get_v1_fs_file: {
+    parameters: {
+      query: {
+        /** @description File path */
+        path: string;
+      };
+    };
+    responses: {
+      /** @description File content */
+      200: {
+        content: never;
+      };
+    };
+  };
+  put_v1_fs_file: {
+    parameters: {
+      query: {
+        /** @description File path */
+        path: string;
+      };
+    };
+    /** @description Raw file bytes */
+    requestBody: {
+      content: {
+        "text/plain": string;
+      };
+    };
+    responses: {
+      /** @description Write result */
+      200: {
+        content: {
+          "application/json": components["schemas"]["FsWriteResponse"];
+        };
+      };
+    };
+  };
+  post_v1_fs_mkdir: {
+    parameters: {
+      query: {
+        /** @description Directory path */
+        path: string;
+      };
+    };
+    responses: {
+      /** @description Directory created */
+      200: {
+        content: {
+          "application/json": components["schemas"]["FsActionResponse"];
+        };
+      };
+    };
+  };
+  post_v1_fs_move: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FsMoveRequest"];
+      };
+    };
+    responses: {
+      /** @description Move result */
+      200: {
+        content: {
+          "application/json": components["schemas"]["FsMoveResponse"];
+        };
+      };
+    };
+  };
+  get_v1_fs_stat: {
+    parameters: {
+      query: {
+        /** @description Path to stat */
+        path: string;
+      };
+    };
+    responses: {
+      /** @description Path metadata */
+      200: {
+        content: {
+          "application/json": components["schemas"]["FsStat"];
+        };
+      };
+    };
+  };
+  post_v1_fs_upload_batch: {
+    parameters: {
+      query?: {
+        /** @description Destination path */
+        path?: string | null;
+      };
+    };
+    /** @description tar archive body */
+    requestBody: {
+      content: {
+        "text/plain": string;
+      };
+    };
+    responses: {
+      /** @description Upload/extract result */
+      200: {
+        content: {
+          "application/json": components["schemas"]["FsUploadBatchResponse"];
+        };
+      };
+    };
+  };
+  get_v1_health: {
+    responses: {
+      /** @description Service health response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["HealthResponse"];
         };
       };
     };

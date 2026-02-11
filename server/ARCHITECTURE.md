@@ -313,7 +313,7 @@ const client = await SandboxAgent.connect({
 
 ### Auto-Detection
 
-`SandboxAgent` provides two factory methods:
+Sandbox Agent provides two factory methods:
 
 ```typescript
 // Connect to existing server

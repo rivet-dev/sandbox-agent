@@ -1,15 +1,9 @@
-import { MessageSquare, Plus, Square, Terminal } from "lucide-react";
+import { CheckSquare, MessageSquare, Plus, Square, Terminal } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import type { McpServerEntry } from "../../App";
-import type {
-  AgentInfo,
-  AgentModelInfo,
-  AgentModeInfo,
-  PermissionEventData,
-  QuestionEventData,
-  SkillSource
-} from "../../types/legacyApi";
-import ApprovalsTab from "../debug/ApprovalsTab";
+import type { AgentInfo } from "sandbox-agent";
+
+type AgentModeInfo = { id: string; name: string; description: string };
+type AgentModelInfo = { id: string; name?: string };
 import SessionCreateMenu, { type SessionConfig } from "../SessionCreateMenu";
 import ChatInput from "./ChatInput";
 import ChatMessages from "./ChatMessages";
@@ -31,32 +25,11 @@ const ChatPanel = ({
   messagesEndRef,
   agentLabel,
   currentAgentVersion,
-  sessionModel,
-  sessionVariant,
-  sessionPermissionMode,
-  sessionMcpServerCount,
-  sessionSkillSourceCount,
+  sessionEnded,
   onEndSession,
-  eventError,
-  questionRequests,
-  permissionRequests,
-  questionSelections,
-  onSelectQuestionOption,
-  onAnswerQuestion,
-  onRejectQuestion,
-  onReplyPermission,
   modesByAgent,
   modelsByAgent,
   defaultModelByAgent,
-  modesLoadingByAgent,
-  modelsLoadingByAgent,
-  modesErrorByAgent,
-  modelsErrorByAgent,
-  mcpServers,
-  onMcpServersChange,
-  mcpConfigError,
-  skillSources,
-  onSkillSourcesChange
 }: {
   sessionId: string;
   transcriptEntries: TimelineEntry[];
@@ -66,39 +39,18 @@ const ChatPanel = ({
   onSendMessage: () => void;
   onKeyDown: (event: React.KeyboardEvent<HTMLTextAreaElement>) => void;
   onCreateSession: (agentId: string, config: SessionConfig) => void;
-  onSelectAgent: (agentId: string) => void;
+  onSelectAgent: (agentId: string) => Promise<void>;
   agents: AgentInfo[];
   agentsLoading: boolean;
   agentsError: string | null;
   messagesEndRef: React.RefObject<HTMLDivElement>;
   agentLabel: string;
   currentAgentVersion?: string | null;
-  sessionModel?: string | null;
-  sessionVariant?: string | null;
-  sessionPermissionMode?: string | null;
-  sessionMcpServerCount: number;
-  sessionSkillSourceCount: number;
+  sessionEnded: boolean;
   onEndSession: () => void;
-  eventError: string | null;
-  questionRequests: QuestionEventData[];
-  permissionRequests: PermissionEventData[];
-  questionSelections: Record<string, string[][]>;
-  onSelectQuestionOption: (requestId: string, optionLabel: string) => void;
-  onAnswerQuestion: (request: QuestionEventData) => void;
-  onRejectQuestion: (requestId: string) => void;
-  onReplyPermission: (requestId: string, reply: "once" | "always" | "reject") => void;
   modesByAgent: Record<string, AgentModeInfo[]>;
   modelsByAgent: Record<string, AgentModelInfo[]>;
   defaultModelByAgent: Record<string, string>;
-  modesLoadingByAgent: Record<string, boolean>;
-  modelsLoadingByAgent: Record<string, boolean>;
-  modesErrorByAgent: Record<string, string | null>;
-  modelsErrorByAgent: Record<string, string | null>;
-  mcpServers: McpServerEntry[];
-  onMcpServersChange: (servers: McpServerEntry[]) => void;
-  mcpConfigError: string | null;
-  skillSources: SkillSource[];
-  onSkillSourcesChange: (sources: SkillSource[]) => void;
 }) => {
   const [showAgentMenu, setShowAgentMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -115,8 +67,6 @@ const ChatPanel = ({
     return () => document.removeEventListener("mousedown", handler);
   }, [showAgentMenu]);
 
-  const hasApprovals = questionRequests.length > 0 || permissionRequests.length > 0;
-
   return (
     <div className="chat-panel">
       <div className="panel-header">
@@ -127,15 +77,22 @@ const ChatPanel = ({
         </div>
         <div className="panel-header-right">
           {sessionId && (
-            <button
-              type="button"
-              className="button ghost small"
-              onClick={onEndSession}
-              title="End session"
-            >
-              <Square size={12} />
-              End
-            </button>
+            sessionEnded ? (
+              <span className="button ghost small" style={{ opacity: 0.5, cursor: "default" }} title="Session ended">
+                <CheckSquare size={12} />
+                Ended
+              </span>
+            ) : (
+              <button
+                type="button"
+                className="button ghost small"
+                onClick={onEndSession}
+                title="End session"
+              >
+                <Square size={12} />
+                End
+              </button>
+            )
           )}
         </div>
       </div>
@@ -161,17 +118,8 @@ const ChatPanel = ({
                 modesByAgent={modesByAgent}
                 modelsByAgent={modelsByAgent}
                 defaultModelByAgent={defaultModelByAgent}
-                modesLoadingByAgent={modesLoadingByAgent}
-                modelsLoadingByAgent={modelsLoadingByAgent}
-                modesErrorByAgent={modesErrorByAgent}
-                modelsErrorByAgent={modelsErrorByAgent}
-                mcpServers={mcpServers}
-                onMcpServersChange={onMcpServersChange}
-                mcpConfigError={mcpConfigError}
-                skillSources={skillSources}
-                onSkillSourcesChange={onSkillSourcesChange}
-                onSelectAgent={onSelectAgent}
                 onCreateSession={onCreateSession}
+                onSelectAgent={onSelectAgent}
                 open={showAgentMenu}
                 onClose={() => setShowAgentMenu(false)}
               />
@@ -187,26 +135,10 @@ const ChatPanel = ({
           <ChatMessages
             entries={transcriptEntries}
             sessionError={sessionError}
-            eventError={eventError}
             messagesEndRef={messagesEndRef}
           />
         )}
       </div>
-
-      {hasApprovals && (
-        <div className="approvals-inline">
-          <div className="approvals-inline-header">Approvals</div>
-          <ApprovalsTab
-            questionRequests={questionRequests}
-            permissionRequests={permissionRequests}
-            questionSelections={questionSelections}
-            onSelectQuestionOption={onSelectQuestionOption}
-            onAnswerQuestion={onAnswerQuestion}
-            onRejectQuestion={onRejectQuestion}
-            onReplyPermission={onReplyPermission}
-          />
-        </div>
-      )}
 
       <ChatInput
         message={message}
@@ -223,26 +155,12 @@ const ChatPanel = ({
             <span className="session-config-label">Agent</span>
             <span className="session-config-value">{agentLabel}</span>
           </div>
-          <div className="session-config-field">
-            <span className="session-config-label">Model</span>
-            <span className="session-config-value">{sessionModel || "-"}</span>
-          </div>
-          <div className="session-config-field">
-            <span className="session-config-label">Variant</span>
-            <span className="session-config-value">{sessionVariant || "-"}</span>
-          </div>
-          <div className="session-config-field">
-            <span className="session-config-label">Permission</span>
-            <span className="session-config-value">{sessionPermissionMode || "-"}</span>
-          </div>
-          <div className="session-config-field">
-            <span className="session-config-label">MCP Servers</span>
-            <span className="session-config-value">{sessionMcpServerCount}</span>
-          </div>
-          <div className="session-config-field">
-            <span className="session-config-label">Skills</span>
-            <span className="session-config-value">{sessionSkillSourceCount}</span>
-          </div>
+          {currentAgentVersion && (
+            <div className="session-config-field">
+              <span className="session-config-label">Version</span>
+              <span className="session-config-value">{currentAgentVersion}</span>
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -1,9 +1,11 @@
 import { describe, expect, it, beforeAll, afterAll } from "vitest";
-import { existsSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { tmpdir } from "node:os";
 import { AcpHttpClient, type SessionNotification } from "../src/index.ts";
 import { spawnSandboxAgent, type SandboxAgentSpawnHandle } from "../../typescript/src/spawn.ts";
+import { prepareMockAgentDataHome } from "../../typescript/tests/helpers/mock-agent.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -60,12 +62,19 @@ describe("AcpHttpClient integration", () => {
   let handle: SandboxAgentSpawnHandle;
   let baseUrl: string;
   let token: string;
+  let dataHome: string;
 
   beforeAll(async () => {
+    dataHome = mkdtempSync(join(tmpdir(), "acp-http-client-"));
+    prepareMockAgentDataHome(dataHome);
+
     handle = await spawnSandboxAgent({
       enabled: true,
       log: "silent",
       timeoutMs: 30000,
+      env: {
+        XDG_DATA_HOME: dataHome,
+      },
     });
     baseUrl = handle.baseUrl;
     token = handle.token;
@@ -73,14 +82,20 @@ describe("AcpHttpClient integration", () => {
 
   afterAll(async () => {
     await handle.dispose();
+    rmSync(dataHome, { recursive: true, force: true });
   });
 
-  it("runs initialize/newSession/prompt against real /v2/rpc", async () => {
+  it("runs initialize/newSession/prompt against real /v1/acp/{server_id}", async () => {
     const updates: SessionNotification[] = [];
+    const serverId = `acp-http-client-${Date.now().toString(36)}`;
 
     const client = new AcpHttpClient({
       baseUrl,
       token,
+      transport: {
+        path: `/v1/acp/${encodeURIComponent(serverId)}`,
+        bootstrapQuery: { agent: "mock" },
+      },
       client: {
         sessionUpdate: async (notification) => {
           updates.push(notification);
@@ -88,23 +103,12 @@ describe("AcpHttpClient integration", () => {
       },
     });
 
-    const initialize = await client.initialize({
-      _meta: {
-        "sandboxagent.dev": {
-          agent: "mock",
-        },
-      },
-    });
+    const initialize = await client.initialize();
     expect(initialize.protocolVersion).toBeTruthy();
 
     const session = await client.newSession({
       cwd: process.cwd(),
       mcpServers: [],
-      _meta: {
-        "sandboxagent.dev": {
-          agent: "mock",
-        },
-      },
     });
     expect(session.sessionId).toBeTruthy();
 

@@ -6,9 +6,11 @@ WORKDIR /build
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 
 # Copy packages needed for the inspector build chain:
-#   inspector -> sandbox-agent SDK -> cli-shared
+#   inspector -> sandbox-agent SDK -> acp-http-client, cli-shared, persist-indexeddb
 COPY sdks/typescript/ sdks/typescript/
+COPY sdks/acp-http-client/ sdks/acp-http-client/
 COPY sdks/cli-shared/ sdks/cli-shared/
+COPY sdks/persist-indexeddb/ sdks/persist-indexeddb/
 COPY frontend/packages/inspector/ frontend/packages/inspector/
 COPY docs/openapi.json docs/
 
@@ -16,6 +18,7 @@ COPY docs/openapi.json docs/
 # but not needed for the inspector build (avoids install errors).
 RUN set -e; for dir in \
       sdks/cli sdks/gigacode \
+      sdks/persist-postgres sdks/persist-sqlite sdks/persist-rivet \
       resources/agent-schemas resources/vercel-ai-sdk-schemas \
       scripts/release scripts/sandbox-testing \
       examples/shared examples/docker examples/e2b examples/vercel \
@@ -44,6 +47,7 @@ COPY Cargo.toml Cargo.lock ./
 COPY server/ ./server/
 COPY gigacode/ ./gigacode/
 COPY resources/agent-schemas/artifacts/ ./resources/agent-schemas/artifacts/
+COPY scripts/agent-configs/ ./scripts/agent-configs/
 COPY --from=frontend /build/frontend/packages/inspector/dist/ ./frontend/packages/inspector/dist/
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \

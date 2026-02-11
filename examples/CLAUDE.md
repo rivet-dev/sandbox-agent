@@ -6,16 +6,16 @@
 - Do not bind mount host files or host directories into Docker example containers.
 - If an example needs tools, skills, or MCP servers, install them inside the container during setup.
 
-## Testing Examples (ACP v2)
+## Testing Examples (ACP v1)
 
-Examples should be validated against v2 endpoints:
+Examples should be validated against v1 endpoints:
 
 1. Start the example: `SANDBOX_AGENT_DEV=1 pnpm start`
-2. Create an ACP client by POSTing `initialize` to `/v2/rpc` with `x-acp-agent: mock` (or another installed agent).
-3. Capture `x-acp-connection-id` from the response headers.
-4. Open SSE stream: `GET /v2/rpc` with `x-acp-connection-id`.
-5. Send `session/new` then `session/prompt` via `POST /v2/rpc` with the same connection id.
-6. Close connection via `DELETE /v2/rpc` with `x-acp-connection-id`.
+2. Pick a server id, for example `example-smoke`.
+3. Create ACP transport by POSTing `initialize` to `/v1/acp/example-smoke?agent=mock` (or another installed agent).
+4. Open SSE stream: `GET /v1/acp/example-smoke`.
+5. Send `session/new` then `session/prompt` via `POST /v1/acp/example-smoke`.
+6. Close connection via `DELETE /v1/acp/example-smoke`.
 
 v1 reminder:
 

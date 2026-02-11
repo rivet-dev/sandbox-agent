@@ -1,14 +1,14 @@
 # Feature 12: Agent Listing (Typed Response)
 
-**Implementation approach:** Enhance existing `GET /v2/agents`
+**Implementation approach:** Enhance existing `GET /v1/agents`
 
 ## Summary
 
-v1 `GET /v1/agents` returned a typed `AgentListResponse` with `installed`, `credentialsAvailable`, `path`, `capabilities`, `serverStatus`. v2 `GET /v2/agents` returns a basic `AgentInfo` with only install state. Needs enrichment.
+v1 `GET /v1/agents` returned a typed `AgentListResponse` with `installed`, `credentialsAvailable`, `path`, `capabilities`, `serverStatus`. v1 `GET /v1/agents` returns a basic `AgentInfo` with only install state. Needs enrichment.
 
 This feature also carries pre-session models/modes as optional fields when the agent is installed (Feature #13), rather than using separate model/mode endpoints.
 
-## Current v2 State
+## Current v1 State
 
 From `router.rs:265-275`:
 
@@ -183,19 +183,19 @@ fn agent_capabilities_for(agent: AgentId) -> AgentCapabilities {
 
 ### Enriched AgentInfo
 
-Merge v2 install fields with v1 richness:
+Merge v1 install fields with v1 richness:
 
 ```rust
 pub struct AgentInfo {
     pub id: String,
     pub installed: bool,                            // convenience: is fully installed
     pub credentials_available: bool,                // from credential extraction
-    pub native_required: bool,                      // keep from v2
-    pub native_installed: bool,                     // keep from v2
-    pub native_version: Option<String>,             // keep from v2
-    pub agent_process_installed: bool,              // keep from v2
-    pub agent_process_source: Option<String>,       // keep from v2
-    pub agent_process_version: Option<String>,      // keep from v2
+    pub native_required: bool,                      // keep from v1
+    pub native_installed: bool,                     // keep from v1
+    pub native_version: Option<String>,             // keep from v1
+    pub agent_process_installed: bool,              // keep from v1
+    pub agent_process_source: Option<String>,       // keep from v1
+    pub agent_process_version: Option<String>,      // keep from v1
     pub path: Option<String>,                       // from resolve_binary()
     pub capabilities: AgentCapabilities,            // full v1 capability set
     pub server_status: Option<AgentServerStatus>,   // from Feature #6
@@ -212,11 +212,11 @@ pub struct AgentInfo {
 | `server/packages/sandbox-agent/src/router.rs` | Enrich `AgentInfo` and `AgentCapabilities` structs; add `agent_capabilities_for()` static mapping; add credential check; add convenience `installed` field; add optional `models`/`modes` for installed agents |
 | `server/packages/agent-management/src/agents.rs` | Expose credential availability check and `resolve_binary()` if not already present |
 | `sdks/typescript/src/client.ts` | Update `AgentInfo` and `AgentCapabilities` types |
-| `server/packages/sandbox-agent/tests/v2_api.rs` | Update agent listing test assertions |
+| `server/packages/sandbox-agent/tests/v1_api.rs` | Update agent listing test assertions |
 
 ### Docs to Update
 
 | Doc | Change |
 |-----|--------|
-| `docs/openapi.json` | Update `/v2/agents` response schema with full `AgentCapabilities` |
+| `docs/openapi.json` | Update `/v1/agents` response schema with full `AgentCapabilities` |
 | `docs/sdks/typescript.mdx` | Document enriched agent listing |

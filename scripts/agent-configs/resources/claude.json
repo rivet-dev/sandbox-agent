@@ -1,0 +1,21 @@
+{
+  "defaultModel": "default",
+  "models": [
+    {
+      "id": "default",
+      "name": "Default (recommended)"
+    },
+    {
+      "id": "opus",
+      "name": "Opus"
+    },
+    {
+      "id": "sonnet",
+      "name": "Sonnet"
+    },
+    {
+      "id": "haiku",
+      "name": "Haiku"
+    }
+  ]
+}

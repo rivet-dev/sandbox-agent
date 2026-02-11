@@ -53,14 +53,14 @@ Why it matters:
 - Lower complexity for bidirectional ACP semantics.
 - But less aligned with strict HTTP-only environments without additional gatewaying.
 
-## Recommended options for our v2
+## Recommended options for our v1
 
-## Option A (recommended): Streamable HTTP as canonical v2 transport
+## Option A (recommended): Streamable HTTP as canonical v1 transport
 
 Implement ACP over:
-- `POST /v2/rpc`
-- `GET /v2/rpc` (SSE, optional but recommended)
-- `DELETE /v2/rpc`
+- `POST /v1/rpc`
+- `GET /v1/rpc` (SSE, optional but recommended)
+- `DELETE /v1/rpc`
 
 Profile:
 - Keep JSON-RPC payloads pure ACP.
@@ -86,14 +86,14 @@ Pros:
 - Potentially simpler core runtime behavior.
 
 Cons:
-- Less direct fit to your immediate "ACP over HTTP v2 API" objective.
+- Less direct fit to your immediate "ACP over HTTP v1 API" objective.
 - Requires and maintains a translation layer from day one.
 
 ## Recommendation
 
-Choose Option A for v2 launch and keep Option B as a later optimization path if operational pain appears.
+Choose Option A for v1 launch and keep Option B as a later optimization path if operational pain appears.
 
 Rationale:
 - It matches current product direction.
 - It aligns with concrete ecosystem work already visible (Goose Streamable HTTP).
-- It can still preserve a future WebSocket backend if needed later, without changing v2 public semantics.
+- It can still preserve a future WebSocket backend if needed later, without changing v1 public semantics.

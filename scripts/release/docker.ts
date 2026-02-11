@@ -36,6 +36,7 @@ export async function tagDocker(opts: ReleaseOpts) {
 	// Create and push manifest with latest
 	if (opts.latest) {
 		await createManifest(sourceCommit, "latest");
+		await createManifest(sourceCommit, opts.minorVersionChannel);
 	}
 }
 

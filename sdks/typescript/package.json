@@ -25,11 +25,11 @@
   ],
   "scripts": {
     "generate:openapi": "SANDBOX_AGENT_SKIP_INSPECTOR=1 cargo run -p sandbox-agent-openapi-gen -- --out ../../docs/openapi.json",
-    "generate:types": "openapi-typescript ../../docs/openapi.json -o src/generated/openapi.ts",
+    "generate:types": "openapi-typescript ../../docs/openapi.json -o src/generated/openapi.ts && node ./scripts/patch-openapi-types.mjs",
     "generate": "pnpm run generate:openapi && pnpm run generate:types",
     "build": "pnpm --filter acp-http-client build && if [ -z \"$SKIP_OPENAPI_GEN\" ]; then pnpm run generate:openapi; fi && pnpm run generate:types && tsup",
-    "typecheck": "pnpm --filter acp-http-client build && tsc --noEmit",
-    "test": "pnpm --filter acp-http-client build && vitest run",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "test:watch": "vitest"
   },
   "devDependencies": {

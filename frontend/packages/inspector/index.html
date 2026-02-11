@@ -110,6 +110,25 @@
         color: var(--muted);
       }
 
+      .header-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 5px 10px;
+        border: 1px solid var(--border-2);
+        border-radius: var(--radius-sm);
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--muted);
+        text-decoration: none;
+        transition: color var(--transition), border-color var(--transition);
+      }
+
+      .header-link:hover {
+        color: var(--accent);
+        border-color: var(--accent);
+      }
+
       .status-indicator.disconnected {
         display: flex;
         align-items: center;
@@ -404,7 +423,7 @@
         flex-direction: column;
         border-right: 1px solid var(--border);
         background: var(--surface-2);
-        overflow: visible;
+        min-height: 0;
       }
 
       .sidebar-header {
@@ -553,6 +572,20 @@
       .session-create-form .setup-input {
         flex: 1;
         min-width: 0;
+      }
+
+      .setup-custom-back {
+        flex-shrink: 0;
+        background: none;
+        border: none;
+        color: var(--accent);
+        font-size: 10px;
+        cursor: pointer;
+        padding: 2px 4px;
+      }
+
+      .setup-custom-back:hover {
+        text-decoration: underline;
       }
 
       .session-create-section {
@@ -1055,6 +1088,23 @@
         color: var(--danger);
       }
 
+      .session-persistence-note {
+        padding: 8px 10px 10px;
+        border-top: 1px solid var(--border);
+        font-size: 10px;
+        line-height: 1.45;
+        color: var(--muted);
+      }
+
+      .session-persistence-note a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+
+      .session-persistence-note a:hover {
+        text-decoration: underline;
+      }
+
       /* Chat Panel */
       .chat-panel {
         display: flex;
@@ -1320,6 +1370,64 @@
         color: var(--danger);
         font-size: 12px;
         margin-top: 8px;
+      }
+
+      .toast-stack {
+        position: fixed;
+        right: 16px;
+        bottom: 16px;
+        z-index: 1000;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        width: min(420px, calc(100vw - 24px));
+        pointer-events: none;
+      }
+
+      .toast {
+        pointer-events: auto;
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        padding: 10px 12px;
+        border-radius: var(--radius-sm);
+        border: 1px solid rgba(255, 59, 48, 0.35);
+        background: rgba(28, 8, 8, 0.95);
+        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.35);
+      }
+
+      .toast-content {
+        min-width: 0;
+      }
+
+      .toast-title {
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        color: var(--danger);
+        margin-bottom: 4px;
+      }
+
+      .toast-message {
+        color: var(--text-secondary);
+        font-size: 12px;
+        line-height: 1.4;
+        word-break: break-word;
+      }
+
+      .toast-close {
+        background: transparent;
+        border: none;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1;
+        cursor: pointer;
+        padding: 2px;
+        margin-top: 1px;
+      }
+
+      .toast-close:hover {
+        color: var(--text);
       }
 
       .cursor {
@@ -1932,82 +2040,80 @@
         letter-spacing: 0.3px;
       }
 
-      .event-type.session,
-      .event-type.session-started,
-      .event-type.session-ended {
+      /* ACP event categories: connection */
+      .event-type.connection,
+      .event-type.session {
         color: var(--success);
       }
-
-      .event-type.item,
-      .event-type.item-started,
-      .event-type.item-completed {
-        color: var(--accent);
-      }
-
-      .event-type.item-delta {
-        color: var(--cyan);
-      }
-
-      .event-type.error,
-      .event-type.agent-unparsed {
-        color: var(--danger);
-      }
-
-      .event-type.question,
-      .event-type.question-requested,
-      .event-type.question-resolved {
-        color: var(--warning);
-      }
-
-      .event-type.permission,
-      .event-type.permission-requested,
-      .event-type.permission-resolved {
-        color: var(--purple);
-      }
-
-      .event-icon.session,
-      .event-icon.session-started,
-      .event-icon.session-ended {
+      .event-icon.connection,
+      .event-icon.session {
         color: var(--success);
         border-color: rgba(48, 209, 88, 0.35);
         background: rgba(48, 209, 88, 0.12);
       }
 
-      .event-icon.item,
-      .event-icon.item-started,
-      .event-icon.item-completed {
+      /* ACP event categories: prompt / tool */
+      .event-type.prompt,
+      .event-type.tool {
+        color: var(--accent);
+      }
+      .event-icon.prompt,
+      .event-icon.tool {
         color: var(--accent);
         border-color: rgba(255, 79, 0, 0.35);
         background: rgba(255, 79, 0, 0.12);
       }
 
-      .event-icon.item-delta {
+      /* ACP event categories: update / terminal (streaming, realtime) */
+      .event-type.update,
+      .event-type.terminal {
+        color: var(--cyan);
+      }
+      .event-icon.update,
+      .event-icon.terminal {
         color: var(--cyan);
         border-color: rgba(100, 210, 255, 0.35);
         background: rgba(100, 210, 255, 0.12);
       }
 
-      .event-icon.error,
-      .event-icon.agent-unparsed {
+      /* ACP event categories: cancel */
+      .event-type.cancel {
+        color: var(--danger);
+      }
+      .event-icon.cancel {
         color: var(--danger);
         border-color: rgba(255, 59, 48, 0.35);
         background: rgba(255, 59, 48, 0.12);
       }
 
-      .event-icon.question,
-      .event-icon.question-requested,
-      .event-icon.question-resolved {
+      /* ACP event categories: filesystem */
+      .event-type.filesystem {
+        color: var(--warning);
+      }
+      .event-icon.filesystem {
         color: var(--warning);
         border-color: rgba(255, 159, 10, 0.35);
         background: rgba(255, 159, 10, 0.12);
       }
 
-      .event-icon.permission,
-      .event-icon.permission-requested,
-      .event-icon.permission-resolved {
+      /* ACP event categories: config / permission */
+      .event-type.config,
+      .event-type.permission {
+        color: var(--purple);
+      }
+      .event-icon.config,
+      .event-icon.permission {
         color: var(--purple);
         border-color: rgba(191, 90, 242, 0.35);
         background: rgba(191, 90, 242, 0.12);
+      }
+
+      /* ACP event categories: response (fallback) */
+      .event-type.response {
+        color: var(--muted);
+      }
+      .event-icon.response {
+        color: var(--muted);
       }
 
       .event-time {
@@ -2246,6 +2352,13 @@
 
         .header-title {
           display: none;
+        }
+
+        .toast-stack {
+          left: 12px;
+          right: 12px;
+          bottom: 12px;
+          width: auto;
         }
       }
     </style>

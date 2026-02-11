@@ -1,52 +1,53 @@
 ---
 title: "Local"
-description: "Run the daemon locally for development."
+description: "Run Sandbox Agent locally for development."
 ---
 
-For local development, you can run the daemon directly on your machine.
+For local development, run Sandbox Agent directly on your machine.
 
 ## With the CLI
 
 ```bash
 # Install
-curl -fsSL https://releases.rivet.dev/sandbox-agent/latest/install.sh | sh
+curl -fsSL https://releases.rivet.dev/sandbox-agent/0.2.x/install.sh | sh
 
 # Run
 sandbox-agent server --no-token --host 127.0.0.1 --port 2468
 ```
 
-Or with npm or Bun:
+Or with npm/Bun:
 
 <Tabs>
   <Tab title="npx">
     ```bash
-    npx sandbox-agent server --no-token --host 127.0.0.1 --port 2468
+    npx @sandbox-agent/cli@0.2.x server --no-token --host 127.0.0.1 --port 2468
     ```
   </Tab>
   <Tab title="bunx">
     ```bash
-    bunx sandbox-agent server --no-token --host 127.0.0.1 --port 2468
+    bunx @sandbox-agent/cli@0.2.x server --no-token --host 127.0.0.1 --port 2468
     ```
   </Tab>
 </Tabs>
 
 ## With the TypeScript SDK
 
-The SDK can automatically spawn and manage the server as a subprocess:
+The SDK can spawn and manage the server as a subprocess:
 
 ```typescript
 import { SandboxAgent } from "sandbox-agent";
 
-// Spawns sandbox-agent server as a subprocess
-const client = await SandboxAgent.start();
+const sdk = await SandboxAgent.start();
 
-await client.createSession("my-session", {
+const session = await sdk.createSession({
   agent: "claude",
-  permissionMode: "default",
 });
 
-// When done
-await client.dispose();
+await session.prompt([
+  { type: "text", text: "Summarize this repository." },
+]);
+
+await sdk.dispose();
 ```
 
-This installs the binary (if needed) and starts the server on a random available port. No manual setup required.
+This starts the server on an available local port and connects automatically.

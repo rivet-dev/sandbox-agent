@@ -13,7 +13,7 @@ Primary references:
 
 ## 1) Status Matrix (Session-Centric)
 
-| v1 capability (session-related) | ACP stable | ACP unstable | Status in v2 | Recommendation |
+| v1 capability (session-related) | ACP stable | ACP unstable | Status in v1 | Recommendation |
 |---|---|---|---|---|
 | Create session | `session/new` | N/A | Covered | Use ACP standard only. |
 | Load/replay prior session | `session/load` (capability-gated) | N/A | Covered when agent process supports `loadSession` | Keep standard behavior. |
@@ -111,7 +111,7 @@ Advertise extension support in `initialize.result.agentCapabilities._meta["sandb
 
 Clients must feature-detect and degrade gracefully.
 
-## 4) Recommendation for Current v2
+## 4) Recommendation for Current v1
 
 Recommended implementation order:
 

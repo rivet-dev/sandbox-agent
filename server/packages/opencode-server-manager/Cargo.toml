@@ -1,0 +1,15 @@
+[package]
+name = "sandbox-agent-opencode-server-manager"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description.workspace = true
+repository.workspace = true
+
+[dependencies]
+sandbox-agent-agent-management.workspace = true
+dirs.workspace = true
+reqwest.workspace = true
+tokio.workspace = true
+tracing.workspace = true

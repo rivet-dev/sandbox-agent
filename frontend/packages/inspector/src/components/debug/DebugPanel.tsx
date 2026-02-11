@@ -1,19 +1,21 @@
-import { Cloud, PlayCircle, Terminal } from "lucide-react";
-import type { AgentInfo, AgentModeInfo, UniversalEvent } from "../../types/legacyApi";
+import { Cloud, PlayCircle, Server, Terminal, Wrench } from "lucide-react";
+import type { AgentInfo, SandboxAgent, SessionEvent } from "sandbox-agent";
+
+type AgentModeInfo = { id: string; name: string; description: string };
 import AgentsTab from "./AgentsTab";
 import EventsTab from "./EventsTab";
+import McpTab from "./McpTab";
+import SkillsTab from "./SkillsTab";
 import RequestLogTab from "./RequestLogTab";
 import type { RequestLog } from "../../types/requestLog";
 
-export type DebugTab = "log" | "events" | "agents";
+export type DebugTab = "log" | "events" | "agents" | "mcp" | "skills";
 
 const DebugPanel = ({
   debugTab,
   onDebugTabChange,
   events,
-  offset,
   onResetEvents,
-  eventsError,
   requestLog,
   copiedLogId,
   onClearRequestLog,
@@ -24,14 +26,13 @@ const DebugPanel = ({
   onRefreshAgents,
   onInstallAgent,
   agentsLoading,
-  agentsError
+  agentsError,
+  getClient,
 }: {
   debugTab: DebugTab;
   onDebugTabChange: (tab: DebugTab) => void;
-  events: UniversalEvent[];
-  offset: number;
+  events: SessionEvent[];
   onResetEvents: () => void;
-  eventsError: string | null;
   requestLog: RequestLog[];
   copiedLogId: number | null;
   onClearRequestLog: () => void;
@@ -43,6 +44,7 @@ const DebugPanel = ({
   onInstallAgent: (agentId: string, reinstall: boolean) => Promise<void>;
   agentsLoading: boolean;
   agentsError: string | null;
+  getClient: () => SandboxAgent;
 }) => {
   return (
     <div className="debug-panel">
@@ -60,6 +62,14 @@ const DebugPanel = ({
           <Cloud className="button-icon" style={{ marginRight: 4, width: 12, height: 12 }} />
           Agents
         </button>
+        <button className={`debug-tab ${debugTab === "mcp" ? "active" : ""}`} onClick={() => onDebugTabChange("mcp")}>
+          <Server className="button-icon" style={{ marginRight: 4, width: 12, height: 12 }} />
+          MCP
+        </button>
+        <button className={`debug-tab ${debugTab === "skills" ? "active" : ""}`} onClick={() => onDebugTabChange("skills")}>
+          <Wrench className="button-icon" style={{ marginRight: 4, width: 12, height: 12 }} />
+          Skills
+        </button>
       </div>
 
       <div className="debug-content">
@@ -75,9 +85,7 @@ const DebugPanel = ({
         {debugTab === "events" && (
           <EventsTab
             events={events}
-            offset={offset}
             onClear={onResetEvents}
-            error={eventsError}
           />
         )}
 
@@ -91,6 +99,14 @@ const DebugPanel = ({
             loading={agentsLoading}
             error={agentsError}
           />
+        )}
+
+        {debugTab === "mcp" && (
+          <McpTab getClient={getClient} />
+        )}
+
+        {debugTab === "skills" && (
+          <SkillsTab getClient={getClient} />
         )}
       </div>
     </div>

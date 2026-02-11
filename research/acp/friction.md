@@ -21,8 +21,8 @@ Update this file continuously during the migration.
 - Date: 2026-02-10
 - Area: Agent process availability
 - Issue: Amp does not have a confirmed official ACP agent process in current ACP docs/research.
-- Impact: Blocks full parity if Amp is required in v2 launch scope.
-- Proposed direction: Treat Amp as conditional for v2.0 and support via pinned fallback only if agent process source is validated.
+- Impact: Blocks full parity if Amp is required in v1 launch scope.
+- Proposed direction: Treat Amp as conditional for v1.0 and support via pinned fallback only if agent process source is validated.
 - Decision: Open.
 - Owner: Unassigned.
 - Status: open
@@ -30,7 +30,7 @@ Update this file continuously during the migration.
 
 - Date: 2026-02-10
 - Area: Transport
-- Issue: ACP streamable HTTP is still draft upstream; v2 requires ACP over HTTP now.
+- Issue: ACP streamable HTTP is still draft upstream; v1 requires ACP over HTTP now.
 - Impact: Potential divergence from upstream HTTP semantics.
 - Proposed direction: Use strict JSON-RPC mapping and keep transport shim minimal/documented for later alignment.
 - Decision: Open.
@@ -72,7 +72,7 @@ Update this file continuously during the migration.
 - Area: ACP over HTTP standardization
 - Issue: Community is actively piloting both Streamable HTTP and WebSocket; no final single transport profile has emerged yet.
 - Impact: Risk of rework if we overfit to one draft behavior that later shifts.
-- Proposed direction: Lock v2 public contract to Streamable HTTP with ACP JSON-RPC payloads, keep implementation modular so WebSocket can be added later without breaking v2 API.
+- Proposed direction: Lock v1 public contract to Streamable HTTP with ACP JSON-RPC payloads, keep implementation modular so WebSocket can be added later without breaking v1 API.
 - Decision: Accepted.
 - Owner: Unassigned.
 - Status: in_progress
@@ -121,7 +121,7 @@ Update this file continuously during the migration.
 - Date: 2026-02-10
 - Area: TypeScript ACP-over-HTTP client support
 - Issue: Official ACP client SDK does not currently provide the exact Streamable HTTP transport behavior required by this project.
-- Impact: SDK cannot target `/v2/rpc` without additional transport implementation.
+- Impact: SDK cannot target `/v1/rpc` without additional transport implementation.
 - Proposed direction: Embed upstream ACP SDK types/lifecycle and implement a project transport agent process for ACP-over-HTTP.
 - Decision: Accepted.
 - Owner: Unassigned.
@@ -156,7 +156,7 @@ Update this file continuously during the migration.
 - Decision: Accepted and implemented.
 - Owner: Unassigned.
 - Status: resolved
-- Links: `server/packages/agent-management/src/agents.rs`, `server/packages/sandbox-agent/tests/v2_api.rs`
+- Links: `server/packages/agent-management/src/agents.rs`, `server/packages/sandbox-agent/tests/v1_api.rs`
 
 - Date: 2026-02-10
 - Area: Inspector E2E tooling
@@ -179,9 +179,9 @@ Update this file continuously during the migration.
 - Links: `research/acp/todo.md`
 
 - Date: 2026-02-10
-- Area: Inspector v1-to-v2 compatibility
-- Issue: Restored inspector UI expects legacy `/v1` session/event contracts that no longer exist in ACP-native v2.
-- Impact: Full parity would block migration; inspector would otherwise fail to run against v2.
+- Area: Inspector v1-to-v1 compatibility
+- Issue: Restored inspector UI expects legacy `/v1` session/event contracts that no longer exist in ACP-native v1.
+- Impact: Full parity would block migration; inspector would otherwise fail to run against v1.
 - Proposed direction: Keep the restored UI and bridge to ACP with a thin compatibility client (`src/lib/legacyClient.ts`), stubbing non-parity features with explicit `TDOO` markers.
 - Decision: Accepted.
 - Owner: Unassigned.
@@ -196,7 +196,7 @@ Update this file continuously during the migration.
 - Decision: Accepted and implemented.
 - Owner: Unassigned.
 - Status: resolved
-- Links: `server/packages/sandbox-agent/src/acp_runtime/mod.rs`, `server/packages/sandbox-agent/src/acp_runtime/mock.rs`, `server/packages/sandbox-agent/tests/v2_api.rs`, `server/packages/sandbox-agent/tests/v2_agent_process_matrix.rs`
+- Links: `server/packages/sandbox-agent/src/acp_runtime/mod.rs`, `server/packages/sandbox-agent/src/acp_runtime/mock.rs`, `server/packages/sandbox-agent/tests/v1_api.rs`, `server/packages/sandbox-agent/tests/v1_agent_process_matrix.rs`
 
 - Date: 2026-02-10
 - Area: TypeScript SDK package split and ACP lifecycle
@@ -210,13 +210,13 @@ Update this file continuously during the migration.
 
 - Date: 2026-02-10
 - Area: Streamable HTTP transport contract
-- Issue: Ambiguity over whether `/v2/rpc` should track MCP transport negotiation (`POST` accepting SSE responses, multi-stream fanout) versus Sandbox Agent's simpler JSON-only POST contract.
+- Issue: Ambiguity over whether `/v1/rpc` should track MCP transport negotiation (`POST` accepting SSE responses, multi-stream fanout) versus Sandbox Agent's simpler JSON-only POST contract.
 - Impact: Without an explicit contract, clients can assume incompatible Accept/media semantics and open duplicate GET streams that receive duplicate events.
-- Proposed direction: Define Sandbox Agent transport profile explicitly: `POST /v2/rpc` is JSON-only (`Content-Type` and `Accept` for `application/json`), `GET /v2/rpc` is SSE-only (`Accept: text/event-stream`), and allow only one active SSE stream per ACP connection id.
+- Proposed direction: Define Sandbox Agent transport profile explicitly: `POST /v1/rpc` is JSON-only (`Content-Type` and `Accept` for `application/json`), `GET /v1/rpc` is SSE-only (`Accept: text/event-stream`), and allow only one active SSE stream per ACP connection id.
 - Decision: Accepted and implemented.
 - Owner: Unassigned.
 - Status: resolved
-- Links: `server/packages/sandbox-agent/src/router.rs`, `server/packages/sandbox-agent/src/acp_runtime/mod.rs`, `server/packages/sandbox-agent/tests/v2_api/acp_transport.rs`, `docs/advanced/acp-http-client.mdx`
+- Links: `server/packages/sandbox-agent/src/router.rs`, `server/packages/sandbox-agent/src/acp_runtime/mod.rs`, `server/packages/sandbox-agent/tests/v1_api/acp_transport.rs`, `docs/advanced/acp-http-client.mdx`
 
 - Date: 2026-02-10
 - Area: Agent selection contract for ACP bootstrap/session creation
@@ -226,4 +226,24 @@ Update this file continuously during the migration.
 - Decision: Accepted and implemented.
 - Owner: Unassigned.
 - Status: resolved
-- Links: `server/packages/sandbox-agent/src/router.rs`, `server/packages/sandbox-agent/src/acp_runtime/helpers.rs`, `server/packages/sandbox-agent/src/acp_runtime/mod.rs`, `server/packages/sandbox-agent/src/acp_runtime/ext_meta.rs`, `server/packages/sandbox-agent/tests/v2_api/acp_transport.rs`
+- Links: `server/packages/sandbox-agent/src/router.rs`, `server/packages/sandbox-agent/src/acp_runtime/helpers.rs`, `server/packages/sandbox-agent/src/acp_runtime/mod.rs`, `server/packages/sandbox-agent/src/acp_runtime/ext_meta.rs`, `server/packages/sandbox-agent/tests/v1_api/acp_transport.rs`
+
+- Date: 2026-02-11
+- Area: ACP server simplification
+- Issue: Current `/v1/rpc` runtime includes server-managed metadata/session registry and `_sandboxagent/*` ACP extensions, while the new direction is a dumb stdio proxy keyed by client-provided ACP server id.
+- Impact: Requires removing extension/metadata semantics and reshaping transport to `/v1/acp/{server_id}` with per-id subprocess lifecycle.
+- Proposed direction: Replace `/v1/rpc` with `/v1/acp/{server_id}` (`POST`/`GET` SSE/`DELETE`), drop connection-id headers, keep replay by `server_id`, move non-ACP concerns to HTTP endpoints, and disable OpenCode routes.
+- Decision: Accepted (spec drafted).
+- Owner: Unassigned.
+- Status: in_progress
+- Links: `research/acp/simplify-server.md`
+
+- Date: 2026-02-11
+- Area: Directory-scoped config ownership
+- Issue: MCP/skills config previously traveled with session initialization payloads; simplified server needs standalone HTTP config scoped by directory.
+- Impact: Requires new HTTP APIs and clear naming for per-directory/per-entry operations without ACP extension transport.
+- Proposed direction: Add directory-scoped query APIs: `/v1/config/mcp?directory=...&mcpName=...` and `/v1/config/skills?directory=...&skillName=...` (name required), using v1 payload shapes for MCP/skills config values.
+- Decision: Accepted (spec updated).
+- Owner: Unassigned.
+- Status: in_progress
+- Links: `research/acp/simplify-server.md`, `docs/mcp-config.mdx`, `docs/skills-config.mdx`

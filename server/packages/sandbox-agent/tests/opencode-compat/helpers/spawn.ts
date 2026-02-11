@@ -5,10 +5,11 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer, type AddressInfo, type Server } from "node:net";
-import { existsSync } from "node:fs";
-import { resolve, dirname } from "node:path";
+import { existsSync, mkdtempSync, rmSync, appendFileSync } from "node:fs";
+import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomBytes } from "node:crypto";
+import { tmpdir } from "node:os";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -79,7 +80,7 @@ async function waitForHealth(
     }
 
     try {
-      const response = await fetch(`${baseUrl}/v2/health`, {
+      const response = await fetch(`${baseUrl}/v1/health`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (response.ok) {
@@ -140,6 +141,8 @@ export async function spawnSandboxAgent(options: SpawnOptions = {}): Promise<San
   const timeoutMs = options.timeoutMs ?? 30_000;
 
   const args = ["server", "--host", host, "--port", String(port), "--token", token];
+  const tempStateDir = mkdtempSync(join(tmpdir(), "sandbox-agent-opencode-"));
+  const sqlitePath = join(tempStateDir, "opencode-sessions.db");
 
   const compatEnv = {
     OPENCODE_COMPAT_FIXED_TIME_MS: "1700000000000",
@@ -149,6 +152,7 @@ export async function spawnSandboxAgent(options: SpawnOptions = {}): Promise<San
     OPENCODE_COMPAT_STATE: "/state/opencode",
     OPENCODE_COMPAT_CONFIG: "/config/opencode",
     OPENCODE_COMPAT_BRANCH: "main",
+    OPENCODE_COMPAT_DB_PATH: sqlitePath,
   };
 
   const child = spawn(binaryPath, args, {
@@ -162,18 +166,21 @@ export async function spawnSandboxAgent(options: SpawnOptions = {}): Promise<San
 
   // Collect stderr for debugging
   let stderr = "";
+  const logFile = process.env.SANDBOX_AGENT_TEST_LOG_FILE;
   child.stderr?.on("data", (chunk) => {
     const text = chunk.toString();
     stderr += text;
+    if (logFile) appendFileSync(logFile, `[stderr] ${text}`);
     if (process.env.SANDBOX_AGENT_TEST_LOGS) {
       process.stderr.write(text);
     }
   });
-  if (process.env.SANDBOX_AGENT_TEST_LOGS) {
-    child.stdout?.on("data", (chunk) => {
+  child.stdout?.on("data", (chunk) => {
+    if (logFile) appendFileSync(logFile, `[stdout] ${chunk.toString()}`);
+    if (process.env.SANDBOX_AGENT_TEST_LOGS) {
       process.stderr.write(chunk.toString());
-    });
-  }
+    }
+  });
 
   const baseUrl = `http://${host}:${port}`;
 
@@ -189,6 +196,7 @@ export async function spawnSandboxAgent(options: SpawnOptions = {}): Promise<San
 
   const dispose = async () => {
     if (child.exitCode !== null) {
+      rmSync(tempStateDir, { recursive: true, force: true });
       return;
     }
     child.kill("SIGTERM");
@@ -196,6 +204,7 @@ export async function spawnSandboxAgent(options: SpawnOptions = {}): Promise<San
     if (!exited) {
       child.kill("SIGKILL");
     }
+    rmSync(tempStateDir, { recursive: true, force: true });
   };
 
   return { baseUrl, token, child, dispose };

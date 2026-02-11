@@ -318,19 +318,19 @@ interface QuestionRequest {
 ### Responding to Questions
 
 ```typescript
-// V2 client for question/permission APIs
-const clientV2 = createOpencodeClientV2({
+// V1 client for question/permission APIs
+const clientV1 = createOpencodeClientV1({
   baseUrl: `http://127.0.0.1:${port}`
 });
 
 // Reply with answers
-await clientV2.question.reply({
+await clientV1.question.reply({
   requestID: requestId,
   answers: [["selected option"]]  // Array of selected labels per question
 });
 
 // Reject question
-await clientV2.question.reject({ requestID: requestId });
+await clientV1.question.reject({ requestID: requestId });
 ```
 
 ### Permission Request
@@ -350,7 +350,7 @@ interface PermissionRequest {
 ### Responding to Permissions
 
 ```typescript
-await clientV2.permission.reply({
+await clientV1.permission.reply({
   requestID: requestId,
   reply: "once" | "always" | "reject"
 });
@@ -644,5 +644,5 @@ The agent has no tool to interact with PTYs and cannot access the session comman
 - OpenCode is the most feature-rich runtime (streaming, questions, permissions)
 - Server persists for the lifetime of a change (workspace+repo+change)
 - Parts are streamed incrementally with delta updates
-- V2 client is needed for question/permission APIs
+- V1 client is needed for question/permission APIs
 - Working directory affects credential discovery and file operations

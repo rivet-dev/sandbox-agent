@@ -1,5 +1,5 @@
 import { SandboxAgent } from "sandbox-agent";
-import { detectAgent, buildInspectorUrl, generateSessionId } from "@sandbox-agent/example-shared";
+import { detectAgent, buildInspectorUrl } from "@sandbox-agent/example-shared";
 import { startDockerSandbox } from "@sandbox-agent/example-shared/docker";
 
 console.log("Starting sandbox...");
@@ -12,17 +12,19 @@ const { baseUrl, cleanup } = await startDockerSandbox({
 
 console.log("Creating session with everything MCP server...");
 const client = await SandboxAgent.connect({ baseUrl });
-const sessionId = generateSessionId();
-await client.createSession(sessionId, {
+const session = await client.createSession({
   agent: detectAgent(),
-  mcp: {
-    everything: {
-      type: "local",
-      command: ["mcp-server-everything"],
-      timeoutMs: 10000,
-    },
+  sessionInit: {
+    cwd: "/root",
+    mcpServers: [{
+      name: "everything",
+      command: "mcp-server-everything",
+      args: [],
+      env: [],
+    }],
   },
 });
+const sessionId = session.id;
 console.log(`  UI: ${buildInspectorUrl({ baseUrl, sessionId })}`);
 console.log('  Try: "generate a random number between 1 and 100"');
 console.log("  Press Ctrl+C to stop.");

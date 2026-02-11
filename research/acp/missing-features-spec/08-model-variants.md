@@ -6,9 +6,9 @@
 
 ## Summary
 
-v1 had `AgentModelInfo.variants`, `AgentModelInfo.defaultVariant`, and `CreateSessionRequest.variant`. v2 already has `_sandboxagent/session/list_models` but the variant fields need to be verified and the session-creation variant selection needs to work end-to-end.
+v1 had `AgentModelInfo.variants`, `AgentModelInfo.defaultVariant`, and `CreateSessionRequest.variant`. v1 already has `_sandboxagent/session/list_models` but the variant fields need to be verified and the session-creation variant selection needs to work end-to-end.
 
-## Current v2 State
+## Current v1 State
 
 From `acp_runtime/mod.rs`, `_sandboxagent/session/list_models` is implemented and returns:
 - `availableModels[]` with `modelId`, `name`, `description`
@@ -120,7 +120,7 @@ The runtime should forward this variant to the agent process (e.g., as a model p
 | `server/packages/sandbox-agent/src/acp_runtime/mod.rs` | Verify `list_models` response includes `variants`/`defaultVariant`; extract and forward `variant` from `session/new` `_meta` |
 | `server/packages/sandbox-agent/src/acp_runtime/mock.rs` | Add variant support to mock model listing |
 | `sdks/typescript/src/client.ts` | Update `listModels` return type to include variants |
-| `server/packages/sandbox-agent/tests/v2_api.rs` | Add model variants test |
+| `server/packages/sandbox-agent/tests/v1_api.rs` | Add model variants test |
 
 ### Docs to Update
 

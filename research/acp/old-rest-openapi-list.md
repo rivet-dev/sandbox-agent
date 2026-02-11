@@ -1,7 +1,7 @@
 ## Sources
 
 - Old OpenAPI path: `docs/openapi.json` at git ref `8ecd27b`
-- ACP v2 API path: `~/misc/acp-docs/schema/schema.json` (`~/misc/acp-docs/schema/schema.unstable.json` for unstable methods)
+- ACP v1 API path: `~/misc/acp-docs/schema/schema.json` (`~/misc/acp-docs/schema/schema.unstable.json` for unstable methods)
 
 | Path / Schema Property | ACP Equivalent |
 | --- | --- |

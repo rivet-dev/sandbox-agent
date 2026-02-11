@@ -1,8 +1,8 @@
-# V2 Spec: ACP Over HTTP
+# V1 Spec: ACP Over HTTP
 
 ## 0) Delete/Remove First
 
-Before implementing v2, remove in-house protocol files and remove v1 API behavior as documented in:
+Before implementing v1, remove in-house protocol files and remove v1 API behavior as documented in:
 
 - `research/acp/00-delete-first.md`
 - `research/acp/v1-schema-to-acp-mapping.md` (endpoint/event-by-event conversion target)
@@ -11,16 +11,16 @@ This is mandatory to prevent dual-protocol drift.
 
 ## 1) Goals
 
-- v2 is intentionally breaking and ACP-native.
+- v1 is intentionally breaking and ACP-native.
 - Internal runtime uses ACP end-to-end (no custom universal event schema).
 - Existing agent managers are replaced with ACP agent process runtimes.
 - v1 API is completely removed; all `/v1/*` requests return explicit removed errors.
 - OpenCode <-> ACP support is preserved as a product requirement, but implemented in a separate step after ACP core is stable.
 
-## 2) Non-goals for first v2 cut
+## 2) Non-goals for first v1 cut
 
 - No guarantee of v1 endpoint compatibility.
-- No v1 compatibility layer in the initial v2 release.
+- No v1 compatibility layer in the initial v1 release.
 - No OpenCode compatibility during ACP core bring-up (`/opencode/*` is disabled until the dedicated bridge step).
 - No in-house universal event format.
 
@@ -40,7 +40,7 @@ Supported client methods (minimum):
 
 - `session/request_permission`
 
-Included unstable ACP methods for v2 profile:
+Included unstable ACP methods for v1 profile:
 
 - `session/list`
 - `session/fork`
@@ -69,9 +69,9 @@ ACP streamable HTTP is draft upstream, so this spec defines a concrete transport
 
 ### 4.1 Endpoints
 
-- `POST /v2/rpc`
-- `GET /v2/rpc` (SSE stream, `Accept: text/event-stream`)
-- `DELETE /v2/rpc` (explicit connection close)
+- `POST /v1/rpc`
+- `GET /v1/rpc` (SSE stream, `Accept: text/event-stream`)
+- `DELETE /v1/rpc` (explicit connection close)
 
 ### 4.2 Connection model
 
@@ -81,15 +81,15 @@ ACP streamable HTTP is draft upstream, so this spec defines a concrete transport
 - Connection identity is `X-ACP-Connection-Id` header.
 - First `initialize` request may omit `X-ACP-Connection-Id` and must include `params._meta["sandboxagent.dev"].agent`.
 - Server ensures backend exists for that agent, creates connection, returns `X-ACP-Connection-Id` in response headers.
-- All subsequent `POST /v2/rpc` and `GET /v2/rpc` requests must include `X-ACP-Connection-Id`.
-- `DELETE /v2/rpc` with `X-ACP-Connection-Id` detaches/closes only the transport connection and releases connection-scoped resources.
-- `DELETE /v2/rpc` does not terminate the session or agent process. Session termination is explicit via `_sandboxagent/session/terminate`.
+- All subsequent `POST /v1/rpc` and `GET /v1/rpc` requests must include `X-ACP-Connection-Id`.
+- `DELETE /v1/rpc` with `X-ACP-Connection-Id` detaches/closes only the transport connection and releases connection-scoped resources.
+- `DELETE /v1/rpc` does not terminate the session or agent process. Session termination is explicit via `_sandboxagent/session/terminate`.
 
 ### 4.3 Message routing
 
-- Client -> agent requests/notifications: sent as JSON-RPC payloads to `POST /v2/rpc`.
-- Agent -> client notifications/requests: delivered on `GET /v2/rpc` SSE stream as JSON-RPC envelopes.
-- Client replies to agent-initiated requests by POSTing JSON-RPC responses to `POST /v2/rpc`.
+- Client -> agent requests/notifications: sent as JSON-RPC payloads to `POST /v1/rpc`.
+- Agent -> client notifications/requests: delivered on `GET /v1/rpc` SSE stream as JSON-RPC envelopes.
+- Client replies to agent-initiated requests by POSTing JSON-RPC responses to `POST /v1/rpc`.
 
 ### 4.4 SSE framing
 
@@ -112,9 +112,9 @@ Resume:
 - Invalid envelope: HTTP 400 with `application/problem+json`.
 - Unknown connection: HTTP 404 with `application/problem+json`.
 - Server timeout waiting on agent process response: HTTP 504 with `application/problem+json`.
-- Successful `DELETE /v2/rpc`: HTTP 204.
-- Repeated `DELETE /v2/rpc` on an already-closed connection: HTTP 204 (idempotent close).
-- All `/v1/*` endpoints: HTTP 410 with `application/problem+json` and message `v1 API removed; use /v2`.
+- Successful `DELETE /v1/rpc`: HTTP 204.
+- Repeated `DELETE /v1/rpc` on an already-closed connection: HTTP 204 (idempotent close).
+- All `/v1/*` endpoints: HTTP 410 with `application/problem+json` and message `v1 API removed; use /v1`.
 
 Note: ACP method-level failures still return JSON-RPC error objects inside 200 responses.
 
@@ -127,7 +127,7 @@ Note: ACP method-level failures still return JSON-RPC error objects inside 200 r
 ### 4.7 Security
 
 - Reuse existing bearer token auth middleware.
-- Validate bearer auth at request time for `/v2/*` routes when configured.
+- Validate bearer auth at request time for `/v1/*` routes when configured.
 - ACP runtime connection ids are in-memory server ids and are not additionally principal-scoped inside runtime.
 - Do not expose agent process stderr on stdout channel.
 
@@ -141,8 +141,8 @@ Based on current ACP community implementations/discussion:
 
 Decision for this repo:
 
-- v2 public transport remains Streamable HTTP (`POST`/`GET` SSE over `/v2/rpc`) as the canonical contract.
-- WebSocket transport is not part of initial v2 surface; consider later only if HTTP profile proves insufficient operationally.
+- v1 public transport remains Streamable HTTP (`POST`/`GET` SSE over `/v1/rpc`) as the canonical contract.
+- WebSocket transport is not part of initial v1 surface; consider later only if HTTP profile proves insufficient operationally.
 
 Reference:
 
@@ -160,7 +160,7 @@ Replace custom per-agent protocol parsers with one ACP agent process process con
 
 ## 5.2 Installers
 
-Current auto-installer installs native CLIs. v2 installer must install:
+Current auto-installer installs native CLIs. v1 installer must install:
 
 - native agent binary (if needed by agent process)
 - ACP agent process binary required for that agent
@@ -170,13 +170,13 @@ Add a manifest-driven mapping (new file to create in implementation phase):
 - `claude`: agent process `claude-code-acp`
 - `codex`: agent process `codex-acp`
 - `opencode`: native ACP mode (agent process optional)
-- `amp`: pending decision (official agent process required or unsupported in v2 initial release)
+- `amp`: pending decision (official agent process required or unsupported in v1 initial release)
 
 ## 5.3 ACP Registry install instructions
 
 Yes, this must be handled.
 
-V2 installer/docs must include install instructions sourced from ACP registry metadata where available, with explicit fallback for non-registry agent processes.
+V1 installer/docs must include install instructions sourced from ACP registry metadata where available, with explicit fallback for non-registry agent processes.
 
 Requirements:
 
@@ -194,8 +194,8 @@ Requirements:
 
 Output surfaces:
 
-- `GET /v2/agents`: include agent process install source + verification status.
-- `POST /v2/agents/{agent}/install`: return concrete installed artifacts and source provenance.
+- `GET /v1/agents`: include agent process install source + verification status.
+- `POST /v1/agents/{agent}/install`: return concrete installed artifacts and source provenance.
 
 ## 5.4 Install commands and lazy agent process install
 
@@ -203,12 +203,12 @@ This must match current ergonomics where installs can be explicit or automatic.
 
 Explicit install interfaces:
 
-- API: `POST /v2/agents/{agent}/install`
-- CLI (v2 surface): `sandbox-agent api v2 agents install <agent> [--reinstall] [--agent-version <v>] [--agent process-version <v>]`
+- API: `POST /v1/agents/{agent}/install`
+- CLI (v1 surface): `sandbox-agent api v1 agents install <agent> [--reinstall] [--agent-version <v>] [--agent process-version <v>]`
 
 Lazy install behavior (default on):
 
-- Trigger point: first ACP bootstrap request (`initialize`) on `/v2/rpc` with `params._meta["sandboxagent.dev"].agent`.
+- Trigger point: first ACP bootstrap request (`initialize`) on `/v1/rpc` with `params._meta["sandboxagent.dev"].agent`.
 - If required binaries are missing, server installs:
   - ACP agent process
   - native agent binary if agent process requires it
@@ -221,28 +221,28 @@ Operational requirements:
 - Clear provenance in result (`registry` vs `fallback`) plus concrete artifact versions.
 - Config switch to disable lazy install (`require_preinstall=true`) for controlled environments.
 
-## 6) Public v2 API shape
+## 6) Public v1 API shape
 
 Expose ACP directly, not custom session endpoints.
 
-- `POST /v2/rpc`: transport write path
-- `GET /v2/rpc`: transport read path (SSE)
+- `POST /v1/rpc`: transport write path
+- `GET /v1/rpc`: transport read path (SSE)
 
-Non-ACP endpoints retained in v2:
+Non-ACP endpoints retained in v1:
 
-- `GET /v2/health`
-- `GET /v2/agents` (capabilities + install status)
-- `POST /v2/agents/{agent}/install`
-- `GET /v2/sessions`
-- `GET /v2/sessions/{id}`
-- `GET /v2/fs/file`
-- `PUT /v2/fs/file`
-- `POST /v2/fs/upload-batch`
+- `GET /v1/health`
+- `GET /v1/agents` (capabilities + install status)
+- `POST /v1/agents/{agent}/install`
+- `GET /v1/sessions`
+- `GET /v1/sessions/{id}`
+- `GET /v1/fs/file`
+- `PUT /v1/fs/file`
+- `POST /v1/fs/upload-batch`
 - `GET /ui/` (Inspector UI shell)
 
 Agent discovery note:
 
-- Do not add standalone `/v2/agents/{agent}/models` or `/v2/agents/{agent}/modes` endpoints.
+- Do not add standalone `/v1/agents/{agent}/models` or `/v1/agents/{agent}/modes` endpoints.
 - Expose optional `models`/`modes` properties on agent response payloads when the agent is installed.
 
 Legacy endpoints retained only as removals:
@@ -261,9 +261,9 @@ Rationale:
 - ACP `fs/*` methods are agent-protocol capabilities and can vary by agent implementation.
 - Sandbox Agent filesystem HTTP endpoints are host/runtime capabilities and should behave consistently across all agents.
 - Large binary transfers (raw file read/write and tar upload) need streaming-friendly HTTP behavior; ACP JSON-RPC envelopes are not suitable for super-large binary payload transport.
-- `GET /v2/fs/file` specifically benefits from HTTP response streaming for large reads.
+- `GET /v1/fs/file` specifically benefits from HTTP response streaming for large reads.
 
-For this reason, `GET /v2/fs/file`, `PUT /v2/fs/file`, and `POST /v2/fs/upload-batch` remain dedicated HTTP endpoints even as other static control APIs migrate to ACP extensions.
+For this reason, `GET /v1/fs/file`, `PUT /v1/fs/file`, and `POST /v1/fs/upload-batch` remain dedicated HTTP endpoints even as other static control APIs migrate to ACP extensions.
 
 Parallel ACP compatibility is still supported:
 
@@ -289,7 +289,7 @@ Rules:
 
 ## 6.2 Inspector (mandatory)
 
-The inspector must be ACP-native in v2.
+The inspector must be ACP-native in v1.
 
 - Replace v1 session/event calls in inspector with ACP-over-HTTP connection flow (`initialize`, `session/new`, `session/prompt`, streamed `session/update`).
 - Add inspector support for rendering raw ACP envelopes and decoded session updates.
@@ -310,12 +310,12 @@ Added:
 - raw ACP JSON-RPC envelopes over HTTP
 - explicit connection identity (`X-ACP-Connection-Id`)
 
-## 8) Test contract for v2
+## 8) Test contract for v1
 
 Consolidated must-have suites (duplicates collapsed):
 
 - ACP protocol conformance (JSON-RPC + ACP schema/semantics)
-- Transport contract (`/v2/rpc` POST/SSE routing, ordering, replay, errors)
+- Transport contract (`/v1/rpc` POST/SSE routing, ordering, replay, errors)
 - End-to-end agent process matrix (includes core turn flow, cancel, HITL, streaming)
 - Installer suite (explicit + lazy install, registry/fallback provenance)
 - Security/auth isolation
@@ -333,11 +333,11 @@ Minimum required `agent-browser` inspector coverage:
 Current automation entrypoint:
 
 - `frontend/packages/inspector/tests/agent-browser.e2e.sh`
-- `server/packages/sandbox-agent/tests/v2_agent_process_matrix.rs` (deterministic agent process matrix smoke + JSON-RPC conformance checks)
+- `server/packages/sandbox-agent/tests/v1_agent_process_matrix.rs` (deterministic agent process matrix smoke + JSON-RPC conformance checks)
 
 ## 9) Open questions to resolve before implementation lock
 
-- Amp agent process availability and support level for v2 launch.
+- Amp agent process availability and support level for v1 launch.
 - Whether additional non-binary filesystem endpoints remain HTTP or migrate to ACP extensions after initial cut.
 
 ## 10) Deferred Dedicated Step: OpenCode <-> ACP
@@ -359,8 +359,8 @@ Current automation entrypoint:
 
 When implementing this spec, update docs in the same change set:
 
-- API reference/openapi docs for v2 and `/v1/*` removal semantics
-- `docs/cli.mdx` for v2 ACP and removed v1 commands
+- API reference/openapi docs for v1 and `/v1/*` removal semantics
+- `docs/cli.mdx` for v1 ACP and removed v1 commands
 - `docs/inspector.mdx` for ACP-based inspector behavior
 - SDK docs (`docs/sdks/typescript.mdx`) for ACP-over-HTTP transport usage
 - Any OpenCode compatibility docs that reference `/opencode/*`

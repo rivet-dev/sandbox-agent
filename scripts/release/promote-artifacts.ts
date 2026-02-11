@@ -34,6 +34,7 @@ export async function promoteArtifacts(opts: ReleaseOpts) {
 	await uploadInstallScripts(opts, opts.version);
 	if (opts.latest) {
 		await uploadInstallScripts(opts, "latest");
+		await uploadInstallScripts(opts, opts.minorVersionChannel);
 	}
 
 	// Upload gigacode install scripts
@@ -97,5 +98,23 @@ async function promotePath(opts: ReleaseOpts, sourceCommit: string, name: string
 	await copyPath(sourcePrefix, `${PREFIX}/${opts.version}/${name}/`);
 	if (opts.latest) {
 		await copyPath(sourcePrefix, `${PREFIX}/latest/${name}/`);
+		if (name === "binaries") {
+			const binariesSourcePrefix = `${PREFIX}/${sourceCommit}/binaries/sandbox-agent-`;
+			const sandboxAgentBinaries = await listReleasesObjects(binariesSourcePrefix);
+			if (
+				!Array.isArray(sandboxAgentBinaries?.Contents) ||
+				sandboxAgentBinaries.Contents.length === 0
+			) {
+				throw new Error(`No sandbox-agent binaries found under ${binariesSourcePrefix}`);
+			}
+
+			await copyPath(
+				binariesSourcePrefix,
+				`${PREFIX}/${opts.minorVersionChannel}/binaries/sandbox-agent-`,
+			);
+			return;
+		}
+
+		await copyPath(sourcePrefix, `${PREFIX}/${opts.minorVersionChannel}/${name}/`);
 	}
 }

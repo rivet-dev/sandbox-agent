@@ -1,0 +1,64 @@
+---
+title: "Observability"
+description: "Track session activity with OpenTelemetry."
+icon: "terminal"
+---
+
+Use OpenTelemetry to instrument session traffic, then ship telemetry to your collector/backend.
+
+## Common collectors and backends
+
+- [OpenTelemetry Collector](https://opentelemetry.io/docs/collector/)
+- [Jaeger](https://www.jaegertracing.io/)
+- [Grafana Tempo](https://grafana.com/oss/tempo/)
+- [Honeycomb](https://www.honeycomb.io/)
+- [Datadog APM](https://docs.datadoghq.com/tracing/)
+
+## Example: trace a prompt round-trip
+
+Wrap `session.prompt()` in a span to measure the full round-trip, then log individual events as span events.
+
+Assumes your OTEL provider/exporter is already configured.
+
+```ts
+import { trace } from "@opentelemetry/api";
+import { SandboxAgent } from "sandbox-agent";
+
+const tracer = trace.getTracer("my-app/sandbox-agent");
+
+const sdk = await SandboxAgent.connect({
+  baseUrl: process.env.SANDBOX_URL!,
+});
+
+const session = await sdk.createSession({ agent: "mock" });
+
+// Log each event as an OTEL span event on the active span
+const unsubscribe = session.onEvent((event) => {
+  const activeSpan = trace.getActiveSpan();
+  if (!activeSpan) return;
+
+  activeSpan.addEvent("session.event", {
+    "sandbox.sender": event.sender,
+    "sandbox.event_index": event.eventIndex,
+  });
+});
+
+// The span covers the full prompt round-trip
+await tracer.startActiveSpan("sandbox_agent.prompt", async (span) => {
+  span.setAttribute("sandbox.session_id", session.id);
+
+  try {
+    const result = await session.prompt([
+      { type: "text", text: "Summarize this repository." },
+    ]);
+    span.setAttribute("sandbox.stop_reason", result.stopReason);
+  } catch (error) {
+    span.recordException(error as Error);
+    throw error;
+  } finally {
+    span.end();
+  }
+});
+
+unsubscribe();
+```

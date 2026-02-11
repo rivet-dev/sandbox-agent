@@ -3,186 +3,87 @@ import {
   PROTOCOL_VERSION,
   type AcpEnvelopeDirection,
   type AnyMessage,
+  type AuthMethod,
   type CancelNotification,
-  type ForkSessionRequest,
-  type ForkSessionResponse,
-  type InitializeRequest,
-  type InitializeResponse,
-  type ListSessionsRequest,
-  type ListSessionsResponse,
-  type LoadSessionRequest,
-  type LoadSessionResponse,
   type NewSessionRequest,
   type NewSessionResponse,
   type PromptRequest,
   type PromptResponse,
-  type RequestPermissionRequest,
-  type RequestPermissionResponse,
-  type ResumeSessionRequest,
-  type ResumeSessionResponse,
   type SessionNotification,
   type SetSessionConfigOptionRequest,
-  type SetSessionConfigOptionResponse,
   type SetSessionModeRequest,
-  type SetSessionModeResponse,
-  type SetSessionModelRequest,
-  type SetSessionModelResponse,
 } from "acp-http-client";
 import type { SandboxAgentSpawnHandle, SandboxAgentSpawnOptions } from "./spawn.ts";
-import type {
-  AgentInstallRequest,
-  AgentInstallResponse,
-  AgentListResponse,
-  FsActionResponse,
-  FsDeleteQuery,
-  FsEntriesQuery,
-  FsEntry,
-  FsMoveRequest,
-  FsMoveResponse,
-  FsPathQuery,
-  FsSessionQuery,
-  FsStat,
-  FsUploadBatchQuery,
-  FsUploadBatchResponse,
-  FsWriteResponse,
-  HealthResponse,
-  ProblemDetails,
-  SessionEndedNotification,
-  SessionInfo,
-  SessionListResponse,
-  SessionTerminateResponse,
+import {
+  type AcpServerListResponse,
+  type AgentInfo,
+  type AgentInstallRequest,
+  type AgentInstallResponse,
+  type AgentListResponse,
+  type FsActionResponse,
+  type FsDeleteQuery,
+  type FsEntriesQuery,
+  type FsEntry,
+  type FsMoveRequest,
+  type FsMoveResponse,
+  type FsPathQuery,
+  type FsStat,
+  type FsUploadBatchQuery,
+  type FsUploadBatchResponse,
+  type FsWriteResponse,
+  type HealthResponse,
+  InMemorySessionPersistDriver,
+  type ListEventsRequest,
+  type ListPage,
+  type ListPageRequest,
+  type McpConfigQuery,
+  type McpServerConfig,
+  type ProblemDetails,
+  type SessionEvent,
+  type SessionPersistDriver,
+  type SessionRecord,
+  type SkillsConfig,
+  type SkillsConfigQuery,
 } from "./types.ts";
 
-const API_PREFIX = "/v2";
+const API_PREFIX = "/v1";
 const FS_PATH = `${API_PREFIX}/fs`;
-const SANDBOX_META_KEY = "sandboxagent.dev";
-const SESSION_DETACH_METHOD = "_sandboxagent/session/detach";
-const SESSION_TERMINATE_METHOD = "_sandboxagent/session/terminate";
-const SESSION_LIST_MODELS_METHOD = "_sandboxagent/session/list_models";
-const SESSION_SET_METADATA_METHOD = "_sandboxagent/session/set_metadata";
-const SESSION_ENDED_METHOD = "_sandboxagent/session/ended";
-const AGENT_UNPARSED_METHOD = "_sandboxagent/agent/unparsed";
-const AGENT_LIST_METHOD = "_sandboxagent/agent/list";
-const AGENT_INSTALL_METHOD = "_sandboxagent/agent/install";
-const SESSION_LIST_METHOD = "_sandboxagent/session/list";
-const SESSION_GET_METHOD = "_sandboxagent/session/get";
-const FS_LIST_ENTRIES_METHOD = "_sandboxagent/fs/list_entries";
-const FS_DELETE_ENTRY_METHOD = "_sandboxagent/fs/delete_entry";
-const FS_MKDIR_METHOD = "_sandboxagent/fs/mkdir";
-const FS_MOVE_METHOD = "_sandboxagent/fs/move";
-const FS_STAT_METHOD = "_sandboxagent/fs/stat";
-const V1_REMOVED_MESSAGE = "v1 API removed; use session methods on SandboxAgentClient";
 
-type QueryValue = string | number | boolean | null | undefined;
-
-type RequestOptions = {
-  query?: Record<string, QueryValue>;
-  body?: unknown;
-  rawBody?: BodyInit;
-  contentType?: string;
-  headers?: HeadersInit;
-  accept?: string;
-  signal?: AbortSignal;
-};
+const DEFAULT_REPLAY_MAX_EVENTS = 50;
+const DEFAULT_REPLAY_MAX_CHARS = 12_000;
+const EVENT_INDEX_SCAN_EVENTS_LIMIT = 500;
 
 export interface SandboxAgentConnectOptions {
   baseUrl: string;
   token?: string;
   fetch?: typeof fetch;
   headers?: HeadersInit;
+  persist?: SessionPersistDriver;
+  replayMaxEvents?: number;
+  replayMaxChars?: number;
 }
 
-export interface SandboxAgentClientConnectOptions {
-  agent?: string;
-  initialize?: Partial<InitializeRequest>;
-}
-
-export interface SandboxAgentClientOptions extends SandboxAgentConnectOptions {
-  agent?: string;
-  autoConnect?: boolean;
-  onEvent?: SandboxAgentEventObserver;
-  onSessionUpdate?: (notification: SessionUpdateNotification) => Promise<void> | void;
-  onPermissionRequest?: (request: PermissionRequest) => Promise<PermissionResponse>;
-}
-
-export interface SandboxAgentStartOptions {
+export interface SandboxAgentStartOptions extends Omit<SandboxAgentConnectOptions, "baseUrl" | "token"> {
   spawn?: SandboxAgentSpawnOptions | boolean;
-  fetch?: typeof fetch;
-  headers?: HeadersInit;
-  agent?: string;
-  autoConnect?: boolean;
-  onEvent?: SandboxAgentEventObserver;
-  onSessionUpdate?: (notification: SessionUpdateNotification) => Promise<void> | void;
-  onPermissionRequest?: (request: PermissionRequest) => Promise<PermissionResponse>;
 }
 
-export interface SandboxMetadata {
-  title?: string;
-  model?: string;
-  mode?: string;
-  variant?: string;
-  requestedSessionId?: string;
-  permissionMode?: string;
-  skills?: Record<string, unknown> | null;
-  agentVersionRequested?: string;
-  agent?: string;
-  createdAt?: string | number;
-  updatedAt?: string | number;
-  ended?: boolean;
-  eventCount?: number;
-  [key: string]: unknown;
+export interface SessionCreateRequest {
+  id?: string;
+  agent: string;
+  sessionInit?: Omit<NewSessionRequest, "_meta">;
 }
 
-export type SessionCreateRequest = Omit<NewSessionRequest, "_meta"> & {
-  metadata?: SandboxMetadata;
-};
-
-export type PermissionRequest = RequestPermissionRequest;
-export type PermissionResponse = RequestPermissionResponse;
-export type SessionUpdateNotification = SessionNotification;
-
-export interface AgentUnparsedNotification {
-  jsonrpc: "2.0";
-  method: typeof AGENT_UNPARSED_METHOD;
-  params: Record<string, unknown>;
-  [key: string]: unknown;
+export interface SessionResumeOrCreateRequest {
+  id: string;
+  agent: string;
+  sessionInit?: Omit<NewSessionRequest, "_meta">;
 }
 
-export type AgentEvent =
-  | {
-      type: "sessionUpdate";
-      notification: SessionUpdateNotification;
-    }
-  | {
-      type: "sessionEnded";
-      notification: SessionEndedNotification;
-    }
-  | {
-      type: "agentUnparsed";
-      notification: AgentUnparsedNotification;
-    };
-
-export type SandboxAgentEventObserver = (event: AgentEvent) => void;
-
-export interface SessionModelInfo {
-  modelId: string;
-  name?: string | null;
-  description?: string | null;
-  defaultVariant?: string | null;
-  variants?: string[] | null;
-  [key: string]: unknown;
+export interface SessionSendOptions {
+  notification?: boolean;
 }
 
-export interface ListModelsResponse {
-  availableModels: SessionModelInfo[];
-  currentModelId?: string | null;
-  [key: string]: unknown;
-}
-
-export interface ListModelsRequest {
-  sessionId?: string;
-  agent?: string;
-}
+export type SessionEventListener = (event: SessionEvent) => void;
 
 export class SandboxAgentError extends Error {
   readonly status: number;
@@ -198,271 +99,560 @@ export class SandboxAgentError extends Error {
   }
 }
 
-export class NotConnectedError extends Error {
-  constructor() {
-    super("ACP session is not connected. Call connect() first.");
-    this.name = "NotConnectedError";
+export class Session {
+  private record: SessionRecord;
+  private readonly sandbox: SandboxAgent;
+
+  constructor(sandbox: SandboxAgent, record: SessionRecord) {
+    this.sandbox = sandbox;
+    this.record = { ...record };
+  }
+
+  get id(): string {
+    return this.record.id;
+  }
+
+  get agent(): string {
+    return this.record.agent;
+  }
+
+  get agentSessionId(): string {
+    return this.record.agentSessionId;
+  }
+
+  get lastConnectionId(): string {
+    return this.record.lastConnectionId;
+  }
+
+  get createdAt(): number {
+    return this.record.createdAt;
+  }
+
+  get destroyedAt(): number | undefined {
+    return this.record.destroyedAt;
+  }
+
+  async refresh(): Promise<Session> {
+    const latest = await this.sandbox.getSession(this.id);
+    if (!latest) {
+      throw new Error(`session '${this.id}' no longer exists`);
+    }
+    this.apply(latest.toRecord());
+    return this;
+  }
+
+  async send(method: string, params: Record<string, unknown> = {}, options: SessionSendOptions = {}): Promise<unknown> {
+    const updated = await this.sandbox.sendSessionMethod(this.id, method, params, options);
+    this.apply(updated.session.toRecord());
+    return updated.response;
+  }
+
+  async prompt(prompt: PromptRequest["prompt"]): Promise<PromptResponse> {
+    const response = await this.send("session/prompt", { prompt });
+    return response as PromptResponse;
+  }
+
+  onEvent(listener: SessionEventListener): () => void {
+    return this.sandbox.onSessionEvent(this.id, listener);
+  }
+
+  toRecord(): SessionRecord {
+    return { ...this.record };
+  }
+
+  apply(record: SessionRecord): void {
+    this.record = { ...record };
   }
 }
 
-export class AlreadyConnectedError extends Error {
-  constructor() {
-    super("ACP session is already connected.");
-    this.name = "AlreadyConnectedError";
+export class LiveAcpConnection {
+  readonly connectionId: string;
+  readonly agent: string;
+
+  private readonly acp: AcpHttpClient;
+  private readonly sessionByLocalId = new Map<string, string>();
+  private readonly localByAgentSessionId = new Map<string, string>();
+  private readonly pendingNewSessionLocals: string[] = [];
+  private readonly pendingRequestSessionById = new Map<string, string>();
+  private readonly pendingReplayByLocalSessionId = new Map<string, string>();
+
+  private readonly onObservedEnvelope: (
+    connection: LiveAcpConnection,
+    envelope: AnyMessage,
+    direction: AcpEnvelopeDirection,
+    localSessionId: string | null,
+  ) => void;
+
+  private constructor(
+    agent: string,
+    connectionId: string,
+    acp: AcpHttpClient,
+    onObservedEnvelope: (
+      connection: LiveAcpConnection,
+      envelope: AnyMessage,
+      direction: AcpEnvelopeDirection,
+      localSessionId: string | null,
+    ) => void,
+  ) {
+    this.agent = agent;
+    this.connectionId = connectionId;
+    this.acp = acp;
+    this.onObservedEnvelope = onObservedEnvelope;
+  }
+
+  static async create(options: {
+    baseUrl: string;
+    token?: string;
+    fetcher: typeof fetch;
+    headers?: HeadersInit;
+    agent: string;
+    serverId: string;
+    onObservedEnvelope: (
+      connection: LiveAcpConnection,
+      envelope: AnyMessage,
+      direction: AcpEnvelopeDirection,
+      localSessionId: string | null,
+    ) => void;
+  }): Promise<LiveAcpConnection> {
+    const connectionId = randomId();
+
+    let live: LiveAcpConnection | null = null;
+    const acp = new AcpHttpClient({
+      baseUrl: options.baseUrl,
+      token: options.token,
+      fetch: options.fetcher,
+      headers: options.headers,
+      transport: {
+        path: `${API_PREFIX}/acp/${encodeURIComponent(options.serverId)}`,
+        bootstrapQuery: { agent: options.agent },
+      },
+      client: {
+        sessionUpdate: async (_notification: SessionNotification) => {
+          // Session updates are observed via envelope persistence.
+        },
+      },
+      onEnvelope: (envelope, direction) => {
+        if (!live) {
+          return;
+        }
+        live.handleEnvelope(envelope, direction);
+      },
+    });
+
+    live = new LiveAcpConnection(options.agent, connectionId, acp, options.onObservedEnvelope);
+
+    const initResult = await acp.initialize({
+      protocolVersion: PROTOCOL_VERSION,
+      clientInfo: {
+        name: "sandbox-agent-sdk",
+        version: "v1",
+      },
+    });
+    if (initResult.authMethods && initResult.authMethods.length > 0) {
+      await autoAuthenticate(acp, initResult.authMethods);
+    }
+    return live;
+  }
+
+  async close(): Promise<void> {
+    await this.acp.disconnect();
+  }
+
+  hasBoundSession(localSessionId: string, agentSessionId?: string): boolean {
+    const bound = this.sessionByLocalId.get(localSessionId);
+    if (!bound) {
+      return false;
+    }
+    if (agentSessionId && bound !== agentSessionId) {
+      return false;
+    }
+    return true;
+  }
+
+  bindSession(localSessionId: string, agentSessionId: string): void {
+    this.sessionByLocalId.set(localSessionId, agentSessionId);
+    this.localByAgentSessionId.set(agentSessionId, localSessionId);
+  }
+
+  queueReplay(localSessionId: string, replayText: string | null): void {
+    if (!replayText) {
+      this.pendingReplayByLocalSessionId.delete(localSessionId);
+      return;
+    }
+    this.pendingReplayByLocalSessionId.set(localSessionId, replayText);
+  }
+
+  async createRemoteSession(
+    localSessionId: string,
+    sessionInit: Omit<NewSessionRequest, "_meta">,
+  ): Promise<NewSessionResponse> {
+    this.pendingNewSessionLocals.push(localSessionId);
+
+    try {
+      const response = await this.acp.newSession(sessionInit);
+      this.bindSession(localSessionId, response.sessionId);
+      return response;
+    } catch (error) {
+      const index = this.pendingNewSessionLocals.indexOf(localSessionId);
+      if (index !== -1) {
+        this.pendingNewSessionLocals.splice(index, 1);
+      }
+      throw error;
+    }
+  }
+
+  async sendSessionMethod(
+    localSessionId: string,
+    method: string,
+    params: Record<string, unknown>,
+    options: SessionSendOptions,
+  ): Promise<unknown> {
+    const agentSessionId = this.sessionByLocalId.get(localSessionId);
+    if (!agentSessionId) {
+      throw new Error(`session '${localSessionId}' is not bound to live ACP connection '${this.connectionId}'`);
+    }
+
+    const mappedParams = mapSessionParams(params, agentSessionId);
+
+    if (method === "session/prompt") {
+      const replayText = this.pendingReplayByLocalSessionId.get(localSessionId);
+      if (replayText) {
+        // TODO: Replace this synthesized replay text with ACP-native restore once standardized.
+        this.pendingReplayByLocalSessionId.delete(localSessionId);
+        injectReplayPrompt(mappedParams, replayText);
+      }
+
+      if (options.notification) {
+        await this.acp.extNotification(method, mappedParams);
+        return undefined;
+      }
+
+      return this.acp.prompt(mappedParams as PromptRequest);
+    }
+
+    if (method === "session/cancel") {
+      await this.acp.cancel(mappedParams as CancelNotification);
+      return undefined;
+    }
+
+    if (method === "session/set_mode") {
+      return this.acp.setSessionMode(mappedParams as SetSessionModeRequest);
+    }
+
+    if (method === "session/set_config_option") {
+      return this.acp.setSessionConfigOption(mappedParams as SetSessionConfigOptionRequest);
+    }
+
+    if (options.notification) {
+      await this.acp.extNotification(method, mappedParams);
+      return undefined;
+    }
+
+    return this.acp.extMethod(method, mappedParams);
+  }
+
+  private handleEnvelope(envelope: AnyMessage, direction: AcpEnvelopeDirection): void {
+    const localSessionId = this.resolveSessionId(envelope, direction);
+    this.onObservedEnvelope(this, envelope, direction, localSessionId);
+  }
+
+  private resolveSessionId(envelope: AnyMessage, direction: AcpEnvelopeDirection): string | null {
+    const id = envelopeId(envelope);
+    const method = envelopeMethod(envelope);
+
+    if (direction === "outbound") {
+      if (id && method === "session/new") {
+        const localSessionId = this.pendingNewSessionLocals.shift() ?? null;
+        if (localSessionId) {
+          this.pendingRequestSessionById.set(id, localSessionId);
+        }
+        return localSessionId;
+      }
+
+      const localFromParams = this.localFromEnvelopeParams(envelope);
+      if (id && localFromParams) {
+        this.pendingRequestSessionById.set(id, localFromParams);
+      }
+      return localFromParams;
+    }
+
+    if (id) {
+      const pending = this.pendingRequestSessionById.get(id) ?? null;
+      if (pending) {
+        this.pendingRequestSessionById.delete(id);
+        const sessionIdFromResult = envelopeSessionIdFromResult(envelope);
+        if (sessionIdFromResult) {
+          this.bindSession(pending, sessionIdFromResult);
+        }
+        return pending;
+      }
+    }
+
+    return this.localFromEnvelopeParams(envelope);
+  }
+
+  private localFromEnvelopeParams(envelope: AnyMessage): string | null {
+    const agentSessionId = envelopeSessionIdFromParams(envelope);
+    if (!agentSessionId) {
+      return null;
+    }
+    return this.localByAgentSessionId.get(agentSessionId) ?? null;
   }
 }
 
-export class SandboxAgentClient {
+export class SandboxAgent {
   private readonly baseUrl: string;
   private readonly token?: string;
   private readonly fetcher: typeof fetch;
   private readonly defaultHeaders?: HeadersInit;
+
+  private readonly persist: SessionPersistDriver;
+  private readonly replayMaxEvents: number;
+  private readonly replayMaxChars: number;
+
   private spawnHandle?: SandboxAgentSpawnHandle;
 
-  private readonly autoConnect: boolean;
-  private agent?: string;
-  private acpClient: AcpHttpClient | null = null;
-  private connectPromise: Promise<InitializeResponse> | null = null;
-  private connectError: unknown;
+  private readonly liveConnections = new Map<string, LiveAcpConnection>();
+  private readonly sessionHandles = new Map<string, Session>();
+  private readonly eventListeners = new Map<string, Set<SessionEventListener>>();
+  private readonly nextSessionEventIndexBySession = new Map<string, number>();
+  private readonly seedSessionEventIndexBySession = new Map<string, Promise<void>>();
 
-  private readonly onEvent?: SandboxAgentEventObserver;
-  private readonly onSessionUpdate?: (notification: SessionUpdateNotification) => Promise<void> | void;
-  private readonly onPermissionRequest?: (request: PermissionRequest) => Promise<PermissionResponse>;
-
-  constructor(options: SandboxAgentClientOptions) {
+  constructor(options: SandboxAgentConnectOptions) {
     this.baseUrl = options.baseUrl.replace(/\/$/, "");
     this.token = options.token;
     this.fetcher = options.fetch ?? globalThis.fetch.bind(globalThis);
     this.defaultHeaders = options.headers;
-    this.autoConnect = options.autoConnect ?? true;
-    this.agent = options.agent;
-    this.onEvent = options.onEvent;
-    this.onSessionUpdate = options.onSessionUpdate;
-    this.onPermissionRequest = options.onPermissionRequest;
+    this.persist = options.persist ?? new InMemorySessionPersistDriver();
+
+    this.replayMaxEvents = normalizePositiveInt(options.replayMaxEvents, DEFAULT_REPLAY_MAX_EVENTS);
+    this.replayMaxChars = normalizePositiveInt(options.replayMaxChars, DEFAULT_REPLAY_MAX_CHARS);
 
     if (!this.fetcher) {
       throw new Error("Fetch API is not available; provide a fetch implementation.");
     }
-
-    if (this.autoConnect) {
-      if (!this.agent) {
-        throw new Error("agent is required when autoConnect is enabled.");
-      }
-      this.connectPromise = this.connectInternal({});
-      this.connectPromise.catch(() => {
-        // Prevent unhandled rejection; ACP calls will surface stored error.
-      });
-    }
   }
 
-  static async start(options: SandboxAgentStartOptions = {}): Promise<SandboxAgentClient> {
+  static async connect(options: SandboxAgentConnectOptions): Promise<SandboxAgent> {
+    return new SandboxAgent(options);
+  }
+
+  static async start(options: SandboxAgentStartOptions = {}): Promise<SandboxAgent> {
     const spawnOptions = normalizeSpawnOptions(options.spawn, true);
     if (!spawnOptions.enabled) {
-      throw new Error("SandboxAgentClient.start requires spawn to be enabled.");
+      throw new Error("SandboxAgent.start requires spawn to be enabled.");
     }
+
     const { spawnSandboxAgent } = await import("./spawn.js");
     const handle = await spawnSandboxAgent(spawnOptions, options.fetch ?? globalThis.fetch);
-    const client = new SandboxAgentClient({
+
+    const client = new SandboxAgent({
       baseUrl: handle.baseUrl,
       token: handle.token,
       fetch: options.fetch,
       headers: options.headers,
-      agent: options.agent,
-      autoConnect: options.autoConnect,
-      onEvent: options.onEvent,
-      onSessionUpdate: options.onSessionUpdate,
-      onPermissionRequest: options.onPermissionRequest,
+      persist: options.persist,
+      replayMaxEvents: options.replayMaxEvents,
+      replayMaxChars: options.replayMaxChars,
     });
+
     client.spawnHandle = handle;
     return client;
   }
 
-  get connected(): boolean {
-    return this.acpClient !== null;
-  }
+  async dispose(): Promise<void> {
+    const connections = [...this.liveConnections.values()];
+    this.liveConnections.clear();
 
-  get clientId(): string | undefined {
-    return this.acpClient?.clientId;
-  }
+    await Promise.all(
+      connections.map(async (connection) => {
+        await connection.close();
+      }),
+    );
 
-  async connect(options: SandboxAgentClientConnectOptions = {}): Promise<InitializeResponse> {
-    if (this.acpClient || this.connectPromise) {
-      throw new AlreadyConnectedError();
-    }
-
-    if (options.agent) {
-      this.agent = options.agent;
-    }
-
-    this.connectPromise = this.connectInternal(options);
-    return this.connectPromise;
-  }
-
-  async disconnect(): Promise<void> {
-    if (this.connectPromise) {
-      await this.connectPromise.catch(() => {
-        // Ignore here; state reset below.
-      });
-    }
-
-    const acp = this.acpClient;
-    this.acpClient = null;
-    this.connectError = undefined;
-
-    if (acp) {
-      await acp.disconnect();
+    if (this.spawnHandle) {
+      await this.spawnHandle.dispose();
+      this.spawnHandle = undefined;
     }
   }
 
-  async newSession(request: SessionCreateRequest): Promise<NewSessionResponse> {
-    const acp = await this.requireAcpConnection();
-    if (!request.metadata || typeof request.metadata.agent !== "string" || !request.metadata.agent.trim()) {
-      throw new Error('newSession requires metadata.agent');
+  async listSessions(request: ListPageRequest = {}): Promise<ListPage<Session>> {
+    const page = await this.persist.listSessions(request);
+    return {
+      items: page.items.map((record) => this.upsertSessionHandle(record)),
+      nextCursor: page.nextCursor,
+    };
+  }
+
+  async getSession(id: string): Promise<Session | null> {
+    const record = await this.persist.getSession(id);
+    if (!record) {
+      return null;
     }
-    return acp.newSession(injectSandboxMetadata(request));
+    return this.upsertSessionHandle(record);
   }
 
-  async loadSession(request: LoadSessionRequest): Promise<LoadSessionResponse> {
-    const acp = await this.requireAcpConnection();
-    return acp.loadSession(request);
+  async getEvents(request: ListEventsRequest): Promise<ListPage<SessionEvent>> {
+    return this.persist.listEvents(request);
   }
 
-  async prompt(request: PromptRequest): Promise<PromptResponse> {
-    const acp = await this.requireAcpConnection();
-    return acp.prompt(request);
-  }
-
-  async cancel(notification: CancelNotification): Promise<void> {
-    const acp = await this.requireAcpConnection();
-    return acp.cancel(notification);
-  }
-
-  async setSessionMode(request: SetSessionModeRequest): Promise<SetSessionModeResponse | void> {
-    const acp = await this.requireAcpConnection();
-    return acp.setSessionMode(request);
-  }
-
-  async setSessionConfigOption(
-    request: SetSessionConfigOptionRequest,
-  ): Promise<SetSessionConfigOptionResponse> {
-    const acp = await this.requireAcpConnection();
-    return acp.setSessionConfigOption(request);
-  }
-
-  async unstableListSessions(request: ListSessionsRequest): Promise<ListSessionsResponse> {
-    const acp = await this.requireAcpConnection();
-    const response = await acp.unstableListSessions(request);
-    return normalizeAcpListSessionsResponse(response);
-  }
-
-  async unstableForkSession(request: ForkSessionRequest): Promise<ForkSessionResponse> {
-    const acp = await this.requireAcpConnection();
-    return acp.unstableForkSession(request);
-  }
-
-  async unstableResumeSession(request: ResumeSessionRequest): Promise<ResumeSessionResponse> {
-    const acp = await this.requireAcpConnection();
-    return acp.unstableResumeSession(request);
-  }
-
-  async setSessionModel(request: SetSessionModelRequest): Promise<SetSessionModelResponse | void> {
-    const acp = await this.requireAcpConnection();
-    return acp.unstableSetSessionModel(request);
-  }
-
-  async listModels(request: ListModelsRequest = {}): Promise<ListModelsResponse> {
-    if (!request.sessionId && (!request.agent || !request.agent.trim())) {
-      throw new Error("listModels requires request.agent when request.sessionId is absent.");
+  async createSession(request: SessionCreateRequest): Promise<Session> {
+    if (!request.agent.trim()) {
+      throw new Error("createSession requires a non-empty agent");
     }
-    const acp = await this.requireAcpConnection();
-    const params: Record<string, unknown> = {};
-    if (request.sessionId) {
-      params.sessionId = request.sessionId;
+
+    const localSessionId = request.id?.trim() || randomId();
+    const live = await this.getLiveConnection(request.agent.trim());
+    const sessionInit = normalizeSessionInit(request.sessionInit);
+
+    const response = await live.createRemoteSession(localSessionId, sessionInit);
+
+    const record: SessionRecord = {
+      id: localSessionId,
+      agent: request.agent.trim(),
+      agentSessionId: response.sessionId,
+      lastConnectionId: live.connectionId,
+      createdAt: nowMs(),
+      sessionInit,
+    };
+
+    await this.persist.updateSession(record);
+    this.nextSessionEventIndexBySession.set(record.id, 1);
+    live.bindSession(record.id, record.agentSessionId);
+    return this.upsertSessionHandle(record);
+  }
+
+  async resumeSession(id: string): Promise<Session> {
+    const existing = await this.persist.getSession(id);
+    if (!existing) {
+      throw new Error(`session '${id}' not found`);
     }
-    if (request.agent && request.agent.trim()) {
-      params.agent = request.agent.trim();
+
+    const live = await this.getLiveConnection(existing.agent);
+    if (existing.lastConnectionId === live.connectionId && live.hasBoundSession(id, existing.agentSessionId)) {
+      return this.upsertSessionHandle(existing);
     }
-    const result = await acp.extMethod(SESSION_LIST_MODELS_METHOD, params);
-    return normalizeListModelsResponse(result);
+
+    const replaySource = await this.collectReplayEvents(existing.id, this.replayMaxEvents);
+    const replayText = buildReplayText(replaySource, this.replayMaxChars);
+
+    const recreated = await live.createRemoteSession(existing.id, normalizeSessionInit(existing.sessionInit));
+
+    const updated: SessionRecord = {
+      ...existing,
+      agentSessionId: recreated.sessionId,
+      lastConnectionId: live.connectionId,
+      destroyedAt: undefined,
+    };
+
+    await this.persist.updateSession(updated);
+    live.bindSession(updated.id, updated.agentSessionId);
+    live.queueReplay(updated.id, replayText);
+
+    return this.upsertSessionHandle(updated);
   }
 
-  async setMetadata(sessionId: string, metadata: SandboxMetadata): Promise<Record<string, unknown>> {
-    const acp = await this.requireAcpConnection();
-    return acp.extMethod(SESSION_SET_METADATA_METHOD, {
-      sessionId,
-      metadata,
-    });
+  async resumeOrCreateSession(request: SessionResumeOrCreateRequest): Promise<Session> {
+    const existing = await this.persist.getSession(request.id);
+    if (existing) {
+      return this.resumeSession(existing.id);
+    }
+    return this.createSession(request);
   }
 
-  async detachSession(sessionId: string): Promise<Record<string, unknown>> {
-    const acp = await this.requireAcpConnection();
-    return acp.extMethod(SESSION_DETACH_METHOD, {
-      sessionId,
-    });
+  async destroySession(id: string): Promise<Session> {
+    const existing = await this.persist.getSession(id);
+    if (!existing) {
+      throw new Error(`session '${id}' not found`);
+    }
+
+    const updated: SessionRecord = {
+      ...existing,
+      destroyedAt: nowMs(),
+    };
+
+    await this.persist.updateSession(updated);
+    return this.upsertSessionHandle(updated);
   }
 
-  async terminateSession(sessionId: string): Promise<SessionTerminateResponse> {
-    const acp = await this.requireAcpConnection();
-    const result = await acp.extMethod(SESSION_TERMINATE_METHOD, {
-      sessionId,
-    });
-    return result as SessionTerminateResponse;
+  async sendSessionMethod(
+    sessionId: string,
+    method: string,
+    params: Record<string, unknown>,
+    options: SessionSendOptions = {},
+  ): Promise<{ session: Session; response: unknown }> {
+    const record = await this.persist.getSession(sessionId);
+    if (!record) {
+      throw new Error(`session '${sessionId}' not found`);
+    }
+
+    const live = await this.getLiveConnection(record.agent);
+    if (!live.hasBoundSession(record.id, record.agentSessionId)) {
+      // The persisted session points at a stale connection; restore lazily.
+      const restored = await this.resumeSession(record.id);
+      return this.sendSessionMethod(restored.id, method, params, options);
+    }
+
+    const response = await live.sendSessionMethod(record.id, method, params, options);
+    const refreshed = await this.requireSessionRecord(record.id);
+    return {
+      session: this.upsertSessionHandle(refreshed),
+      response,
+    };
+  }
+
+  onSessionEvent(sessionId: string, listener: SessionEventListener): () => void {
+    const listeners = this.eventListeners.get(sessionId) ?? new Set<SessionEventListener>();
+    listeners.add(listener);
+    this.eventListeners.set(sessionId, listeners);
+
+    return () => {
+      const set = this.eventListeners.get(sessionId);
+      if (!set) {
+        return;
+      }
+      set.delete(listener);
+      if (set.size === 0) {
+        this.eventListeners.delete(sessionId);
+      }
+    };
   }
 
   async getHealth(): Promise<HealthResponse> {
     return this.requestJson("GET", `${API_PREFIX}/health`);
   }
 
-  async listAgents(): Promise<AgentListResponse> {
-    const acp = await this.requireAcpConnection();
-    return (await acp.extMethod(AGENT_LIST_METHOD, {})) as unknown as AgentListResponse;
+  async listAgents(options?: { config?: boolean }): Promise<AgentListResponse> {
+    return this.requestJson("GET", `${API_PREFIX}/agents`, {
+      query: options?.config ? { config: "true" } : undefined,
+    });
+  }
+
+  async getAgent(agent: string, options?: { config?: boolean }): Promise<AgentInfo> {
+    return this.requestJson("GET", `${API_PREFIX}/agents/${encodeURIComponent(agent)}`, {
+      query: options?.config ? { config: "true" } : undefined,
+    });
   }
 
   async installAgent(agent: string, request: AgentInstallRequest = {}): Promise<AgentInstallResponse> {
-    const acp = await this.requireAcpConnection();
-    return (await acp.extMethod(AGENT_INSTALL_METHOD, {
-      agent,
-      ...request,
-    })) as unknown as AgentInstallResponse;
+    return this.requestJson("POST", `${API_PREFIX}/agents/${encodeURIComponent(agent)}/install`, {
+      body: request,
+    });
   }
 
-  // v1 session-creation/message endpoints remain removed in ACP-native v2.
-  async createSession(_sessionId: string, _request: unknown): Promise<never> {
-    throw new Error(V1_REMOVED_MESSAGE);
+  async listAcpServers(): Promise<AcpServerListResponse> {
+    return this.requestJson("GET", `${API_PREFIX}/acp`);
   }
 
-  async listSessions(): Promise<SessionListResponse> {
-    const acp = await this.requireAcpConnection();
-    const response = (await acp.extMethod(SESSION_LIST_METHOD, {})) as unknown as SessionListResponse;
-    return normalizeSessionListResponse(response);
-  }
-
-  async getSession(sessionId: string): Promise<SessionInfo> {
-    const acp = await this.requireAcpConnection();
-    const response = (await acp.extMethod(SESSION_GET_METHOD, {
-      sessionId,
-    })) as unknown as SessionInfo;
-    return normalizeSessionInfo(response);
-  }
-
-  async postMessage(_sessionId: string, _request: unknown): Promise<never> {
-    throw new Error(V1_REMOVED_MESSAGE);
-  }
-
-  async getEvents(_sessionId: string, _query?: unknown): Promise<never> {
-    throw new Error(V1_REMOVED_MESSAGE);
-  }
-
-  async listFsEntries(query?: FsEntriesQuery): Promise<FsEntry[]> {
-    const acp = await this.requireAcpConnection();
-    const result = await acp.extMethod(FS_LIST_ENTRIES_METHOD, withSessionQueryAliases(query) ?? {});
-    const entries = isRecord(result) && Array.isArray(result.entries) ? result.entries : [];
-    return entries.map((entry) => normalizeFsEntry(entry as FsEntry));
+  async listFsEntries(query: FsEntriesQuery = {}): Promise<FsEntry[]> {
+    return this.requestJson("GET", `${FS_PATH}/entries`, {
+      query,
+    });
   }
 
   async readFsFile(query: FsPathQuery): Promise<Uint8Array> {
     const response = await this.requestRaw("GET", `${FS_PATH}/file`, {
-      query: withSessionQueryAliases(query),
+      query,
       accept: "application/octet-stream",
     });
     const buffer = await response.arrayBuffer();
@@ -471,178 +661,214 @@ export class SandboxAgentClient {
 
   async writeFsFile(query: FsPathQuery, body: BodyInit): Promise<FsWriteResponse> {
     const response = await this.requestRaw("PUT", `${FS_PATH}/file`, {
-      query: withSessionQueryAliases(query),
+      query,
       rawBody: body,
       contentType: "application/octet-stream",
       accept: "application/json",
     });
-    const text = await response.text();
-    const parsed = text ? (JSON.parse(text) as FsWriteResponse) : { path: "", bytes_written: 0 };
-    return normalizeFsWriteResponse(parsed);
+    return (await response.json()) as FsWriteResponse;
   }
 
   async deleteFsEntry(query: FsDeleteQuery): Promise<FsActionResponse> {
-    const acp = await this.requireAcpConnection();
-    return (await acp.extMethod(
-      FS_DELETE_ENTRY_METHOD,
-      withSessionQueryAliases(query) ?? {},
-    )) as unknown as FsActionResponse;
+    return this.requestJson("DELETE", `${FS_PATH}/entry`, { query });
   }
 
   async mkdirFs(query: FsPathQuery): Promise<FsActionResponse> {
-    const acp = await this.requireAcpConnection();
-    return (await acp.extMethod(
-      FS_MKDIR_METHOD,
-      withSessionQueryAliases(query) ?? {},
-    )) as unknown as FsActionResponse;
+    return this.requestJson("POST", `${FS_PATH}/mkdir`, { query });
   }
 
-  async moveFs(request: FsMoveRequest, query?: FsSessionQuery): Promise<FsMoveResponse> {
-    const acp = await this.requireAcpConnection();
-    return (await acp.extMethod(FS_MOVE_METHOD, {
-      ...(withSessionQueryAliases(query) ?? {}),
-      ...request,
-    })) as unknown as FsMoveResponse;
+  async moveFs(request: FsMoveRequest): Promise<FsMoveResponse> {
+    return this.requestJson("POST", `${FS_PATH}/move`, { body: request });
   }
 
   async statFs(query: FsPathQuery): Promise<FsStat> {
-    const acp = await this.requireAcpConnection();
-    const stat = (await acp.extMethod(
-      FS_STAT_METHOD,
-      withSessionQueryAliases(query) ?? {},
-    )) as unknown as FsStat;
-    return normalizeFsStat(stat);
+    return this.requestJson("GET", `${FS_PATH}/stat`, { query });
   }
 
   async uploadFsBatch(body: BodyInit, query?: FsUploadBatchQuery): Promise<FsUploadBatchResponse> {
     const response = await this.requestRaw("POST", `${FS_PATH}/upload-batch`, {
-      query: withSessionQueryAliases(query),
+      query,
       rawBody: body,
       contentType: "application/x-tar",
       accept: "application/json",
     });
-    const text = await response.text();
-    return text ? (JSON.parse(text) as FsUploadBatchResponse) : { paths: [], truncated: false };
+    return (await response.json()) as FsUploadBatchResponse;
   }
 
-  async dispose(): Promise<void> {
-    await this.disconnect();
-
-    if (this.spawnHandle) {
-      await this.spawnHandle.dispose();
-      this.spawnHandle = undefined;
-    }
+  async getMcpConfig(query: McpConfigQuery): Promise<McpServerConfig> {
+    return this.requestJson("GET", `${API_PREFIX}/config/mcp`, { query });
   }
 
-  private async connectInternal(options: SandboxAgentClientConnectOptions): Promise<InitializeResponse> {
-    const agent = options.agent ?? this.agent;
-    if (!agent) {
-      this.connectPromise = null;
-      throw new Error("agent is required to connect.");
+  async setMcpConfig(query: McpConfigQuery, config: McpServerConfig): Promise<void> {
+    await this.requestRaw("PUT", `${API_PREFIX}/config/mcp`, { query, body: config });
+  }
+
+  async deleteMcpConfig(query: McpConfigQuery): Promise<void> {
+    await this.requestRaw("DELETE", `${API_PREFIX}/config/mcp`, { query });
+  }
+
+  async getSkillsConfig(query: SkillsConfigQuery): Promise<SkillsConfig> {
+    return this.requestJson("GET", `${API_PREFIX}/config/skills`, { query });
+  }
+
+  async setSkillsConfig(query: SkillsConfigQuery, config: SkillsConfig): Promise<void> {
+    await this.requestRaw("PUT", `${API_PREFIX}/config/skills`, { query, body: config });
+  }
+
+  async deleteSkillsConfig(query: SkillsConfigQuery): Promise<void> {
+    await this.requestRaw("DELETE", `${API_PREFIX}/config/skills`, { query });
+  }
+
+  private async getLiveConnection(agent: string): Promise<LiveAcpConnection> {
+    const existing = this.liveConnections.get(agent);
+    if (existing) {
+      return existing;
     }
 
-    const acpClient = new AcpHttpClient({
+    const serverId = `sdk-${agent}-${randomId()}`;
+    const created = await LiveAcpConnection.create({
       baseUrl: this.baseUrl,
-      fetch: this.fetcher,
       token: this.token,
+      fetcher: this.fetcher,
       headers: this.defaultHeaders,
-      client: {
-        sessionUpdate: async (notification) => {
-          if (this.onSessionUpdate) {
-            await this.onSessionUpdate(notification);
-          }
-          this.emitEvent({
-            type: "sessionUpdate",
-            notification,
-          });
-        },
-        requestPermission: this.onPermissionRequest,
-        extNotification: async (method, params) => {
-          this.handleEnvelope(
-            {
-              jsonrpc: "2.0",
-              method,
-              params,
-            } as AnyMessage,
-            "inbound",
-          );
-        },
+      agent,
+      serverId,
+      onObservedEnvelope: (connection, envelope, direction, localSessionId) => {
+        void this.persistObservedEnvelope(connection, envelope, direction, localSessionId);
       },
     });
 
-    try {
-      const initializeResponse = await acpClient.initialize({
-        protocolVersion: options.initialize?.protocolVersion ?? PROTOCOL_VERSION,
-        clientCapabilities: options.initialize?.clientCapabilities,
-        clientInfo: options.initialize?.clientInfo ?? {
-          name: "sandbox-agent-sdk",
-          version: "v2",
-        },
-        _meta: mergeSandboxMeta(options.initialize?._meta, { agent }),
-      });
+    this.liveConnections.set(agent, created);
+    return created;
+  }
 
-      this.acpClient = acpClient;
-      this.connectError = undefined;
-      this.agent = agent;
-      return initializeResponse;
-    } catch (error) {
-      this.connectError = error;
-      await acpClient.disconnect().catch(() => {
-        // best effort
-      });
-      throw error;
-    } finally {
-      this.connectPromise = null;
+  private async persistObservedEnvelope(
+    connection: LiveAcpConnection,
+    envelope: AnyMessage,
+    direction: AcpEnvelopeDirection,
+    localSessionId: string | null,
+  ): Promise<void> {
+    if (!localSessionId) {
+      return;
+    }
+
+    const event: SessionEvent = {
+      id: randomId(),
+      eventIndex: await this.allocateSessionEventIndex(localSessionId),
+      sessionId: localSessionId,
+      createdAt: nowMs(),
+      connectionId: connection.connectionId,
+      sender: direction === "outbound" ? "client" : "agent",
+      payload: cloneEnvelope(envelope),
+    };
+
+    await this.persist.insertEvent(event);
+
+    const listeners = this.eventListeners.get(localSessionId);
+    if (!listeners || listeners.size === 0) {
+      return;
+    }
+
+    for (const listener of listeners) {
+      listener(event);
     }
   }
 
-  private async requireAcpConnection(): Promise<AcpHttpClient> {
-    if (this.connectPromise) {
-      await this.connectPromise;
+  private async allocateSessionEventIndex(sessionId: string): Promise<number> {
+    await this.ensureSessionEventIndexSeeded(sessionId);
+    const nextIndex = this.nextSessionEventIndexBySession.get(sessionId) ?? 1;
+    this.nextSessionEventIndexBySession.set(sessionId, nextIndex + 1);
+    return nextIndex;
+  }
+
+  private async ensureSessionEventIndexSeeded(sessionId: string): Promise<void> {
+    if (this.nextSessionEventIndexBySession.has(sessionId)) {
+      return;
     }
 
-    if (!this.acpClient) {
-      if (this.connectError) {
-        throw this.connectError;
+    if (!this.seedSessionEventIndexBySession.has(sessionId)) {
+      const pending = (async () => {
+        const maxPersistedIndex = await this.findMaxPersistedSessionEventIndex(sessionId);
+        this.nextSessionEventIndexBySession.set(sessionId, Math.max(1, maxPersistedIndex + 1));
+      })().finally(() => {
+        this.seedSessionEventIndexBySession.delete(sessionId);
+      });
+      this.seedSessionEventIndexBySession.set(sessionId, pending);
+    }
+
+    const pending = this.seedSessionEventIndexBySession.get(sessionId);
+    if (pending) {
+      await pending;
+    }
+  }
+
+  private async findMaxPersistedSessionEventIndex(sessionId: string): Promise<number> {
+    let maxIndex = 0;
+    let eventCursor: string | undefined;
+
+    while (true) {
+      const eventsPage = await this.persist.listEvents({
+        sessionId,
+        cursor: eventCursor,
+        limit: EVENT_INDEX_SCAN_EVENTS_LIMIT,
+      });
+
+      for (const event of eventsPage.items) {
+        if (Number.isFinite(event.eventIndex) && event.eventIndex > maxIndex) {
+          maxIndex = Math.floor(event.eventIndex);
+        }
       }
-      throw new NotConnectedError();
+
+      if (!eventsPage.nextCursor) {
+        break;
+      }
+      eventCursor = eventsPage.nextCursor;
     }
 
-    return this.acpClient;
+    return maxIndex;
   }
 
-  private handleEnvelope(envelope: AnyMessage, direction: AcpEnvelopeDirection): void {
-    if (direction !== "inbound") {
-      return;
-    }
+  private async collectReplayEvents(sessionId: string, maxEvents: number): Promise<SessionEvent[]> {
+    const all: SessionEvent[] = [];
+    let cursor: string | undefined;
 
-    const method = notificationMethod(envelope);
-    if (!method) {
-      return;
-    }
-
-    if (method === SESSION_ENDED_METHOD) {
-      const notification = normalizeSessionEndedNotification(envelope);
-      this.emitEvent({
-        type: "sessionEnded",
-        notification,
+    while (true) {
+      const page = await this.persist.listEvents({
+        sessionId,
+        cursor,
+        limit: Math.max(100, maxEvents),
       });
-      return;
+
+      all.push(...page.items);
+
+      if (!page.nextCursor) {
+        break;
+      }
+
+      cursor = page.nextCursor;
     }
 
-    if (method === AGENT_UNPARSED_METHOD) {
-      this.emitEvent({
-        type: "agentUnparsed",
-        notification: normalizeAgentUnparsedNotification(envelope),
-      });
-    }
+    return all.slice(-maxEvents);
   }
 
-  private emitEvent(event: AgentEvent): void {
-    if (!this.onEvent) {
-      return;
+  private upsertSessionHandle(record: SessionRecord): Session {
+    const existing = this.sessionHandles.get(record.id);
+    if (existing) {
+      existing.apply(record);
+      return existing;
     }
-    this.onEvent(event);
+
+    const created = new Session(this, record);
+    this.sessionHandles.set(record.id, created);
+    return created;
+  }
+
+  private async requireSessionRecord(id: string): Promise<SessionRecord> {
+    const record = await this.persist.getSession(id);
+    if (!record) {
+      throw new Error(`session '${id}' not found`);
+    }
+    return record;
   }
 
   private async requestJson<T>(method: string, path: string, options: RequestOptions = {}): Promise<T> {
@@ -658,12 +884,7 @@ export class SandboxAgentClient {
       return undefined as T;
     }
 
-    const text = await response.text();
-    if (!text) {
-      return undefined as T;
-    }
-
-    return JSON.parse(text) as T;
+    return (await response.json()) as T;
   }
 
   private async requestRaw(method: string, path: string, options: RequestOptions = {}): Promise<Response> {
@@ -674,10 +895,16 @@ export class SandboxAgentClient {
       headers.set("Accept", options.accept);
     }
 
-    const init: RequestInit = { method, headers, signal: options.signal };
+    const init: RequestInit = {
+      method,
+      headers,
+      signal: options.signal,
+    };
+
     if (options.rawBody !== undefined && options.body !== undefined) {
       throw new Error("requestRaw received both rawBody and body");
     }
+
     if (options.rawBody !== undefined) {
       if (options.contentType) {
         headers.set("Content-Type", options.contentType);
@@ -699,6 +926,7 @@ export class SandboxAgentClient {
 
   private buildHeaders(extra?: HeadersInit): Headers {
     const headers = new Headers(this.defaultHeaders ?? undefined);
+
     if (this.token) {
       headers.set("Authorization", `Bearer ${this.token}`);
     }
@@ -713,6 +941,7 @@ export class SandboxAgentClient {
 
   private buildUrl(path: string, query?: Record<string, QueryValue>): string {
     const url = new URL(`${this.baseUrl}${path}`);
+
     if (query) {
       Object.entries(query).forEach(([key, value]) => {
         if (value === undefined || value === null) {
@@ -721,189 +950,199 @@ export class SandboxAgentClient {
         url.searchParams.set(key, String(value));
       });
     }
+
     return url.toString();
   }
 }
 
-// Backward-compatible convenience static entrypoint.
-export class SandboxAgent {
-  static async connect(options: SandboxAgentClientOptions): Promise<SandboxAgentClient> {
-    const autoConnect = options.autoConnect ?? !!options.agent;
-    return new SandboxAgentClient({ ...options, autoConnect });
+type QueryValue = string | number | boolean | null | undefined;
+
+type RequestOptions = {
+  query?: Record<string, QueryValue>;
+  body?: unknown;
+  rawBody?: BodyInit;
+  contentType?: string;
+  headers?: HeadersInit;
+  accept?: string;
+  signal?: AbortSignal;
+};
+
+/**
+ * Auto-select and call `authenticate` based on the agent's advertised auth methods.
+ * Prefers env-var-based methods that the server process already has configured.
+ */
+async function autoAuthenticate(acp: AcpHttpClient, methods: AuthMethod[]): Promise<void> {
+  // Only attempt env-var-based methods that the server process can satisfy
+  // automatically.  Interactive methods (e.g. "claude-login") cannot be
+  // fulfilled programmatically and must be skipped.
+  const envBased = methods.find(
+    (m) =>
+      m.id === "codex-api-key" ||
+      m.id === "openai-api-key" ||
+      m.id === "anthropic-api-key",
+  );
+
+  if (!envBased) {
+    return;
   }
 
-  static async start(options: SandboxAgentStartOptions = {}): Promise<SandboxAgentClient> {
-    const autoConnect = options.autoConnect ?? !!options.agent;
-    return SandboxAgentClient.start({ ...options, autoConnect });
+  try {
+    await acp.authenticate({ methodId: envBased.id });
+  } catch {
+    // Authentication is best-effort; the agent may already have credentials
+    // from env vars or credential files configured on the server side.
   }
 }
 
-function injectSandboxMetadata(request: SessionCreateRequest): NewSessionRequest {
-  const { metadata, ...rest } = request;
-  if (!metadata) {
-    return rest as NewSessionRequest;
+function normalizeSessionInit(
+  value: Omit<NewSessionRequest, "_meta"> | undefined,
+): Omit<NewSessionRequest, "_meta"> {
+  if (!value) {
+    return {
+      cwd: defaultCwd(),
+      mcpServers: [],
+    };
   }
-
-  return {
-    ...(rest as NewSessionRequest),
-    _meta: mergeSandboxMeta((rest as Record<string, unknown>)._meta, metadata),
-  };
-}
-
-function mergeSandboxMeta(
-  existing: unknown,
-  sandboxAdditions: Record<string, unknown>,
-): Record<string, unknown> {
-  const base = isRecord(existing) ? existing : {};
-  const existingSandbox = isRecord(base[SANDBOX_META_KEY]) ? base[SANDBOX_META_KEY] : {};
-  return {
-    ...base,
-    [SANDBOX_META_KEY]: {
-      ...existingSandbox,
-      ...sandboxAdditions,
-    },
-  };
-}
-
-function normalizeAcpListSessionsResponse(response: ListSessionsResponse): ListSessionsResponse {
-  const raw = response as unknown as Record<string, unknown>;
-  const sessions = Array.isArray(raw.sessions) ? raw.sessions : [];
-
-  return {
-    ...(response as Record<string, unknown>),
-    sessions: sessions.map((entry) => normalizeAcpSessionInfo(entry)),
-  } as ListSessionsResponse;
-}
-
-function normalizeAcpSessionInfo(entry: unknown): Record<string, unknown> {
-  const session = isRecord(entry) ? { ...entry } : {};
-  const meta = isRecord(session._meta) ? session._meta : {};
-  const sandboxMeta = isRecord(meta[SANDBOX_META_KEY]) ? meta[SANDBOX_META_KEY] : undefined;
-
-  if (!sandboxMeta) {
-    return session;
-  }
-
-  if (session.metadata === undefined) {
-    session.metadata = sandboxMeta;
-  }
-
-  if (session.model === undefined && typeof sandboxMeta.model === "string") {
-    session.model = sandboxMeta.model;
-  }
-
-  if (session.title === undefined && typeof sandboxMeta.title === "string") {
-    session.title = sandboxMeta.title;
-  }
-
-  if (session.agent === undefined && typeof sandboxMeta.agent === "string") {
-    session.agent = sandboxMeta.agent;
-  }
-
-  if (session.createdAt === undefined && sandboxMeta.createdAt !== undefined) {
-    session.createdAt = sandboxMeta.createdAt;
-  }
-
-  if (session.updatedAt === undefined && sandboxMeta.updatedAt !== undefined) {
-    session.updatedAt = sandboxMeta.updatedAt;
-  }
-
-  if (session.ended === undefined && typeof sandboxMeta.ended === "boolean") {
-    session.ended = sandboxMeta.ended;
-  }
-
-  if (session.eventCount === undefined && typeof sandboxMeta.eventCount === "number") {
-    session.eventCount = sandboxMeta.eventCount;
-  }
-
-  return session;
-}
-
-function normalizeListModelsResponse(result: Record<string, unknown>): ListModelsResponse {
-  const availableModels = Array.isArray(result.availableModels)
-    ? result.availableModels.map((entry) => normalizeModelInfo(entry))
-    : [];
-
-  return {
-    ...result,
-    availableModels,
-    currentModelId:
-      typeof result.currentModelId === "string" || result.currentModelId === null
-        ? (result.currentModelId as string | null)
-        : undefined,
-  };
-}
-
-function normalizeModelInfo(value: unknown): SessionModelInfo {
-  if (!isRecord(value)) {
-    return { modelId: "" };
-  }
-
-  const modelId =
-    typeof value.modelId === "string"
-      ? value.modelId
-      : typeof value.id === "string"
-        ? value.id
-        : "";
 
   return {
     ...value,
-    modelId,
+    cwd: value.cwd ?? defaultCwd(),
+    mcpServers: value.mcpServers ?? [],
   };
 }
 
-function normalizeSessionEndedNotification(envelope: AnyMessage): SessionEndedNotification {
-  const source: Record<string, unknown> = isRecord(envelope) ? envelope : {};
-  const sourceParams = source["params"];
-  const params = isRecord(sourceParams) ? { ...sourceParams } : {};
-
-  const sessionId =
-    typeof params.sessionId === "string"
-      ? params.sessionId
-      : typeof params.session_id === "string"
-        ? params.session_id
-        : undefined;
-
-  if (sessionId) {
-    params.sessionId = sessionId;
-    params.session_id = sessionId;
-  }
-
+function mapSessionParams(params: Record<string, unknown>, agentSessionId: string): Record<string, unknown> {
   return {
-    ...(source as Record<string, unknown>),
-    jsonrpc: "2.0",
-    method: SESSION_ENDED_METHOD,
-    params,
-  } as SessionEndedNotification;
+    ...params,
+    sessionId: agentSessionId,
+  };
 }
 
-function normalizeAgentUnparsedNotification(envelope: AnyMessage): AgentUnparsedNotification {
-  const source: Record<string, unknown> = isRecord(envelope) ? envelope : {};
-  const sourceParams = source["params"];
-  const params = isRecord(sourceParams) ? sourceParams : {};
-
-  return {
-    ...(source as Record<string, unknown>),
-    jsonrpc: "2.0",
-    method: AGENT_UNPARSED_METHOD,
-    params,
-  } as AgentUnparsedNotification;
+function injectReplayPrompt(params: Record<string, unknown>, replayText: string): void {
+  const prompt = Array.isArray(params.prompt) ? [...params.prompt] : [];
+  prompt.unshift({
+    type: "text",
+    text: replayText,
+  });
+  params.prompt = prompt;
 }
 
-function notificationMethod(message: AnyMessage): string | null {
-  if (!isRecord(message)) {
+function buildReplayText(events: SessionEvent[], maxChars: number): string | null {
+  if (events.length === 0) {
     return null;
   }
 
-  if ("id" in message) {
+  const prefix =
+    "Previous session history is replayed below as JSON-RPC envelopes. Use it as context before responding to the latest user prompt.\n";
+  let text = prefix;
+
+  for (const event of events) {
+    const line = JSON.stringify({
+      createdAt: event.createdAt,
+      sender: event.sender,
+      payload: event.payload,
+    });
+
+    if (text.length + line.length + 1 > maxChars) {
+      text += "\n[history truncated]";
+      break;
+    }
+
+    text += `${line}\n`;
+  }
+
+  return text;
+}
+
+function envelopeMethod(message: AnyMessage): string | null {
+  if (!isRecord(message) || !("method" in message) || typeof message["method"] !== "string") {
+    return null;
+  }
+  return message["method"];
+}
+
+function envelopeId(message: AnyMessage): string | null {
+  if (!isRecord(message) || !("id" in message) || message["id"] === undefined || message["id"] === null) {
+    return null;
+  }
+  return String(message["id"]);
+}
+
+function envelopeSessionIdFromParams(message: AnyMessage): string | null {
+  if (!isRecord(message) || !("params" in message) || !isRecord(message["params"])) {
     return null;
   }
 
-  return typeof message.method === "string" ? message.method : null;
+  const params = message["params"];
+  if (typeof params.sessionId === "string" && params.sessionId.length > 0) {
+    return params.sessionId;
+  }
+
+  return null;
+}
+
+function envelopeSessionIdFromResult(message: AnyMessage): string | null {
+  if (!isRecord(message) || !("result" in message) || !isRecord(message["result"])) {
+    return null;
+  }
+
+  const result = message["result"];
+  if (typeof result.sessionId === "string" && result.sessionId.length > 0) {
+    return result.sessionId;
+  }
+
+  return null;
+}
+
+function cloneEnvelope(envelope: AnyMessage): AnyMessage {
+  return JSON.parse(JSON.stringify(envelope)) as AnyMessage;
 }
 
 function isRecord(value: unknown): value is Record<string, any> {
   return typeof value === "object" && value !== null;
+}
+
+function randomId(): string {
+  if (typeof globalThis.crypto?.randomUUID === "function") {
+    return globalThis.crypto.randomUUID();
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function nowMs(): number {
+  return Date.now();
+}
+
+function defaultCwd(): string {
+  if (typeof process !== "undefined" && typeof process.cwd === "function") {
+    return process.cwd();
+  }
+  return "/";
+}
+
+function normalizePositiveInt(value: number | undefined, fallback: number): number {
+  if (!Number.isFinite(value) || (value ?? 0) < 1) {
+    return fallback;
+  }
+  return Math.floor(value as number);
+}
+
+function normalizeSpawnOptions(
+  spawn: SandboxAgentSpawnOptions | boolean | undefined,
+  defaultEnabled: boolean,
+): SandboxAgentSpawnOptions & { enabled: boolean } {
+  if (spawn === false) {
+    return { enabled: false };
+  }
+
+  if (spawn === true || spawn === undefined) {
+    return { enabled: defaultEnabled };
+  }
+
+  return {
+    ...spawn,
+    enabled: spawn.enabled ?? defaultEnabled,
+  };
 }
 
 async function readProblem(response: Response): Promise<ProblemDetails | undefined> {
@@ -917,78 +1156,3 @@ async function readProblem(response: Response): Promise<ProblemDetails | undefin
     return undefined;
   }
 }
-
-function normalizeSessionListResponse(response: SessionListResponse): SessionListResponse {
-  return {
-    ...response,
-    sessions: response.sessions.map((session) => normalizeSessionInfo(session)),
-  };
-}
-
-function normalizeSessionInfo(session: SessionInfo): SessionInfo {
-  const normalized = { ...session };
-  const sessionId = typeof normalized.session_id === "string" ? normalized.session_id : normalized.sessionId;
-  if (typeof sessionId === "string") {
-    normalized.session_id = sessionId;
-    normalized.sessionId = sessionId;
-  }
-  return normalized;
-}
-
-function normalizeFsEntry(entry: FsEntry): FsEntry {
-  const normalized = { ...entry };
-  const entryType = normalized.entry_type ?? normalized.entryType;
-  if (entryType) {
-    normalized.entry_type = entryType;
-    normalized.entryType = entryType;
-  }
-  return normalized;
-}
-
-function normalizeFsStat(stat: FsStat): FsStat {
-  const normalized = { ...stat };
-  const entryType = normalized.entry_type ?? normalized.entryType;
-  if (entryType) {
-    normalized.entry_type = entryType;
-    normalized.entryType = entryType;
-  }
-  return normalized;
-}
-
-function normalizeFsWriteResponse(response: FsWriteResponse): FsWriteResponse {
-  const normalized = { ...response };
-  const bytes = normalized.bytes_written ?? normalized.bytesWritten;
-  if (typeof bytes === "number") {
-    normalized.bytes_written = bytes;
-    normalized.bytesWritten = bytes;
-  }
-  return normalized;
-}
-
-function withSessionQueryAliases<T extends object>(query?: T): Record<string, QueryValue> | undefined {
-  if (!query) {
-    return undefined;
-  }
-
-  const normalized = { ...(query as Record<string, QueryValue>) };
-  const sessionId = normalized.session_id ?? normalized.sessionId;
-  if (sessionId !== undefined) {
-    normalized.session_id = sessionId;
-    normalized.sessionId = sessionId;
-  }
-
-  return normalized;
-}
-
-const normalizeSpawnOptions = (
-  spawn: SandboxAgentSpawnOptions | boolean | undefined,
-  defaultEnabled: boolean,
-): SandboxAgentSpawnOptions => {
-  if (typeof spawn === "boolean") {
-    return { enabled: spawn };
-  }
-  if (spawn) {
-    return { enabled: spawn.enabled ?? defaultEnabled, ...spawn };
-  }
-  return { enabled: defaultEnabled };
-};

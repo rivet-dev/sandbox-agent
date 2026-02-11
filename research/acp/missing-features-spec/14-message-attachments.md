@@ -4,9 +4,9 @@
 
 ## Summary
 
-v1 `MessageRequest.attachments` allowed sending file attachments (path, mime, filename) with prompts. v2 ACP `embeddedContext` is only partial. Need to support file attachments in prompt messages.
+v1 `MessageRequest.attachments` allowed sending file attachments (path, mime, filename) with prompts. v1 ACP `embeddedContext` is only partial. Need to support file attachments in prompt messages.
 
-## Current v2 State
+## Current v1 State
 
 - ACP `session/prompt` accepts `params.content` as the prompt text
 - No attachment mechanism in the current ACP prompt flow
@@ -122,7 +122,7 @@ The runtime extracts attachments from `_meta` and transforms them per agent:
 | `server/packages/sandbox-agent/src/acp_runtime/mod.rs` | Extract `attachments` from `session/prompt` `_meta`; transform per agent before forwarding |
 | `server/packages/sandbox-agent/src/acp_runtime/mock.rs` | Add mock handling for attachments |
 | `sdks/typescript/src/client.ts` | Add `attachments` option to prompt method |
-| `server/packages/sandbox-agent/tests/v2_api.rs` | Add attachment prompt test |
+| `server/packages/sandbox-agent/tests/v1_api.rs` | Add attachment prompt test |
 
 ### Docs to Update
 

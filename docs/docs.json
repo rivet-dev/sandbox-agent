@@ -50,8 +50,7 @@
 						"group": "Getting started",
 						"pages": [
 							"quickstart",
-							"building-chat-ui",
-							"manage-sessions",
+							"sdk-overview",
 							{
 								"group": "Deploy",
 								"icon": "server",
@@ -68,11 +67,7 @@
 						]
 					},
 					{
-						"group": "SDKs",
-						"pages": ["sdks/typescript", "sdks/python"]
-					},
-					{
-						"group": "Agent Features",
+						"group": "Agent",
 						"pages": [
 							"agent-sessions",
 							"attachments",
@@ -82,19 +77,24 @@
 						]
 					},
 					{
-						"group": "Features",
+						"group": "System",
 						"pages": ["file-system"]
 					},
 					{
-						"group": "Advanced",
-						"pages": ["advanced/acp-http-client"]
+						"group": "Orchestration",
+						"pages": [
+							"architecture",
+							"session-persistence",
+							"observability",
+							"multiplayer",
+							"security"
+						]
 					},
 					{
 						"group": "Reference",
 						"pages": [
 							"cli",
 							"inspector",
-							"session-transcript-schema",
 							"opencode-compatibility",
 							{
 								"group": "More",
@@ -102,6 +102,7 @@
 									"credentials",
 									"daemon",
 									"cors",
+									"session-restoration",
 									"telemetry",
 									{
 										"group": "AI",

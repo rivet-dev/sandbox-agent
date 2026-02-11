@@ -4,12 +4,12 @@
 
 ## Summary
 
-v1 had explicit session termination (`POST /v1/sessions/{id}/terminate`). v2 only has `session/cancel` (turn cancellation, not session kill) and `DELETE /v2/rpc` (connection close, not session termination). Need explicit session destroy/terminate semantics.
+v1 had explicit session termination (`POST /v1/sessions/{id}/terminate`). v1 only has `session/cancel` (turn cancellation, not session kill) and `DELETE /v1/rpc` (connection close, not session termination). Need explicit session destroy/terminate semantics.
 
-## Current v2 State
+## Current v1 State
 
 - `session/cancel` — cancels an in-flight prompt turn only
-- `DELETE /v2/rpc` — closes the HTTP connection, does **not** terminate the session
+- `DELETE /v1/rpc` — closes the HTTP connection, does **not** terminate the session
 - `_sandboxagent/session/detach` — detaches a session from a connection (multi-client visibility)
 - No session termination/deletion exists
 - `rfds-vs-extensions.md`: "Session Termination: Not covered by ACP. Only implement if product explicitly requires termination semantics beyond session/cancel"
@@ -112,7 +112,7 @@ Response:
 | `server/packages/sandbox-agent/src/acp_runtime/mod.rs` | Add `_sandboxagent/session/terminate` handler; add session removal from registry; add process kill logic |
 | `server/packages/sandbox-agent/src/acp_runtime/mock.rs` | Add mock terminate support |
 | `sdks/typescript/src/client.ts` | Add `terminateSession(sessionId)` method |
-| `server/packages/sandbox-agent/tests/v2_api.rs` | Add session termination test |
+| `server/packages/sandbox-agent/tests/v1_api.rs` | Add session termination test |
 
 ### Docs to Update
 

@@ -3,7 +3,7 @@
 ## Inspector Architecture
 
 - Inspector source is `frontend/packages/inspector/`.
-- `/ui/` must use ACP over HTTP (`/v2/rpc`) for session/prompt traffic.
+- `/ui/` must use ACP over HTTP (`/v1/rpc`) for session/prompt traffic.
 - Primary flow:
   - `initialize`
   - `session/new`

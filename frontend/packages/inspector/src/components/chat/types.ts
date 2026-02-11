@@ -1,14 +1,17 @@
-import type { UniversalItem } from "../../types/legacyApi";
-
 export type TimelineEntry = {
   id: string;
-  kind: "item" | "meta";
+  kind: "message" | "tool" | "meta" | "reasoning";
   time: string;
-  item?: UniversalItem;
-  deltaText?: string;
-  meta?: {
-    title: string;
-    detail?: string;
-    severity?: "info" | "error";
-  };
+  // For messages:
+  role?: "user" | "assistant";
+  text?: string;
+  // For tool calls:
+  toolName?: string;
+  toolInput?: string;
+  toolOutput?: string;
+  toolStatus?: string;
+  // For reasoning:
+  reasoning?: { text: string; visibility?: string };
+  // For meta:
+  meta?: { title: string; detail?: string; severity?: "info" | "error" };
 };

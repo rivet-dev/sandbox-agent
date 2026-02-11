@@ -1,282 +1,237 @@
-export interface ProblemDetails {
-  type: string;
-  title: string;
-  status: number;
-  detail?: string;
-  instance?: string;
-  [key: string]: unknown;
-}
+import type { AnyMessage, NewSessionRequest } from "acp-http-client";
+import type { components, operations } from "./generated/openapi.ts";
 
-export type HealthStatus = "healthy" | "degraded" | "unhealthy" | "ok";
+export type ProblemDetails = components["schemas"]["ProblemDetails"];
 
-export interface AgentHealthInfo {
+export type HealthResponse = JsonResponse<operations["get_v1_health"], 200>;
+export type AgentListResponse = JsonResponse<operations["get_v1_agents"], 200>;
+export type AgentInfo = components["schemas"]["AgentInfo"];
+export type AgentInstallRequest = JsonRequestBody<operations["post_v1_agent_install"]>;
+export type AgentInstallResponse = JsonResponse<operations["post_v1_agent_install"], 200>;
+
+export type AcpEnvelope = components["schemas"]["AcpEnvelope"];
+export type AcpServerInfo = components["schemas"]["AcpServerInfo"];
+export type AcpServerListResponse = JsonResponse<operations["get_v1_acp_servers"], 200>;
+
+export type FsEntriesQuery = QueryParams<operations["get_v1_fs_entries"]>;
+export type FsEntry = components["schemas"]["FsEntry"];
+export type FsPathQuery = QueryParams<operations["get_v1_fs_file"]>;
+export type FsDeleteQuery = QueryParams<operations["delete_v1_fs_entry"]>;
+export type FsUploadBatchQuery = QueryParams<operations["post_v1_fs_upload_batch"]>;
+export type FsWriteResponse = JsonResponse<operations["put_v1_fs_file"], 200>;
+export type FsActionResponse = JsonResponse<operations["delete_v1_fs_entry"], 200>;
+export type FsMoveRequest = JsonRequestBody<operations["post_v1_fs_move"]>;
+export type FsMoveResponse = JsonResponse<operations["post_v1_fs_move"], 200>;
+export type FsStat = JsonResponse<operations["get_v1_fs_stat"], 200>;
+export type FsUploadBatchResponse = JsonResponse<operations["post_v1_fs_upload_batch"], 200>;
+
+export type McpConfigQuery = QueryParams<operations["get_v1_config_mcp"]>;
+export type McpServerConfig = components["schemas"]["McpServerConfig"];
+
+export type SkillsConfigQuery = QueryParams<operations["get_v1_config_skills"]>;
+export type SkillsConfig = components["schemas"]["SkillsConfig"];
+
+export interface SessionRecord {
+  id: string;
   agent: string;
-  installed: boolean;
-  running: boolean;
-  [key: string]: unknown;
+  agentSessionId: string;
+  lastConnectionId: string;
+  createdAt: number;
+  destroyedAt?: number;
+  sessionInit?: Omit<NewSessionRequest, "_meta">;
 }
 
-export interface HealthResponse {
-  status: HealthStatus | string;
-  version: string;
-  uptime_ms: number;
-  agents: AgentHealthInfo[];
-  // Backward-compatible field from earlier v2 payloads.
-  api_version?: string;
-  [key: string]: unknown;
-}
+export type SessionEventSender = "client" | "agent";
 
-export type ServerStatus = "running" | "stopped" | "error";
-
-export interface ServerStatusInfo {
-  status: ServerStatus | string;
-  base_url?: string | null;
-  baseUrl?: string | null;
-  uptime_ms?: number | null;
-  uptimeMs?: number | null;
-  restart_count?: number;
-  restartCount?: number;
-  last_error?: string | null;
-  lastError?: string | null;
-  [key: string]: unknown;
-}
-
-export interface AgentModelInfo {
-  id?: string;
-  model_id?: string;
-  modelId?: string;
-  name?: string | null;
-  description?: string | null;
-  default_variant?: string | null;
-  defaultVariant?: string | null;
-  variants?: string[] | null;
-  [key: string]: unknown;
-}
-
-export interface AgentModeInfo {
+export interface SessionEvent {
+  // Stable unique event id. For ordering, sort by (sessionId, eventIndex).
   id: string;
-  name: string;
-  description: string;
-  [key: string]: unknown;
+  eventIndex: number;
+  sessionId: string;
+  createdAt: number;
+  connectionId: string;
+  sender: SessionEventSender;
+  payload: AnyMessage;
 }
 
-export interface AgentCapabilities {
-  plan_mode?: boolean;
-  permissions?: boolean;
-  questions?: boolean;
-  tool_calls?: boolean;
-  tool_results?: boolean;
-  text_messages?: boolean;
-  images?: boolean;
-  file_attachments?: boolean;
-  session_lifecycle?: boolean;
-  error_events?: boolean;
-  reasoning?: boolean;
-  status?: boolean;
-  command_execution?: boolean;
-  file_changes?: boolean;
-  mcp_tools?: boolean;
-  streaming_deltas?: boolean;
-  item_started?: boolean;
-  shared_process?: boolean;
-  unstable_methods?: boolean;
-  [key: string]: unknown;
+export interface ListPageRequest {
+  cursor?: string;
+  limit?: number;
 }
 
-export interface AgentInfo {
-  id: string;
-  installed?: boolean;
-  credentials_available?: boolean;
-  native_required?: boolean;
-  native_installed?: boolean;
-  native_version?: string | null;
-  agent_process_installed?: boolean;
-  agent_process_source?: string | null;
-  agent_process_version?: string | null;
-  version?: string | null;
-  path?: string | null;
-  server_status?: ServerStatusInfo | null;
-  models?: AgentModelInfo[] | null;
-  default_model?: string | null;
-  modes?: AgentModeInfo[] | null;
-  capabilities: AgentCapabilities;
-  [key: string]: unknown;
+export interface ListPage<T> {
+  items: T[];
+  nextCursor?: string;
 }
 
-export interface AgentListResponse {
-  agents: AgentInfo[];
+export interface ListEventsRequest extends ListPageRequest {
+  sessionId: string;
 }
 
-export interface AgentInstallRequest {
-  reinstall?: boolean;
-  agentVersion?: string;
-  agentProcessVersion?: string;
+export interface SessionPersistDriver {
+  getSession(id: string): Promise<SessionRecord | null>;
+  listSessions(request?: ListPageRequest): Promise<ListPage<SessionRecord>>;
+  updateSession(session: SessionRecord): Promise<void>;
+  listEvents(request: ListEventsRequest): Promise<ListPage<SessionEvent>>;
+  insertEvent(event: SessionEvent): Promise<void>;
 }
 
-export interface AgentInstallArtifact {
-  kind: string;
-  path: string;
-  source: string;
-  version?: string | null;
+export interface InMemorySessionPersistDriverOptions {
+  maxSessions?: number;
+  maxEventsPerSession?: number;
 }
 
-export interface AgentInstallResponse {
-  already_installed: boolean;
-  artifacts: AgentInstallArtifact[];
+const DEFAULT_MAX_SESSIONS = 1024;
+const DEFAULT_MAX_EVENTS_PER_SESSION = 500;
+const DEFAULT_LIST_LIMIT = 100;
+
+export class InMemorySessionPersistDriver implements SessionPersistDriver {
+  private readonly maxSessions: number;
+  private readonly maxEventsPerSession: number;
+  private readonly sessions = new Map<string, SessionRecord>();
+  private readonly eventsBySession = new Map<string, SessionEvent[]>();
+
+  constructor(options: InMemorySessionPersistDriverOptions = {}) {
+    this.maxSessions = normalizeCap(options.maxSessions, DEFAULT_MAX_SESSIONS);
+    this.maxEventsPerSession = normalizeCap(
+      options.maxEventsPerSession,
+      DEFAULT_MAX_EVENTS_PER_SESSION,
+    );
+  }
+
+  async getSession(id: string): Promise<SessionRecord | null> {
+    const session = this.sessions.get(id);
+    return session ? cloneSessionRecord(session) : null;
+  }
+
+  async listSessions(request: ListPageRequest = {}): Promise<ListPage<SessionRecord>> {
+    const sorted = [...this.sessions.values()].sort((a, b) => {
+      if (a.createdAt !== b.createdAt) {
+        return a.createdAt - b.createdAt;
+      }
+      return a.id.localeCompare(b.id);
+    });
+    const page = paginate(sorted, request);
+    return {
+      items: page.items.map(cloneSessionRecord),
+      nextCursor: page.nextCursor,
+    };
+  }
+
+  async updateSession(session: SessionRecord): Promise<void> {
+    this.sessions.set(session.id, { ...session });
+
+    if (!this.eventsBySession.has(session.id)) {
+      this.eventsBySession.set(session.id, []);
+    }
+
+    if (this.sessions.size <= this.maxSessions) {
+      return;
+    }
+
+    const overflow = this.sessions.size - this.maxSessions;
+    const removable = [...this.sessions.values()]
+      .sort((a, b) => {
+        if (a.createdAt !== b.createdAt) {
+          return a.createdAt - b.createdAt;
+        }
+        return a.id.localeCompare(b.id);
+      })
+      .slice(0, overflow)
+      .map((sessionToRemove) => sessionToRemove.id);
+
+    for (const sessionId of removable) {
+      this.sessions.delete(sessionId);
+      this.eventsBySession.delete(sessionId);
+    }
+  }
+
+  async listEvents(request: ListEventsRequest): Promise<ListPage<SessionEvent>> {
+    const all = [...(this.eventsBySession.get(request.sessionId) ?? [])].sort((a, b) => {
+      if (a.eventIndex !== b.eventIndex) {
+        return a.eventIndex - b.eventIndex;
+      }
+      return a.id.localeCompare(b.id);
+    });
+    const page = paginate(all, request);
+    return {
+      items: page.items.map(cloneSessionEvent),
+      nextCursor: page.nextCursor,
+    };
+  }
+
+  async insertEvent(event: SessionEvent): Promise<void> {
+    const events = this.eventsBySession.get(event.sessionId) ?? [];
+    events.push(cloneSessionEvent(event));
+
+    if (events.length > this.maxEventsPerSession) {
+      events.splice(0, events.length - this.maxEventsPerSession);
+    }
+
+    this.eventsBySession.set(event.sessionId, events);
+  }
 }
 
-export type SessionEndReason = "completed" | "error" | "terminated";
-export type TerminatedBy = "agent" | "daemon";
-
-export interface StderrOutput {
-  head?: string | null;
-  tail?: string | null;
-  truncated: boolean;
-  total_lines?: number | null;
+function cloneSessionRecord(session: SessionRecord): SessionRecord {
+  return {
+    ...session,
+    sessionInit: session.sessionInit
+      ? (JSON.parse(JSON.stringify(session.sessionInit)) as SessionRecord["sessionInit"])
+      : undefined,
+  };
 }
 
-export interface SessionTerminationInfo {
-  reason: SessionEndReason | string;
-  terminated_by: TerminatedBy | string;
-  message?: string | null;
-  exit_code?: number | null;
-  stderr?: StderrOutput | null;
-  [key: string]: unknown;
+function cloneSessionEvent(event: SessionEvent): SessionEvent {
+  return {
+    ...event,
+    payload: JSON.parse(JSON.stringify(event.payload)) as AnyMessage,
+  };
 }
 
-export interface SessionInfo {
-  session_id: string;
-  sessionId?: string;
-  agent?: string;
-  cwd?: string;
-  title?: string | null;
-  ended?: boolean;
-  created_at?: string | number | null;
-  createdAt?: string | number | null;
-  updated_at?: string | number | null;
-  updatedAt?: string | number | null;
-  model?: string | null;
-  metadata?: Record<string, unknown> | null;
-  agent_mode?: string;
-  agentMode?: string;
-  permission_mode?: string;
-  permissionMode?: string;
-  native_session_id?: string | null;
-  nativeSessionId?: string | null;
-  event_count?: number;
-  eventCount?: number;
-  directory?: string | null;
-  variant?: string | null;
-  mcp?: Record<string, unknown> | null;
-  skills?: Record<string, unknown> | null;
-  termination_info?: SessionTerminationInfo | null;
-  terminationInfo?: SessionTerminationInfo | null;
-  [key: string]: unknown;
+type ResponsesOf<T> = T extends { responses: infer R } ? R : never;
+type JsonResponse<T, StatusCode extends keyof ResponsesOf<T>> = ResponsesOf<T>[StatusCode] extends {
+  content: { "application/json": infer B };
+}
+  ? B
+  : never;
+
+type JsonRequestBody<T> = T extends {
+  requestBody: { content: { "application/json": infer B } };
+}
+  ? B
+  : never;
+
+type QueryParams<T> = T extends { parameters: { query: infer Q } }
+  ? Q
+  : T extends { parameters: { query?: infer Q } }
+    ? Q
+    : never;
+
+function normalizeCap(value: number | undefined, fallback: number): number {
+  if (!Number.isFinite(value) || (value ?? 0) < 1) {
+    return fallback;
+  }
+  return Math.floor(value as number);
 }
 
-export interface SessionListResponse {
-  sessions: SessionInfo[];
+function paginate<T>(items: T[], request: ListPageRequest): ListPage<T> {
+  const offset = parseCursor(request.cursor);
+  const limit = normalizeCap(request.limit, DEFAULT_LIST_LIMIT);
+  const slice = items.slice(offset, offset + limit);
+  const nextOffset = offset + slice.length;
+  return {
+    items: slice,
+    nextCursor: nextOffset < items.length ? String(nextOffset) : undefined,
+  };
 }
 
-export interface SessionTerminateResponse {
-  terminated?: boolean;
-  reason?: SessionEndReason | string;
-  terminated_by?: TerminatedBy | string;
-  terminatedBy?: TerminatedBy | string;
-  [key: string]: unknown;
-}
-
-export interface SessionEndedParams {
-  session_id?: string;
-  sessionId?: string;
-  data?: SessionTerminationInfo;
-  reason?: SessionEndReason | string;
-  terminated_by?: TerminatedBy | string;
-  terminatedBy?: TerminatedBy | string;
-  message?: string | null;
-  exit_code?: number | null;
-  stderr?: StderrOutput | null;
-  [key: string]: unknown;
-}
-
-export interface SessionEndedNotification {
-  jsonrpc: "2.0";
-  method: "_sandboxagent/session/ended";
-  params: SessionEndedParams;
-  [key: string]: unknown;
-}
-
-export interface FsPathQuery {
-  path: string;
-  session_id?: string | null;
-  sessionId?: string | null;
-}
-
-export interface FsEntriesQuery {
-  path?: string | null;
-  session_id?: string | null;
-  sessionId?: string | null;
-}
-
-export interface FsSessionQuery {
-  session_id?: string | null;
-  sessionId?: string | null;
-}
-
-export interface FsDeleteQuery {
-  path: string;
-  recursive?: boolean | null;
-  session_id?: string | null;
-  sessionId?: string | null;
-}
-
-export interface FsUploadBatchQuery {
-  path?: string | null;
-  session_id?: string | null;
-  sessionId?: string | null;
-}
-
-export type FsEntryType = "file" | "directory";
-
-export interface FsEntry {
-  name: string;
-  path: string;
-  size: number;
-  entry_type?: FsEntryType;
-  entryType?: FsEntryType;
-  modified?: string | null;
-}
-
-export interface FsStat {
-  path: string;
-  size: number;
-  entry_type?: FsEntryType;
-  entryType?: FsEntryType;
-  modified?: string | null;
-}
-
-export interface FsWriteResponse {
-  path: string;
-  bytes_written?: number;
-  bytesWritten?: number;
-}
-
-export interface FsMoveRequest {
-  from: string;
-  to: string;
-  overwrite?: boolean | null;
-}
-
-export interface FsMoveResponse {
-  from: string;
-  to: string;
-}
-
-export interface FsActionResponse {
-  path: string;
-}
-
-export interface FsUploadBatchResponse {
-  paths: string[];
-  truncated: boolean;
+function parseCursor(cursor: string | undefined): number {
+  if (!cursor) {
+    return 0;
+  }
+  const parsed = Number.parseInt(cursor, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return 0;
+  }
+  return parsed;
 }

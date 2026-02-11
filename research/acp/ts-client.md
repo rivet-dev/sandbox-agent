@@ -25,15 +25,15 @@
 - Existing ACP-facing methods in `sandbox-agent` are removed (full rewrite).
 - Non-ACP HTTP helpers remain in `sandbox-agent` (health/agents/install/fs/etc).
 
-## Server-Verified v2 ACP Contract
+## Server-Verified v1 ACP Contract
 
 ### HTTP endpoints and headers
 - Endpoints:
-1. `POST /v2/rpc`
-2. `GET /v2/rpc` (SSE)
-3. `DELETE /v2/rpc`
+1. `POST /v1/rpc`
+2. `GET /v1/rpc` (SSE)
+3. `DELETE /v1/rpc`
 - Headers:
-1. `x-acp-connection-id` for existing connection usage.
+1. No connection-id header.
 2. `Last-Event-ID` for SSE replay.
 3. Agent selection is in payload metadata: `params._meta["sandboxagent.dev"].agent`.
 - Sources:
@@ -75,7 +75,7 @@
 - Source:
 1. `server/packages/sandbox-agent/src/acp_runtime/ext_meta.rs:32`
 2. `server/packages/sandbox-agent/src/acp_runtime/ext_meta.rs:55`
-3. `server/packages/sandbox-agent/tests/v2_api/acp_extensions.rs:3`
+3. `server/packages/sandbox-agent/tests/v1_api/acp_extensions.rs:3`
 
 ## Server-Verified `_meta["sandboxagent.dev"]` Behavior
 
@@ -130,7 +130,7 @@
 4. `skills`
 5. `agentVersionRequested`
 - Sources:
-1. `server/packages/sandbox-agent/tests/v2_api/acp_extensions.rs:145`
+1. `server/packages/sandbox-agent/tests/v1_api/acp_extensions.rs:145`
 2. `research/acp/v1-schema-to-acp-mapping.md:73`
 3. `research/acp/v1-schema-to-acp-mapping.md:80`
 
@@ -138,7 +138,7 @@
 
 ### Package A: `acp-http-client`
 - Scope:
-1. ACP JSON-RPC over streamable HTTP only (`/v2/rpc`, headers, SSE replay, close).
+1. ACP JSON-RPC over streamable HTTP only (`/v1/rpc`, headers, SSE replay, close).
 2. Generic envelope send/receive and connection lifecycle.
 3. No `_sandboxagent/*` helpers.
 4. No `_meta["sandboxagent.dev"]` helpers.
@@ -184,7 +184,7 @@ Naming rule: for stable ACP methods, Sandbox Agent SDK method names stay ACP-ali
 | `extMethod(\"_sandboxagent/session/set_metadata\")` | `{\"jsonrpc\":\"2.0\",\"id\":12,\"method\":\"_sandboxagent/session/set_metadata\",\"params\":{...}}` | `setMetadata()` | Native wrapper method. |
 | `extMethod(\"_sandboxagent/session/detach\")` | `{\"jsonrpc\":\"2.0\",\"id\":13,\"method\":\"_sandboxagent/session/detach\",\"params\":{\"sessionId\":\"...\"}}` | `detachSession()` | Native wrapper method. |
 | `extMethod(\"_sandboxagent/session/terminate\")` | `{\"jsonrpc\":\"2.0\",\"id\":14,\"method\":\"_sandboxagent/session/terminate\",\"params\":{\"sessionId\":\"...\"}}` | `terminateSession()` | Native wrapper method. |
-| close ACP connection | `DELETE /v2/rpc` with header `x-acp-connection-id` | `disconnect()` | Transport-level close, not a JSON-RPC envelope. |
+| close ACP connection | `DELETE /v1/rpc` | `disconnect()` | Transport-level close, not a JSON-RPC envelope. |
 
 ## Conversion Layer Requirements
 - Request conversion (sandbox -> ACP):
@@ -211,7 +211,7 @@ Naming rule: for stable ACP methods, Sandbox Agent SDK method names stay ACP-ali
 - Replace with sandbox-facing API on `SandboxAgentClient`.
 
 ## Testing Requirements
-- Continue integration tests against real server/runtime over real `/v2` HTTP APIs.
+- Continue integration tests against real server/runtime over real `/v1` HTTP APIs.
 - Add integration coverage for:
 1. Auto-connect on constructor.
 2. `autoConnect: false` behavior.

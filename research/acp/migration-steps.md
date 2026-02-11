@@ -11,7 +11,7 @@
 The migration test plan is intentionally collapsed to avoid duplicate coverage.
 
 1. ACP protocol conformance
-2. Transport contract (`/v2/rpc`)
+2. Transport contract (`/v1/rpc`)
 3. End-to-end agent process matrix (core flow + cancel + HITL + streaming)
 4. Installer suite (explicit + lazy + registry/fallback provenance)
 5. Security/auth isolation
@@ -56,7 +56,7 @@ Validation gate:
 2. Implement agent process process manager (spawn, supervise, reconnect policy).
 3. Implement JSON-RPC bridge: HTTP POST/SSE <-> agent process stdio.
 4. Add connection registry keyed by `X-ACP-Connection-Id`.
-5. Include unstable ACP methods in the v2 profile (`session/list`, `session/fork`, `session/resume`, `session/set_model`, `$/cancel_request`).
+5. Include unstable ACP methods in the v1 profile (`session/list`, `session/fork`, `session/resume`, `session/set_model`, `$/cancel_request`).
 
 Exit criteria:
 
@@ -64,11 +64,11 @@ Exit criteria:
 
 Validation gate:
 
-- End-to-end ACP flow test over `/v2/rpc` (request/response + streamed notifications).
+- End-to-end ACP flow test over `/v1/rpc` (request/response + streamed notifications).
 - Cancellation test (`session/cancel`) with proper terminal response behavior.
 - HITL request/response round-trip test (`session/request_permission` path).
 - SSE ordering and reconnection behavior test (`Last-Event-ID` replay path).
-- Explicit close test (`DELETE /v2/rpc`) including idempotent double-close behavior.
+- Explicit close test (`DELETE /v1/rpc`) including idempotent double-close behavior.
 - Unstable ACP methods validation (`session/list`, `session/fork`, `session/resume`, `session/set_model`, `$/cancel_request`) for agent processes that advertise support.
 
 ## Phase 3: Installer Refactor
@@ -79,7 +79,7 @@ Validation gate:
 4. Add install verification command per agent process.
 5. Add ACP registry integration for install metadata + fallback sources.
 6. Generate install instructions from manifest and expose provenance (`registry` or `fallback`) in API/CLI.
-7. Implement lazy install path on first `/v2/rpc` initialize (with per-agent install lock and idempotent results).
+7. Implement lazy install path on first `/v1/rpc` initialize (with per-agent install lock and idempotent results).
 8. Add config to disable lazy install for preprovisioned environments.
 
 Exit criteria:
@@ -92,39 +92,39 @@ Validation gate:
 - Lazy install on first ACP `initialize` test.
 - Reinstall/version/provenance assertions.
 
-## Phase 4: v2 HTTP API
+## Phase 4: v1 HTTP API
 
-1. Mount `/v2/rpc` POST and SSE endpoints.
-2. Add `/v2/health`, `/v2/agents`, `/v2/agents/{agent}/install`.
+1. Mount `/v1/rpc` POST and SSE endpoints.
+2. Add `/v1/health`, `/v1/agents`, `/v1/agents/{agent}/install`.
 3. Add auth integration on connection lifecycle.
-4. Keep `/ui/` inspector route and migrate inspector backend calls to ACP v2 transport.
+4. Keep `/ui/` inspector route and migrate inspector backend calls to ACP v1 transport.
 5. Remove v1 OpenAPI generation from default docs build.
 
 Exit criteria:
 
-- v2 endpoints documented and passing integration tests.
+- v1 endpoints documented and passing integration tests.
 
 Validation gate:
 
-- Contract tests for all `/v2` endpoints (`/v2/rpc`, `/v2/health`, `/v2/agents`, install).
+- Contract tests for all `/v1` endpoints (`/v1/rpc`, `/v1/health`, `/v1/agents`, install).
 - Auth tests (valid, missing, invalid token).
 - Error mapping tests (bad envelope, unknown connection, timeout paths).
 - `/v1/*` removal contract test (HTTP 410 + stable payload).
 - Inspector ACP `agent-browser` flow tests pass.
-- `DELETE /v2/rpc` close contract tests pass.
+- `DELETE /v1/rpc` close contract tests pass.
 
-## Phase 5: SDK and CLI v2
+## Phase 5: SDK and CLI v1
 
 1. Add ACP transport client in `sdks/typescript` by embedding `@agentclientprotocol/sdk` (no in-house ACP reimplementation).
 2. Implement custom ACP-over-HTTP transport agent process in our SDK (official ACP client SDK does not provide required Streamable HTTP behavior out of the box).
 3. Add inspector frontend client wiring to use ACP-over-HTTP transport primitives.
 4. Add CLI commands for sending raw ACP envelopes and streaming ACP messages.
 5. Remove v1-only SDK/CLI methods (or hard-fail with "v1 removed").
-6. Regenerate docs to v2 ACP contract.
+6. Regenerate docs to v1 ACP contract.
 
 Exit criteria:
 
-- SDK can complete a full ACP prompt turn over `/v2/rpc`.
+- SDK can complete a full ACP prompt turn over `/v1/rpc`.
 
 Validation gate:
 
@@ -136,9 +136,9 @@ Validation gate:
 
 1. Replace v1 HTTP/session tests with ACP transport contract tests.
 2. Add smoke tests per supported agent process.
-   Current deterministic matrix: `server/packages/sandbox-agent/tests/v2_agent_process_matrix.rs`.
+   Current deterministic matrix: `server/packages/sandbox-agent/tests/v1_agent_process_matrix.rs`.
 3. Add canary rollout notes directly in `docs/quickstart.mdx`, `docs/cli.mdx`, and `docs/sdks/typescript.mdx`.
-4. Update docs for v2 ACP, `/v1/*` removal, inspector ACP behavior, and SDK usage.
+4. Update docs for v1 ACP, `/v1/*` removal, inspector ACP behavior, and SDK usage.
 5. Keep v1 endpoints hard-removed (`410`) until/unless a separate compatibility project is approved.
 
 Exit criteria:
@@ -155,9 +155,9 @@ Validation gate:
 ## Phase 7: OpenCode <-> ACP Bridge (Dedicated Step)
 
 1. Keep `/opencode/*` commented out/disabled through Phases 1-6.
-2. Implement OpenCode <-> ACP bridge on top of v2 ACP runtime.
+2. Implement OpenCode <-> ACP bridge on top of v1 ACP runtime.
 3. Re-enable `server/packages/sandbox-agent/src/opencode_compat.rs` routes/tests at full capability.
-4. Add dedicated integration tests that validate OpenCode SDK/TUI flows through ACP v2 internals.
+4. Add dedicated integration tests that validate OpenCode SDK/TUI flows through ACP v1 internals.
 
 Exit criteria:
 
@@ -170,5 +170,5 @@ Validation gate:
 
 ## Compatibility Layer (optional future project)
 
-1. No compatibility layer is in the current v2 scope.
+1. No compatibility layer is in the current v1 scope.
 2. If later approved, it should be a separate project with a dedicated spec and test matrix.

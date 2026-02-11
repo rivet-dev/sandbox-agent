@@ -7,7 +7,7 @@ export default defineConfig(({ command }) => ({
   server: {
     port: 5173,
     proxy: {
-      "/v2": {
+      "/v1": {
         target: "http://localhost:2468",
         changeOrigin: true,
       },

@@ -1,73 +1,22 @@
-import { ArrowLeft, ArrowRight, ChevronDown, ChevronRight, Pencil, Plus, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-import type { McpServerEntry } from "../App";
-import type { AgentInfo, AgentModelInfo, AgentModeInfo, SkillSource } from "../types/legacyApi";
+import { ArrowLeft, ArrowRight } from "lucide-react";
+import { useEffect, useState } from "react";
+import type { AgentInfo } from "sandbox-agent";
+
+type AgentModeInfo = { id: string; name: string; description: string };
+type AgentModelInfo = { id: string; name?: string };
 
 export type SessionConfig = {
-  model: string;
   agentMode: string;
-  permissionMode: string;
-  variant: string;
+  model: string;
 };
+
+const CUSTOM_MODEL_VALUE = "__custom__";
 
 const agentLabels: Record<string, string> = {
   claude: "Claude Code",
   codex: "Codex",
   opencode: "OpenCode",
   amp: "Amp"
-};
-
-const validateServerJson = (json: string): string | null => {
-  const trimmed = json.trim();
-  if (!trimmed) return "Config is required";
-  try {
-    const parsed = JSON.parse(trimmed);
-    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return "Must be a JSON object";
-    }
-    if (!parsed.type) return 'Missing "type" field';
-    if (parsed.type !== "local" && parsed.type !== "remote") {
-      return 'Type must be "local" or "remote"';
-    }
-    if (parsed.type === "local" && !parsed.command) return 'Local server requires "command"';
-    if (parsed.type === "remote" && !parsed.url) return 'Remote server requires "url"';
-    return null;
-  } catch {
-    return "Invalid JSON";
-  }
-};
-
-const getServerType = (configJson: string): string | null => {
-  try {
-    const parsed = JSON.parse(configJson);
-    return parsed?.type ?? null;
-  } catch {
-    return null;
-  }
-};
-
-const getServerSummary = (configJson: string): string => {
-  try {
-    const parsed = JSON.parse(configJson);
-    if (parsed?.type === "local") {
-      const cmd = Array.isArray(parsed.command) ? parsed.command.join(" ") : parsed.command;
-      return cmd ?? "local";
-    }
-    if (parsed?.type === "remote") {
-      return parsed.url ?? "remote";
-    }
-    return parsed?.type ?? "";
-  } catch {
-    return "";
-  }
-};
-
-const skillSourceSummary = (source: SkillSource): string => {
-  let summary = source.source;
-  if (source.skills && source.skills.length > 0) {
-    summary += ` [${source.skills.join(", ")}]`;
-  }
-  return summary;
 };
 
 const SessionCreateMenu = ({
@@ -77,17 +26,8 @@ const SessionCreateMenu = ({
   modesByAgent,
   modelsByAgent,
   defaultModelByAgent,
-  modesLoadingByAgent,
-  modelsLoadingByAgent,
-  modesErrorByAgent,
-  modelsErrorByAgent,
-  mcpServers,
-  onMcpServersChange,
-  mcpConfigError,
-  skillSources,
-  onSkillSourcesChange,
-  onSelectAgent,
   onCreateSession,
+  onSelectAgent,
   open,
   onClose
 }: {
@@ -97,60 +37,18 @@ const SessionCreateMenu = ({
   modesByAgent: Record<string, AgentModeInfo[]>;
   modelsByAgent: Record<string, AgentModelInfo[]>;
   defaultModelByAgent: Record<string, string>;
-  modesLoadingByAgent: Record<string, boolean>;
-  modelsLoadingByAgent: Record<string, boolean>;
-  modesErrorByAgent: Record<string, string | null>;
-  modelsErrorByAgent: Record<string, string | null>;
-  mcpServers: McpServerEntry[];
-  onMcpServersChange: (servers: McpServerEntry[]) => void;
-  mcpConfigError: string | null;
-  skillSources: SkillSource[];
-  onSkillSourcesChange: (sources: SkillSource[]) => void;
-  onSelectAgent: (agentId: string) => void;
   onCreateSession: (agentId: string, config: SessionConfig) => void;
+  onSelectAgent: (agentId: string) => Promise<void>;
   open: boolean;
   onClose: () => void;
 }) => {
-  const [phase, setPhase] = useState<"agent" | "config">("agent");
+  const [phase, setPhase] = useState<"agent" | "config" | "loading-config">("agent");
   const [selectedAgent, setSelectedAgent] = useState("");
   const [agentMode, setAgentMode] = useState("");
-  const [permissionMode, setPermissionMode] = useState("default");
-  const [model, setModel] = useState("");
-  const [variant, setVariant] = useState("");
-
-  const [mcpExpanded, setMcpExpanded] = useState(false);
-  const [skillsExpanded, setSkillsExpanded] = useState(false);
-
-  // Skill add/edit state
-  const [addingSkill, setAddingSkill] = useState(false);
-  const [editingSkillIndex, setEditingSkillIndex] = useState<number | null>(null);
-  const [skillType, setSkillType] = useState<"github" | "local" | "git">("github");
-  const [skillSource, setSkillSource] = useState("");
-  const [skillFilter, setSkillFilter] = useState("");
-  const [skillRef, setSkillRef] = useState("");
-  const [skillSubpath, setSkillSubpath] = useState("");
-  const [skillLocalError, setSkillLocalError] = useState<string | null>(null);
-  const skillSourceRef = useRef<HTMLInputElement>(null);
-
-  // MCP add/edit state
-  const [addingMcp, setAddingMcp] = useState(false);
-  const [editingMcpIndex, setEditingMcpIndex] = useState<number | null>(null);
-  const [mcpName, setMcpName] = useState("");
-  const [mcpJson, setMcpJson] = useState("");
-  const [mcpLocalError, setMcpLocalError] = useState<string | null>(null);
-  const mcpNameRef = useRef<HTMLInputElement>(null);
-  const mcpJsonRef = useRef<HTMLTextAreaElement>(null);
-
-  const cancelSkillEdit = () => {
-    setAddingSkill(false);
-    setEditingSkillIndex(null);
-    setSkillType("github");
-    setSkillSource("");
-    setSkillFilter("");
-    setSkillRef("");
-    setSkillSubpath("");
-    setSkillLocalError(null);
-  };
+  const [selectedModel, setSelectedModel] = useState("");
+  const [customModel, setCustomModel] = useState("");
+  const [isCustomModel, setIsCustomModel] = useState(false);
+  const [configLoadDone, setConfigLoadDone] = useState(false);
 
   // Reset state when menu closes
   useEffect(() => {
@@ -158,19 +56,20 @@ const SessionCreateMenu = ({
       setPhase("agent");
       setSelectedAgent("");
       setAgentMode("");
-      setPermissionMode("default");
-      setModel("");
-      setVariant("");
-      setMcpExpanded(false);
-      setSkillsExpanded(false);
-      cancelSkillEdit();
-      setAddingMcp(false);
-      setEditingMcpIndex(null);
-      setMcpName("");
-      setMcpJson("");
-      setMcpLocalError(null);
+      setSelectedModel("");
+      setCustomModel("");
+      setIsCustomModel(false);
+      setConfigLoadDone(false);
     }
   }, [open]);
+
+  // Transition to config phase after load completes — deferred via useEffect
+  // so parent props (modelsByAgent) have settled before we render the config form
+  useEffect(() => {
+    if (phase === "loading-config" && configLoadDone) {
+      setPhase("config");
+    }
+  }, [phase, configLoadDone]);
 
   // Auto-select first mode when modes load for selected agent
   useEffect(() => {
@@ -181,173 +80,59 @@ const SessionCreateMenu = ({
     }
   }, [modesByAgent, selectedAgent, agentMode]);
 
-  // Focus skill source input when adding
+  // Auto-select default model when agent is selected
   useEffect(() => {
-    if ((addingSkill || editingSkillIndex !== null) && skillSourceRef.current) {
-      skillSourceRef.current.focus();
+    if (!selectedAgent) return;
+    if (selectedModel) return;
+    const defaultModel = defaultModelByAgent[selectedAgent];
+    if (defaultModel) {
+      setSelectedModel(defaultModel);
+    } else {
+      const models = modelsByAgent[selectedAgent];
+      if (models && models.length > 0) {
+        setSelectedModel(models[0].id);
+      }
     }
-  }, [addingSkill, editingSkillIndex]);
-
-  // Focus MCP name input when adding
-  useEffect(() => {
-    if (addingMcp && mcpNameRef.current) {
-      mcpNameRef.current.focus();
-    }
-  }, [addingMcp]);
-
-  // Focus MCP json textarea when editing
-  useEffect(() => {
-    if (editingMcpIndex !== null && mcpJsonRef.current) {
-      mcpJsonRef.current.focus();
-    }
-  }, [editingMcpIndex]);
+  }, [modelsByAgent, defaultModelByAgent, selectedAgent, selectedModel]);
 
   if (!open) return null;
 
   const handleAgentClick = (agentId: string) => {
     setSelectedAgent(agentId);
-    setPhase("config");
-    onSelectAgent(agentId);
+    setPhase("loading-config");
+    setConfigLoadDone(false);
+    onSelectAgent(agentId).finally(() => {
+      setConfigLoadDone(true);
+    });
   };
 
   const handleBack = () => {
     setPhase("agent");
     setSelectedAgent("");
     setAgentMode("");
-    setPermissionMode("default");
-    setModel("");
-    setVariant("");
+    setSelectedModel("");
+    setCustomModel("");
+    setIsCustomModel(false);
+    setConfigLoadDone(false);
   };
+
+  const handleModelSelectChange = (value: string) => {
+    if (value === CUSTOM_MODEL_VALUE) {
+      setIsCustomModel(true);
+      setSelectedModel("");
+    } else {
+      setIsCustomModel(false);
+      setCustomModel("");
+      setSelectedModel(value);
+    }
+  };
+
+  const resolvedModel = isCustomModel ? customModel : selectedModel;
 
   const handleCreate = () => {
-    if (mcpConfigError) return;
-    onCreateSession(selectedAgent, { model, agentMode, permissionMode, variant });
+    onCreateSession(selectedAgent, { agentMode, model: resolvedModel });
     onClose();
   };
-
-  // Skill source helpers
-  const startAddSkill = () => {
-    setAddingSkill(true);
-    setEditingSkillIndex(null);
-    setSkillType("github");
-    setSkillSource("rivet-dev/skills");
-    setSkillFilter("sandbox-agent");
-    setSkillRef("");
-    setSkillSubpath("");
-    setSkillLocalError(null);
-  };
-
-  const startEditSkill = (index: number) => {
-    const entry = skillSources[index];
-    setEditingSkillIndex(index);
-    setAddingSkill(false);
-    setSkillType(entry.type as "github" | "local" | "git");
-    setSkillSource(entry.source);
-    setSkillFilter(entry.skills?.join(", ") ?? "");
-    setSkillRef(entry.ref ?? "");
-    setSkillSubpath(entry.subpath ?? "");
-    setSkillLocalError(null);
-  };
-
-  const commitSkill = () => {
-    const src = skillSource.trim();
-    if (!src) {
-      setSkillLocalError("Source is required");
-      return;
-    }
-    const entry: SkillSource = {
-      type: skillType,
-      source: src,
-    };
-    const filterList = skillFilter.trim()
-      ? skillFilter.split(",").map((s) => s.trim()).filter(Boolean)
-      : undefined;
-    if (filterList && filterList.length > 0) entry.skills = filterList;
-    if (skillRef.trim()) entry.ref = skillRef.trim();
-    if (skillSubpath.trim()) entry.subpath = skillSubpath.trim();
-
-    if (editingSkillIndex !== null) {
-      const updated = [...skillSources];
-      updated[editingSkillIndex] = entry;
-      onSkillSourcesChange(updated);
-    } else {
-      onSkillSourcesChange([...skillSources, entry]);
-    }
-    cancelSkillEdit();
-  };
-
-  const removeSkill = (index: number) => {
-    onSkillSourcesChange(skillSources.filter((_, i) => i !== index));
-    if (editingSkillIndex === index) {
-      cancelSkillEdit();
-    }
-  };
-
-  const isEditingSkill = addingSkill || editingSkillIndex !== null;
-
-  const startAddMcp = () => {
-    setAddingMcp(true);
-    setEditingMcpIndex(null);
-    setMcpName("everything");
-    setMcpJson('{\n  "type": "local",\n  "command": "npx",\n  "args": ["@modelcontextprotocol/server-everything"]\n}');
-    setMcpLocalError(null);
-  };
-
-  const startEditMcp = (index: number) => {
-    const entry = mcpServers[index];
-    setEditingMcpIndex(index);
-    setAddingMcp(false);
-    setMcpName(entry.name);
-    setMcpJson(entry.configJson);
-    setMcpLocalError(entry.error);
-  };
-
-  const cancelMcpEdit = () => {
-    setAddingMcp(false);
-    setEditingMcpIndex(null);
-    setMcpName("");
-    setMcpJson("");
-    setMcpLocalError(null);
-  };
-
-  const commitMcp = () => {
-    const name = mcpName.trim();
-    if (!name) {
-      setMcpLocalError("Server name is required");
-      return;
-    }
-    const error = validateServerJson(mcpJson);
-    if (error) {
-      setMcpLocalError(error);
-      return;
-    }
-    // Check for duplicate names (except when editing the same entry)
-    const duplicate = mcpServers.findIndex((e) => e.name === name);
-    if (duplicate !== -1 && duplicate !== editingMcpIndex) {
-      setMcpLocalError(`Server "${name}" already exists`);
-      return;
-    }
-
-    const entry: McpServerEntry = { name, configJson: mcpJson.trim(), error: null };
-
-    if (editingMcpIndex !== null) {
-      const updated = [...mcpServers];
-      updated[editingMcpIndex] = entry;
-      onMcpServersChange(updated);
-    } else {
-      onMcpServersChange([...mcpServers, entry]);
-    }
-    cancelMcpEdit();
-  };
-
-  const removeMcp = (index: number) => {
-    onMcpServersChange(mcpServers.filter((_, i) => i !== index));
-    if (editingMcpIndex === index) {
-      cancelMcpEdit();
-    }
-  };
-
-  const isEditingMcp = addingMcp || editingMcpIndex !== null;
 
   if (phase === "agent") {
     return (
@@ -378,30 +163,25 @@ const SessionCreateMenu = ({
     );
   }
 
+  const agentLabel = agentLabels[selectedAgent] ?? selectedAgent;
+
+  if (phase === "loading-config") {
+    return (
+      <div className="session-create-menu">
+        <div className="session-create-header">
+          <button className="session-create-back" onClick={handleBack} title="Back to agents">
+            <ArrowLeft size={14} />
+          </button>
+          <span className="session-create-agent-name">{agentLabel}</span>
+        </div>
+        <div className="sidebar-add-status">Loading config...</div>
+      </div>
+    );
+  }
+
   // Phase 2: config form
   const activeModes = modesByAgent[selectedAgent] ?? [];
-  const modesLoading = modesLoadingByAgent[selectedAgent] ?? false;
-  const modesError = modesErrorByAgent[selectedAgent] ?? null;
-  const modelOptions = modelsByAgent[selectedAgent] ?? [];
-  const modelsLoading = modelsLoadingByAgent[selectedAgent] ?? false;
-  const modelsError = modelsErrorByAgent[selectedAgent] ?? null;
-  const defaultModel = defaultModelByAgent[selectedAgent] ?? "";
-  const selectedModelId = model || defaultModel;
-  const selectedModelObj = modelOptions.find((entry) => entry.id === selectedModelId);
-  const variantOptions = selectedModelObj?.variants ?? [];
-  const showModelSelect = modelsLoading || Boolean(modelsError) || modelOptions.length > 0;
-  const hasModelOptions = modelOptions.length > 0;
-  const modelCustom =
-    model && hasModelOptions && !modelOptions.some((entry) => entry.id === model);
-  const supportsVariants =
-    modelsLoading ||
-    Boolean(modelsError) ||
-    modelOptions.some((entry) => (entry.variants?.length ?? 0) > 0);
-  const showVariantSelect =
-    supportsVariants && (modelsLoading || Boolean(modelsError) || variantOptions.length > 0);
-  const hasVariantOptions = variantOptions.length > 0;
-  const variantCustom = variant && hasVariantOptions && !variantOptions.includes(variant);
-  const agentLabel = agentLabels[selectedAgent] ?? selectedAgent;
+  const activeModels = modelsByAgent[selectedAgent] ?? [];
 
   return (
     <div className="session-create-menu">
@@ -415,330 +195,69 @@ const SessionCreateMenu = ({
       <div className="session-create-form">
         <div className="setup-field">
           <span className="setup-label">Model</span>
-          {showModelSelect ? (
-            <select
-              className="setup-select"
-              value={model}
-              onChange={(e) => { setModel(e.target.value); setVariant(""); }}
-              title="Model"
-              disabled={modelsLoading || Boolean(modelsError)}
-            >
-              {modelsLoading ? (
-                <option value="">Loading models...</option>
-              ) : modelsError ? (
-                <option value="">{modelsError}</option>
-              ) : (
-                <>
-                  <option value="">
-                    {defaultModel ? `Default (${defaultModel})` : "Default"}
-                  </option>
-                  {modelCustom && <option value={model}>{model} (custom)</option>}
-                  {modelOptions.map((entry) => (
-                    <option key={entry.id} value={entry.id}>
-                      {entry.name ?? entry.id}
-                    </option>
-                  ))}
-                </>
-              )}
-            </select>
-          ) : (
+          {isCustomModel ? (
             <input
               className="setup-input"
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              placeholder="Model"
-              title="Model"
+              type="text"
+              value={customModel}
+              onChange={(e) => setCustomModel(e.target.value)}
+              placeholder="Enter model name..."
+              autoFocus
             />
-          )}
-        </div>
-
-        <div className="setup-field">
-          <span className="setup-label">Mode</span>
-          <select
-            className="setup-select"
-            value={agentMode}
-            onChange={(e) => setAgentMode(e.target.value)}
-            title="Mode"
-            disabled={modesLoading || Boolean(modesError)}
-          >
-            {modesLoading ? (
-              <option value="">Loading modes...</option>
-            ) : modesError ? (
-              <option value="">{modesError}</option>
-            ) : activeModes.length > 0 ? (
-              activeModes.map((m) => (
+          ) : (
+            <select
+              className="setup-select"
+              value={selectedModel}
+              onChange={(e) => handleModelSelectChange(e.target.value)}
+              title="Model"
+            >
+              {activeModels.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.name || m.id}
                 </option>
-              ))
-            ) : (
-              <option value="">Mode</option>
-            )}
-          </select>
+              ))}
+              <option value={CUSTOM_MODEL_VALUE}>Custom...</option>
+            </select>
+          )}
+          {isCustomModel && (
+            <button
+              className="setup-custom-back"
+              onClick={() => {
+                setIsCustomModel(false);
+                setCustomModel("");
+                const defaultModel = defaultModelByAgent[selectedAgent];
+                setSelectedModel(
+                  defaultModel || (activeModels.length > 0 ? activeModels[0].id : "")
+                );
+              }}
+              title="Back to model list"
+              type="button"
+            >
+              ← List
+            </button>
+          )}
         </div>
-
-        <div className="setup-field">
-          <span className="setup-label">Permission</span>
-          <select
-            className="setup-select"
-            value={permissionMode}
-            onChange={(e) => setPermissionMode(e.target.value)}
-            title="Permission Mode"
-          >
-            <option value="default">Default</option>
-            <option value="plan">Plan</option>
-            <option value="bypass">Bypass</option>
-          </select>
-        </div>
-
-        {supportsVariants && (
+        {activeModes.length > 0 && (
           <div className="setup-field">
-            <span className="setup-label">Variant</span>
-            {showVariantSelect ? (
-              <select
-                className="setup-select"
-                value={variant}
-                onChange={(e) => setVariant(e.target.value)}
-                title="Variant"
-                disabled={modelsLoading || Boolean(modelsError)}
-              >
-                {modelsLoading ? (
-                  <option value="">Loading variants...</option>
-                ) : modelsError ? (
-                  <option value="">{modelsError}</option>
-                ) : (
-                  <>
-                    <option value="">Default</option>
-                    {variantCustom && <option value={variant}>{variant} (custom)</option>}
-                    {variantOptions.map((entry) => (
-                      <option key={entry} value={entry}>
-                        {entry}
-                      </option>
-                    ))}
-                  </>
-                )}
-              </select>
-            ) : (
-              <input
-                className="setup-input"
-                value={variant}
-                onChange={(e) => setVariant(e.target.value)}
-                placeholder="Variant"
-                title="Variant"
-              />
-            )}
+            <span className="setup-label">Mode</span>
+            <select
+              className="setup-select"
+              value={agentMode}
+              onChange={(e) => setAgentMode(e.target.value)}
+              title="Mode"
+            >
+              {activeModes.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name || m.id}
+                </option>
+              ))}
+            </select>
           </div>
         )}
-
-        {/* MCP Servers - collapsible */}
-        <div className="session-create-section">
-          <button
-            type="button"
-            className="session-create-section-toggle"
-            onClick={() => setMcpExpanded(!mcpExpanded)}
-          >
-            <span className="setup-label">MCP</span>
-            <span className="session-create-section-count">{mcpServers.length} server{mcpServers.length !== 1 ? "s" : ""}</span>
-            {mcpExpanded ? <ChevronDown size={12} className="session-create-section-arrow" /> : <ChevronRight size={12} className="session-create-section-arrow" />}
-          </button>
-          {mcpExpanded && (
-            <div className="session-create-section-body">
-              {mcpServers.length > 0 && !isEditingMcp && (
-                <div className="session-create-mcp-list">
-                  {mcpServers.map((entry, index) => (
-                    <div key={entry.name} className="session-create-mcp-item">
-                      <div className="session-create-mcp-info">
-                        <span className="session-create-mcp-name">{entry.name}</span>
-                        {getServerType(entry.configJson) && (
-                          <span className="session-create-mcp-type">{getServerType(entry.configJson)}</span>
-                        )}
-                        <span className="session-create-mcp-summary mono">{getServerSummary(entry.configJson)}</span>
-                      </div>
-                      <div className="session-create-mcp-actions">
-                        <button
-                          type="button"
-                          className="session-create-skill-remove"
-                          onClick={() => startEditMcp(index)}
-                          title="Edit server"
-                        >
-                          <Pencil size={10} />
-                        </button>
-                        <button
-                          type="button"
-                          className="session-create-skill-remove"
-                          onClick={() => removeMcp(index)}
-                          title="Remove server"
-                        >
-                          <X size={12} />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {isEditingMcp ? (
-                <div className="session-create-mcp-edit">
-                  <input
-                    ref={mcpNameRef}
-                    className="session-create-mcp-name-input"
-                    value={mcpName}
-                    onChange={(e) => { setMcpName(e.target.value); setMcpLocalError(null); }}
-                    placeholder="server-name"
-                    disabled={editingMcpIndex !== null}
-                  />
-                  <textarea
-                    ref={mcpJsonRef}
-                    className="session-create-textarea mono"
-                    value={mcpJson}
-                    onChange={(e) => { setMcpJson(e.target.value); setMcpLocalError(null); }}
-                    placeholder='{"type":"local","command":"node","args":["./server.js"]}'
-                    rows={4}
-                  />
-                  {mcpLocalError && (
-                    <div className="session-create-inline-error">{mcpLocalError}</div>
-                  )}
-                  <div className="session-create-mcp-edit-actions">
-                    <button type="button" className="session-create-mcp-save" onClick={commitMcp}>
-                      {editingMcpIndex !== null ? "Save" : "Add"}
-                    </button>
-                    <button type="button" className="session-create-mcp-cancel" onClick={cancelMcpEdit}>
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  className="session-create-add-btn"
-                  onClick={startAddMcp}
-                >
-                  <Plus size={12} />
-                  Add server
-                </button>
-              )}
-              {mcpConfigError && !isEditingMcp && (
-                <div className="session-create-inline-error">{mcpConfigError}</div>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Skills - collapsible with source-based list */}
-        <div className="session-create-section">
-          <button
-            type="button"
-            className="session-create-section-toggle"
-            onClick={() => setSkillsExpanded(!skillsExpanded)}
-          >
-            <span className="setup-label">Skills</span>
-            <span className="session-create-section-count">{skillSources.length} source{skillSources.length !== 1 ? "s" : ""}</span>
-            {skillsExpanded ? <ChevronDown size={12} className="session-create-section-arrow" /> : <ChevronRight size={12} className="session-create-section-arrow" />}
-          </button>
-          {skillsExpanded && (
-            <div className="session-create-section-body">
-              {skillSources.length > 0 && !isEditingSkill && (
-                <div className="session-create-skill-list">
-                  {skillSources.map((entry, index) => (
-                    <div key={`${entry.type}-${entry.source}-${index}`} className="session-create-skill-item">
-                      <span className="session-create-skill-type-badge">{entry.type}</span>
-                      <span className="session-create-skill-path mono">{skillSourceSummary(entry)}</span>
-                      <div className="session-create-mcp-actions">
-                        <button
-                          type="button"
-                          className="session-create-skill-remove"
-                          onClick={() => startEditSkill(index)}
-                          title="Edit source"
-                        >
-                          <Pencil size={10} />
-                        </button>
-                        <button
-                          type="button"
-                          className="session-create-skill-remove"
-                          onClick={() => removeSkill(index)}
-                          title="Remove source"
-                        >
-                          <X size={12} />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {isEditingSkill ? (
-                <div className="session-create-mcp-edit">
-                  <div className="session-create-skill-type-row">
-                    <select
-                      className="session-create-skill-type-select"
-                      value={skillType}
-                      onChange={(e) => { setSkillType(e.target.value as "github" | "local" | "git"); setSkillLocalError(null); }}
-                    >
-                      <option value="github">github</option>
-                      <option value="local">local</option>
-                      <option value="git">git</option>
-                    </select>
-                    <input
-                      ref={skillSourceRef}
-                      className="session-create-skill-input mono"
-                      value={skillSource}
-                      onChange={(e) => { setSkillSource(e.target.value); setSkillLocalError(null); }}
-                      placeholder={skillType === "github" ? "owner/repo" : skillType === "local" ? "/path/to/skill" : "https://git.example.com/repo.git"}
-                    />
-                  </div>
-                  <input
-                    className="session-create-skill-input mono"
-                    value={skillFilter}
-                    onChange={(e) => setSkillFilter(e.target.value)}
-                    placeholder="Filter skills (comma-separated, optional)"
-                  />
-                  {skillType !== "local" && (
-                    <div className="session-create-skill-type-row">
-                      <input
-                        className="session-create-skill-input mono"
-                        value={skillRef}
-                        onChange={(e) => setSkillRef(e.target.value)}
-                        placeholder="Branch/tag (optional)"
-                      />
-                      <input
-                        className="session-create-skill-input mono"
-                        value={skillSubpath}
-                        onChange={(e) => setSkillSubpath(e.target.value)}
-                        placeholder="Subpath (optional)"
-                      />
-                    </div>
-                  )}
-                  {skillLocalError && (
-                    <div className="session-create-inline-error">{skillLocalError}</div>
-                  )}
-                  <div className="session-create-mcp-edit-actions">
-                    <button type="button" className="session-create-mcp-save" onClick={commitSkill}>
-                      {editingSkillIndex !== null ? "Save" : "Add"}
-                    </button>
-                    <button type="button" className="session-create-mcp-cancel" onClick={cancelSkillEdit}>
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  className="session-create-add-btn"
-                  onClick={startAddSkill}
-                >
-                  <Plus size={12} />
-                  Add source
-                </button>
-              )}
-            </div>
-          )}
-        </div>
       </div>
 
       <div className="session-create-actions">
-        <button
-          className="button primary"
-          onClick={handleCreate}
-          disabled={Boolean(mcpConfigError)}
-        >
+        <button className="button primary" onClick={handleCreate}>
           Create Session
         </button>
       </div>

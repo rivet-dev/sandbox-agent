@@ -1,10 +1,10 @@
-# V1 Schema to ACP v2 Mapping (1:1)
+# V1 Schema to ACP v1 Mapping (1:1)
 
 ## 1) Scope
 
-This document maps every current v1 HTTP endpoint and every universal event type to the v2 surface (ACP JSON-RPC for agent/session traffic, HTTP for control-plane/platform APIs).
+This document maps every current v1 HTTP endpoint and every universal event type to the v1 surface (ACP JSON-RPC for agent/session traffic, HTTP for control-plane/platform APIs).
 
-Important: this is a conversion reference only. Runtime `/v1/*` endpoints are removed in v2 and return HTTP 410.
+Important: this is a conversion reference only. Runtime `/v1/*` endpoints are removed in v1 and return HTTP 410.
 
 Source of truth used:
 
@@ -17,7 +17,7 @@ Source of truth used:
 
 Transport assumption:
 
-- v2 uses ACP over Streamable HTTP (POST + SSE) as the canonical public transport.
+- v1 uses ACP over Streamable HTTP (POST + SSE) as the canonical public transport.
 - WebSocket can be added later without changing this mapping.
 
 ## 2) Mapping Rules
@@ -25,7 +25,7 @@ Transport assumption:
 1. Use ACP standard methods/events first.
 2. If ACP stable has no equivalent, use either:
    - ACP extension methods (must start with `_`) for agent/session protocol gaps, or
-   - HTTP `/v2/*` control-plane/platform endpoints for non-agent/session APIs.
+   - HTTP `/v1/*` control-plane/platform endpoints for non-agent/session APIs.
 3. Preserve legacy-only data in `_meta` (namespaced), not as ad-hoc root fields.
 4. Use `_meta` for correlation and legacy envelope carry-over.
 
@@ -39,28 +39,28 @@ Extension namespace used in this spec:
 
 ## 3) Endpoint Mapping (All v1 Endpoints)
 
-| v1 endpoint | v2 mapping | Mapping type | Notes |
+| v1 endpoint | v1 mapping | Mapping type | Notes |
 |---|---|---|---|
-| `GET /v1/health` | `GET /v2/health` | HTTP control-plane | v1-parity payload on v2 route. |
-| `GET /v1/agents` | `GET /v2/agents` | HTTP control-plane | Agent inventory, capabilities, server status, and optional models/modes for installed agents. |
-| `POST /v1/agents/{agent}/install` | `POST /v2/agents/{agent}/install` | HTTP control-plane | Agent process + native agent install flow. |
-| `GET /v1/agents/{agent}/models` | Folded into agent response `models` field (installed agents only) | HTTP control-plane | No standalone `/models` endpoint in v2. |
-| `GET /v1/agents/{agent}/modes` | Folded into agent response `modes` field (installed agents only) | HTTP control-plane | No standalone `/modes` endpoint in v2. |
-| `GET /v1/fs/entries` | `GET /v2/fs/entries` | HTTP platform API | Port v1 behavior. |
-| `DELETE /v1/fs/entry` | `DELETE /v2/fs/entry` | HTTP platform API | Port v1 behavior, including `recursive`. |
-| `GET /v1/fs/file` | `GET /v2/fs/file` | HTTP platform API | Raw bytes response (octet-stream), v1 parity. |
-| `PUT /v1/fs/file` | `PUT /v2/fs/file` | HTTP platform API | Raw bytes write, v1 parity. |
-| `POST /v1/fs/mkdir` | `POST /v2/fs/mkdir` | HTTP platform API | Port v1 behavior. |
-| `POST /v1/fs/move` | `POST /v2/fs/move` | HTTP platform API | Port v1 behavior. |
-| `GET /v1/fs/stat` | `GET /v2/fs/stat` | HTTP platform API | Port v1 behavior. |
-| `POST /v1/fs/upload-batch` | `POST /v2/fs/upload-batch` | HTTP platform API | Tar upload/extract behavior from v1. |
-| `GET /v1/sessions` | `GET /v2/sessions` | HTTP control-plane | Session inventory without ACP connection requirement. |
+| `GET /v1/health` | `GET /v1/health` | HTTP control-plane | v1-parity payload on v1 route. |
+| `GET /v1/agents` | `GET /v1/agents` | HTTP control-plane | Agent inventory, capabilities, server status, and optional models/modes for installed agents. |
+| `POST /v1/agents/{agent}/install` | `POST /v1/agents/{agent}/install` | HTTP control-plane | Agent process + native agent install flow. |
+| `GET /v1/agents/{agent}/models` | Folded into agent response `models` field (installed agents only) | HTTP control-plane | No standalone `/models` endpoint in v1. |
+| `GET /v1/agents/{agent}/modes` | Folded into agent response `modes` field (installed agents only) | HTTP control-plane | No standalone `/modes` endpoint in v1. |
+| `GET /v1/fs/entries` | `GET /v1/fs/entries` | HTTP platform API | Port v1 behavior. |
+| `DELETE /v1/fs/entry` | `DELETE /v1/fs/entry` | HTTP platform API | Port v1 behavior, including `recursive`. |
+| `GET /v1/fs/file` | `GET /v1/fs/file` | HTTP platform API | Raw bytes response (octet-stream), v1 parity. |
+| `PUT /v1/fs/file` | `PUT /v1/fs/file` | HTTP platform API | Raw bytes write, v1 parity. |
+| `POST /v1/fs/mkdir` | `POST /v1/fs/mkdir` | HTTP platform API | Port v1 behavior. |
+| `POST /v1/fs/move` | `POST /v1/fs/move` | HTTP platform API | Port v1 behavior. |
+| `GET /v1/fs/stat` | `GET /v1/fs/stat` | HTTP platform API | Port v1 behavior. |
+| `POST /v1/fs/upload-batch` | `POST /v1/fs/upload-batch` | HTTP platform API | Tar upload/extract behavior from v1. |
+| `GET /v1/sessions` | `GET /v1/sessions` | HTTP control-plane | Session inventory without ACP connection requirement. |
 | `POST /v1/sessions/{session_id}` | `session/new` | Standard | Path `session_id` becomes alias in `_meta["sandboxagent.dev"].requestedSessionId`. |
 | `POST /v1/sessions/{session_id}/messages` | `session/prompt` | Standard | Asynchronous behavior comes from transport (request + stream). |
 | `POST /v1/sessions/{session_id}/messages/stream` | `session/prompt` + consume `session/update` on SSE | Standard | Streaming is transport-level, not a distinct ACP method. |
-| `POST /v1/sessions/{session_id}/terminate` | `_sandboxagent/session/terminate` | Extension | Idempotent termination semantics distinct from `DELETE /v2/rpc`. |
-| `GET /v1/sessions/{session_id}/events` | `_sandboxagent/session/events` (poll view over ACP stream) | Extension | Optional compatibility helper; canonical v2 is stream consumption. |
-| `GET /v1/sessions/{session_id}/events/sse` | `GET /v2/rpc` SSE stream | Standard transport | Filter by sessionId client-side or via connection/session binding. |
+| `POST /v1/sessions/{session_id}/terminate` | `_sandboxagent/session/terminate` | Extension | Idempotent termination semantics distinct from `DELETE /v1/rpc`. |
+| `GET /v1/sessions/{session_id}/events` | `_sandboxagent/session/events` (poll view over ACP stream) | Extension | Optional compatibility helper; canonical v1 is stream consumption. |
+| `GET /v1/sessions/{session_id}/events/sse` | `GET /v1/rpc` SSE stream | Standard transport | Filter by sessionId client-side or via connection/session binding. |
 | `POST /v1/sessions/{session_id}/permissions/{permission_id}/reply` | JSON-RPC response to pending `session/request_permission` request id | Standard | Bridge `permission_id` to request `id` in transport state. |
 | `POST /v1/sessions/{session_id}/questions/{question_id}/reply` | JSON-RPC response to pending `_sandboxagent/session/request_question` | Extension | ACP stable has no generic question/HITL request method. |
 | `POST /v1/sessions/{session_id}/questions/{question_id}/reject` | JSON-RPC response to pending `_sandboxagent/session/request_question` | Extension | Encode rejection in response outcome. |

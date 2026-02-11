@@ -1,0 +1,24 @@
+[package]
+name = "acp-http-adapter"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Minimal ACP HTTP-to-stdio adapter"
+
+[dependencies]
+axum.workspace = true
+tokio = { workspace = true, features = ["process", "io-util"] }
+tokio-stream.workspace = true
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+clap.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+reqwest.workspace = true
+bytes = "1.10"

@@ -1,14 +1,14 @@
 # Server Instructions
 
-## ACP v2 Architecture
+## ACP v1 Architecture
 
 - Public API routes are defined in `server/packages/sandbox-agent/src/router.rs`.
 - ACP runtime/process bridge is in `server/packages/sandbox-agent/src/acp_runtime.rs`.
-- `/v2` is the only active API surface for sessions/prompts (`/v2/rpc`).
+- `/v1` is the only active API surface for sessions/prompts (`/v1/acp/{server_id}`).
 - Keep binary filesystem transfer endpoints as dedicated HTTP APIs:
-  - `GET /v2/fs/file`
-  - `PUT /v2/fs/file`
-  - `POST /v2/fs/upload-batch`
+  - `GET /v1/fs/file`
+  - `PUT /v1/fs/file`
+  - `POST /v1/fs/upload-batch`
   - Rationale: host-owned cross-agent-consistent behavior and large binary transfer needs that ACP JSON-RPC is not suited to stream efficiently.
   - Maintain ACP variants in parallel only when they share the same underlying filesystem implementation; SDK defaults should still prefer HTTP for large/binary transfers.
 - `/v1/*` must remain hard-removed (`410`) and `/opencode/*` stays disabled (`503`) until Phase 7.
@@ -23,14 +23,14 @@
 
 ## Tests
 
-Primary v2 integration coverage:
-- `server/packages/sandbox-agent/tests/v2_api.rs`
-- `server/packages/sandbox-agent/tests/v2_agent_process_matrix.rs`
+Primary v1 integration coverage:
+- `server/packages/sandbox-agent/tests/v1_api.rs`
+- `server/packages/sandbox-agent/tests/v1_agent_process_matrix.rs`
 
 Run:
 ```bash
-cargo test -p sandbox-agent --test v2_api
-cargo test -p sandbox-agent --test v2_agent_process_matrix
+cargo test -p sandbox-agent --test v1_api
+cargo test -p sandbox-agent --test v1_agent_process_matrix
 ```
 
 ## Migration Docs Sync

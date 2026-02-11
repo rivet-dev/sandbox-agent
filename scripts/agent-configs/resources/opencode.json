@@ -1,0 +1,254 @@
+{
+  "defaultModel": "opencode/gemini-3-pro",
+  "models": [
+    {
+      "id": "anthropic/claude-3-5-haiku-20241022",
+      "name": "Anthropic/Claude Haiku 3.5"
+    },
+    {
+      "id": "anthropic/claude-3-5-haiku-latest",
+      "name": "Anthropic/Claude Haiku 3.5 (latest)"
+    },
+    {
+      "id": "anthropic/claude-3-5-sonnet-20240620",
+      "name": "Anthropic/Claude Sonnet 3.5"
+    },
+    {
+      "id": "anthropic/claude-3-5-sonnet-20241022",
+      "name": "Anthropic/Claude Sonnet 3.5 v2"
+    },
+    {
+      "id": "anthropic/claude-3-7-sonnet-20250219",
+      "name": "Anthropic/Claude Sonnet 3.7"
+    },
+    {
+      "id": "anthropic/claude-3-7-sonnet-latest",
+      "name": "Anthropic/Claude Sonnet 3.7 (latest)"
+    },
+    {
+      "id": "anthropic/claude-3-haiku-20240307",
+      "name": "Anthropic/Claude Haiku 3"
+    },
+    {
+      "id": "anthropic/claude-3-opus-20240229",
+      "name": "Anthropic/Claude Opus 3"
+    },
+    {
+      "id": "anthropic/claude-3-sonnet-20240229",
+      "name": "Anthropic/Claude Sonnet 3"
+    },
+    {
+      "id": "anthropic/claude-haiku-4-5",
+      "name": "Anthropic/Claude Haiku 4.5 (latest)"
+    },
+    {
+      "id": "anthropic/claude-haiku-4-5-20251001",
+      "name": "Anthropic/Claude Haiku 4.5"
+    },
+    {
+      "id": "anthropic/claude-opus-4-0",
+      "name": "Anthropic/Claude Opus 4 (latest)"
+    },
+    {
+      "id": "anthropic/claude-opus-4-1",
+      "name": "Anthropic/Claude Opus 4.1 (latest)"
+    },
+    {
+      "id": "anthropic/claude-opus-4-1-20250805",
+      "name": "Anthropic/Claude Opus 4.1"
+    },
+    {
+      "id": "anthropic/claude-opus-4-20250514",
+      "name": "Anthropic/Claude Opus 4"
+    },
+    {
+      "id": "anthropic/claude-opus-4-5",
+      "name": "Anthropic/Claude Opus 4.5 (latest)"
+    },
+    {
+      "id": "anthropic/claude-opus-4-5-20251101",
+      "name": "Anthropic/Claude Opus 4.5"
+    },
+    {
+      "id": "anthropic/claude-opus-4-6",
+      "name": "Anthropic/Claude Opus 4.6"
+    },
+    {
+      "id": "anthropic/claude-sonnet-4-0",
+      "name": "Anthropic/Claude Sonnet 4 (latest)"
+    },
+    {
+      "id": "anthropic/claude-sonnet-4-20250514",
+      "name": "Anthropic/Claude Sonnet 4"
+    },
+    {
+      "id": "anthropic/claude-sonnet-4-5",
+      "name": "Anthropic/Claude Sonnet 4.5 (latest)"
+    },
+    {
+      "id": "anthropic/claude-sonnet-4-5-20250929",
+      "name": "Anthropic/Claude Sonnet 4.5"
+    },
+    {
+      "id": "cerebras/gpt-oss-120b",
+      "name": "Cerebras/GPT OSS 120B"
+    },
+    {
+      "id": "cerebras/qwen-3-235b-a22b-instruct-2507",
+      "name": "Cerebras/Qwen 3 235B Instruct"
+    },
+    {
+      "id": "cerebras/zai-glm-4.7",
+      "name": "Cerebras/Z.AI GLM-4.7"
+    },
+    {
+      "id": "openai/gpt-5.1-codex",
+      "name": "OpenAI/GPT-5.1 Codex"
+    },
+    {
+      "id": "openai/gpt-5.1-codex-max",
+      "name": "OpenAI/GPT-5.1 Codex Max"
+    },
+    {
+      "id": "openai/gpt-5.1-codex-mini",
+      "name": "OpenAI/GPT-5.1 Codex mini"
+    },
+    {
+      "id": "openai/gpt-5.2",
+      "name": "OpenAI/GPT-5.2"
+    },
+    {
+      "id": "openai/gpt-5.2-codex",
+      "name": "OpenAI/GPT-5.2 Codex"
+    },
+    {
+      "id": "openai/gpt-5.3-codex",
+      "name": "OpenAI/GPT-5.3 Codex"
+    },
+    {
+      "id": "opencode/big-pickle",
+      "name": "OpenCode Zen/Big Pickle"
+    },
+    {
+      "id": "opencode/claude-3-5-haiku",
+      "name": "OpenCode Zen/Claude Haiku 3.5"
+    },
+    {
+      "id": "opencode/claude-haiku-4-5",
+      "name": "OpenCode Zen/Claude Haiku 4.5"
+    },
+    {
+      "id": "opencode/claude-opus-4-1",
+      "name": "OpenCode Zen/Claude Opus 4.1"
+    },
+    {
+      "id": "opencode/claude-opus-4-5",
+      "name": "OpenCode Zen/Claude Opus 4.5"
+    },
+    {
+      "id": "opencode/claude-opus-4-6",
+      "name": "OpenCode Zen/Claude Opus 4.6"
+    },
+    {
+      "id": "opencode/claude-sonnet-4",
+      "name": "OpenCode Zen/Claude Sonnet 4"
+    },
+    {
+      "id": "opencode/claude-sonnet-4-5",
+      "name": "OpenCode Zen/Claude Sonnet 4.5"
+    },
+    {
+      "id": "opencode/gemini-3-flash",
+      "name": "OpenCode Zen/Gemini 3 Flash"
+    },
+    {
+      "id": "opencode/gemini-3-pro",
+      "name": "OpenCode Zen/Gemini 3 Pro"
+    },
+    {
+      "id": "opencode/glm-4.6",
+      "name": "OpenCode Zen/GLM-4.6"
+    },
+    {
+      "id": "opencode/glm-4.7",
+      "name": "OpenCode Zen/GLM-4.7"
+    },
+    {
+      "id": "opencode/gpt-5",
+      "name": "OpenCode Zen/GPT-5"
+    },
+    {
+      "id": "opencode/gpt-5-codex",
+      "name": "OpenCode Zen/GPT-5 Codex"
+    },
+    {
+      "id": "opencode/gpt-5-nano",
+      "name": "OpenCode Zen/GPT-5 Nano"
+    },
+    {
+      "id": "opencode/gpt-5.1",
+      "name": "OpenCode Zen/GPT-5.1"
+    },
+    {
+      "id": "opencode/gpt-5.1-codex",
+      "name": "OpenCode Zen/GPT-5.1 Codex"
+    },
+    {
+      "id": "opencode/gpt-5.1-codex-max",
+      "name": "OpenCode Zen/GPT-5.1 Codex Max"
+    },
+    {
+      "id": "opencode/gpt-5.1-codex-mini",
+      "name": "OpenCode Zen/GPT-5.1 Codex Mini"
+    },
+    {
+      "id": "opencode/gpt-5.2",
+      "name": "OpenCode Zen/GPT-5.2"
+    },
+    {
+      "id": "opencode/gpt-5.2-codex",
+      "name": "OpenCode Zen/GPT-5.2 Codex"
+    },
+    {
+      "id": "opencode/kimi-k2",
+      "name": "OpenCode Zen/Kimi K2"
+    },
+    {
+      "id": "opencode/kimi-k2-thinking",
+      "name": "OpenCode Zen/Kimi K2 Thinking"
+    },
+    {
+      "id": "opencode/kimi-k2.5",
+      "name": "OpenCode Zen/Kimi K2.5"
+    },
+    {
+      "id": "opencode/kimi-k2.5-free",
+      "name": "OpenCode Zen/Kimi K2.5 Free"
+    },
+    {
+      "id": "opencode/minimax-m2.1",
+      "name": "OpenCode Zen/MiniMax M2.1"
+    },
+    {
+      "id": "opencode/minimax-m2.1-free",
+      "name": "OpenCode Zen/MiniMax M2.1 Free"
+    },
+    {
+      "id": "opencode/trinity-large-preview-free",
+      "name": "OpenCode Zen/Trinity Large Preview"
+    }
+  ],
+  "defaultMode": "build",
+  "modes": [
+    {
+      "id": "build",
+      "name": "Build",
+      "description": "The default agent. Executes tools based on configured permissions."
+    },
+    {
+      "id": "plan",
+      "name": "Plan",
+      "description": "Plan mode. Disallows all edit tools."
+    }
+  ]
+}

@@ -15,6 +15,9 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import { createOpencodeClient, type OpencodeClient } from "@opencode-ai/sdk";
 import { spawnSandboxAgent, buildSandboxAgent, type SandboxAgentHandle } from "./helpers/spawn";
+import { mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 describe("OpenCode-compatible Session API", () => {
   let handle: SandboxAgentHandle;
@@ -276,6 +279,47 @@ describe("OpenCode-compatible Session API", () => {
       });
       expect(prompt.error).toBeUndefined();
     });
+
+    it("should reject init model changes after the first prompt", async () => {
+      const session = await client.session.create();
+      const sessionId = session.data?.id!;
+      expect(sessionId).toBeDefined();
+
+      const firstPrompt = await client.session.prompt({
+        path: { id: sessionId },
+        body: {
+          model: { providerID: "mock", modelID: "mock" },
+          parts: [{ type: "text", text: "first" }],
+        },
+      });
+      expect(firstPrompt.error).toBeUndefined();
+
+      const changed = await initSessionViaHttp(sessionId, {
+        providerID: "codex",
+        modelID: "gpt-5",
+      });
+      expect(changed.response.status).toBe(400);
+      expect(changed.data?.errors?.[0]?.message).toBe(
+        "OpenCode compatibility currently does not support changing the model after creating a session. Export with /export and load in to a new session."
+      );
+    });
+
+    it("should map agent-only first prompt selection to provider/model defaults", async () => {
+      const session = await client.session.create();
+      const sessionId = session.data?.id!;
+      expect(sessionId).toBeDefined();
+
+      const prompt = await client.session.prompt({
+        path: { id: sessionId },
+        body: {
+          agent: "codex",
+          parts: [{ type: "text", text: "hello with agent only" }],
+        } as any,
+      });
+      expect(prompt.error).toBeUndefined();
+      expect(prompt.data?.info?.providerID).toBe("codex");
+      expect(prompt.data?.info?.modelID).toBe("gpt-5");
+    });
   });
 
   describe("session.get", () => {
@@ -333,6 +377,68 @@ describe("OpenCode-compatible Session API", () => {
 
       expect(response.error).toBeDefined();
     });
+
+    it("should restore persisted sessions after server restart and continue prompting", async () => {
+      await handle.dispose();
+
+      const tempStateDir = mkdtempSync(join(tmpdir(), "sandbox-agent-opencode-restore-"));
+      const sqlitePath = join(tempStateDir, "opencode-sessions.db");
+
+      try {
+        handle = await spawnSandboxAgent({
+          opencodeCompat: true,
+          env: { OPENCODE_COMPAT_DB_PATH: sqlitePath },
+        });
+        client = createOpencodeClient({
+          baseUrl: `${handle.baseUrl}/opencode`,
+          headers: { Authorization: `Bearer ${handle.token}` },
+        });
+
+        const created = await client.session.create({ body: { title: "Persisted Session" } });
+        const sessionId = created.data?.id!;
+        expect(sessionId).toBeDefined();
+
+        const firstPrompt = await client.session.prompt({
+          path: { id: sessionId },
+          body: {
+            model: { providerID: "mock", modelID: "mock" },
+            parts: [{ type: "text", text: "before restart" }],
+          },
+        });
+        expect(firstPrompt.error).toBeUndefined();
+
+        await waitForAssistantMessage(sessionId);
+        await handle.dispose();
+
+        handle = await spawnSandboxAgent({
+          opencodeCompat: true,
+          env: { OPENCODE_COMPAT_DB_PATH: sqlitePath },
+        });
+        client = createOpencodeClient({
+          baseUrl: `${handle.baseUrl}/opencode`,
+          headers: { Authorization: `Bearer ${handle.token}` },
+        });
+
+        const restored = await client.session.get({ path: { id: sessionId } });
+        expect(restored.error).toBeUndefined();
+        expect(restored.data?.id).toBe(sessionId);
+        expect(restored.data?.title).toBe("Persisted Session");
+
+        const secondPrompt = await client.session.prompt({
+          path: { id: sessionId },
+          body: {
+            model: { providerID: "mock", modelID: "mock" },
+            parts: [{ type: "text", text: "after restart" }],
+          },
+        });
+        expect(secondPrompt.error).toBeUndefined();
+
+        const messages = await listMessagesViaHttp(sessionId);
+        expect(messages.length).toBeGreaterThan(2);
+      } finally {
+        rmSync(tempStateDir, { recursive: true, force: true });
+      }
+    });
   });
 
   describe("session.update", () => {
@@ -375,6 +481,38 @@ describe("OpenCode-compatible Session API", () => {
           "OpenCode compatibility currently does not support changing the model after creating a session. Export with /export and load in to a new session."
         );
       }
+    });
+
+    it("should reject prompt model changes after the first prompt", async () => {
+      const created = await client.session.create({ body: { title: "Model Lock" } });
+      const sessionId = created.data?.id!;
+
+      const firstPrompt = await client.session.prompt({
+        path: { id: sessionId },
+        body: {
+          model: { providerID: "mock", modelID: "mock" },
+          parts: [{ type: "text", text: "first" }],
+        },
+      });
+      expect(firstPrompt.error).toBeUndefined();
+
+      const response = await fetch(`${handle.baseUrl}/opencode/session/${sessionId}/message`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${handle.token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: { providerID: "codex", modelID: "gpt-5" },
+          parts: [{ type: "text", text: "second" }],
+        }),
+      });
+      const data = await response.json();
+
+      expect(response.status).toBe(400);
+      expect(data?.errors?.[0]?.message).toBe(
+        "OpenCode compatibility currently does not support changing the model after creating a session. Export with /export and load in to a new session."
+      );
     });
   });
 

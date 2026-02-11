@@ -1,0 +1,64 @@
+---
+title: "Architecture"
+description: "How the client, sandbox, server, and agent fit together."
+icon: "microchip"
+---
+
+Sandbox Agent runs as an HTTP server inside your sandbox. Your app talks to it remotely.
+
+## Components
+
+- `Your client`: your app code using the `sandbox-agent` SDK.
+- `Sandbox`: isolated runtime (E2B, Daytona, Docker, etc.).
+- `Sandbox Agent server`: process inside the sandbox exposing HTTP transport.
+- `Agent`: Claude/Codex/OpenCode/Amp process managed by Sandbox Agent.
+
+```mermaid placement="top-right"
+  flowchart LR
+    CLIENT["Sandbox Agent SDK"]
+    SERVER["Sandbox Agent server"]
+    AGENT["Agent process"]
+
+    subgraph SANDBOX["Sandbox"]
+      direction TB
+      SERVER --> AGENT
+    end
+
+    CLIENT -->|HTTP| SERVER
+```
+
+## Suggested Topology
+
+Run the SDK on your backend, then call it from your frontend.
+
+This extra hop is recommended because it keeps auth/token logic on the backend and makes persistence simpler.
+
+```mermaid placement="top-right"
+  flowchart LR
+    BROWSER["Browser"]
+    subgraph BACKEND["Your backend"]
+      direction TB
+      SDK["Sandbox Agent SDK"]
+    end
+    subgraph SANDBOX_SIMPLE["Sandbox"]
+      SERVER_SIMPLE["Sandbox Agent server"]
+    end
+
+    BROWSER --> BACKEND
+    BACKEND --> SDK --> SERVER_SIMPLE
+```
+
+### Backend requirements
+
+Your backend layer needs to handle:
+
+- **Long-running connections**: prompts can take minutes.
+- **Session affinity**: follow-up messages must reach the same session.
+- **State between requests**: session metadata and event history must persist across requests.
+- **Graceful recovery**: sessions should resume after backend restarts.
+
+We recommend [Rivet](https://rivet.dev) over serverless because actors natively support the long-lived connections, session routing, and state persistence that agent workloads require.
+
+## Session persistence
+
+For storage driver options and replay behavior, see [Persisting Sessions](/session-persistence).

@@ -1,0 +1,183 @@
+---
+title: "Persisting Sessions"
+description: "Choose and configure session persistence for the TypeScript SDK."
+icon: "database"
+---
+
+The TypeScript SDK uses a `SessionPersistDriver` to store session records and event history.
+If you do not provide one, the SDK uses in-memory storage.
+With persistence enabled, sessions can be restored after runtime/session loss. See [Session Restoration](/session-restoration).
+
+Each driver stores:
+
+- `SessionRecord` (`id`, `agent`, `agentSessionId`, `lastConnectionId`, `createdAt`, optional `destroyedAt`, optional `sessionInit`)
+- `SessionEvent` (`id`, `eventIndex`, `sessionId`, `connectionId`, `sender`, `payload`, `createdAt`)
+
+## Persistence drivers
+
+### In-memory
+
+Best for local dev and ephemeral workloads.
+
+```ts
+import { InMemorySessionPersistDriver, SandboxAgent } from "sandbox-agent";
+
+const persist = new InMemorySessionPersistDriver({
+  maxSessions: 1024,
+  maxEventsPerSession: 500,
+});
+
+const sdk = await SandboxAgent.connect({
+  baseUrl: "http://127.0.0.1:2468",
+  persist,
+});
+```
+
+### Rivet
+
+Recommended for sandbox orchestration with actor state.
+
+```bash
+npm install @sandbox-agent/persist-rivet@0.1.x
+```
+
+```ts
+import { actor } from "rivetkit";
+import { SandboxAgent } from "sandbox-agent";
+import { RivetSessionPersistDriver, type RivetPersistState } from "@sandbox-agent/persist-rivet";
+
+type PersistedState = RivetPersistState & {
+  sandboxId: string;
+  baseUrl: string;
+};
+
+export default actor({
+  createState: async () => {
+    return {
+      sandboxId: "sbx_123",
+      baseUrl: "http://127.0.0.1:2468",
+    } satisfies Partial<PersistedState>;
+  },
+  createVars: async (c) => {
+    const persist = new RivetSessionPersistDriver(c);
+    const sdk = await SandboxAgent.connect({
+      baseUrl: c.state.baseUrl,
+      persist,
+    });
+
+    const session = await sdk.resumeOrCreateSession({ id: "default", agent: "codex" });
+
+    const unsubscribe = session.onEvent((event) => {
+      c.broadcast("session.event", event);
+    });
+
+    return { sdk, session, unsubscribe };
+  },
+  actions: {
+    sendMessage: async (c, message: string) => {
+      await c.vars.session.prompt([{ type: "text", text: message }]);
+    },
+  },
+  onSleep: async (c) => {
+    c.vars.unsubscribe?.();
+    await c.vars.sdk.dispose();
+  },
+});
+```
+
+### IndexedDB
+
+Best for browser apps that should survive reloads.
+
+```bash
+npm install @sandbox-agent/persist-indexeddb@0.2.x
+```
+
+```ts
+import { SandboxAgent } from "sandbox-agent";
+import { IndexedDbSessionPersistDriver } from "@sandbox-agent/persist-indexeddb";
+
+const persist = new IndexedDbSessionPersistDriver({
+  databaseName: "sandbox-agent-session-store",
+});
+
+const sdk = await SandboxAgent.connect({
+  baseUrl: "http://127.0.0.1:2468",
+  persist,
+});
+```
+
+### SQLite
+
+Best for local/server Node apps that need durable storage without a DB server.
+
+```bash
+npm install @sandbox-agent/persist-sqlite@0.2.x
+```
+
+```ts
+import { SandboxAgent } from "sandbox-agent";
+import { SQLiteSessionPersistDriver } from "@sandbox-agent/persist-sqlite";
+
+const persist = new SQLiteSessionPersistDriver({
+  filename: "./sandbox-agent.db",
+});
+
+const sdk = await SandboxAgent.connect({
+  baseUrl: "http://127.0.0.1:2468",
+  persist,
+});
+```
+
+### Postgres
+
+Use when you already run Postgres and want shared relational storage.
+
+```bash
+npm install @sandbox-agent/persist-postgres@0.2.x
+```
+
+```ts
+import { SandboxAgent } from "sandbox-agent";
+import { PostgresSessionPersistDriver } from "@sandbox-agent/persist-postgres";
+
+const persist = new PostgresSessionPersistDriver({
+  connectionString: process.env.DATABASE_URL,
+  schema: "public",
+});
+
+const sdk = await SandboxAgent.connect({
+  baseUrl: "http://127.0.0.1:2468",
+  persist,
+});
+```
+
+### Custom driver
+
+Implement `SessionPersistDriver` for custom backends.
+
+```ts
+import type { SessionPersistDriver } from "sandbox-agent";
+
+class MyDriver implements SessionPersistDriver {
+  async getSession(id) { return null; }
+  async listSessions(request) { return { items: [] }; }
+  async updateSession(session) {}
+  async listEvents(request) { return { items: [] }; }
+  async insertEvent(event) {}
+}
+```
+
+## Replay controls
+
+`SandboxAgent.connect(...)` supports:
+
+- `replayMaxEvents` (default `50`)
+- `replayMaxChars` (default `12000`)
+
+These cap replay size when restoring sessions.
+
+## Related docs
+
+- [SDK Overview](/sdk-overview)
+- [Session Restoration](/session-restoration)

@@ -1,79 +1,52 @@
 ---
 title: "E2B"
-description: "Deploy the daemon inside an E2B sandbox."
+description: "Deploy Sandbox Agent inside an E2B sandbox."
 ---
 
 ## Prerequisites
 
-- `E2B_API_KEY` environment variable
-- `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` for the coding agents
+- `E2B_API_KEY`
+- `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`
 
-## TypeScript Example
+## TypeScript example
 
 ```typescript
 import { Sandbox } from "@e2b/code-interpreter";
-import { SandboxAgentClient } from "sandbox-agent";
+import { SandboxAgent } from "sandbox-agent";
 
-// Pass API keys to the sandbox
 const envs: Record<string, string> = {};
 if (process.env.ANTHROPIC_API_KEY) envs.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 if (process.env.OPENAI_API_KEY) envs.OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
 const sandbox = await Sandbox.create({ allowInternetAccess: true, envs });
 
-// Install sandbox-agent
 await sandbox.commands.run(
-  "curl -fsSL https://releases.rivet.dev/sandbox-agent/latest/install.sh | sh"
+  "curl -fsSL https://releases.rivet.dev/sandbox-agent/0.2.x/install.sh | sh"
 );
 
-// Install agents before starting the server
 await sandbox.commands.run("sandbox-agent install-agent claude");
 await sandbox.commands.run("sandbox-agent install-agent codex");
 
-// Start the server in the background
 await sandbox.commands.run(
   "sandbox-agent server --no-token --host 0.0.0.0 --port 3000",
   { background: true }
 );
 
-// Connect to the server
 const baseUrl = `https://${sandbox.getHost(3000)}`;
-const client = new SandboxAgentClient({ baseUrl, agent: "mock" });
+const sdk = await SandboxAgent.connect({ baseUrl });
 
-// Wait for server to be ready
-for (let i = 0; i < 30; i++) {
-  try {
-    await client.getHealth();
-    break;
-  } catch {
-    await new Promise((r) => setTimeout(r, 1000));
-  }
-}
-
-// Create a session and start coding
-await client.createSession("my-session", {
-  agent: "claude",
-  permissionMode: "default",
+const session = await sdk.createSession({ agent: "claude" });
+const off = session.onEvent((event) => {
+  console.log(event.sender, event.payload);
 });
 
-await client.postMessage("my-session", {
-  message: "Summarize this repository",
-});
+await session.prompt([{ type: "text", text: "Summarize this repository" }]);
+off();
 
-for await (const event of client.streamEvents("my-session")) {
-  console.log(event.type, event.data);
-}
-
-// Cleanup
 await sandbox.kill();
 ```
 
-## Faster Cold Starts
+## Faster cold starts
 
-For faster startup, create a custom E2B template with sandbox-agent and agents pre-installed:
-
-1. Create a template with the install script baked in
-2. Pre-install agents: `sandbox-agent install-agent claude codex`
-3. Use the template ID when creating sandboxes
-
-See [E2B Custom Templates](https://e2b.dev/docs/sandbox-template) for details.
+For faster startup, create a custom E2B template with Sandbox Agent and target agents pre-installed.
+See [E2B Custom Templates](https://e2b.dev/docs/sandbox-template).

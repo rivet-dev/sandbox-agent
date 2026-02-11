@@ -14,7 +14,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@main
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -23,11 +23,11 @@ jobs:
       - run: pnpm install
       - name: Run checks
         run: ./scripts/release/main.ts --version 0.0.0 --check
-      - name: Run ACP v2 server tests
+      - name: Run ACP v1 server tests
         run: |
           cargo test -p sandbox-agent-agent-management
-          cargo test -p sandbox-agent --test v2_api
-          cargo test -p sandbox-agent --test v2_agent_process_matrix
+          cargo test -p sandbox-agent --test v1_api
+          cargo test -p sandbox-agent --test v1_agent_process_matrix
           cargo test -p sandbox-agent --lib
       - name: Run SDK tests
         run: pnpm --dir sdks/typescript test

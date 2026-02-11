@@ -1,14 +1,14 @@
 # Feature 6: Server Status
 
-**Implementation approach:** Extension fields on `GET /v2/agents` and `GET /v2/health`
+**Implementation approach:** Extension fields on `GET /v1/agents` and `GET /v1/health`
 
 ## Summary
 
-v1 had `ServerStatus` (Running/Stopped/Error) and `ServerStatusInfo` (baseUrl, lastError, restartCount, uptimeMs) per agent. v2 has none of this. Add server/agent process status tracking.
+v1 had `ServerStatus` (Running/Stopped/Error) and `ServerStatusInfo` (baseUrl, lastError, restartCount, uptimeMs) per agent. v1 has none of this. Add server/agent process status tracking.
 
-## Current v2 State
+## Current v1 State
 
-`GET /v2/agents` returns `AgentInfo` with install state only:
+`GET /v1/agents` returns `AgentInfo` with install state only:
 
 ```rust
 pub struct AgentInfo {
@@ -132,13 +132,13 @@ Only include `server_status` for agents that use shared processes (Codex, OpenCo
 | File | Change |
 |------|--------|
 | `server/packages/sandbox-agent/src/acp_runtime/mod.rs` | Track agent process lifecycle (start/stop/error/restart count) per `AgentId`; expose `status_snapshot()` method |
-| `server/packages/sandbox-agent/src/router.rs` | Add `ServerStatus`, `ServerStatusInfo` types; add `server_status` to `AgentInfo`; query runtime for status in `get_v2_agents` |
+| `server/packages/sandbox-agent/src/router.rs` | Add `ServerStatus`, `ServerStatusInfo` types; add `server_status` to `AgentInfo`; query runtime for status in `get_v1_agents` |
 | `sdks/typescript/src/client.ts` | Update `AgentInfo` type with `serverStatus` |
-| `server/packages/sandbox-agent/tests/v2_api.rs` | Test server status in agent listing |
+| `server/packages/sandbox-agent/tests/v1_api.rs` | Test server status in agent listing |
 
 ### Docs to Update
 
 | Doc | Change |
 |-----|--------|
-| `docs/openapi.json` | Update `/v2/agents` response with `server_status` |
+| `docs/openapi.json` | Update `/v1/agents` response with `server_status` |
 | `docs/sdks/typescript.mdx` | Document `serverStatus` field |

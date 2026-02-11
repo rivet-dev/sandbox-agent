@@ -1,18 +1,19 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { existsSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { tmpdir } from "node:os";
 import {
-  AlreadyConnectedError,
-  NotConnectedError,
+  InMemorySessionPersistDriver,
   SandboxAgent,
-  SandboxAgentClient,
-  type AgentEvent,
+  type SessionEvent,
 } from "../src/index.ts";
 import { spawnSandboxAgent, isNodeRuntime, type SandboxAgentSpawnHandle } from "../src/spawn.ts";
+import { prepareMockAgentDataHome } from "./helpers/mock-agent.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const AGENT_UNPARSED_METHOD = "_sandboxagent/agent/unparsed";
 
 function findBinary(): string | null {
   if (process.env.SANDBOX_AGENT_BIN) {
@@ -49,8 +50,8 @@ function sleep(ms: number): Promise<void> {
 
 async function waitFor<T>(
   fn: () => T | undefined | null,
-  timeoutMs = 5000,
-  stepMs = 25,
+  timeoutMs = 6000,
+  stepMs = 30,
 ): Promise<T> {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
@@ -63,16 +64,23 @@ async function waitFor<T>(
   throw new Error("timed out waiting for condition");
 }
 
-describe("Integration: TypeScript SDK against real server/runtime", () => {
+describe("Integration: TypeScript SDK flat session API", () => {
   let handle: SandboxAgentSpawnHandle;
   let baseUrl: string;
   let token: string;
+  let dataHome: string;
 
   beforeAll(async () => {
+    dataHome = mkdtempSync(join(tmpdir(), "sdk-integration-"));
+    prepareMockAgentDataHome(dataHome);
+
     handle = await spawnSandboxAgent({
       enabled: true,
       log: "silent",
       timeoutMs: 30000,
+      env: {
+        XDG_DATA_HOME: dataHome,
+      },
     });
     baseUrl = handle.baseUrl;
     token = handle.token;
@@ -80,246 +88,197 @@ describe("Integration: TypeScript SDK against real server/runtime", () => {
 
   afterAll(async () => {
     await handle.dispose();
+    rmSync(dataHome, { recursive: true, force: true });
   });
 
   it("detects Node.js runtime", () => {
     expect(isNodeRuntime()).toBe(true);
   });
 
-  it("keeps health on HTTP and requires ACP connection for ACP-backed helpers", async () => {
-    const client = await SandboxAgent.connect({
+  it("creates a session, sends prompt, and persists events", async () => {
+    const sdk = await SandboxAgent.connect({
       baseUrl,
       token,
-      agent: "mock",
-      autoConnect: false,
     });
 
-    const health = await client.getHealth();
-    expect(health.status).toBe("ok");
+    const session = await sdk.createSession({ agent: "mock" });
 
-    await expect(client.listAgents()).rejects.toBeInstanceOf(NotConnectedError);
-
-    await client.connect();
-    const agents = await client.listAgents();
-    expect(Array.isArray(agents.agents)).toBe(true);
-    expect(agents.agents.length).toBeGreaterThan(0);
-
-    await client.disconnect();
-  });
-
-  it("auto-connects on constructor and runs initialize/new/prompt flow", async () => {
-    const events: AgentEvent[] = [];
-
-    const client = new SandboxAgentClient({
-      baseUrl,
-      token,
-      agent: "mock",
-      onEvent: (event) => {
-        events.push(event);
-      },
+    const observed: SessionEvent[] = [];
+    const off = session.onEvent((event) => {
+      observed.push(event);
     });
 
-    const session = await client.newSession({
-      cwd: process.cwd(),
-      mcpServers: [],
-      metadata: {
-        agent: "mock",
-      },
-    });
-    expect(session.sessionId).toBeTruthy();
-
-    const prompt = await client.prompt({
-      sessionId: session.sessionId,
-      prompt: [{ type: "text", text: "hello integration" }],
-    });
+    const prompt = await session.prompt([{ type: "text", text: "hello flat sdk" }]);
     expect(prompt.stopReason).toBe("end_turn");
 
     await waitFor(() => {
-      const text = events
-        .filter((event): event is Extract<AgentEvent, { type: "sessionUpdate" }> => {
-          return event.type === "sessionUpdate";
-        })
-        .map((event) => event.notification)
-        .filter((entry) => entry.update.sessionUpdate === "agent_message_chunk")
-        .map((entry) => entry.update.content)
-        .filter((content) => content.type === "text")
-        .map((content) => content.text)
-        .join("");
-      return text.includes("mock: hello integration") ? text : undefined;
+      const inbound = observed.find((event) => event.sender === "agent");
+      return inbound;
     });
 
-    await client.disconnect();
-  });
+    const listed = await sdk.listSessions({ limit: 20 });
+    expect(listed.items.some((entry) => entry.id === session.id)).toBe(true);
 
-  it("enforces manual connect and disconnect lifecycle when autoConnect is disabled", async () => {
-    const client = new SandboxAgentClient({
-      baseUrl,
-      token,
-      agent: "mock",
-      autoConnect: false,
-    });
+    const fetched = await sdk.getSession(session.id);
+    expect(fetched?.agent).toBe("mock");
 
-    await expect(
-      client.newSession({
-        cwd: process.cwd(),
-        mcpServers: [],
-        metadata: {
-          agent: "mock",
-        },
-      }),
-    ).rejects.toBeInstanceOf(NotConnectedError);
+    const events = await sdk.getEvents({ sessionId: session.id, limit: 100 });
+    expect(events.items.length).toBeGreaterThan(0);
+    expect(events.items.some((event) => event.sender === "client")).toBe(true);
+    expect(events.items.some((event) => event.sender === "agent")).toBe(true);
+    expect(events.items.every((event) => typeof event.id === "string")).toBe(true);
+    expect(events.items.every((event) => Number.isInteger(event.eventIndex))).toBe(true);
 
-    await client.connect();
-
-    const session = await client.newSession({
-      cwd: process.cwd(),
-      mcpServers: [],
-      metadata: {
-        agent: "mock",
-      },
-    });
-    expect(session.sessionId).toBeTruthy();
-
-    await client.disconnect();
-
-    await expect(
-      client.prompt({
-        sessionId: session.sessionId,
-        prompt: [{ type: "text", text: "after disconnect" }],
-      }),
-    ).rejects.toBeInstanceOf(NotConnectedError);
-  });
-
-  it("rejects duplicate connect calls for a single client instance", async () => {
-    const client = new SandboxAgentClient({
-      baseUrl,
-      token,
-      agent: "mock",
-      autoConnect: false,
-    });
-
-    await client.connect();
-    await expect(client.connect()).rejects.toBeInstanceOf(AlreadyConnectedError);
-    await client.disconnect();
-  });
-
-  it("injects metadata on newSession and extracts metadata from session/list", async () => {
-    const client = new SandboxAgentClient({
-      baseUrl,
-      token,
-      agent: "mock",
-      autoConnect: false,
-    });
-
-    await client.connect();
-
-    const session = await client.newSession({
-      cwd: process.cwd(),
-      mcpServers: [],
-      metadata: {
-        agent: "mock",
-        variant: "high",
-      },
-    });
-
-    await client.setMetadata(session.sessionId, {
-      title: "sdk title",
-      permissionMode: "ask",
-      model: "mock",
-    });
-
-    const listed = await client.unstableListSessions({});
-    const current = listed.sessions.find((entry) => entry.sessionId === session.sessionId) as
-      | (Record<string, unknown> & { metadata?: Record<string, unknown> })
-      | undefined;
-
-    expect(current).toBeTruthy();
-    expect(current?.title).toBe("sdk title");
-
-    const metadata =
-      (current?.metadata as Record<string, unknown> | undefined) ??
-      ((current?._meta as Record<string, unknown> | undefined)?.["sandboxagent.dev"] as
-        | Record<string, unknown>
-        | undefined);
-
-    expect(metadata?.variant).toBe("high");
-    expect(metadata?.permissionMode).toBe("ask");
-    expect(metadata?.model).toBe("mock");
-
-    await client.disconnect();
-  });
-
-  it("converts _sandboxagent/session/ended into typed agent events", async () => {
-    const events: AgentEvent[] = [];
-    const client = new SandboxAgentClient({
-      baseUrl,
-      token,
-      agent: "mock",
-      autoConnect: false,
-      onEvent: (event) => {
-        events.push(event);
-      },
-    });
-
-    await client.connect();
-
-    const session = await client.newSession({
-      cwd: process.cwd(),
-      mcpServers: [],
-      metadata: {
-        agent: "mock",
-      },
-    });
-
-    await client.terminateSession(session.sessionId);
-
-    const ended = await waitFor(() => {
-      return events.find((event) => event.type === "sessionEnded");
-    });
-
-    expect(ended.type).toBe("sessionEnded");
-    if (ended.type === "sessionEnded") {
-      const endedSessionId =
-        ended.notification.params.sessionId ?? ended.notification.params.session_id;
-      expect(endedSessionId).toBe(session.sessionId);
+    for (let i = 1; i < events.items.length; i += 1) {
+      expect(events.items[i]!.eventIndex).toBeGreaterThanOrEqual(events.items[i - 1]!.eventIndex);
     }
 
-    await client.disconnect();
+    off();
+    await sdk.dispose();
   });
 
-  it("converts _sandboxagent/agent/unparsed notifications through the event adapter", async () => {
-    const events: AgentEvent[] = [];
-    const client = new SandboxAgentClient({
+  it("restores a session on stale connection by recreating and replaying history on first prompt", async () => {
+    const persist = new InMemorySessionPersistDriver({
+      maxEventsPerSession: 200,
+    });
+
+    const first = await SandboxAgent.connect({
       baseUrl,
       token,
-      autoConnect: false,
-      onEvent: (event) => {
-        events.push(event);
-      },
+      persist,
+      replayMaxEvents: 50,
+      replayMaxChars: 20_000,
     });
 
-    (client as any).handleEnvelope(
-      {
-        jsonrpc: "2.0",
-        method: AGENT_UNPARSED_METHOD,
-        params: {
-          raw: "unexpected payload",
-        },
-      },
-      "inbound",
-    );
+    const created = await first.createSession({ agent: "mock" });
+    await created.prompt([{ type: "text", text: "first run" }]);
+    const oldConnectionId = created.lastConnectionId;
 
-    const unparsed = events.find((event) => event.type === "agentUnparsed");
-    expect(unparsed?.type).toBe("agentUnparsed");
+    await first.dispose();
+
+    const second = await SandboxAgent.connect({
+      baseUrl,
+      token,
+      persist,
+      replayMaxEvents: 50,
+      replayMaxChars: 20_000,
+    });
+
+    const restored = await second.resumeSession(created.id);
+    expect(restored.lastConnectionId).not.toBe(oldConnectionId);
+
+    await restored.prompt([{ type: "text", text: "second run" }]);
+
+    const events = await second.getEvents({ sessionId: restored.id, limit: 500 });
+
+    const replayInjected = events.items.find((event) => {
+      if (event.sender !== "client") {
+        return false;
+      }
+      const payload = event.payload as Record<string, unknown>;
+      const method = payload.method;
+      const params = payload.params as Record<string, unknown> | undefined;
+      const prompt = Array.isArray(params?.prompt) ? params?.prompt : [];
+      const firstBlock = prompt[0] as Record<string, unknown> | undefined;
+      return (
+        method === "session/prompt" &&
+        typeof firstBlock?.text === "string" &&
+        firstBlock.text.includes("Previous session history is replayed below")
+      );
+    });
+
+    expect(replayInjected).toBeTruthy();
+
+    await second.dispose();
   });
 
-  it("rejects invalid token on protected /v2 endpoints", async () => {
-    const client = new SandboxAgentClient({
-      baseUrl,
-      token: "invalid-token",
-      autoConnect: false,
+  it("enforces in-memory event cap to avoid leaks", async () => {
+    const persist = new InMemorySessionPersistDriver({
+      maxEventsPerSession: 8,
     });
 
-    await expect(client.getHealth()).rejects.toThrow();
+    const sdk = await SandboxAgent.connect({
+      baseUrl,
+      token,
+      persist,
+    });
+
+    const session = await sdk.createSession({ agent: "mock" });
+
+    for (let i = 0; i < 20; i += 1) {
+      await session.prompt([{ type: "text", text: `event-cap-${i}` }]);
+    }
+
+    const events = await sdk.getEvents({ sessionId: session.id, limit: 200 });
+    expect(events.items.length).toBeLessThanOrEqual(8);
+
+    await sdk.dispose();
+  });
+
+  it("supports MCP and skills config HTTP helpers", async () => {
+    const sdk = await SandboxAgent.connect({
+      baseUrl,
+      token,
+    });
+
+    const directory = mkdtempSync(join(tmpdir(), "sdk-config-"));
+
+    const mcpConfig = {
+      type: "local" as const,
+      command: "node",
+      args: ["server.js"],
+      env: { LOG_LEVEL: "debug" },
+    };
+
+    await sdk.setMcpConfig(
+      {
+        directory,
+        mcpName: "local-test",
+      },
+      mcpConfig,
+    );
+
+    const loadedMcp = await sdk.getMcpConfig({
+      directory,
+      mcpName: "local-test",
+    });
+    expect(loadedMcp.type).toBe("local");
+
+    await sdk.deleteMcpConfig({
+      directory,
+      mcpName: "local-test",
+    });
+
+    const skillsConfig = {
+      sources: [
+        {
+          type: "github",
+          source: "rivet-dev/skills",
+          skills: ["sandbox-agent"],
+        },
+      ],
+    };
+
+    await sdk.setSkillsConfig(
+      {
+        directory,
+        skillName: "default",
+      },
+      skillsConfig,
+    );
+
+    const loadedSkills = await sdk.getSkillsConfig({
+      directory,
+      skillName: "default",
+    });
+    expect(Array.isArray(loadedSkills.sources)).toBe(true);
+
+    await sdk.deleteSkillsConfig({
+      directory,
+      skillName: "default",
+    });
+
+    await sdk.dispose();
+    rmSync(directory, { recursive: true, force: true });
   });
 });

@@ -24,6 +24,7 @@ export interface ReleaseOpts {
 	root: string;
 	version: string;
 	latest: boolean;
+	minorVersionChannel: string;
 	/** Commit to publish release for. */
 	commit: string;
 	/** Optional version to reuse artifacts and Docker images from instead of building. */
@@ -434,6 +435,10 @@ async function main() {
 		console.log(`Auto-determined latest flag: ${isLatest} (version: ${version})`);
 	}
 
+	const parsedVersion = semver.parse(version);
+	assert(parsedVersion !== null, "version must be parseable");
+	const minorVersionChannel = `${parsedVersion.major}.${parsedVersion.minor}.x`;
+
 	// Setup opts
 	let commit: string;
 	if (opts.overrideCommit) {
@@ -449,6 +454,7 @@ async function main() {
 		root: ROOT_DIR,
 		version: version,
 		latest: isLatest,
+		minorVersionChannel,
 		commit,
 		reuseEngineVersion: opts.reuseEngineVersion,
 	};
@@ -469,6 +475,7 @@ async function main() {
 		console.log(`\nRelease Details:`);
 		console.log(`  Version: ${releaseOpts.version}`);
 		console.log(`  Latest: ${releaseOpts.latest}`);
+		console.log(`  Minor channel: ${releaseOpts.minorVersionChannel}`);
 		console.log(`  Commit: ${releaseOpts.commit}`);
 		if (releaseOpts.reuseEngineVersion) {
 			console.log(`  Reusing engine version: ${releaseOpts.reuseEngineVersion}`);

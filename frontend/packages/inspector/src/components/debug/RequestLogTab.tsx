@@ -44,21 +44,21 @@ const RequestLogTab = ({
                   type="button"
                   onClick={() => hasDetails && toggleExpanded(entry.id)}
                   title={hasDetails ? (isExpanded ? "Collapse" : "Expand") : undefined}
-                  style={{ cursor: hasDetails ? "pointer" : "default" }}
+                  style={{ cursor: hasDetails ? "pointer" : "default", gridTemplateColumns: "1fr auto auto auto" }}
                 >
-                  <div className="event-summary-main" style={{ flex: 1 }}>
+                  <div className="event-summary-main">
                     <div className="event-title-row">
                       <span className="log-method">{entry.method}</span>
                       <span className="log-url text-truncate" style={{ flex: 1 }}>{entry.url}</span>
-                      <span className={`log-status ${entry.status && entry.status < 400 ? "ok" : "error"}`}>
-                        {entry.status || "ERR"}
-                      </span>
                     </div>
                     <div className="event-id">
                       {entry.time}
                       {entry.error && ` - ${entry.error}`}
                     </div>
                   </div>
+                  <span className={`log-status ${entry.status && entry.status < 400 ? "ok" : "error"}`}>
+                    {entry.status || "ERR"}
+                  </span>
                   <span
                     className="copy-button"
                     onClick={(e) => {

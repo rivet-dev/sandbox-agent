@@ -4,9 +4,9 @@
 
 ## Summary
 
-v1 had a full question subsystem: agent requests a question from the user, client replies with an answer or rejection, and the system tracks question status. v2 has partial stub implementation in mock only.
+v1 had a full question subsystem: agent requests a question from the user, client replies with an answer or rejection, and the system tracks question status. v1 has partial stub implementation in mock only.
 
-## Current v2 State
+## Current v1 State
 
 - `_sandboxagent/session/request_question` is declared as a constant in `acp_runtime/mod.rs:33`
 - Advertised in capability injection (`extensions.sessionRequestQuestion: true`)

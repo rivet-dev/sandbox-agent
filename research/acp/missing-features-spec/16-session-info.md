@@ -1,12 +1,12 @@
 # Feature 16: Session Info
 
-**Implementation approach:** New HTTP endpoints (`GET /v2/sessions`, `GET /v2/sessions/{id}`)
+**Implementation approach:** New HTTP endpoints (`GET /v1/sessions`, `GET /v1/sessions/{id}`)
 
 ## Summary
 
-v1 `SessionInfo` tracked `event_count`, `created_at`, `updated_at`, and full `mcp` config. v2 has session data in the ACP runtime's `MetaSession` struct but no HTTP endpoints to query it. Add REST endpoints for session listing and detail.
+v1 `SessionInfo` tracked `event_count`, `created_at`, `updated_at`, and full `mcp` config. v1 has session data in the ACP runtime's `MetaSession` struct but no HTTP endpoints to query it. Add REST endpoints for session listing and detail.
 
-## Current v2 State
+## Current v1 State
 
 ### Internal Session Tracking
 
@@ -117,15 +117,15 @@ fn build_session_info(state: &SessionState) -> SessionInfo {
 ### New HTTP Endpoints
 
 ```
-GET /v2/sessions              -> SessionListResponse
-GET /v2/sessions/{id}         -> SessionInfo
+GET /v1/sessions              -> SessionListResponse
+GET /v1/sessions/{id}         -> SessionInfo
 ```
 
 These are control-plane HTTP endpoints (not ACP), providing session visibility without requiring an active ACP connection.
 
 ### Response Types
 
-The v2 `SessionInfo` should be a superset of v1 fields, adapted for ACP:
+The v1 `SessionInfo` should be a superset of v1 fields, adapted for ACP:
 
 ```rust
 #[derive(Debug, Serialize, JsonSchema, ToSchema)]
@@ -156,15 +156,15 @@ Need to add:
 
 | File | Change |
 |------|--------|
-| `server/packages/sandbox-agent/src/router.rs` | Add `GET /v2/sessions` and `GET /v2/sessions/{id}` handlers; add response types |
+| `server/packages/sandbox-agent/src/router.rs` | Add `GET /v1/sessions` and `GET /v1/sessions/{id}` handlers; add response types |
 | `server/packages/sandbox-agent/src/acp_runtime/mod.rs` | Add `created_at` to `MetaSession`; add `ended` tracking; expose `list_sessions()` and `get_session()` public methods |
 | `sdks/typescript/src/client.ts` | Add `listSessions()` and `getSession(id)` methods |
-| `server/packages/sandbox-agent/tests/v2_api.rs` | Add session listing and detail tests |
+| `server/packages/sandbox-agent/tests/v1_api.rs` | Add session listing and detail tests |
 
 ### Docs to Update
 
 | Doc | Change |
 |-----|--------|
-| `docs/openapi.json` | Add `/v2/sessions` and `/v2/sessions/{id}` endpoint specs |
+| `docs/openapi.json` | Add `/v1/sessions` and `/v1/sessions/{id}` endpoint specs |
 | `docs/cli.mdx` | Add CLI `sessions list` and `sessions info` commands |
 | `docs/sdks/typescript.mdx` | Document session listing SDK methods |

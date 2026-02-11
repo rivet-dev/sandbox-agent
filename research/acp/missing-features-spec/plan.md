@@ -1,14 +1,14 @@
 # Missing Features Implementation Plan
 
-Features selected from the v1-to-v2 gap analysis, ordered for implementation.
+Features selected from the v1-to-v1 gap analysis, ordered for implementation.
 
 ## Confirmed Decisions (Locked)
 
 - Canonical extension naming is `_sandboxagent/...` and `_meta["sandboxagent.dev"]`; remove/ignore `_sandboxagent/*`.
-- Control-plane discovery/status/session APIs are HTTP-only under `/v2/*` (no ACP control-plane equivalents).
+- Control-plane discovery/status/session APIs are HTTP-only under `/v1/*` (no ACP control-plane equivalents).
 - For Health, Filesystem, and Attachments, implementation should port behavior from v1 using commit `8ecd27bc24e62505d7aa4c50cbdd1c9dbb09f836`.
 - Session termination via `_sandboxagent/session/terminate` is idempotent.
-- `DELETE /v2/rpc` is transport detach only; it must not replace explicit termination semantics.
+- `DELETE /v1/rpc` is transport detach only; it must not replace explicit termination semantics.
 - Model variants (#8) are removed from current scope.
 - `include_raw` (#10) is removed from current scope.
 - Models/modes should be optional properties on agent response payloads (only when the agent is installed) and lazily populated.
@@ -24,9 +24,9 @@ These features enrich existing endpoints and have no dependencies on each other.
 
 | Order | Feature                                      | Spec | Approach                                   | Effort |
 |:-----:|----------------------------------------------|:----:|--------------------------------------------|:------:|
-| A1    | [Health Endpoint](./05-health-endpoint.md)   | #5   | Port v1 health behavior to `GET /v2/health` | Small  |
+| A1    | [Health Endpoint](./05-health-endpoint.md)   | #5   | Port v1 health behavior to `GET /v1/health` | Small  |
 | A2    | [Server Status](./06-server-status.md)       | #6   | Add process tracking to ACP runtime         | Medium |
-| A3    | [Agent Listing](./12-agent-listing.md)       | #12  | Enrich `GET /v2/agents` with v1-parity data | Medium |
+| A3    | [Agent Listing](./12-agent-listing.md)       | #12  | Enrich `GET /v1/agents` with v1-parity data | Medium |
 
 **A2 blocks A3** — agent listing includes server status from Feature #6.
 
@@ -36,7 +36,7 @@ Session-level features that build on Phase A runtime tracking.
 
 | Order | Feature                                                      | Spec | Approach                                             | Effort |
 |:-----:|--------------------------------------------------------------|:----:|------------------------------------------------------|:------:|
-| B1    | [Session Info](./16-session-info.md)                         | #16  | New `GET /v2/sessions` and `GET /v2/sessions/{id}`  | Medium |
+| B1    | [Session Info](./16-session-info.md)                         | #16  | New `GET /v1/sessions` and `GET /v1/sessions/{id}`  | Medium |
 | B2    | [Session Termination](./07-session-termination.md)           | #7   | Idempotent `_sandboxagent/session/terminate`         | Medium |
 | B3    | [Error Termination Metadata](./17-error-termination-metadata.md) | #17  | Stderr capture + `_sandboxagent/session/ended` event | Medium |
 
@@ -72,7 +72,7 @@ Standalone platform-level API.
 
 | Order | Feature                               | Spec | Approach                         | Effort |
 |:-----:|---------------------------------------|:----:|----------------------------------|:------:|
-| E1    | [Filesystem API](./04-filesystem-api.md) | #4   | Port v1 behavior to `/v2/fs/*`   | Large  |
+| E1    | [Filesystem API](./04-filesystem-api.md) | #4   | Port v1 behavior to `/v1/fs/*`   | Large  |
 
 No dependencies on other features. Can be implemented at any time but is the largest single feature.
 
@@ -97,7 +97,7 @@ E1 (Filesystem)          [independent]
 | #  | Feature                         | Spec File                                             | Status                          | Approach                                        |
 |:--:|---------------------------------|-------------------------------------------------------|---------------------------------|-------------------------------------------------|
 | 1  | ~~Questions~~                   | [01-questions.md](./01-questions.md)                 | Deferred ([#156](https://github.com/rivet-dev/sandbox-agent/issues/156)) | Agent process side                              |
-| 4  | Filesystem API                  | [04-filesystem-api.md](./04-filesystem-api.md)       | Not implemented                 | Port v1 behavior onto `/v2/fs/*`                |
+| 4  | Filesystem API                  | [04-filesystem-api.md](./04-filesystem-api.md)       | Not implemented                 | Port v1 behavior onto `/v1/fs/*`                |
 | 5  | Health Endpoint                 | [05-health-endpoint.md](./05-health-endpoint.md)     | Partial (basic only)            | Port v1 health behavior                         |
 | 6  | Server Status                   | [06-server-status.md](./06-server-status.md)         | Not implemented                 | Runtime tracking                                |
 | 7  | Session Termination             | [07-session-termination.md](./07-session-termination.md) | Not implemented              | Idempotent ACP extension                        |
@@ -121,7 +121,7 @@ E1 (Filesystem)          [independent]
 | `sdks/typescript/src/client.ts`                   | All in-scope features         |
 | `docs/openapi.json`                               | #4, #5, #6, #12, #13, #16    |
 | `docs/sdks/typescript.mdx`                        | All in-scope features         |
-| `server/packages/sandbox-agent/tests/v2_api.rs`   | All in-scope features         |
+| `server/packages/sandbox-agent/tests/v1_api.rs`   | All in-scope features         |
 
 ### Docs update checklist
 

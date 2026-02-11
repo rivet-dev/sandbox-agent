@@ -147,8 +147,8 @@ jobs:
           sudo apt-get install -y unzip curl
 
           # Install AWS CLI
-          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-          unzip awscliv2.zip
+          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscli.zip"
+          unzip awscli.zip
           sudo ./aws/install --update
 
           COMMIT_SHA_SHORT="${GITHUB_SHA::7}"

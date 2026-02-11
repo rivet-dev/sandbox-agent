@@ -1,19 +1,119 @@
-import { ChevronDown, ChevronRight } from "lucide-react";
+import {
+  Ban,
+  Bot,
+  Brain,
+  ChevronDown,
+  ChevronRight,
+  Circle,
+  CircleX,
+  Command,
+  CornerDownLeft,
+  FilePen,
+  FileText,
+  FolderOpen,
+  Hourglass,
+  KeyRound,
+  ListChecks,
+  MessageSquare,
+  Plug,
+  Radio,
+  ScrollText,
+  Settings,
+  ShieldCheck,
+  SquarePlus,
+  SquareTerminal,
+  ToggleLeft,
+  Trash2,
+  Unplug,
+  Wrench,
+  type LucideIcon,
+} from "lucide-react";
 import { useEffect, useState } from "react";
-import type { UniversalEvent } from "../../types/legacyApi";
+import type { SessionEvent } from "sandbox-agent";
 import { formatJson, formatTime } from "../../utils/format";
-import { getEventCategory, getEventClass, getEventIcon, getEventKey, getEventType } from "./eventUtils";
+
+type EventIconInfo = { Icon: LucideIcon; category: string };
+
+function getEventIcon(method: string, payload: Record<string, unknown>): EventIconInfo {
+  if (method === "session/update") {
+    const params = payload.params as Record<string, unknown> | undefined;
+    const update = params?.update as Record<string, unknown> | undefined;
+    const updateType = update?.sessionUpdate as string | undefined;
+
+    switch (updateType) {
+      case "user_message_chunk":
+        return { Icon: MessageSquare, category: "prompt" };
+      case "agent_message_chunk":
+        return { Icon: Bot, category: "update" };
+      case "agent_thought_chunk":
+        return { Icon: Brain, category: "update" };
+      case "tool_call":
+      case "tool_call_update":
+        return { Icon: Wrench, category: "tool" };
+      case "plan":
+        return { Icon: ListChecks, category: "config" };
+      case "available_commands_update":
+        return { Icon: Command, category: "config" };
+      case "current_mode_update":
+        return { Icon: ToggleLeft, category: "config" };
+      case "config_option_update":
+        return { Icon: Settings, category: "config" };
+      default:
+        return { Icon: Radio, category: "update" };
+    }
+  }
+
+  switch (method) {
+    case "initialize":
+      return { Icon: Plug, category: "connection" };
+    case "authenticate":
+      return { Icon: KeyRound, category: "connection" };
+    case "session/new":
+      return { Icon: SquarePlus, category: "session" };
+    case "session/load":
+      return { Icon: FolderOpen, category: "session" };
+    case "session/prompt":
+      return { Icon: MessageSquare, category: "prompt" };
+    case "session/cancel":
+      return { Icon: Ban, category: "cancel" };
+    case "session/set_mode":
+      return { Icon: ToggleLeft, category: "config" };
+    case "session/set_config_option":
+      return { Icon: Settings, category: "config" };
+    case "session/request_permission":
+      return { Icon: ShieldCheck, category: "permission" };
+    case "fs/read_text_file":
+      return { Icon: FileText, category: "filesystem" };
+    case "fs/write_text_file":
+      return { Icon: FilePen, category: "filesystem" };
+    case "terminal/create":
+      return { Icon: SquareTerminal, category: "terminal" };
+    case "terminal/kill":
+      return { Icon: CircleX, category: "terminal" };
+    case "terminal/output":
+      return { Icon: ScrollText, category: "terminal" };
+    case "terminal/release":
+      return { Icon: Trash2, category: "terminal" };
+    case "terminal/wait_for_exit":
+      return { Icon: Hourglass, category: "terminal" };
+    case "_sandboxagent/session/detach":
+      return { Icon: Unplug, category: "session" };
+    case "(response)":
+      return { Icon: CornerDownLeft, category: "response" };
+    default:
+      if (method.startsWith("_sandboxagent/")) {
+        return { Icon: Radio, category: "connection" };
+      }
+      return { Icon: Circle, category: "response" };
+  }
+}
 
 const EventsTab = ({
   events,
-  offset,
   onClear,
-  error
 }: {
-  events: UniversalEvent[];
-  offset: number;
+  events: SessionEvent[];
   onClear: () => void;
-  error: string | null;
 }) => {
   const [collapsedEvents, setCollapsedEvents] = useState<Record<string, boolean>>({});
   const [copied, setCopied] = useState(false);
@@ -55,10 +155,15 @@ const EventsTab = ({
     }
   }, [events.length]);
 
+  const getMethod = (event: SessionEvent): string => {
+    const payload = event.payload as Record<string, unknown>;
+    return typeof payload.method === "string" ? payload.method : "(response)";
+  };
+
   return (
     <>
       <div className="inline-row" style={{ marginBottom: 12, justifyContent: "space-between" }}>
-        <span className="card-meta">Offset: {offset}</span>
+        <span className="card-meta">{events.length} events</span>
         <div className="inline-row">
           <button
             type="button"
@@ -75,26 +180,26 @@ const EventsTab = ({
         </div>
       </div>
 
-      {error && <div className="banner error">{error}</div>}
-
       {events.length === 0 ? (
         <div className="card-meta">
-          No events yet. Start streaming to receive events.
+          No events yet. Create a session and send a message.
         </div>
       ) : (
         <div className="event-list">
           {[...events].reverse().map((event) => {
-            const type = getEventType(event);
-            const category = getEventCategory(type);
-            const eventClass = `${category} ${getEventClass(type)}`;
-            const eventKey = getEventKey(event);
+            const eventKey = event.id;
             const isCollapsed = collapsedEvents[eventKey] ?? true;
             const toggleCollapsed = () =>
               setCollapsedEvents((prev) => ({
                 ...prev,
                 [eventKey]: !(prev[eventKey] ?? true)
               }));
-            const Icon = getEventIcon(type);
+            const method = getMethod(event);
+            const payload = event.payload as Record<string, unknown>;
+            const { Icon, category } = getEventIcon(method, payload);
+            const time = formatTime(new Date(event.createdAt).toISOString());
+            const senderClass = event.sender === "client" ? "client" : "agent";
+
             return (
               <div key={eventKey} className={`event-item ${isCollapsed ? "collapsed" : "expanded"}`}>
                 <button
@@ -103,24 +208,26 @@ const EventsTab = ({
                   onClick={toggleCollapsed}
                   title={isCollapsed ? "Expand payload" : "Collapse payload"}
                 >
-                  <span className={`event-icon ${eventClass}`}>
+                  <span className={`event-icon ${category}`}>
                     <Icon size={14} />
                   </span>
                   <div className="event-summary-main">
                     <div className="event-title-row">
-                      <span className={`event-type ${eventClass}`}>{type}</span>
-                      <span className="event-time">{formatTime(event.time)}</span>
+                      <span className={`event-type ${category}`}>{method}</span>
+                      <span className={`pill ${senderClass === "client" ? "accent" : "success"}`}>
+                        {event.sender}
+                      </span>
+                      <span className="event-time">{time}</span>
                     </div>
                     <div className="event-id">
-                      Event #{event.event_id || event.sequence} - seq {event.sequence} - {event.source}
-                      {event.synthetic ? " (synthetic)" : ""}
+                      {event.id}
                     </div>
                   </div>
                   <span className="event-chevron">
                     {isCollapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
                   </span>
                 </button>
-                {!isCollapsed && <pre className="code-block event-payload">{formatJson(event.data)}</pre>}
+                {!isCollapsed && <pre className="code-block event-payload">{formatJson(event.payload)}</pre>}
               </div>
             );
           })}

@@ -4,9 +4,9 @@
 
 ## Summary
 
-v1 captured `exit_code`, structured `StderrOutput` (head/tail/truncated) when a session ended due to error. v2 loses this metadata. Need to capture and expose process termination details.
+v1 captured `exit_code`, structured `StderrOutput` (head/tail/truncated) when a session ended due to error. v1 loses this metadata. Need to capture and expose process termination details.
 
-## Current v2 State
+## Current v1 State
 
 - Agent process lifecycle is managed in `acp_runtime/mod.rs`
 - Process exit is detected but error metadata (exit code, stderr) is not captured or forwarded
@@ -171,7 +171,7 @@ When an agent process terminates with an error:
 ### Session Info Integration
 
 Termination metadata should be accessible via:
-- `GET /v2/sessions/{id}` (Feature #16) — include `terminationInfo` in response when session has ended
+- `GET /v1/sessions/{id}` (Feature #16) — include `terminationInfo` in response when session has ended
 - `session/list` ACP response — include termination status in session entries
 
 ### Files to Modify
@@ -181,7 +181,7 @@ Termination metadata should be accessible via:
 | `server/packages/sandbox-agent/src/acp_runtime/mod.rs` | Add stderr capture (head/tail buffer) on agent process; capture exit code; emit `_sandboxagent/session/ended`; store v1-shaped termination info in `MetaSession` |
 | `server/packages/sandbox-agent/src/acp_runtime/mock.rs` | Add mock error termination scenario (e.g., when prompt contains "crash") |
 | `sdks/typescript/src/client.ts` | Add `TerminationInfo` type; expose on session events and session info |
-| `server/packages/sandbox-agent/tests/v2_api.rs` | Add error termination metadata test |
+| `server/packages/sandbox-agent/tests/v1_api.rs` | Add error termination metadata test |
 
 ### Docs to Update
 

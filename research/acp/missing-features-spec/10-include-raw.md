@@ -6,9 +6,9 @@
 
 ## Summary
 
-v1 had an `include_raw` option that preserved the original agent JSON alongside normalized events. The `UniversalEvent.raw` field held the verbatim agent output. v2 has `_sandboxagent/agent/unparsed` for parse errors but no mechanism for clients to request raw agent payloads alongside normalized ACP events.
+v1 had an `include_raw` option that preserved the original agent JSON alongside normalized events. The `UniversalEvent.raw` field held the verbatim agent output. v1 has `_sandboxagent/agent/unparsed` for parse errors but no mechanism for clients to request raw agent payloads alongside normalized ACP events.
 
-## Current v2 State
+## Current v1 State
 
 - `_sandboxagent/agent/unparsed` — sends notifications when the runtime fails to parse agent output (error recovery only)
 - No option for clients to request raw agent JSON alongside normal ACP events
@@ -43,7 +43,7 @@ When `include_raw=true`, each `UniversalEvent` included the verbatim JSON the ag
 
 ### Extension Design
 
-Since v2 agents speak ACP natively (JSON-RPC), the "raw" concept changes:
+Since v1 agents speak ACP natively (JSON-RPC), the "raw" concept changes:
 - For ACP-native agents: raw = the ACP JSON-RPC envelope itself (which clients already see)
 - For non-native agents or runtime-synthesized events: raw = the original agent output before transformation
 

@@ -2,7 +2,7 @@
 
 Updated: 2026-02-10
 
-This tracks legacy inspector behaviors that do not yet have full parity on ACP v2.
+This tracks legacy inspector behaviors that do not yet have full parity on ACP v1.
 
 1. TDOO: Session `permissionMode` preconfiguration on create is not wired in ACP inspector compatibility.
 2. TDOO: Session `variant` preconfiguration on create is not wired in ACP inspector compatibility.

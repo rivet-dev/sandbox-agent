@@ -4,12 +4,12 @@
 
 ## Summary
 
-v1 exposed pre-session model/mode discovery via separate endpoints. For v2, models and modes should be optional fields on the agent response payload (only when the agent is installed), with lazy population for dynamic agents.
+v1 exposed pre-session model/mode discovery via separate endpoints. For v1, models and modes should be optional fields on the agent response payload (only when the agent is installed), with lazy population for dynamic agents.
 
-## Current v2 State
+## Current v1 State
 
 - `_sandboxagent/session/list_models` works but requires an active ACP connection and session
-- `GET /v2/agents` does not include pre-session model/mode metadata
+- `GET /v1/agents` does not include pre-session model/mode metadata
 - v1 had static per-agent mode definitions (`agent_modes_for()` in `router.rs`)
 - v1 had dynamic model fetching (Claude/Codex/OpenCode), plus static model lists for Amp/Mock
 
@@ -57,11 +57,11 @@ Model variants are explicitly out of scope for this implementation pass.
 | `server/packages/sandbox-agent/src/router.rs` | Enrich agent response type/handlers to optionally include models + modes |
 | `server/packages/sandbox-agent/src/acp_runtime/mod.rs` | Expose model query support for control-plane enrichment without requiring an active session |
 | `sdks/typescript/src/client.ts` | Extend `AgentInfo` type with optional `models`, `defaultModel`, `modes` |
-| `server/packages/sandbox-agent/tests/v2_api.rs` | Add assertions for installed vs non-installed agent response shapes |
+| `server/packages/sandbox-agent/tests/v1_api.rs` | Add assertions for installed vs non-installed agent response shapes |
 
 ## Docs to Update
 
 | Doc | Change |
 |-----|--------|
-| `docs/openapi.json` | Update `/v2/agents` (and agent detail endpoint if present) schema with optional `models`/`modes` |
+| `docs/openapi.json` | Update `/v1/agents` (and agent detail endpoint if present) schema with optional `models`/`modes` |
 | `docs/sdks/typescript.mdx` | Document optional model/mode fields on agent response |

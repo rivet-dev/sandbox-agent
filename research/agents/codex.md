@@ -9,7 +9,7 @@ Research notes on OpenAI Codex's configuration, credential discovery, and runtim
 - **Execution Method (alternatives)**: SDK (`@openai/codex-sdk`) or CLI binary
 - **Session Persistence**: Thread ID (string)
 - **Import**: Dynamic import to avoid bundling issues
-- **Binary Location**: `~/.nvm/versions/node/v24.3.0/bin/codex` (npm global install)
+- **Binary Location**: `~/.nvm/versions/node/current/bin/codex` (npm global install)
 
 ## SDK Architecture
 

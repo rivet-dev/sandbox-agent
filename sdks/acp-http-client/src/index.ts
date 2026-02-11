@@ -33,7 +33,7 @@ import {
   type Stream,
 } from "@agentclientprotocol/sdk";
 
-const ACP_PATH = "/v2/rpc";
+const DEFAULT_ACP_PATH = "/v1/rpc";
 
 export interface ProblemDetails {
   type: string;
@@ -48,6 +48,13 @@ export type AcpEnvelopeDirection = "inbound" | "outbound";
 
 export type AcpEnvelopeObserver = (envelope: AnyMessage, direction: AcpEnvelopeDirection) => void;
 
+export type QueryValue = string | number | boolean | null | undefined;
+
+export interface AcpHttpTransportOptions {
+  path?: string;
+  bootstrapQuery?: Record<string, QueryValue>;
+}
+
 export interface AcpHttpClientOptions {
   baseUrl: string;
   token?: string;
@@ -55,6 +62,7 @@ export interface AcpHttpClientOptions {
   headers?: HeadersInit;
   client?: Partial<Client>;
   onEnvelope?: AcpEnvelopeObserver;
+  transport?: AcpHttpTransportOptions;
 }
 
 export class AcpHttpError extends Error {
@@ -68,6 +76,58 @@ export class AcpHttpError extends Error {
     this.status = status;
     this.problem = problem;
     this.response = response;
+  }
+}
+
+export interface RpcErrorResponse {
+  code: number;
+  message: string;
+  data?: unknown;
+}
+
+const RPC_CODE_LABELS: Record<number, string> = {
+  [-32700]: "Parse error",
+  [-32600]: "Invalid request",
+  [-32601]: "Method not supported by agent",
+  [-32602]: "Invalid parameters",
+  [-32603]: "Internal agent error",
+  [-32000]: "Authentication required",
+  [-32002]: "Resource not found",
+};
+
+export class AcpRpcError extends Error {
+  readonly code: number;
+  readonly data?: unknown;
+
+  constructor(code: number, message: string, data?: unknown) {
+    const label = RPC_CODE_LABELS[code];
+    const display = label ? `${label}: ${message}` : message;
+    super(display);
+    this.name = "AcpRpcError";
+    this.code = code;
+    this.data = data;
+  }
+}
+
+function isRpcErrorResponse(value: unknown): value is RpcErrorResponse {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "code" in value &&
+    typeof (value as RpcErrorResponse).code === "number" &&
+    "message" in value &&
+    typeof (value as RpcErrorResponse).message === "string"
+  );
+}
+
+async function wrapRpc<T>(promise: Promise<T>): Promise<T> {
+  try {
+    return await promise;
+  } catch (error) {
+    if (isRpcErrorResponse(error)) {
+      throw new AcpRpcError(error.code, error.message, error.data);
+    }
+    throw error;
   }
 }
 
@@ -87,14 +147,11 @@ export class AcpHttpClient {
       token: options.token,
       defaultHeaders: options.headers,
       onEnvelope: options.onEnvelope,
+      transport: options.transport,
     });
 
     const clientHandlers = buildClientHandlers(options.client);
     this.connection = new ClientSideConnection(() => clientHandlers, this.transport.stream);
-  }
-
-  get clientId(): string | undefined {
-    return this.transport.clientId ?? undefined;
   }
 
   async initialize(request: Partial<InitializeRequest> = {}): Promise<InitializeResponse> {
@@ -103,7 +160,7 @@ export class AcpHttpClient {
       clientCapabilities: request.clientCapabilities,
       clientInfo: request.clientInfo ?? {
         name: "acp-http-client",
-        version: "v2",
+        version: "v1",
       },
     };
 
@@ -111,23 +168,23 @@ export class AcpHttpClient {
       params._meta = request._meta;
     }
 
-    return this.connection.initialize(params);
+    return wrapRpc(this.connection.initialize(params));
   }
 
   async authenticate(request: AuthenticateRequest): Promise<AuthenticateResponse> {
-    return this.connection.authenticate(request);
+    return wrapRpc(this.connection.authenticate(request));
   }
 
   async newSession(request: NewSessionRequest): Promise<NewSessionResponse> {
-    return this.connection.newSession(request);
+    return wrapRpc(this.connection.newSession(request));
   }
 
   async loadSession(request: LoadSessionRequest): Promise<LoadSessionResponse> {
-    return this.connection.loadSession(request);
+    return wrapRpc(this.connection.loadSession(request));
   }
 
   async prompt(request: PromptRequest): Promise<PromptResponse> {
-    return this.connection.prompt(request);
+    return wrapRpc(this.connection.prompt(request));
   }
 
   async cancel(notification: CancelNotification): Promise<void> {
@@ -135,35 +192,35 @@ export class AcpHttpClient {
   }
 
   async setSessionMode(request: SetSessionModeRequest): Promise<SetSessionModeResponse | void> {
-    return this.connection.setSessionMode(request);
+    return wrapRpc(this.connection.setSessionMode(request));
   }
 
   async setSessionConfigOption(
     request: SetSessionConfigOptionRequest,
   ): Promise<SetSessionConfigOptionResponse> {
-    return this.connection.setSessionConfigOption(request);
+    return wrapRpc(this.connection.setSessionConfigOption(request));
   }
 
   async unstableListSessions(request: ListSessionsRequest): Promise<ListSessionsResponse> {
-    return this.connection.unstable_listSessions(request);
+    return wrapRpc(this.connection.unstable_listSessions(request));
   }
 
   async unstableForkSession(request: ForkSessionRequest): Promise<ForkSessionResponse> {
-    return this.connection.unstable_forkSession(request);
+    return wrapRpc(this.connection.unstable_forkSession(request));
   }
 
   async unstableResumeSession(request: ResumeSessionRequest): Promise<ResumeSessionResponse> {
-    return this.connection.unstable_resumeSession(request);
+    return wrapRpc(this.connection.unstable_resumeSession(request));
   }
 
   async unstableSetSessionModel(
     request: SetSessionModelRequest,
   ): Promise<SetSessionModelResponse | void> {
-    return this.connection.unstable_setSessionModel(request);
+    return wrapRpc(this.connection.unstable_setSessionModel(request));
   }
 
   async extMethod(method: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {
-    return this.connection.extMethod(method, params);
+    return wrapRpc(this.connection.extMethod(method, params));
   }
 
   async extNotification(method: string, params: Record<string, unknown>): Promise<void> {
@@ -193,16 +250,19 @@ type StreamableHttpAcpTransportOptions = {
   token?: string;
   defaultHeaders?: HeadersInit;
   onEnvelope?: AcpEnvelopeObserver;
+  transport?: AcpHttpTransportOptions;
 };
 
 class StreamableHttpAcpTransport {
   readonly stream: Stream;
 
   private readonly baseUrl: string;
+  private readonly path: string;
   private readonly fetcher: typeof fetch;
   private readonly token?: string;
   private readonly defaultHeaders?: HeadersInit;
   private readonly onEnvelope?: AcpEnvelopeObserver;
+  private readonly bootstrapQuery: URLSearchParams | null;
 
   private readableController: ReadableStreamDefaultController<AnyMessage> | null = null;
   private sseAbortController: AbortController | null = null;
@@ -210,14 +270,18 @@ class StreamableHttpAcpTransport {
   private lastEventId: string | null = null;
   private closed = false;
   private closingPromise: Promise<void> | null = null;
-  private _clientId: string | null = null;
+  private postedOnce = false;
 
   constructor(options: StreamableHttpAcpTransportOptions) {
     this.baseUrl = options.baseUrl.replace(/\/$/, "");
+    this.path = normalizePath(options.transport?.path ?? DEFAULT_ACP_PATH);
     this.fetcher = options.fetcher;
     this.token = options.token;
     this.defaultHeaders = options.defaultHeaders;
     this.onEnvelope = options.onEnvelope;
+    this.bootstrapQuery = options.transport?.bootstrapQuery
+      ? buildQueryParams(options.transport.bootstrapQuery)
+      : null;
 
     this.stream = {
       readable: new ReadableStream<AnyMessage>({
@@ -242,10 +306,6 @@ class StreamableHttpAcpTransport {
     };
   }
 
-  get clientId(): string | null {
-    return this._clientId;
-  }
-
   async close(): Promise<void> {
     if (this.closingPromise) {
       return this.closingPromise;
@@ -266,23 +326,32 @@ class StreamableHttpAcpTransport {
       this.sseAbortController.abort();
     }
 
-    const clientId = this._clientId;
-    if (clientId) {
+    if (!this.postedOnce) {
       try {
-        const response = await this.fetcher(`${this.baseUrl}${ACP_PATH}`, {
-          method: "DELETE",
-          headers: this.buildHeaders({
-            "x-acp-connection-id": clientId,
-            Accept: "application/json",
-          }),
-        });
-
-        if (!response.ok && response.status !== 404) {
-          throw new AcpHttpError(response.status, await readProblem(response), response);
-        }
+        this.readableController?.close();
       } catch {
-        // Ignore close errors; close must be best effort.
+        // no-op
       }
+      this.readableController = null;
+      return;
+    }
+
+    const deleteHeaders = this.buildHeaders({
+      Accept: "application/json",
+    });
+
+    try {
+      const response = await this.fetcher(this.buildUrl(), {
+        method: "DELETE",
+        headers: deleteHeaders,
+        signal: timeoutSignal(2_000),
+      });
+
+      if (!response.ok && response.status !== 404) {
+        throw new AcpHttpError(response.status, await readProblem(response), response);
+      }
+    } catch {
+      // Ignore close errors; close must be best effort.
     }
 
     try {
@@ -306,25 +375,20 @@ class StreamableHttpAcpTransport {
       Accept: "application/json",
     });
 
-    if (this._clientId) {
-      headers.set("x-acp-connection-id", this._clientId);
-    }
-
-    const response = await this.fetcher(`${this.baseUrl}${ACP_PATH}`, {
+    const url = this.buildUrl(this.bootstrapQueryIfNeeded());
+    const response = await this.fetcher(url, {
       method: "POST",
       headers,
       body: JSON.stringify(message),
     });
 
+    this.postedOnce = true;
+
     if (!response.ok) {
       throw new AcpHttpError(response.status, await readProblem(response), response);
     }
 
-    const responseClientId = response.headers.get("x-acp-connection-id");
-    if (responseClientId && responseClientId !== this._clientId) {
-      this._clientId = responseClientId;
-      this.ensureSseLoop();
-    }
+    this.ensureSseLoop();
 
     if (response.status === 200) {
       const text = await response.text();
@@ -332,11 +396,16 @@ class StreamableHttpAcpTransport {
         const envelope = JSON.parse(text) as AnyMessage;
         this.pushInbound(envelope);
       }
+    } else {
+      // Drain response body so the underlying connection is released back to
+      // the pool.  Without this, Node.js undici keeps the socket occupied and
+      // may stall subsequent requests to the same origin.
+      await response.text().catch(() => {});
     }
   }
 
   private ensureSseLoop(): void {
-    if (this.sseLoop || this.closed || !this._clientId) {
+    if (this.sseLoop || this.closed || !this.postedOnce) {
       return;
     }
 
@@ -346,11 +415,10 @@ class StreamableHttpAcpTransport {
   }
 
   private async runSseLoop(): Promise<void> {
-    while (!this.closed && this._clientId) {
+    while (!this.closed) {
       this.sseAbortController = new AbortController();
 
       const headers = this.buildHeaders({
-        "x-acp-connection-id": this._clientId,
         Accept: "text/event-stream",
       });
 
@@ -359,12 +427,11 @@ class StreamableHttpAcpTransport {
       }
 
       try {
-        const response = await this.fetcher(`${this.baseUrl}${ACP_PATH}`, {
+        const response = await this.fetcher(this.buildUrl(), {
           method: "GET",
           headers,
           signal: this.sseAbortController.signal,
         });
-
         if (!response.ok) {
           throw new AcpHttpError(response.status, await readProblem(response), response);
         }
@@ -518,6 +585,23 @@ class StreamableHttpAcpTransport {
 
     return headers;
   }
+
+  private buildUrl(query?: URLSearchParams | null): string {
+    const url = new URL(`${this.baseUrl}${this.path}`);
+    if (query) {
+      for (const [key, value] of query.entries()) {
+        url.searchParams.set(key, value);
+      }
+    }
+    return url.toString();
+  }
+
+  private bootstrapQueryIfNeeded(): URLSearchParams | null {
+    if (this.postedOnce || !this.bootstrapQuery || this.bootstrapQuery.size === 0) {
+      return null;
+    }
+    return this.bootstrapQuery;
+  }
 }
 
 function buildClientHandlers(client?: Partial<Client>): Client {
@@ -571,4 +655,30 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function timeoutSignal(timeoutMs: number): AbortSignal | undefined {
+  if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
+    return AbortSignal.timeout(timeoutMs);
+  }
+  return undefined;
+}
+
+function normalizePath(path: string): string {
+  if (!path.startsWith("/")) {
+    return `/${path}`;
+  }
+  return path;
+}
+
+function buildQueryParams(source: Record<string, QueryValue>): URLSearchParams {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(source)) {
+    if (value === undefined || value === null) {
+      continue;
+    }
+    params.set(key, String(value));
+  }
+  return params;
+}
+
 export type * from "@agentclientprotocol/sdk";
+export { PROTOCOL_VERSION } from "@agentclientprotocol/sdk";

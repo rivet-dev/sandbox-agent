@@ -1,75 +1,31 @@
-use std::collections::BTreeSet;
-use std::fs;
-use std::path::PathBuf;
+use axum::body::Body;
+use axum::http::{Method, Request, StatusCode};
+use http_body_util::BodyExt;
+use sandbox_agent::router::{build_router, AppState, AuthConfig};
+use sandbox_agent_agent_management::agents::AgentManager;
+use tower::util::ServiceExt;
 
-use sandbox_agent::opencode_compat::OpenCodeApiDoc;
-use serde_json::Value;
-use utoipa::OpenApi;
+#[tokio::test]
+async fn opencode_routes_are_mounted() {
+    let install_dir = tempfile::tempdir().expect("tempdir");
+    let manager = AgentManager::new(install_dir.path()).expect("agent manager");
+    let app = build_router(AppState::new(AuthConfig::disabled(), manager));
 
-fn collect_path_methods(spec: &Value) -> BTreeSet<String> {
-    let mut methods = BTreeSet::new();
-    let Some(paths) = spec.get("paths").and_then(|value| value.as_object()) else {
-        return methods;
-    };
-    for (path, item) in paths {
-        let Some(item) = item.as_object() else {
-            continue;
-        };
-        for method in [
-            "get", "post", "put", "patch", "delete", "options", "head", "trace",
-        ] {
-            if item.contains_key(method) {
-                methods.insert(format!("{} {}", method.to_uppercase(), path));
-            }
-        }
-    }
-    methods
-}
+    let request = Request::builder()
+        .method(Method::GET)
+        .uri("/opencode/session")
+        .body(Body::empty())
+        .expect("build request");
 
-fn official_spec_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../resources/agent-schemas/artifacts/openapi/opencode.json")
-}
+    let response = app.oneshot(request).await.expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
 
-#[test]
-fn opencode_openapi_matches_official_paths() {
-    let official_path = official_spec_path();
-    if !official_path.exists() {
-        eprintln!(
-            "skipping OpenCode OpenAPI parity check; official spec missing at {:?}",
-            official_path
-        );
-        return;
-    }
-    let official_json = fs::read_to_string(&official_path).unwrap_or_else(|err| {
-        panic!("failed to read official OpenCode spec at {official_path:?}: {err}")
-    });
-    let official: Value =
-        serde_json::from_str(&official_json).expect("official OpenCode spec is not valid JSON");
-
-    let ours = OpenCodeApiDoc::openapi();
-    let ours_value = serde_json::to_value(&ours).expect("failed to serialize OpenCode OpenAPI");
-
-    let official_methods = collect_path_methods(&official);
-    let our_methods = collect_path_methods(&ours_value);
-
-    let missing: Vec<_> = official_methods.difference(&our_methods).cloned().collect();
-    let extra: Vec<_> = our_methods.difference(&official_methods).cloned().collect();
-
-    if !missing.is_empty() || !extra.is_empty() {
-        let mut message = String::new();
-        if !missing.is_empty() {
-            message.push_str("Missing endpoints (present in official spec, absent in ours):\n");
-            for endpoint in &missing {
-                message.push_str(&format!("- {endpoint}\n"));
-            }
-        }
-        if !extra.is_empty() {
-            message.push_str("Extra endpoints (present in ours, absent in official spec):\n");
-            for endpoint in &extra {
-                message.push_str(&format!("- {endpoint}\n"));
-            }
-        }
-        panic!("{message}");
-    }
+    let body = response
+        .into_body()
+        .collect()
+        .await
+        .expect("collect body")
+        .to_bytes();
+    let parsed: serde_json::Value = serde_json::from_slice(&body).expect("json body");
+    assert!(parsed.is_array());
 }

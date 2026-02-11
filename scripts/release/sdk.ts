@@ -228,12 +228,16 @@ export async function publishNpmCliShared(opts: ReleaseOpts) {
 
 	// Add --tag flag for release candidates
 	const isReleaseCandidate = opts.version.includes("-rc.");
-	const tag = isReleaseCandidate ? "rc" : "latest";
+	const tag = isReleaseCandidate ? "rc" : (opts.latest ? "latest" : opts.minorVersionChannel);
 
 	await $({
 		stdio: "inherit",
 		cwd: cliSharedPath,
 	})`pnpm publish --access public --tag ${tag} --no-git-checks`;
+
+	if (opts.latest && tag === "latest") {
+		await addNpmDistTag(name, opts.version, opts.minorVersionChannel);
+	}
 
 	console.log(`✅ Published ${name}@${opts.version}`);
 }
@@ -265,12 +269,16 @@ export async function publishNpmSdk(opts: ReleaseOpts) {
 
 	// Add --tag flag for release candidates
 	const isReleaseCandidate = opts.version.includes("-rc.");
-	const tag = isReleaseCandidate ? "rc" : "latest";
+	const tag = isReleaseCandidate ? "rc" : (opts.latest ? "latest" : opts.minorVersionChannel);
 
 	await $({
 		stdio: "inherit",
 		cwd: sdkPath,
 	})`pnpm publish --access public --tag ${tag} --no-git-checks`;
+
+	if (opts.latest && tag === "latest") {
+		await addNpmDistTag(name, opts.version, opts.minorVersionChannel);
+	}
 
 	console.log(`✅ Published ${name}@${opts.version}`);
 }
@@ -346,7 +354,12 @@ export async function publishNpmCli(opts: ReleaseOpts) {
 
 		// Add --tag flag for release candidates
 		const isReleaseCandidate = opts.version.includes("-rc.");
-		const tag = isReleaseCandidate ? "rc" : "latest";
+		const tag = getCliPackageNpmTag({
+			packageName,
+			isReleaseCandidate,
+			latest: opts.latest,
+			minorVersionChannel: opts.minorVersionChannel,
+		});
 
 		try {
 			await $({
@@ -354,6 +367,14 @@ export async function publishNpmCli(opts: ReleaseOpts) {
 				cwd: packagePath,
 			})`pnpm publish --access public --tag ${tag} --no-git-checks`;
 			console.log(`✅ Published ${packageName}@${opts.version}`);
+
+			if (
+				opts.latest &&
+				tag === "latest" &&
+				isSandboxAgentCliPackage(packageName)
+			) {
+				await addNpmDistTag(packageName, opts.version, opts.minorVersionChannel);
+			}
 		} catch (err) {
 			console.error(`❌ Failed to publish ${packageName}`);
 			throw err;
@@ -361,4 +382,36 @@ export async function publishNpmCli(opts: ReleaseOpts) {
 	}
 
 	console.log("✅ All CLI packages published");
+}
+
+function getCliPackageNpmTag(opts: {
+	packageName: string;
+	isReleaseCandidate: boolean;
+	latest: boolean;
+	minorVersionChannel: string;
+}): string {
+	if (opts.isReleaseCandidate) {
+		return "rc";
+	}
+
+	if (opts.latest) {
+		return "latest";
+	}
+
+	return opts.minorVersionChannel;
+}
+
+function isSandboxAgentCliPackage(packageName: string): boolean {
+	return packageName === "@sandbox-agent/cli" || packageName.startsWith("@sandbox-agent/cli-");
+}
+
+async function addNpmDistTag(
+	packageName: string,
+	version: string,
+	tag: string,
+): Promise<void> {
+	console.log(`==> Adding npm dist-tag: ${packageName}@${version} as ${tag}`);
+	await $({
+		stdio: "inherit",
+	})`npm dist-tag add ${packageName}@${version} ${tag}`;
 }

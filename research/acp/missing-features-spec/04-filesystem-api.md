@@ -4,13 +4,13 @@
 
 ## Summary
 
-v1 had 8 filesystem endpoints. v2 has only ACP `fs/read_text_file` + `fs/write_text_file` (text-only, agent->client direction). The full filesystem API should be re-implemented as Sandbox Agent-specific HTTP contracts at `/v2/fs/*`.
+v1 had 8 filesystem endpoints. v1 has only ACP `fs/read_text_file` + `fs/write_text_file` (text-only, agent->client direction). The full filesystem API should be re-implemented as Sandbox Agent-specific HTTP contracts at `/v1/fs/*`.
 
-## Current v2 State
+## Current v1 State
 
 - ACP stable: `fs/read_text_file`, `fs/write_text_file` (client methods invoked by agents, text-only)
 - No HTTP filesystem endpoints exist in current `router.rs`
-- `rfds-vs-extensions.md` confirms: "Already extension (`/v2/fs/*` custom HTTP surface)"
+- `rfds-vs-extensions.md` confirms: "Already extension (`/v1/fs/*` custom HTTP surface)"
 - CLAUDE.md: "Filesystem and terminal APIs remain Sandbox Agent-specific HTTP contracts and are not ACP"
 
 ## v1 Reference (source commit)
@@ -356,32 +356,32 @@ async fn fs_upload_batch(
 
 ## Implementation Plan
 
-### New v2 Endpoints
+### New v1 Endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/v2/fs/entries` | List directory entries |
-| GET | `/v2/fs/file` | Read file raw bytes |
-| PUT | `/v2/fs/file` | Write file raw bytes |
-| DELETE | `/v2/fs/entry` | Delete file or directory |
-| POST | `/v2/fs/mkdir` | Create directory |
-| POST | `/v2/fs/move` | Move/rename |
-| GET | `/v2/fs/stat` | File metadata |
-| POST | `/v2/fs/upload-batch` | Upload tar archive |
+| GET | `/v1/fs/entries` | List directory entries |
+| GET | `/v1/fs/file` | Read file raw bytes |
+| PUT | `/v1/fs/file` | Write file raw bytes |
+| DELETE | `/v1/fs/entry` | Delete file or directory |
+| POST | `/v1/fs/mkdir` | Create directory |
+| POST | `/v1/fs/move` | Move/rename |
+| GET | `/v1/fs/stat` | File metadata |
+| POST | `/v1/fs/upload-batch` | Upload tar archive |
 
 ### Files to Modify
 
 | File | Change |
 |------|--------|
-| `server/packages/sandbox-agent/src/router.rs` | Add all 8 `/v2/fs/*` endpoints with handlers (port from v1 with v2 path prefix) |
+| `server/packages/sandbox-agent/src/router.rs` | Add all 8 `/v1/fs/*` endpoints with handlers (port from v1 with v1 path prefix) |
 | `server/packages/sandbox-agent/src/cli.rs` | Add CLI `fs` subcommands (list, read, write, delete, mkdir, move, stat) |
 | `sdks/typescript/src/client.ts` | Add filesystem methods to SDK |
-| `server/packages/sandbox-agent/tests/v2_api.rs` | Add filesystem endpoint tests |
+| `server/packages/sandbox-agent/tests/v1_api.rs` | Add filesystem endpoint tests |
 
 ### Docs to Update
 
 | Doc | Change |
 |-----|--------|
-| `docs/openapi.json` | Add `/v2/fs/*` endpoint specs |
+| `docs/openapi.json` | Add `/v1/fs/*` endpoint specs |
 | `docs/cli.mdx` | Add `fs` subcommand documentation |
 | `docs/sdks/typescript.mdx` | Document filesystem SDK methods |

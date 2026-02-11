@@ -44,12 +44,12 @@ describe("OpenCode-compatible Model API", () => {
     expect(mockModels["mock"].family).toBe("Mock");
 
     const ampModels = ampProvider?.models ?? {};
-    expect(ampModels["smart"]).toBeDefined();
-    expect(ampModels["smart"].id).toBe("smart");
-    expect(ampModels["smart"].family).toBe("Amp");
+    expect(ampModels["amp-default"]).toBeDefined();
+    expect(ampModels["amp-default"].id).toBe("amp-default");
+    expect(ampModels["amp-default"].family).toBe("Amp");
 
     expect(response.data?.default?.["mock"]).toBe("mock");
-    expect(response.data?.default?.["amp"]).toBe("smart");
+    expect(response.data?.default?.["amp"]).toBe("amp-default");
   });
 
   it("should keep provider backends visible when discovery is degraded", async () => {

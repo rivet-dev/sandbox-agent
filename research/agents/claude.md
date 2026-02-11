@@ -9,7 +9,7 @@ Research notes on Claude Code's configuration, credential discovery, and runtime
 - **Session Persistence**: Session ID (string)
 - **SDK**: None (spawns CLI directly)
 
-## ACP Terminology (Sandbox Agent v2)
+## ACP Terminology (Sandbox Agent v1)
 
 Use these terms consistently when discussing Claude's ACP path:
 

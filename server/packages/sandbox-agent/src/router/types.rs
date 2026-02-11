@@ -1,35 +1,10 @@
+use std::collections::BTreeMap;
+
 use super::*;
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
 pub struct HealthResponse {
     pub status: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentModeInfo {
-    pub id: String,
-    pub name: String,
-    pub description: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentModelInfo {
-    pub id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub variants: Option<Vec<String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub default_variant: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentModelsResponse {
-    pub models: Vec<AgentModelInfo>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub default_model: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
@@ -37,7 +12,6 @@ pub struct AgentModelsResponse {
 pub enum ServerStatus {
     Running,
     Stopped,
-    Error,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
@@ -45,12 +19,7 @@ pub enum ServerStatus {
 pub struct ServerStatusInfo {
     pub status: ServerStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub base_url: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub uptime_ms: Option<u64>,
-    pub restart_count: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
@@ -90,17 +59,23 @@ pub struct AgentInfo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub server_status: Option<ServerStatusInfo>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub models: Option<Vec<AgentModelInfo>>,
+    pub config_options: Option<Vec<Value>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub default_model: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub modes: Option<Vec<AgentModeInfo>>,
+    pub config_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentListResponse {
     pub agents: Vec<AgentInfo>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct AgentsQuery {
+    #[serde(default)]
+    pub config: Option<bool>,
+    #[serde(default)]
+    pub no_cache: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema, Default)]
@@ -127,108 +102,8 @@ pub struct AgentInstallResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct StderrOutput {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub head: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tail: Option<String>,
-    pub truncated: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub total_lines: Option<usize>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct TerminationInfo {
-    pub reason: String,
-    pub terminated_by: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub message: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub exit_code: Option<i32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub stderr: Option<StderrOutput>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct SessionInfo {
-    pub session_id: String,
-    pub agent: String,
-    pub agent_mode: String,
-    pub permission_mode: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub native_session_id: Option<String>,
-    pub ended: bool,
-    pub event_count: u64,
-    pub created_at: i64,
-    pub updated_at: i64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub directory: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub title: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub termination_info: Option<TerminationInfo>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
-pub struct SessionListResponse {
-    pub sessions: Vec<SessionInfo>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct CreateSessionRequest {
-    pub agent: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub agent_mode: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub permission_mode: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub variant: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub agent_version: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub directory: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub title: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub mcp: Option<Value>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub skills: Option<Value>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum PermissionReply {
-    Once,
-    Always,
-    Reject,
-}
-
-impl std::str::FromStr for PermissionReply {
-    type Err = String;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value.to_ascii_lowercase().as_str() {
-            "once" => Ok(Self::Once),
-            "always" => Ok(Self::Always),
-            "reject" => Ok(Self::Reject),
-            _ => Err(format!("invalid permission reply: {value}")),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct FsPathQuery {
     pub path: String,
-    #[serde(default, skip_serializing_if = "Option::is_none", alias = "session_id")]
-    pub session_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
@@ -236,23 +111,12 @@ pub struct FsPathQuery {
 pub struct FsEntriesQuery {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none", alias = "session_id")]
-    pub session_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct FsSessionQuery {
-    #[serde(default, skip_serializing_if = "Option::is_none", alias = "session_id")]
-    pub session_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct FsDeleteQuery {
     pub path: String,
-    #[serde(default, skip_serializing_if = "Option::is_none", alias = "session_id")]
-    pub session_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recursive: Option<bool>,
 }
@@ -262,8 +126,6 @@ pub struct FsDeleteQuery {
 pub struct FsUploadBatchQuery {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none", alias = "session_id")]
-    pub session_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
@@ -328,6 +190,162 @@ pub struct FsActionResponse {
 pub struct FsUploadBatchResponse {
     pub paths: Vec<String>,
     pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AcpPostQuery {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AcpServerInfo {
+    pub server_id: String,
+    pub agent: String,
+    pub created_at_ms: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AcpServerListResponse {
+    pub servers: Vec<AcpServerInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct McpConfigQuery {
+    pub directory: String,
+    #[serde(rename = "mcpName", alias = "mcp_name")]
+    pub mcp_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillsConfigQuery {
+    pub directory: String,
+    #[serde(rename = "skillName", alias = "skill_name")]
+    pub skill_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillsConfig {
+    pub sources: Vec<SkillSource>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillSource {
+    #[serde(rename = "type")]
+    pub source_type: String,
+    pub source: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skills: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "ref")]
+    pub git_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subpath: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(untagged)]
+pub enum McpCommand {
+    Command(String),
+    CommandWithArgs(Vec<String>),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum McpRemoteTransport {
+    Http,
+    Sse,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct McpOAuthConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_secret: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(untagged)]
+pub enum McpOAuthConfigOrDisabled {
+    Config(McpOAuthConfig),
+    Disabled(bool),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "camelCase", tag = "type")]
+pub enum McpServerConfig {
+    #[serde(rename = "local", alias = "stdio")]
+    Local {
+        command: McpCommand,
+        #[serde(default)]
+        args: Vec<String>,
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            alias = "environment"
+        )]
+        env: Option<BTreeMap<String, String>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        enabled: Option<bool>,
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            rename = "timeoutMs",
+            alias = "timeout"
+        )]
+        #[schema(rename = "timeoutMs")]
+        timeout_ms: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cwd: Option<String>,
+    },
+    #[serde(rename = "remote", alias = "http")]
+    Remote {
+        url: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        headers: Option<BTreeMap<String, String>>,
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            rename = "bearerTokenEnvVar",
+            alias = "bearerTokenEnvVar",
+            alias = "bearer_token_env_var"
+        )]
+        #[schema(rename = "bearerTokenEnvVar")]
+        bearer_token_env_var: Option<String>,
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            rename = "envHeaders",
+            alias = "envHttpHeaders",
+            alias = "env_http_headers"
+        )]
+        #[schema(rename = "envHeaders")]
+        env_headers: Option<BTreeMap<String, String>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        oauth: Option<McpOAuthConfigOrDisabled>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        enabled: Option<bool>,
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            rename = "timeoutMs",
+            alias = "timeout"
+        )]
+        #[schema(rename = "timeoutMs")]
+        timeout_ms: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        transport: Option<McpRemoteTransport>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]

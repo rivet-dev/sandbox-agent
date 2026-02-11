@@ -1,6 +1,6 @@
 # Delete Or Comment Out First
 
-This is the initial, deliberate teardown list before building ACP-native v2.
+This is the initial, deliberate teardown list before building ACP-native v1.
 
 ## Hard delete first (in-house protocol types and converters)
 
@@ -39,7 +39,7 @@ This is the initial, deliberate teardown list before building ACP-native v2.
 
 Rationale: this layer is based on current v1 session/event model. Comment it out/disable it during ACP core implementation to avoid coupling and drift.
 
-Important: OpenCode <-> ACP support is still required, but it is explicitly reintroduced in Phase 7 after ACP v2 core transport/runtime are stable.
+Important: OpenCode <-> ACP support is still required, but it is explicitly reintroduced in Phase 7 after ACP v1 core transport/runtime are stable.
 
 ## Tests to remove or disable with v1
 
@@ -50,4 +50,4 @@ Important: OpenCode <-> ACP support is still required, but it is explicitly rein
 - `server/packages/sandbox-agent/tests/sessions.rs`
 - `server/packages/sandbox-agent/tests/agent_flows.rs`
 
-Replace with ACP-native contract tests in v2.
+Replace with ACP-native contract tests in v1.

@@ -1,13 +1,13 @@
 # ACP Migration Research
 
-This folder captures the v2 migration plan from the current in-house protocol to ACP-first architecture.
+This folder captures the v1 migration plan from the current in-house protocol to ACP-first architecture.
 
 ## Files
 
 - `research/acp/00-delete-first.md`: delete/comment-out-first inventory for the rewrite kickoff.
 - `research/acp/acp-notes.md`: ACP protocol notes extracted from `~/misc/acp-docs`.
 - `research/acp/acp-over-http-findings.md`: field research from ACP Zulip thread on real ACP-over-HTTP transport patterns and recommendations.
-- `research/acp/spec.md`: proposed v2 protocol/transport spec (ACP over HTTP).
+- `research/acp/spec.md`: proposed v1 protocol/transport spec (ACP over HTTP).
 - `research/acp/v1-schema-to-acp-mapping.md`: exhaustive 1:1 mapping of all current v1 endpoints/events into ACP methods, notifications, responses, and `_meta` extensions.
 - `research/acp/rfds-vs-extensions.md`: simple list of which gaps should be raised as ACP RFDs vs remain product-specific extensions.
 - `research/acp/migration-steps.md`: concrete implementation phases and execution checklist.
@@ -35,7 +35,7 @@ This folder captures the v2 migration plan from the current in-house protocol to
 ## Important context
 
 - ACP stable transport is stdio; streamable HTTP is still draft in ACP docs.
-- v2 in this repo is intentionally breaking and ACP-native.
-- v1 is removed in v2 and returns HTTP 410 on `/v1/*`.
+- v1 in this repo is intentionally breaking and ACP-native.
+- v1 is removed in v1 and returns HTTP 410 on `/v1/*`.
 - `/opencode/*` is disabled during ACP core phases and re-enabled in the dedicated bridge phase.
 - Keep `research/acp/friction.md` current as issues/ambiguities are discovered.

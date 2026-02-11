@@ -1,4 +1,4 @@
-# ACP v2 Migration TODO
+# ACP v1 Migration TODO
 
 Source docs:
 - `research/acp/spec.md`
@@ -34,15 +34,15 @@ Implementation:
 - [x] Implement agent process process manager (spawn/supervise baseline).
 - [x] Implement JSON-RPC bridge (`POST`/SSE <-> agent process stdio).
 - [x] Add connection registry keyed by `X-ACP-Connection-Id`.
-- [x] Implement unstable methods in v2 profile: `session/list`, `session/fork`, `session/resume`, `session/set_model`, `$/cancel_request`.
-- [x] Implement explicit close path: `DELETE /v2/rpc`.
+- [x] Implement unstable methods in v1 profile: `session/list`, `session/fork`, `session/resume`, `session/set_model`, `$/cancel_request`.
+- [x] Implement explicit close path: `DELETE /v1/rpc`.
 
 Validation gate:
-- [x] End-to-end ACP flow over `/v2/rpc` (request/response + streamed notifications).
+- [x] End-to-end ACP flow over `/v1/rpc` (request/response + streamed notifications).
 - [x] `session/cancel` behavior test passes.
 - [x] HITL request/response round-trip test passes.
 - [x] SSE ordering and `Last-Event-ID` replay test passes.
-- [x] `DELETE /v2/rpc` idempotent double-close test passes.
+- [x] `DELETE /v1/rpc` idempotent double-close test passes.
 - [x] Unstable method tests pass for agent processes that advertise support (mock covered).
 
 ## Phase 3: Installer Refactor
@@ -54,7 +54,7 @@ Implementation:
 - [x] Add install verification command per agent process.
 - [x] Integrate ACP registry metadata + fallback sources.
 - [x] Expose install provenance (`registry` vs `fallback`) in API/CLI.
-- [x] Implement lazy install on first `/v2/rpc` initialize.
+- [x] Implement lazy install on first `/v1/rpc` initialize.
 - [x] Add per-agent install lock + idempotent install results.
 - [x] Add config switch to disable lazy install for preprovisioned envs (`SANDBOX_AGENT_REQUIRE_PREINSTALL`).
 - [ ] Fill out installers for all ACP registry agents (expand `AgentId` + per-agent installer mappings).
@@ -65,25 +65,25 @@ Validation gate:
 - [x] Reinstall/version/provenance assertions pass.
 - [ ] Add integration coverage that every ACP registry agent has a corresponding installer mapping in `agent-management`.
 
-## Phase 4: v2 HTTP API
+## Phase 4: v1 HTTP API
 
 Implementation:
-- [x] Mount `POST /v2/rpc` and `GET /v2/rpc` (SSE).
-- [x] Mount `DELETE /v2/rpc` close endpoint.
-- [x] Add `GET /v2/health`, `GET /v2/agents`, `POST /v2/agents/{agent}/install`.
+- [x] Mount `POST /v1/rpc` and `GET /v1/rpc` (SSE).
+- [x] Mount `DELETE /v1/rpc` close endpoint.
+- [x] Add `GET /v1/health`, `GET /v1/agents`, `POST /v1/agents/{agent}/install`.
 - [x] Integrate auth on ACP client lifecycle.
-- [x] Keep `/ui/` and migrate inspector backend calls to ACP v2 transport.
+- [x] Keep `/ui/` and migrate inspector backend calls to ACP v1 transport.
 - [x] Remove v1 OpenAPI surface from generated docs contract.
 
 Validation gate:
-- [x] Contract tests for `/v2` endpoints pass.
+- [x] Contract tests for `/v1` endpoints pass.
 - [x] Auth tests pass (valid/missing/invalid token).
 - [x] `/v1/*` removal contract test passes (HTTP 410 + stable payload).
 - [x] Inspector ACP `agent-browser` flow test passes.
-- [x] `DELETE /v2/rpc` close contract tests pass.
+- [x] `DELETE /v1/rpc` close contract tests pass.
 - [x] Error mapping tests are complete for every documented error path.
 
-## Phase 5: SDK and CLI v2
+## Phase 5: SDK and CLI v1
 
 Implementation:
 - [x] Embed `@agentclientprotocol/sdk` in `sdks/typescript`.
@@ -91,7 +91,7 @@ Implementation:
 - [x] Wire inspector frontend client to ACP-over-HTTP primitives.
 - [x] Add CLI commands for raw ACP envelopes + streaming ACP messages.
 - [x] Remove or hard-fail v1-only SDK/CLI methods (`v1 removed`).
-- [x] Regenerate docs for v2 ACP contract.
+- [x] Regenerate docs for v1 ACP contract.
 
 Validation gate:
 - [x] TypeScript SDK end-to-end tests pass in embedded mode.
@@ -105,7 +105,7 @@ Implementation:
 - [x] Replace v1 HTTP/session tests with ACP transport contract tests (core server + SDK).
 - [x] Add smoke tests per supported agent process (claude/codex/opencode covered with deterministic ACP agent process stubs).
 - [x] Add canary docs + migration notes.
-- [x] Update docs for v2 ACP, `/v1/*` removal, inspector ACP behavior, and SDK usage.
+- [x] Update docs for v1 ACP, `/v1/*` removal, inspector ACP behavior, and SDK usage.
 - [x] Keep `/v1/*` hard-removed (HTTP 410).
 
 Validation gate:
@@ -122,9 +122,9 @@ Notes:
 
 Implementation:
 - [x] Keep `/opencode/*` disabled through Phases 1-6.
-- [ ] Implement OpenCode <-> ACP bridge on top of v2 ACP runtime.
+- [ ] Implement OpenCode <-> ACP bridge on top of v1 ACP runtime.
 - [ ] Re-enable `server/packages/sandbox-agent/src/opencode_compat.rs` routes/tests.
-- [ ] Add dedicated integration tests for OpenCode SDK/TUI flows through ACP v2 internals.
+- [ ] Add dedicated integration tests for OpenCode SDK/TUI flows through ACP v1 internals.
 
 Validation gate:
 - [ ] OpenCode compatibility suite passes against ACP-backed implementation.
@@ -133,7 +133,7 @@ Validation gate:
 ## Consolidated Test Suites (Must-Have)
 
 - [x] ACP protocol conformance (beyond mock baseline).
-- [x] `/v2/rpc` transport contract.
+- [x] `/v1/rpc` transport contract.
 - [x] End-to-end agent process matrix (core + cancel + HITL + streaming).
 - [x] Installer suite (explicit + lazy + provenance).
 - [x] Security/auth isolation.
@@ -155,7 +155,7 @@ Validation gate:
 - [x] Add dedicated regression for `Last-Event-ID` handling in CLI `api acp stream`.
 - [x] Add explicit test for `SANDBOX_AGENT_REQUIRE_PREINSTALL=true` behavior.
 - [x] Improve server build-script invalidation for inspector embedding (avoid manual touch workaround when `dist/` appears after initial build).
-- [ ] Integrate agent server logs into v2 observability surfaces (agent process/process logs available via control-plane and inspector), with redaction and end-to-end tests.
+- [ ] Integrate agent server logs into v1 observability surfaces (agent process/process logs available via control-plane and inspector), with redaction and end-to-end tests.
 
 ## Inspector Frontend Parity Follow-ups
 
@@ -164,6 +164,7 @@ Validation gate:
 - [ ] TODO: Implement session `skills` source configuration in inspector ACP flow.
 - [ ] TODO: Implement question request/reply/reject flow in inspector ACP flow.
 - [ ] TODO: Implement agent mode discovery before session creation (replace cached/empty fallback).
-- [ ] TODO: Implement agent model discovery before session creation (replace cached/empty fallback).
+- [ ] TODO: Dynamic Claude model loading — fetch models from Anthropic API (`GET https://api.anthropic.com/v1/models?beta=true`) using the user's credentials instead of hardcoded aliases (default/sonnet/opus/haiku). The old implementation cached results with coalesced in-flight requests and fell back to aliases for OAuth users. See commit `8ecd27b` for `fetch_claude_models()` and `agent_models()` cache logic. Current hardcoded fallback is in `router/support.rs::fallback_config_options()`.
+- [ ] TODO: Dynamic Codex model loading — codex-acp (`github.com/zed-industries/codex-acp`) is installed and returns models via ACP `configOptions` in `session/new`. The config probe should pick these up automatically; investigate why the probe currently returns empty configOptions for Codex and fix. Once working, the hardcoded Codex fallbacks in `fallback_config_options()` become unused. See commit `8ecd27b` for old `fetch_codex_models()`.
 - [ ] TODO: Replace inspector-local session list with server/global ACP-backed session inventory.
 - [ ] TODO: Replace synthesized inspector event history with canonical ACP-backed history model.

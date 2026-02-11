@@ -1,5 +1,5 @@
 import { SandboxAgent } from "sandbox-agent";
-import { detectAgent, buildInspectorUrl, generateSessionId } from "@sandbox-agent/example-shared";
+import { detectAgent, buildInspectorUrl } from "@sandbox-agent/example-shared";
 import { startDockerSandbox } from "@sandbox-agent/example-shared/docker";
 import fs from "node:fs";
 import path from "node:path";
@@ -31,16 +31,19 @@ console.log(`  Written: ${written.path} (${written.bytesWritten} bytes)`);
 
 // Create a session with the uploaded MCP server as a local command.
 console.log("Creating session with custom MCP tool...");
-const sessionId = generateSessionId();
-await client.createSession(sessionId, {
+const session = await client.createSession({
   agent: detectAgent(),
-  mcp: {
-    customTools: {
-      type: "local",
-      command: ["node", "/opt/mcp/custom-tools/mcp-server.cjs"],
-    },
+  sessionInit: {
+    cwd: "/root",
+    mcpServers: [{
+      name: "customTools",
+      command: "node",
+      args: ["/opt/mcp/custom-tools/mcp-server.cjs"],
+      env: [],
+    }],
   },
 });
+const sessionId = session.id;
 console.log(`  UI: ${buildInspectorUrl({ baseUrl, sessionId })}`);
 console.log('  Try: "generate a random number between 1 and 100"');
 console.log("  Press Ctrl+C to stop.");

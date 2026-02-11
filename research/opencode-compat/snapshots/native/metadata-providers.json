@@ -2517,7 +2517,7 @@
         "claude-3-5-sonnet-20241022": {
           "id": "claude-3-5-sonnet-20241022",
           "providerID": "anthropic",
-          "name": "Claude Sonnet 3.5 v2",
+          "name": "Claude Sonnet 3.5 v1",
           "family": "claude-sonnet",
           "api": {
             "id": "claude-3-5-sonnet-20241022",

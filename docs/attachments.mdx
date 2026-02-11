@@ -1,29 +1,27 @@
 ---
 title: "Attachments"
-description: "Upload files into the sandbox and attach them to prompts."
+description: "Upload files into the sandbox and reference them in prompts."
 sidebarTitle: "Attachments"
 icon: "paperclip"
 ---
 
-Use the filesystem API to upload files, then reference them as attachments when sending prompts.
+Use the filesystem API to upload files, then include file references in prompt content.
 
 <Steps>
   <Step title="Upload a file">
     <CodeGroup>
     ```ts TypeScript
-    import { SandboxAgentClient } from "sandbox-agent";
+    import { SandboxAgent } from "sandbox-agent";
     import fs from "node:fs";
 
-    const client = new SandboxAgentClient({
+    const sdk = await SandboxAgent.connect({
       baseUrl: "http://127.0.0.1:2468",
-      token: process.env.SANDBOX_TOKEN,
-      agent: "mock",
-      });
+    });
 
     const buffer = await fs.promises.readFile("./data.csv");
 
-    const upload = await client.writeFsFile(
-      { path: "./uploads/data.csv", sessionId: "my-session" },
+    const upload = await sdk.writeFsFile(
+      { path: "./uploads/data.csv" },
       buffer,
     );
 
@@ -31,59 +29,33 @@ Use the filesystem API to upload files, then reference them as attachments when 
     ```
 
     ```bash cURL
-    curl -X PUT "http://127.0.0.1:2468/v1/fs/file?path=./uploads/data.csv&sessionId=my-session" \
-      -H "Authorization: Bearer $SANDBOX_TOKEN" \
+    curl -X PUT "http://127.0.0.1:2468/v1/fs/file?path=./uploads/data.csv" \
       --data-binary @./data.csv
     ```
     </CodeGroup>
 
-    The response returns the absolute path that you should use for attachments.
+    The upload response returns the absolute path.
   </Step>
 
-  <Step title="Attach the file in a prompt">
-    <CodeGroup>
+  <Step title="Reference the file in a prompt">
     ```ts TypeScript
-    import { SandboxAgentClient } from "sandbox-agent";
+    const session = await sdk.createSession({ agent: "mock" });
 
-    const client = new SandboxAgentClient({
-      baseUrl: "http://127.0.0.1:2468",
-      token: process.env.SANDBOX_TOKEN,
-      agent: "mock",
-      });
-
-    await client.postMessage("my-session", {
-      message: "Please analyze the attached CSV.",
-      attachments: [
-        {
-          path: "/home/sandbox/uploads/data.csv",
-          mime: "text/csv",
-          filename: "data.csv",
-        },
-      ],
-    });
+    await session.prompt([
+      { type: "text", text: "Please analyze the attached CSV." },
+      {
+        type: "resource_link",
+        name: "data.csv",
+        uri: "file:///home/sandbox/uploads/data.csv",
+        mimeType: "text/csv",
+      },
+    ]);
     ```
-
-    ```bash cURL
-    curl -X POST "http://127.0.0.1:2468/v1/sessions/my-session/messages" \
-      -H "Authorization: Bearer $SANDBOX_TOKEN" \
-      -H "Content-Type: application/json" \
-      -d '{
-        "message": "Please analyze the attached CSV.",
-        "attachments": [
-          {
-            "path": "/home/sandbox/uploads/data.csv",
-            "mime": "text/csv",
-            "filename": "data.csv"
-          }
-        ]
-      }'
-    ```
-    </CodeGroup>
   </Step>
 </Steps>
 
 ## Notes
 
-- Use absolute paths from the upload response to avoid ambiguity.
-- If `mime` is omitted, the server defaults to `application/octet-stream`.
-- OpenCode receives file parts directly; other agents will see the attachment paths appended to the prompt.
+- Use absolute file URIs in `resource_link` blocks.
+- If `mimeType` is omitted, the agent/runtime may infer a default.
+- Support for non-text resources depends on each agent's ACP prompt capabilities.

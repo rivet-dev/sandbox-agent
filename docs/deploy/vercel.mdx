@@ -1,47 +1,39 @@
 ---
 title: "Vercel"
-description: "Deploy the daemon inside a Vercel Sandbox."
+description: "Deploy Sandbox Agent inside a Vercel Sandbox."
 ---
 
 ## Prerequisites
 
-- `VERCEL_OIDC_TOKEN` or `VERCEL_ACCESS_TOKEN` environment variable
-- `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` for the coding agents
+- `VERCEL_OIDC_TOKEN` or `VERCEL_ACCESS_TOKEN`
+- `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`
 
-## TypeScript Example
+## TypeScript example
 
 ```typescript
 import { Sandbox } from "@vercel/sandbox";
-import { SandboxAgentClient } from "sandbox-agent";
+import { SandboxAgent } from "sandbox-agent";
 
-// Pass API keys to the sandbox
 const envs: Record<string, string> = {};
 if (process.env.ANTHROPIC_API_KEY) envs.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 if (process.env.OPENAI_API_KEY) envs.OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
-// Create sandbox with port 3000 exposed
 const sandbox = await Sandbox.create({
   runtime: "node24",
   ports: [3000],
 });
 
-// Helper to run commands
 const run = async (cmd: string, args: string[] = []) => {
   const result = await sandbox.runCommand({ cmd, args, env: envs });
   if (result.exitCode !== 0) {
     throw new Error(`Command failed: ${cmd} ${args.join(" ")}`);
   }
-  return result;
 };
 
-// Install sandbox-agent
-await run("sh", ["-c", "curl -fsSL https://releases.rivet.dev/sandbox-agent/latest/install.sh | sh"]);
-
-// Install agents before starting the server
+await run("sh", ["-c", "curl -fsSL https://releases.rivet.dev/sandbox-agent/0.2.x/install.sh | sh"]);
 await run("sandbox-agent", ["install-agent", "claude"]);
 await run("sandbox-agent", ["install-agent", "codex"]);
 
-// Start the server in the background
 await sandbox.runCommand({
   cmd: "sandbox-agent",
   args: ["server", "--no-token", "--host", "0.0.0.0", "--port", "3000"],
@@ -49,43 +41,22 @@ await sandbox.runCommand({
   detached: true,
 });
 
-// Connect to the server
 const baseUrl = sandbox.domain(3000);
-const client = new SandboxAgentClient({ baseUrl, agent: "mock" });
+const sdk = await SandboxAgent.connect({ baseUrl });
 
-// Wait for server to be ready
-for (let i = 0; i < 30; i++) {
-  try {
-    await client.getHealth();
-    break;
-  } catch {
-    await new Promise((r) => setTimeout(r, 1000));
-  }
-}
+const session = await sdk.createSession({ agent: "claude" });
 
-// Create a session and start coding
-await client.createSession("my-session", {
-  agent: "claude",
-  permissionMode: "default",
+const off = session.onEvent((event) => {
+  console.log(event.sender, event.payload);
 });
 
-await client.postMessage("my-session", {
-  message: "Summarize this repository",
-});
+await session.prompt([{ type: "text", text: "Summarize this repository" }]);
+off();
 
-for await (const event of client.streamEvents("my-session")) {
-  console.log(event.type, event.data);
-}
-
-// Cleanup
 await sandbox.stop();
 ```
 
 ## Authentication
 
-Vercel Sandboxes support two authentication methods:
-
-- **OIDC Token**: Set `VERCEL_OIDC_TOKEN` (recommended for CI/CD)
-- **Access Token**: Set `VERCEL_ACCESS_TOKEN` (for local development, run `vercel env pull`)
-
-See [Vercel Sandbox docs](https://vercel.com/docs/functions/sandbox) for details.
+Vercel Sandboxes support OIDC token auth (recommended) and access-token auth.
+See [Vercel Sandbox docs](https://vercel.com/docs/functions/sandbox).

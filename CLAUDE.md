@@ -1,24 +1,24 @@
 # Instructions
 
-## ACP v2 Baseline
+## ACP v1 Baseline
 
-- v2 is ACP-native.
+- v1 is ACP-native.
 - `/v1/*` is removed and returns `410 Gone` (`application/problem+json`).
 - `/opencode/*` is disabled during ACP core phases and returns `503`.
-- Prompt/session traffic is ACP JSON-RPC over streamable HTTP on `/v2/rpc`:
-  - `POST /v2/rpc`
-  - `GET /v2/rpc` (SSE)
-  - `DELETE /v2/rpc`
+- Prompt/session traffic is ACP JSON-RPC over streamable HTTP on `/v1/rpc`:
+  - `POST /v1/rpc`
+  - `GET /v1/rpc` (SSE)
+  - `DELETE /v1/rpc`
 - Control-plane endpoints:
-  - `GET /v2/health`
-  - `GET /v2/agents`
-  - `POST /v2/agents/{agent}/install`
+  - `GET /v1/health`
+  - `GET /v1/agents`
+  - `POST /v1/agents/{agent}/install`
 - Binary filesystem transfer endpoints (intentionally HTTP, not ACP extension methods):
-  - `GET /v2/fs/file`
-  - `PUT /v2/fs/file`
-  - `POST /v2/fs/upload-batch`
+  - `GET /v1/fs/file`
+  - `PUT /v1/fs/file`
+  - `POST /v1/fs/upload-batch`
 - Sandbox Agent ACP extension method naming:
-  - Custom ACP methods use `_sandboxagent/...` (not `_sandboxagent/v2/...`).
+  - Custom ACP methods use `_sandboxagent/...` (not `_sandboxagent/v1/...`).
   - Session detach method is `_sandboxagent/session/detach`.
 
 ## API Scope
@@ -27,7 +27,7 @@
 - ACP extensions may be used for gaps (for example `skills`, `models`, and related metadata), but the default is that agent-facing behavior is implemented by the agent through ACP.
 - Custom HTTP APIs are for non-agent/session platform services (for example filesystem, terminals, and other host/runtime capabilities).
 - Filesystem and terminal APIs remain Sandbox Agent-specific HTTP contracts and are not ACP.
-- Keep `GET /v2/fs/file`, `PUT /v2/fs/file`, and `POST /v2/fs/upload-batch` on HTTP:
+- Keep `GET /v1/fs/file`, `PUT /v1/fs/file`, and `POST /v1/fs/upload-batch` on HTTP:
   - These are Sandbox Agent host/runtime operations with cross-agent-consistent behavior.
   - They may involve very large binary transfers that ACP JSON-RPC envelopes are not suited to stream.
   - This is intentionally separate from ACP native `fs/read_text_file` and `fs/write_text_file`.
@@ -51,14 +51,24 @@
 ## TypeScript SDK Architecture
 
 - TypeScript clients are split into:
-  - `acp-http-client`: protocol-pure ACP-over-HTTP (`/v2/rpc`) with no Sandbox-specific metadata/extensions.
-  - `sandbox-agent`: `SandboxAgentClient` wrapper that adds Sandbox metadata/extension helpers and keeps non-ACP HTTP helpers.
-- `SandboxAgentClient` constructor is `new SandboxAgentClient(...)`.
-- `SandboxAgentClient` auto-connects by default; `autoConnect: false` requires explicit `.connect()`.
-- ACP/session methods must throw when disconnected (`NotConnectedError`), and `.connect()` must throw when already connected (`AlreadyConnectedError`).
-- A `SandboxAgentClient` instance may have at most one active ACP connection at a time.
-- Stable ACP session method names should stay ACP-aligned in the Sandbox wrapper (`newSession`, `loadSession`, `prompt`, `cancel`, `setSessionMode`, `setSessionConfigOption`).
-- Sandbox extension methods are first-class wrapper helpers (`listModels`, `setMetadata`, `detachSession`, `terminateSession`).
+  - `acp-http-client`: protocol-pure ACP-over-HTTP (`/v1/acp`) with no Sandbox-specific HTTP helpers.
+  - `sandbox-agent`: `SandboxAgent` SDK wrapper that combines ACP session operations with Sandbox control-plane and filesystem helpers.
+- `SandboxAgent` entry points are `SandboxAgent.connect(...)` and `SandboxAgent.start(...)`.
+- Stable Sandbox session methods are `createSession`, `resumeSession`, `resumeOrCreateSession`, `destroySession`, `sendSessionMethod`, and `onSessionEvent`.
+- `Session` helpers are `prompt(...)`, `send(...)`, and `onEvent(...)`.
+- Cleanup is `sdk.dispose()`.
+
+### Docs Source Of Truth
+
+- For TypeScript docs/examples, source of truth is implementation in:
+  - `sdks/typescript/src/client.ts`
+  - `sdks/typescript/src/index.ts`
+  - `sdks/acp-http-client/src/index.ts`
+- Do not document TypeScript APIs unless they are exported and implemented in those files.
+- For HTTP/CLI docs/examples, source of truth is:
+  - `server/packages/sandbox-agent/src/router.rs`
+  - `server/packages/sandbox-agent/src/cli.rs`
+- Keep docs aligned to implemented endpoints/commands only (for example ACP under `/v1/acp`, not legacy `/v1/sessions` APIs).
 
 ## Source Documents
 
@@ -76,5 +86,43 @@
 - Regenerate `docs/openapi.json` when HTTP contracts change.
 - Keep `docs/inspector.mdx` and `docs/sdks/typescript.mdx` aligned with implementation.
 - Append blockers/decisions to `research/acp/friction.md` during ACP work.
-- TypeScript SDK tests should run against a real running server/runtime over real `/v2` HTTP APIs, typically using the real `mock` agent for deterministic behavior.
+- TypeScript SDK tests should run against a real running server/runtime over real `/v1` HTTP APIs, typically using the real `mock` agent for deterministic behavior.
 - Do not use Vitest fetch/transport mocks to simulate server functionality in TypeScript SDK tests.
+
+## Docker Examples (Dev Testing)
+
+- When manually testing bleeding-edge (unreleased) versions of sandbox-agent in `examples/`, use `SANDBOX_AGENT_DEV=1` with the Docker-based examples.
+- This triggers `examples/shared/Dockerfile.dev` which builds the server binary from local source and packages it into the Docker image.
+- Example: `SANDBOX_AGENT_DEV=1 pnpm --filter @sandbox-agent/example-mcp start`
+
+## Install Version References
+
+- Channel policy:
+  - Sandbox Agent install/version references use a pinned minor channel `0.N.x` (for curl URLs and `sandbox-agent` / `@sandbox-agent/cli` npm/bun installs).
+  - Gigacode install/version references use `latest` (for `@sandbox-agent/gigacode` install/run commands and `gigacode-install.*` release promotion).
+  - Release promotion policy: `latest` releases must still update `latest`; when a release is `latest`, Sandbox Agent must also be promoted to the matching minor channel `0.N.x`.
+- Keep every install-version reference below in sync whenever versions/channels change:
+  - `README.md`
+  - `docs/acp-http-client.mdx`
+  - `docs/cli.mdx`
+  - `docs/quickstart.mdx`
+  - `docs/sdk-overview.mdx`
+  - `docs/session-persistence.mdx`
+  - `docs/deploy/local.mdx`
+  - `docs/deploy/cloudflare.mdx`
+  - `docs/deploy/vercel.mdx`
+  - `docs/deploy/daytona.mdx`
+  - `docs/deploy/e2b.mdx`
+  - `docs/deploy/docker.mdx`
+  - `frontend/packages/website/src/components/GetStarted.tsx`
+  - `.claude/commands/post-release-testing.md`
+  - `examples/cloudflare/Dockerfile`
+  - `examples/daytona/src/index.ts`
+  - `examples/daytona/src/daytona-with-snapshot.ts`
+  - `examples/docker/src/index.ts`
+  - `examples/e2b/src/index.ts`
+  - `examples/vercel/src/index.ts`
+  - `scripts/release/main.ts`
+  - `scripts/release/promote-artifacts.ts`
+  - `scripts/release/sdk.ts`
+  - `scripts/sandbox-testing/test-sandbox.ts`

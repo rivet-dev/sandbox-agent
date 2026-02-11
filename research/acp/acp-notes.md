@@ -63,4 +63,4 @@ From ACP docs agent list:
 Gap to confirm for launch scope:
 
 - Amp is not currently listed in ACP docs as a native ACP agent or published agent process.
-- We need an explicit product decision: block Amp in v2 launch or provide/build an ACP agent process.
+- We need an explicit product decision: block Amp in v1 launch or provide/build an ACP agent process.

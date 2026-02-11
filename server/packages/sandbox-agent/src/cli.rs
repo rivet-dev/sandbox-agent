@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::PathBuf;
+use std::process::Command as ProcessCommand;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use clap::{Args, Parser, Subcommand};
 
@@ -29,7 +30,7 @@ use thiserror::Error;
 use tower_http::cors::{Any, CorsLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
-const API_PREFIX: &str = "/v2";
+const API_PREFIX: &str = "/v1";
 const ACP_EXTENSION_AGENT_LIST_METHOD: &str = "_sandboxagent/agent/list";
 const ACP_EXTENSION_AGENT_INSTALL_METHOD: &str = "_sandboxagent/agent/install";
 const DEFAULT_HOST: &str = "127.0.0.1";
@@ -194,7 +195,7 @@ pub struct DaemonStatusArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum ApiCommand {
-    /// Manage available v2 agents and install status.
+    /// Manage available v1 agents and install status.
     Agents(AgentsArgs),
     /// Send and stream raw ACP JSON-RPC envelopes.
     Acp(AcpArgs),
@@ -231,11 +232,11 @@ pub struct AcpArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum AcpCommand {
-    /// Send one ACP JSON-RPC envelope to /v2/rpc.
+    /// Send one ACP JSON-RPC envelope to /v1/acp/{server_id}.
     Post(AcpPostArgs),
-    /// Stream ACP JSON-RPC envelopes from /v2/rpc SSE.
+    /// Stream ACP JSON-RPC envelopes from /v1/acp/{server_id} SSE.
     Stream(AcpStreamArgs),
-    /// Close an ACP client.
+    /// Close an ACP server stream.
     Close(AcpCloseArgs),
 }
 
@@ -260,22 +261,22 @@ pub struct ApiInstallAgentArgs {
 
 #[derive(Args, Debug)]
 pub struct AcpPostArgs {
-    #[arg(long = "client-id")]
-    client_id: Option<String>,
+    #[arg(long = "server-id")]
+    server_id: String,
+    #[arg(long = "agent")]
+    agent: Option<String>,
     #[arg(long)]
     json: Option<String>,
     #[arg(long = "json-file")]
     json_file: Option<PathBuf>,
-    #[arg(long, default_value_t = false)]
-    print_client_id: bool,
     #[command(flatten)]
     client: ClientArgs,
 }
 
 #[derive(Args, Debug)]
 pub struct AcpStreamArgs {
-    #[arg(long = "client-id")]
-    client_id: String,
+    #[arg(long = "server-id")]
+    server_id: String,
     #[arg(long = "last-event-id")]
     last_event_id: Option<u64>,
     #[command(flatten)]
@@ -284,8 +285,8 @@ pub struct AcpStreamArgs {
 
 #[derive(Args, Debug)]
 pub struct AcpCloseArgs {
-    #[arg(long = "client-id")]
-    client_id: String,
+    #[arg(long = "server-id")]
+    server_id: String,
     #[command(flatten)]
     client: ClientArgs,
 }
@@ -498,6 +499,10 @@ fn run_agents(command: &AgentsCommand, cli: &CliConfig) -> Result<(), CliError> 
 }
 
 fn call_acp_extension(ctx: &ClientContext, method: &str, params: Value) -> Result<Value, CliError> {
+    let server_id = unique_cli_server_id("cli-ext");
+    let initialize_path = build_acp_server_path(&server_id, Some("mock"))?;
+    let request_path = build_acp_server_path(&server_id, None)?;
+
     let initialize = json!({
         "jsonrpc": "2.0",
         "id": "cli-init",
@@ -512,9 +517,13 @@ fn call_acp_extension(ctx: &ClientContext, method: &str, params: Value) -> Resul
             }
         }
     });
-    let initialize_response =
-        ctx.post_with_headers(&format!("{API_PREFIX}/rpc"), &initialize, &[])?;
-    let connection_id = extract_connection_id(initialize_response)?;
+    let initialize_response = ctx.post(&initialize_path, &initialize)?;
+    let initialize_status = initialize_response.status();
+    let initialize_text = initialize_response.text()?;
+    if !initialize_status.is_success() {
+        print_error_body(&initialize_text)?;
+        return Err(CliError::HttpStatus(initialize_status));
+    }
 
     let request = json!({
         "jsonrpc": "2.0",
@@ -522,16 +531,9 @@ fn call_acp_extension(ctx: &ClientContext, method: &str, params: Value) -> Resul
         "method": method,
         "params": params,
     });
-    let response = ctx.post_with_headers(
-        &format!("{API_PREFIX}/rpc"),
-        &request,
-        &[("x-acp-connection-id", connection_id.as_str())],
-    );
+    let response = ctx.post(&request_path, &request);
 
-    let _ = ctx.delete_with_headers(
-        &format!("{API_PREFIX}/rpc"),
-        &[("x-acp-connection-id", connection_id.as_str())],
-    );
+    let _ = ctx.delete(&request_path);
 
     let response = response?;
     let status = response.status();
@@ -553,57 +555,20 @@ fn call_acp_extension(ctx: &ClientContext, method: &str, params: Value) -> Resul
     Ok(parsed.get("result").cloned().unwrap_or(Value::Null))
 }
 
-fn extract_connection_id(response: reqwest::blocking::Response) -> Result<String, CliError> {
-    let status = response.status();
-    let headers = response.headers().clone();
-    let text = response.text()?;
-    if !status.is_success() {
-        print_error_body(&text)?;
-        return Err(CliError::HttpStatus(status));
-    }
-    headers
-        .get("x-acp-connection-id")
-        .and_then(|value| value.to_str().ok())
-        .map(|value| value.to_string())
-        .ok_or_else(|| {
-            CliError::Server("missing x-acp-connection-id in initialize response".to_string())
-        })
-}
-
 fn run_acp(command: &AcpCommand, cli: &CliConfig) -> Result<(), CliError> {
     match command {
         AcpCommand::Post(args) => {
             let ctx = ClientContext::new(cli, &args.client)?;
             let payload = load_json_payload(args.json.as_deref(), args.json_file.as_deref())?;
-
-            let mut headers = Vec::new();
-            if let Some(client_id) = args.client_id.as_deref() {
-                headers.push(("x-acp-connection-id", client_id));
-            }
-
-            let response =
-                ctx.post_with_headers(&format!("{API_PREFIX}/rpc"), &payload, &headers)?;
-            let client_id = response
-                .headers()
-                .get("x-acp-connection-id")
-                .and_then(|value| value.to_str().ok())
-                .map(|value| value.to_string());
-
-            print_json_or_empty(response)?;
-
-            if args.print_client_id {
-                if let Some(client_id) = client_id {
-                    write_stdout_line(&client_id)?;
-                }
-            }
-
-            Ok(())
+            let path = build_acp_server_path(&args.server_id, args.agent.as_deref())?;
+            let response = ctx.post(&path, &payload)?;
+            print_json_or_empty(response)
         }
         AcpCommand::Stream(args) => {
             let ctx = ClientContext::new(cli, &args.client)?;
+            let path = build_acp_server_path(&args.server_id, None)?;
             let request = ctx
-                .request(Method::GET, &format!("{API_PREFIX}/rpc"))
-                .header("x-acp-connection-id", args.client_id.as_str())
+                .request(Method::GET, &path)
                 .header("accept", "text/event-stream");
 
             let request = apply_last_event_id_header(request, args.last_event_id);
@@ -613,19 +578,58 @@ fn run_acp(command: &AcpCommand, cli: &CliConfig) -> Result<(), CliError> {
         }
         AcpCommand::Close(args) => {
             let ctx = ClientContext::new(cli, &args.client)?;
-            let response = ctx.delete_with_headers(
-                &format!("{API_PREFIX}/rpc"),
-                &[("x-acp-connection-id", args.client_id.as_str())],
-            )?;
+            let path = build_acp_server_path(&args.server_id, None)?;
+            let response = ctx.delete(&path)?;
             print_empty_response(response)
         }
     }
 }
 
-fn run_opencode(_cli: &CliConfig, _args: &OpencodeArgs) -> Result<(), CliError> {
-    Err(CliError::Server(
-        "/opencode is disabled during ACP core bring-up and will return in Phase 7".to_string(),
-    ))
+fn run_opencode(cli: &CliConfig, args: &OpencodeArgs) -> Result<(), CliError> {
+    let token = cli.token.as_deref();
+    crate::daemon::ensure_running(cli, &args.host, args.port, token)?;
+    let base_url = format!("http://{}:{}", args.host, args.port);
+
+    let attach_url = format!("{base_url}/opencode");
+    let mut attach_command = if let Ok(bin) = std::env::var("GIGACODE_OPENCODE_BIN") {
+        let mut cmd = ProcessCommand::new(bin);
+        cmd.arg("attach").arg(&attach_url);
+        cmd
+    } else {
+        let mut cmd = ProcessCommand::new("opencode");
+        cmd.arg("attach").arg(&attach_url);
+        cmd
+    };
+
+    let status = match attach_command.status() {
+        Ok(status) => status,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            let mut fallback = ProcessCommand::new("npx");
+            fallback
+                .arg("--yes")
+                .arg("opencode-ai")
+                .arg("attach")
+                .arg(&attach_url);
+            fallback.status().map_err(|fallback_err| {
+                CliError::Server(format!(
+                    "failed to launch opencode attach. Tried `opencode attach` and `npx --yes opencode-ai attach`. Last error: {fallback_err}"
+                ))
+            })?
+        }
+        Err(err) => {
+            return Err(CliError::Server(format!(
+                "failed to launch opencode attach: {err}"
+            )));
+        }
+    };
+
+    if !status.success() {
+        return Err(CliError::Server(format!(
+            "opencode attach exited with status {status}"
+        )));
+    }
+
+    Ok(())
 }
 
 fn run_daemon(command: &DaemonCommand, cli: &CliConfig) -> Result<(), CliError> {
@@ -961,6 +965,43 @@ fn apply_last_event_id_header(
     }
 }
 
+fn unique_cli_server_id(prefix: &str) -> String {
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or(0);
+    format!("{prefix}-{}-{millis}", std::process::id())
+}
+
+fn build_acp_server_path(
+    server_id: &str,
+    bootstrap_agent: Option<&str>,
+) -> Result<String, CliError> {
+    let server_id = server_id.trim();
+    if server_id.is_empty() {
+        return Err(CliError::Server("server id must not be empty".to_string()));
+    }
+    if server_id.contains('/') {
+        return Err(CliError::Server(
+            "server id must not contain '/'".to_string(),
+        ));
+    }
+
+    let mut path = format!("{API_PREFIX}/acp/{server_id}");
+    if let Some(agent) = bootstrap_agent {
+        let agent = agent.trim();
+        if agent.is_empty() {
+            return Err(CliError::Server(
+                "agent must not be empty when provided".to_string(),
+            ));
+        }
+        path.push_str("?agent=");
+        path.push_str(agent);
+    }
+
+    Ok(path)
+}
+
 fn default_server_log_dir() -> PathBuf {
     if let Ok(dir) = std::env::var("SANDBOX_AGENT_LOG_DIR") {
         return PathBuf::from(dir);
@@ -1080,29 +1121,8 @@ impl ClientContext {
         Ok(self.request(Method::POST, path).json(body).send()?)
     }
 
-    fn post_with_headers<T: Serialize>(
-        &self,
-        path: &str,
-        body: &T,
-        headers: &[(&str, &str)],
-    ) -> Result<reqwest::blocking::Response, CliError> {
-        let mut request = self.request(Method::POST, path).json(body);
-        for (name, value) in headers {
-            request = request.header(*name, *value);
-        }
-        Ok(request.send()?)
-    }
-
-    fn delete_with_headers(
-        &self,
-        path: &str,
-        headers: &[(&str, &str)],
-    ) -> Result<reqwest::blocking::Response, CliError> {
-        let mut request = self.request(Method::DELETE, path);
-        for (name, value) in headers {
-            request = request.header(*name, *value);
-        }
-        Ok(request.send()?)
+    fn delete(&self, path: &str) -> Result<reqwest::blocking::Response, CliError> {
+        Ok(self.request(Method::DELETE, path).send()?)
     }
 }
 
@@ -1205,9 +1225,10 @@ mod tests {
     #[test]
     fn apply_last_event_id_header_sets_header_when_provided() {
         let client = HttpClient::builder().build().expect("build client");
-        let request = apply_last_event_id_header(client.get("http://localhost/v2/rpc"), Some(42))
-            .build()
-            .expect("build request");
+        let request =
+            apply_last_event_id_header(client.get("http://localhost/v1/acp/test"), Some(42))
+                .build()
+                .expect("build request");
 
         let header = request
             .headers()
@@ -1219,7 +1240,7 @@ mod tests {
     #[test]
     fn apply_last_event_id_header_omits_header_when_absent() {
         let client = HttpClient::builder().build().expect("build client");
-        let request = apply_last_event_id_header(client.get("http://localhost/v2/rpc"), None)
+        let request = apply_last_event_id_header(client.get("http://localhost/v1/acp/test"), None)
             .build()
             .expect("build request");
         assert!(request.headers().get("last-event-id").is_none());
