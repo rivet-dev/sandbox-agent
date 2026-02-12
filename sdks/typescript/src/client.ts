@@ -7,8 +7,11 @@ import {
   type CancelNotification,
   type NewSessionRequest,
   type NewSessionResponse,
+  type PermissionOption,
   type PromptRequest,
   type PromptResponse,
+  type RequestPermissionRequest,
+  type RequestPermissionResponse,
   type SessionNotification,
   type SetSessionConfigOptionRequest,
   type SetSessionModeRequest,
@@ -227,6 +230,9 @@ export class LiveAcpConnection {
         bootstrapQuery: { agent: options.agent },
       },
       client: {
+        requestPermission: async (request: RequestPermissionRequest): Promise<RequestPermissionResponse> => {
+          return autoSelectPermissionResponse(request);
+        },
         sessionUpdate: async (_notification: SessionNotification) => {
           // Session updates are observed via envelope persistence.
         },
@@ -1009,6 +1015,40 @@ function normalizeSessionInit(
     cwd: value.cwd ?? defaultCwd(),
     mcpServers: value.mcpServers ?? [],
   };
+}
+
+function autoSelectPermissionResponse(
+  request: RequestPermissionRequest,
+): RequestPermissionResponse {
+  const chosen = selectPermissionOption(request.options ?? []);
+  if (!chosen) {
+    return {
+      outcome: {
+        outcome: "cancelled",
+      },
+    };
+  }
+
+  return {
+    outcome: {
+      outcome: "selected",
+      optionId: chosen.optionId,
+    },
+  };
+}
+
+function selectPermissionOption(options: PermissionOption[]): PermissionOption | null {
+  const allowOnce = options.find((option) => option.kind === "allow_once");
+  if (allowOnce) {
+    return allowOnce;
+  }
+
+  const allowAlways = options.find((option) => option.kind === "allow_always");
+  if (allowAlways) {
+    return allowAlways;
+  }
+
+  return null;
 }
 
 function mapSessionParams(params: Record<string, unknown>, agentSessionId: string): Record<string, unknown> {
