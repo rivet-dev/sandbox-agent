@@ -103,10 +103,10 @@ fn map_error(err: AdapterError) -> Response {
             "serialize_failed",
             &format!("failed to serialize JSON payload: {ser}"),
         ),
-        AdapterError::Spawn(spawn) => problem(
+        AdapterError::Spawn { command, error } => problem(
             StatusCode::BAD_GATEWAY,
             "spawn_failed",
-            &format!("failed to start agent process: {spawn}"),
+            &format!("failed to start agent process `{command}`: {error}"),
         ),
         AdapterError::MissingStdin | AdapterError::MissingStdout | AdapterError::MissingStderr => {
             problem(
