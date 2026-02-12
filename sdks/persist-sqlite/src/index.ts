@@ -1,4 +1,4 @@
-import { DatabaseSync } from "node:sqlite";
+import Database from "better-sqlite3";
 import type {
   ListEventsRequest,
   ListPage,
@@ -12,16 +12,13 @@ const DEFAULT_LIST_LIMIT = 100;
 
 export interface SQLiteSessionPersistDriverOptions {
   filename?: string;
-  open?: boolean;
 }
 
 export class SQLiteSessionPersistDriver implements SessionPersistDriver {
-  private readonly db: DatabaseSync;
+  private readonly db: Database.Database;
 
   constructor(options: SQLiteSessionPersistDriverOptions = {}) {
-    this.db = new DatabaseSync(options.filename ?? ":memory:", {
-      open: options.open ?? true,
-    });
+    this.db = new Database(options.filename ?? ":memory:");
     this.initialize();
   }
 

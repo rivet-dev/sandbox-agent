@@ -1,0 +1,19 @@
+{
+  "name": "@sandbox-agent/example-persist-sqlite",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@sandbox-agent/example-shared": "workspace:*",
+    "@sandbox-agent/persist-sqlite": "workspace:*",
+    "sandbox-agent": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "tsx": "latest",
+    "typescript": "latest"
+  }
+}
