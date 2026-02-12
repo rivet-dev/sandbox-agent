@@ -13,7 +13,7 @@ import {
 	createGitHubRelease,
 	validateGit,
 } from "./git";
-import { publishCrates, publishNpmCli, publishNpmCliShared, publishNpmSdk } from "./sdk";
+import { publishCrates, publishNpmCli, publishNpmLibraries } from "./sdk";
 import { updateVersion } from "./update_version";
 import { assert, assertEquals, fetchGitRef, versionOrCommitToRef } from "./utils";
 
@@ -282,8 +282,7 @@ const STEPS = [
 	"run-ci-checks",
 	"build-js-artifacts",
 	"publish-crates",
-	"publish-npm-cli-shared",
-	"publish-npm-sdk",
+	"publish-npm-libraries",
 	"publish-npm-cli",
 	"tag-docker",
 	"promote-artifacts",
@@ -324,8 +323,7 @@ const PHASE_MAP: Record<Phase, Step[]> = {
 	"complete-ci": [
 		"update-version",
 		"publish-crates",
-		"publish-npm-cli-shared",
-		"publish-npm-sdk",
+		"publish-npm-libraries",
 		"publish-npm-cli",
 		"tag-docker",
 		"promote-artifacts",
@@ -604,14 +602,9 @@ async function main() {
 		await publishCrates(releaseOpts);
 	}
 
-	if (shouldRunStep("publish-npm-cli-shared")) {
-		console.log("==> Publishing NPM CLI Shared");
-		await publishNpmCliShared(releaseOpts);
-	}
-
-	if (shouldRunStep("publish-npm-sdk")) {
-		console.log("==> Publishing NPM SDK");
-		await publishNpmSdk(releaseOpts);
+	if (shouldRunStep("publish-npm-libraries")) {
+		console.log("==> Publishing NPM Libraries");
+		await publishNpmLibraries(releaseOpts);
 	}
 
 	if (shouldRunStep("publish-npm-cli")) {

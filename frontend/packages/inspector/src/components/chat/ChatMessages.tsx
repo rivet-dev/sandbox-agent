@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { getAvatarLabel, getMessageClass } from "./messageUtils";
-import renderContentPart from "./renderContentPart";
 import type { TimelineEntry } from "./types";
 import { AlertTriangle, Settings, ChevronRight, ChevronDown } from "lucide-react";
 
@@ -63,81 +62,98 @@ const ChatMessages = ({
             );
           }
 
-          // Other status messages - collapsible
+          // Other status messages - collapsible only if there's detail
+          const hasDetail = Boolean(entry.meta?.detail);
+          if (hasDetail) {
+            return (
+              <CollapsibleMessage
+                key={entry.id}
+                id={entry.id}
+                icon={isError ? <AlertTriangle size={14} className="error-icon" /> : <Settings size={14} className="system-icon" />}
+                label={title}
+                className={isError ? "error" : "system"}
+              >
+                <div className="part-body">{entry.meta?.detail}</div>
+              </CollapsibleMessage>
+            );
+          }
+
+          // No detail - simple non-collapsible message
+          return (
+            <div key={entry.id} className={`simple-status-message ${isError ? "error" : "system"}`}>
+              {isError ? <AlertTriangle size={14} className="error-icon" /> : <Settings size={14} className="system-icon" />}
+              <span>{title}</span>
+            </div>
+          );
+        }
+
+        if (entry.kind === "reasoning") {
           return (
             <CollapsibleMessage
               key={entry.id}
               id={entry.id}
-              icon={isError ? <AlertTriangle size={14} className="error-icon" /> : <Settings size={14} className="system-icon" />}
-              label={title}
-              className={isError ? "error" : "system"}
+              icon={<Settings size={14} className="system-icon" />}
+              label={`Reasoning${entry.reasoning?.visibility ? ` (${entry.reasoning.visibility})` : ""}`}
+              className="system"
             >
-              {entry.meta?.detail && <div className="part-body">{entry.meta.detail}</div>}
+              <div className="part-body muted">{entry.reasoning?.text}</div>
             </CollapsibleMessage>
           );
         }
 
-        const item = entry.item;
-        if (!item) return null;
-        const hasParts = (item.content ?? []).length > 0;
-        const isInProgress = item.status === "in_progress";
-        const isFailed = item.status === "failed";
-        const messageClass = getMessageClass(item);
-        const statusLabel = item.status !== "completed" ? item.status.replace("_", " ") : "";
-        const kindLabel = item.kind.replace("_", " ");
-        const isTool = messageClass === "tool";
+        if (entry.kind === "tool") {
+          const isComplete = entry.toolStatus === "completed" || entry.toolStatus === "failed";
+          const isFailed = entry.toolStatus === "failed";
+          const statusLabel = entry.toolStatus && entry.toolStatus !== "completed"
+            ? entry.toolStatus.replace("_", " ")
+            : "";
 
-        // Tool results - collapsible
-        if (isTool) {
           return (
             <CollapsibleMessage
               key={entry.id}
               id={entry.id}
               icon={<span className="tool-icon">T</span>}
-              label={`${kindLabel}${statusLabel ? ` (${statusLabel})` : ""}`}
-              className="tool"
+              label={`${entry.toolName ?? "tool"}${statusLabel ? ` (${statusLabel})` : ""}`}
+              className={`tool${isFailed ? " error" : ""}`}
             >
-              {hasParts ? (
-                (item.content ?? []).map(renderContentPart)
-              ) : entry.deltaText ? (
-                <span>{entry.deltaText}</span>
-              ) : (
-                <span className="muted">No content.</span>
-              )}
-            </CollapsibleMessage>
-          );
-        }
-
-        return (
-          <div key={entry.id} className={`message ${messageClass} ${isFailed ? "error no-avatar" : ""}`}>
-            {!isFailed && <div className="avatar">{getAvatarLabel(messageClass)}</div>}
-            <div className="message-content">
-              {(item.kind !== "message" || item.status !== "completed") && (
-                <div className="message-meta">
-                  {isFailed && <AlertTriangle size={14} className="error-icon" />}
-                  <span>{kindLabel}</span>
-                  {statusLabel && (
-                    <span className={`pill ${item.status === "failed" ? "danger" : "accent"}`}>
-                      {statusLabel}
-                    </span>
-                  )}
+              {entry.toolInput && (
+                <div className="part">
+                  <div className="part-title">input</div>
+                  <pre className="code-block">{entry.toolInput}</pre>
                 </div>
               )}
-              {hasParts ? (
-                (item.content ?? []).map(renderContentPart)
-              ) : entry.deltaText ? (
-                <span>
-                  {entry.deltaText}
-                  {isInProgress && <span className="cursor" />}
-                </span>
-              ) : isInProgress ? (
+              {isComplete && entry.toolOutput && (
+                <div className="part">
+                  <div className="part-title">output</div>
+                  <pre className="code-block">{entry.toolOutput}</pre>
+                </div>
+              )}
+              {!isComplete && !entry.toolInput && (
                 <span className="thinking-indicator">
                   <span className="thinking-dot" />
                   <span className="thinking-dot" />
                   <span className="thinking-dot" />
                 </span>
+              )}
+            </CollapsibleMessage>
+          );
+        }
+
+        // Regular message
+        const messageClass = getMessageClass(entry);
+
+        return (
+          <div key={entry.id} className={`message ${messageClass}`}>
+            <div className="avatar">{getAvatarLabel(messageClass)}</div>
+            <div className="message-content">
+              {entry.text ? (
+                <div className="part-body">{entry.text}</div>
               ) : (
-                <span className="muted">No content yet.</span>
+                <span className="thinking-indicator">
+                  <span className="thinking-dot" />
+                  <span className="thinking-dot" />
+                  <span className="thinking-dot" />
+                </span>
               )}
             </div>
           </div>

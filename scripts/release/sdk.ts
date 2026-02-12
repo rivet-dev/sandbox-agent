@@ -1,38 +1,13 @@
 import { $ } from "execa";
 import * as fs from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join, relative } from "node:path";
+import { glob } from "glob";
 import type { ReleaseOpts } from "./main";
 import { downloadFromReleases, PREFIX } from "./utils";
 
-// Crates to publish in dependency order
-const CRATES = [
-	"error",
-	"agent-credentials",
-	"agent-management",
-	"opencode-server-manager",
-	"opencode-adapter",
-	"acp-http-adapter",
-	"sandbox-agent",
-	"gigacode",
-] as const;
-
-// NPM CLI packages
-const CLI_PACKAGES = [
-	"@sandbox-agent/cli",
-	"@sandbox-agent/cli-linux-x64",
-	"@sandbox-agent/cli-linux-arm64",
-	"@sandbox-agent/cli-win32-x64",
-	"@sandbox-agent/cli-darwin-x64",
-	"@sandbox-agent/cli-darwin-arm64",
-	"@sandbox-agent/gigacode",
-	"@sandbox-agent/gigacode-linux-x64",
-	"@sandbox-agent/gigacode-linux-arm64",
-	"@sandbox-agent/gigacode-win32-x64",
-	"@sandbox-agent/gigacode-darwin-x64",
-	"@sandbox-agent/gigacode-darwin-arm64",
-] as const;
-
-// Mapping from npm package name to Rust target and binary extension
+// ─── Platform binary mapping (npm package → Rust target) ────────────────────
+// Maps CLI platform packages to their Rust build targets.
+// Keep in sync when adding new target platforms.
 const CLI_PLATFORM_MAP: Record<
 	string,
 	{ target: string; binaryExt: string; binaryName: string }
@@ -89,6 +64,8 @@ const CLI_PLATFORM_MAP: Record<
 	},
 };
 
+// ─── Shared helpers ─────────────────────────────────────────────────────────
+
 async function npmVersionExists(
 	packageName: string,
 	version: string,
@@ -104,16 +81,16 @@ async function npmVersionExists(
 		return true;
 	} catch (error: any) {
 		if (error.stderr) {
-			if (
-				!error.stderr.includes(
-					`No match found for version ${version}`,
-				) &&
-				!error.stderr.includes(
-					`'${packageName}@${version}' is not in this registry.`,
-				)
-			) {
+			const stderr = error.stderr;
+			// Expected errors when version or package doesn't exist
+			const expected =
+				stderr.includes(`No match found for version ${version}`) ||
+				stderr.includes(`'${packageName}@${version}' is not in this registry.`) ||
+				stderr.includes("404 Not Found") ||
+				stderr.includes("is not in the npm registry");
+			if (!expected) {
 				throw new Error(
-					`unexpected npm view version output: ${error.stderr}`,
+					`unexpected npm view version output: ${stderr}`,
 				);
 			}
 		}
@@ -131,7 +108,6 @@ async function crateVersionExists(
 			stdout: "pipe",
 			stderr: "pipe",
 		})`cargo search ${crateName} --limit 1`;
-		// cargo search output format: "cratename = \"version\" # description"
 		const output = result.stdout;
 		const match = output.match(new RegExp(`^${crateName}\\s*=\\s*"([^"]+)"`));
 		if (match && match[1] === version) {
@@ -139,62 +115,148 @@ async function crateVersionExists(
 		}
 		return false;
 	} catch (error: any) {
-		// If cargo search fails, assume crate doesn't exist
 		return false;
 	}
 }
 
+// ─── Package discovery ──────────────────────────────────────────────────────
+
+interface NpmPackageInfo {
+	name: string;
+	dir: string;
+	hasBuildScript: boolean;
+	localDeps: string[];
+}
+
+/**
+ * Discover non-private npm packages matching the given glob patterns.
+ */
+async function discoverNpmPackages(root: string, patterns: string[]): Promise<NpmPackageInfo[]> {
+	const packages: NpmPackageInfo[] = [];
+
+	for (const pattern of patterns) {
+		const matches = await glob(pattern, { cwd: root });
+		for (const match of matches) {
+			const fullPath = join(root, match);
+			const pkg = JSON.parse(await fs.readFile(fullPath, "utf-8"));
+			if (pkg.private) continue;
+
+			const allDeps = { ...pkg.dependencies, ...pkg.peerDependencies };
+			const localDeps = Object.entries(allDeps || {})
+				.filter(([_, v]) => String(v).startsWith("workspace:"))
+				.map(([k]) => k);
+
+			packages.push({
+				name: pkg.name,
+				dir: dirname(fullPath),
+				hasBuildScript: !!pkg.scripts?.build,
+				localDeps,
+			});
+		}
+	}
+
+	return packages;
+}
+
+/**
+ * Topologically sort packages so dependencies are published before dependents.
+ */
+function topoSort(packages: NpmPackageInfo[]): NpmPackageInfo[] {
+	const byName = new Map(packages.map(p => [p.name, p]));
+	const visited = new Set<string>();
+	const result: NpmPackageInfo[] = [];
+
+	function visit(pkg: NpmPackageInfo) {
+		if (visited.has(pkg.name)) return;
+		visited.add(pkg.name);
+		for (const dep of pkg.localDeps) {
+			const d = byName.get(dep);
+			if (d) visit(d);
+		}
+		result.push(pkg);
+	}
+
+	for (const pkg of packages) visit(pkg);
+	return result;
+}
+
+interface CrateInfo {
+	name: string;
+	dir: string;
+}
+
+/**
+ * Discover workspace crates via `cargo metadata` and return them in dependency order.
+ */
+async function discoverCrates(root: string): Promise<CrateInfo[]> {
+	const result = await $({ cwd: root, stdout: "pipe" })`cargo metadata --no-deps --format-version 1`;
+	const metadata = JSON.parse(result.stdout);
+
+	const memberIds = new Set<string>(metadata.workspace_members);
+	const workspacePackages = metadata.packages.filter((p: any) => memberIds.has(p.id));
+
+	// Build name→package map for topo sort
+	const byName = new Map<string, any>(workspacePackages.map((p: any) => [p.name, p]));
+
+	const visited = new Set<string>();
+	const sorted: CrateInfo[] = [];
+
+	function visit(pkg: any) {
+		if (visited.has(pkg.name)) return;
+		visited.add(pkg.name);
+		for (const dep of pkg.dependencies) {
+			const internal = byName.get(dep.name);
+			if (internal) visit(internal);
+		}
+		sorted.push({
+			name: pkg.name,
+			dir: dirname(pkg.manifest_path),
+		});
+	}
+
+	for (const pkg of workspacePackages) visit(pkg);
+	return sorted;
+}
+
+// ─── Crate publishing ───────────────────────────────────────────────────────
+
 export async function publishCrates(opts: ReleaseOpts) {
-	console.log("==> Publishing crates to crates.io");
+	console.log("==> Discovering workspace crates");
+	const crates = await discoverCrates(opts.root);
 
-	for (const crate of CRATES) {
-		const cratePath = crate === "gigacode"
-			? join(opts.root, "gigacode")
-			: join(opts.root, "server/packages", crate);
+	console.log(`Found ${crates.length} crates to publish:`);
+	for (const c of crates) console.log(`  - ${c.name}`);
 
-		// Read Cargo.toml to get the actual crate name
-		const cargoTomlPath = join(cratePath, "Cargo.toml");
-		const cargoToml = await fs.readFile(cargoTomlPath, "utf-8");
-		const nameMatch = cargoToml.match(/^name\s*=\s*"([^"]+)"/m);
-		const crateName = nameMatch ? nameMatch[1] : `sandbox-agent-${crate}`;
-
-		// Check if version already exists
-		const versionExists = await crateVersionExists(crateName, opts.version);
+	for (const crate of crates) {
+		const versionExists = await crateVersionExists(crate.name, opts.version);
 		if (versionExists) {
 			console.log(
-				`Version ${opts.version} of ${crateName} already exists on crates.io. Skipping...`,
+				`Version ${opts.version} of ${crate.name} already exists on crates.io. Skipping...`,
 			);
 			continue;
 		}
 
-		// Publish
-		// Use --no-verify to skip the verification step because:
-		// 1. Code was already built/checked in the setup phase
-		// 2. Verification downloads published dependencies which may not have the latest
-		//    changes yet (crates.io indexing takes time)
-		console.log(`==> Publishing to crates.io: ${crateName}@${opts.version}`);
+		console.log(`==> Publishing to crates.io: ${crate.name}@${opts.version}`);
 
 		try {
 			await $({
 				stdout: "pipe",
 				stderr: "pipe",
-				cwd: cratePath,
+				cwd: crate.dir,
 			})`cargo publish --allow-dirty --no-verify`;
-			console.log(`✅ Published ${crateName}@${opts.version}`);
+			console.log(`✅ Published ${crate.name}@${opts.version}`);
 		} catch (err: any) {
-			// Check if error is because crate already exists (from a previous partial run)
 			if (err.stderr?.includes("already exists")) {
 				console.log(
-					`Version ${opts.version} of ${crateName} already exists on crates.io. Skipping...`,
+					`Version ${opts.version} of ${crate.name} already exists on crates.io. Skipping...`,
 				);
 				continue;
 			}
-			console.error(`❌ Failed to publish ${crateName}`);
+			console.error(`❌ Failed to publish ${crate.name}`);
 			console.error(err.stderr || err.message);
 			throw err;
 		}
 
-		// Wait a bit for crates.io to index the new version (needed for dependency resolution)
 		console.log("Waiting for crates.io to index...");
 		await new Promise((resolve) => setTimeout(resolve, 30000));
 	}
@@ -202,108 +264,68 @@ export async function publishCrates(opts: ReleaseOpts) {
 	console.log("✅ All crates published");
 }
 
-export async function publishNpmCliShared(opts: ReleaseOpts) {
-	const cliSharedPath = join(opts.root, "sdks/cli-shared");
-	const packageJsonPath = join(cliSharedPath, "package.json");
-	const packageJson = JSON.parse(await fs.readFile(packageJsonPath, "utf-8"));
-	const name = packageJson.name;
+// ─── NPM library publishing ────────────────────────────────────────────────
 
-	// Check if version already exists
-	const versionExists = await npmVersionExists(name, opts.version);
-	if (versionExists) {
-		console.log(
-			`Version ${opts.version} of ${name} already exists. Skipping...`,
-		);
-		return;
-	}
+/**
+ * Discover and publish all non-private library packages under sdks/.
+ * Excludes CLI/gigacode wrapper and platform packages (handled by publishNpmCli).
+ * Publishes in dependency order via topological sort.
+ */
+export async function publishNpmLibraries(opts: ReleaseOpts) {
+	console.log("==> Discovering library packages");
+	const all = await discoverNpmPackages(opts.root, ["sdks/*/package.json"]);
 
-	// Build cli-shared
-	console.log(`==> Building @sandbox-agent/cli-shared`);
-	await $({
-		stdio: "inherit",
-		cwd: opts.root,
-	})`pnpm --filter @sandbox-agent/cli-shared build`;
+	// Exclude CLI and gigacode directories (handled by publishNpmCli)
+	const libraries = all.filter(p => {
+		const rel = relative(opts.root, p.dir);
+		return !rel.startsWith("sdks/cli") && !rel.startsWith("sdks/gigacode");
+	});
 
-	// Publish
-	console.log(`==> Publishing to NPM: ${name}@${opts.version}`);
+	const sorted = topoSort(libraries);
 
-	// Add --tag flag for release candidates
+	console.log(`Found ${sorted.length} library packages to publish:`);
+	for (const pkg of sorted) console.log(`  - ${pkg.name}`);
+
 	const isReleaseCandidate = opts.version.includes("-rc.");
 	const tag = isReleaseCandidate ? "rc" : (opts.latest ? "latest" : opts.minorVersionChannel);
 
-	await $({
-		stdio: "inherit",
-		cwd: cliSharedPath,
-	})`pnpm publish --access public --tag ${tag} --no-git-checks`;
-
-	console.log(`✅ Published ${name}@${opts.version}`);
-}
-
-export async function publishNpmSdk(opts: ReleaseOpts) {
-	const isReleaseCandidate = opts.version.includes("-rc.");
-	const tag = isReleaseCandidate ? "rc" : (opts.latest ? "latest" : opts.minorVersionChannel);
-
-	// Publish acp-http-client (dependency of the SDK)
-	{
-		const acpHttpClientPath = join(opts.root, "sdks/acp-http-client");
-		const packageJsonPath = join(acpHttpClientPath, "package.json");
-		const packageJson = JSON.parse(await fs.readFile(packageJsonPath, "utf-8"));
-		const name = packageJson.name;
-
-		const versionExists = await npmVersionExists(name, opts.version);
+	for (const pkg of sorted) {
+		const versionExists = await npmVersionExists(pkg.name, opts.version);
 		if (versionExists) {
-			console.log(
-				`Version ${opts.version} of ${name} already exists. Skipping...`,
-			);
-		} else {
-			console.log(`==> Building acp-http-client`);
-			await $({
-				stdio: "inherit",
-				cwd: opts.root,
-			})`pnpm --filter acp-http-client build`;
-
-			console.log(`==> Publishing to NPM: ${name}@${opts.version}`);
-			await $({
-				stdio: "inherit",
-				cwd: acpHttpClientPath,
-			})`pnpm publish --access public --tag ${tag} --no-git-checks`;
-
-			console.log(`✅ Published ${name}@${opts.version}`);
+			console.log(`Version ${opts.version} of ${pkg.name} already exists. Skipping...`);
+			continue;
 		}
+
+		if (pkg.hasBuildScript) {
+			console.log(`==> Building ${pkg.name}`);
+			await $({ stdio: "inherit", cwd: opts.root })`pnpm --filter ${pkg.name} build`;
+		}
+
+		console.log(`==> Publishing to NPM: ${pkg.name}@${opts.version}`);
+		await $({ stdio: "inherit", cwd: pkg.dir })`pnpm publish --access public --tag ${tag} --no-git-checks`;
+		console.log(`✅ Published ${pkg.name}@${opts.version}`);
 	}
 
-	// Publish SDK
-	const sdkPath = join(opts.root, "sdks/typescript");
-	const packageJsonPath = join(sdkPath, "package.json");
-	const packageJson = JSON.parse(await fs.readFile(packageJsonPath, "utf-8"));
-	const name = packageJson.name;
-
-	const versionExists = await npmVersionExists(name, opts.version);
-	if (versionExists) {
-		console.log(
-			`Version ${opts.version} of ${name} already exists. Skipping...`,
-		);
-		return;
-	}
-
-	// Build the SDK (cli-shared should already be built by publishNpmCliShared)
-	console.log(`==> Building TypeScript SDK`);
-	await $({
-		stdio: "inherit",
-		cwd: opts.root,
-	})`pnpm --filter sandbox-agent build`;
-
-	console.log(`==> Publishing to NPM: ${name}@${opts.version}`);
-	await $({
-		stdio: "inherit",
-		cwd: sdkPath,
-	})`pnpm publish --access public --tag ${tag} --no-git-checks`;
-
-	console.log(`✅ Published ${name}@${opts.version}`);
+	console.log("✅ All library packages published");
 }
 
+// ─── NPM CLI publishing ────────────────────────────────────────────────────
+
+/**
+ * Discover and publish CLI wrapper and platform packages.
+ * Platform packages get their binaries downloaded from R2 before publishing.
+ */
 export async function publishNpmCli(opts: ReleaseOpts) {
-	console.log("==> Publishing CLI packages to NPM");
+	console.log("==> Discovering CLI packages");
+	const packages = await discoverNpmPackages(opts.root, [
+		"sdks/cli/package.json",
+		"sdks/cli/platforms/*/package.json",
+		"sdks/gigacode/package.json",
+		"sdks/gigacode/platforms/*/package.json",
+	]);
+
+	console.log(`Found ${packages.length} CLI packages to publish:`);
+	for (const pkg of packages) console.log(`  - ${pkg.name}`);
 
 	// Determine which commit to use for downloading binaries
 	let sourceCommit = opts.commit;
@@ -316,65 +338,41 @@ export async function publishNpmCli(opts: ReleaseOpts) {
 		console.log(`Using binaries from commit: ${sourceCommit}`);
 	}
 
-	for (const packageName of CLI_PACKAGES) {
-		// Check if version already exists
-		const versionExists = await npmVersionExists(packageName, opts.version);
+	for (const pkg of packages) {
+		const versionExists = await npmVersionExists(pkg.name, opts.version);
 		if (versionExists) {
 			console.log(
-				`Version ${opts.version} of ${packageName} already exists. Skipping...`,
+				`Version ${opts.version} of ${pkg.name} already exists. Skipping...`,
 			);
 			continue;
 		}
 
-		// Determine package path
-		let packagePath: string;
-		if (packageName === "@sandbox-agent/cli") {
-			packagePath = join(opts.root, "sdks/cli");
-		} else if (packageName === "@sandbox-agent/gigacode") {
-			packagePath = join(opts.root, "sdks/gigacode");
-		} else if (packageName.startsWith("@sandbox-agent/cli-")) {
-			// Platform-specific packages: @sandbox-agent/cli-linux-x64 -> sdks/cli/platforms/linux-x64
-			const platform = packageName.replace("@sandbox-agent/cli-", "");
-			packagePath = join(opts.root, "sdks/cli/platforms", platform);
-		} else if (packageName.startsWith("@sandbox-agent/gigacode-")) {
-			// Platform-specific packages: @sandbox-agent/gigacode-linux-x64 -> sdks/gigacode/platforms/linux-x64
-			const platform = packageName.replace("@sandbox-agent/gigacode-", "");
-			packagePath = join(opts.root, "sdks/gigacode/platforms", platform);
-		} else {
-			throw new Error(`Unknown CLI package: ${packageName}`);
-		}
-
-		// Download binary from R2 for platform-specific packages
-		const platformInfo = CLI_PLATFORM_MAP[packageName];
+		// Download binary for platform-specific packages
+		const platformInfo = CLI_PLATFORM_MAP[pkg.name];
 		if (platformInfo) {
-			const binDir = join(packagePath, "bin");
+			const binDir = join(pkg.dir, "bin");
 			const binaryName = `${platformInfo.binaryName}${platformInfo.binaryExt}`;
 			const localBinaryPath = join(binDir, binaryName);
 			const remoteBinaryPath = `${PREFIX}/${sourceCommit}/binaries/${platformInfo.binaryName}-${platformInfo.target}${platformInfo.binaryExt}`;
 
-			console.log(`==> Downloading binary for ${packageName}`);
+			console.log(`==> Downloading binary for ${pkg.name}`);
 			console.log(`    From: ${remoteBinaryPath}`);
 			console.log(`    To: ${localBinaryPath}`);
 
-			// Create bin directory
 			await fs.mkdir(binDir, { recursive: true });
-
-			// Download binary
 			await downloadFromReleases(remoteBinaryPath, localBinaryPath);
 
-			// Make binary executable (not needed on Windows)
 			if (!platformInfo.binaryExt) {
 				await fs.chmod(localBinaryPath, 0o755);
 			}
 		}
 
 		// Publish
-		console.log(`==> Publishing to NPM: ${packageName}@${opts.version}`);
+		console.log(`==> Publishing to NPM: ${pkg.name}@${opts.version}`);
 
-		// Add --tag flag for release candidates
 		const isReleaseCandidate = opts.version.includes("-rc.");
 		const tag = getCliPackageNpmTag({
-			packageName,
+			packageName: pkg.name,
 			isReleaseCandidate,
 			latest: opts.latest,
 			minorVersionChannel: opts.minorVersionChannel,
@@ -383,12 +381,11 @@ export async function publishNpmCli(opts: ReleaseOpts) {
 		try {
 			await $({
 				stdio: "inherit",
-				cwd: packagePath,
+				cwd: pkg.dir,
 			})`pnpm publish --access public --tag ${tag} --no-git-checks`;
-			console.log(`✅ Published ${packageName}@${opts.version}`);
-
+			console.log(`✅ Published ${pkg.name}@${opts.version}`);
 		} catch (err) {
-			console.error(`❌ Failed to publish ${packageName}`);
+			console.error(`❌ Failed to publish ${pkg.name}`);
 			throw err;
 		}
 	}
@@ -412,4 +409,3 @@ function getCliPackageNpmTag(opts: {
 
 	return opts.minorVersionChannel;
 }
-
