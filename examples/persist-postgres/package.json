@@ -1,0 +1,21 @@
+{
+  "name": "@sandbox-agent/example-persist-postgres",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@sandbox-agent/example-shared": "workspace:*",
+    "@sandbox-agent/persist-postgres": "workspace:*",
+    "pg": "latest",
+    "sandbox-agent": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "@types/pg": "latest",
+    "tsx": "latest",
+    "typescript": "latest"
+  }
+}

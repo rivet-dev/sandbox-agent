@@ -47,6 +47,7 @@ Cargo.lock
 
 # Example temp files
 .tmp-upload/
+*.db
 
 # CLI binaries (downloaded during npm publish)
 sdks/cli/platforms/*/bin/
