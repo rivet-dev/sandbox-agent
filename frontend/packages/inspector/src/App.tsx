@@ -50,11 +50,15 @@ type SessionListItem = {
   sessionId: string;
   agent: string;
   ended: boolean;
+  archived: boolean;
 };
 
 const ERROR_TOAST_MS = 6000;
 const MAX_ERROR_TOASTS = 3;
+const CREATE_SESSION_SLOW_WARNING_MS = 90_000;
 const HTTP_ERROR_EVENT = "inspector-http-error";
+const ARCHIVED_SESSIONS_KEY = "sandbox-agent-inspector-archived-sessions";
+const SESSION_MODELS_KEY = "sandbox-agent-inspector-session-models";
 
 const DEFAULT_ENDPOINT = "http://localhost:2468";
 
@@ -112,12 +116,79 @@ const getHttpErrorMessage = (status: number, statusText: string, responseBody: s
   return `${base}: ${clippedBody}`;
 };
 
+const shouldIgnoreGlobalError = (value: unknown): boolean => {
+  const name = value instanceof Error ? value.name : "";
+  const message = (() => {
+    if (typeof value === "string") return value;
+    if (value instanceof Error) return value.message;
+    if (value && typeof value === "object" && "message" in value && typeof (value as { message?: unknown }).message === "string") {
+      return (value as { message: string }).message;
+    }
+    return "";
+  })().toLowerCase();
+
+  if (name === "AbortError") return true;
+  if (!message) return false;
+
+  return (
+    message.includes("aborterror") ||
+    message.includes("the operation was aborted") ||
+    message.includes("signal is aborted") ||
+    message.includes("resizeobserver loop limit exceeded") ||
+    message.includes("resizeobserver loop completed with undelivered notifications")
+  );
+};
+
 const getSessionIdFromPath = (): string => {
   const basePath = import.meta.env.BASE_URL;
   const path = window.location.pathname;
   const relative = path.startsWith(basePath) ? path.slice(basePath.length) : path;
   const match = relative.match(/^sessions\/(.+)/);
   return match ? match[1] : "";
+};
+
+const getArchivedSessionIds = (): Set<string> => {
+  if (typeof window === "undefined") return new Set<string>();
+  try {
+    const raw = window.localStorage.getItem(ARCHIVED_SESSIONS_KEY);
+    if (!raw) return new Set<string>();
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return new Set<string>();
+    return new Set(parsed.filter((value): value is string => typeof value === "string" && value.length > 0));
+  } catch {
+    return new Set<string>();
+  }
+};
+
+const archiveSessionId = (id: string): void => {
+  if (typeof window === "undefined" || !id) return;
+  const archived = getArchivedSessionIds();
+  archived.add(id);
+  window.localStorage.setItem(ARCHIVED_SESSIONS_KEY, JSON.stringify([...archived]));
+};
+
+const unarchiveSessionId = (id: string): void => {
+  if (typeof window === "undefined" || !id) return;
+  const archived = getArchivedSessionIds();
+  if (!archived.delete(id)) return;
+  window.localStorage.setItem(ARCHIVED_SESSIONS_KEY, JSON.stringify([...archived]));
+};
+
+const getPersistedSessionModels = (): Record<string, string> => {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(SESSION_MODELS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return Object.fromEntries(
+      Object.entries(parsed).filter(
+        (entry): entry is [string, string] => typeof entry[0] === "string" && typeof entry[1] === "string" && entry[1].length > 0
+      )
+    );
+  } catch {
+    return {};
+  }
 };
 
 const updateSessionPath = (id: string) => {
@@ -185,6 +256,7 @@ export default function App() {
   const [agentId, setAgentId] = useState("claude");
   const [sessionId, setSessionId] = useState(getSessionIdFromPath());
   const [sessionError, setSessionError] = useState<string | null>(null);
+  const [sessionModelById, setSessionModelById] = useState<Record<string, string>>(() => getPersistedSessionModels());
 
   const [message, setMessage] = useState("");
   const [events, setEvents] = useState<SessionEvent[]>([]);
@@ -198,12 +270,16 @@ export default function App() {
   const toastTimeoutsRef = useRef<Map<number, number>>(new Map());
 
   const [debugTab, setDebugTab] = useState<DebugTab>("events");
+  const [highlightedEventId, setHighlightedEventId] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const clientRef = useRef<SandboxAgent | null>(null);
   const activeSessionRef = useRef<Session | null>(null);
   const eventUnsubRef = useRef<(() => void) | null>(null);
+  const reconnectingAfterCreateFailureRef = useRef(false);
+  const creatingSessionRef = useRef(false);
+  const createNoiseIgnoreUntilRef = useRef(0);
 
   const logRequest = useCallback((entry: RequestLog) => {
     setRequestLog((prev) => {
@@ -360,7 +436,9 @@ export default function App() {
       }
       setEvents(allEvents);
     };
-    hydrateEvents().catch(() => {});
+    hydrateEvents().catch((error) => {
+      console.error("Failed to hydrate events:", error);
+    });
 
     // Subscribe to new events
     const unsub = session.onEvent((event) => {
@@ -375,6 +453,22 @@ export default function App() {
       setConnectError(null);
     }
     try {
+      // Ensure reconnects do not keep stale session subscriptions/clients around.
+      if (eventUnsubRef.current) {
+        eventUnsubRef.current();
+        eventUnsubRef.current = null;
+      }
+      activeSessionRef.current = null;
+      if (clientRef.current) {
+        try {
+          await clientRef.current.dispose();
+        } catch (disposeError) {
+          console.warn("Failed to dispose previous client during reconnect:", disposeError);
+        } finally {
+          clientRef.current = null;
+        }
+      }
+
       const client = await createClient(overrideEndpoint);
       await client.getHealth();
       if (overrideEndpoint) {
@@ -383,6 +477,14 @@ export default function App() {
       setConnected(true);
       await refreshAgents();
       await fetchSessions();
+      if (sessionId) {
+        try {
+          const resumed = await client.resumeSession(sessionId);
+          subscribeToSession(resumed);
+        } catch (resumeError) {
+          console.warn("Failed to resume current session after reconnect:", resumeError);
+        }
+      }
       if (reportError) {
         setConnectError(null);
       }
@@ -408,7 +510,9 @@ export default function App() {
     }
     activeSessionRef.current = null;
     if (clientRef.current) {
-      void clientRef.current.dispose();
+      void clientRef.current.dispose().catch((error) => {
+        console.warn("Failed to dispose client on disconnect:", error);
+      });
     }
     setConnected(false);
     clientRef.current = null;
@@ -436,12 +540,15 @@ export default function App() {
   };
 
   const loadAgentConfig = useCallback(async (targetAgentId: string) => {
+    console.log("[loadAgentConfig] Loading config for agent:", targetAgentId);
     try {
       const info = await getClient().getAgent(targetAgentId, { config: true });
+      console.log("[loadAgentConfig] Got agent info:", info);
       setAgents((prev) =>
         prev.map((a) => (a.id === targetAgentId ? { ...a, configOptions: info.configOptions, configError: info.configError } : a))
       );
-    } catch {
+    } catch (error) {
+      console.error("[loadAgentConfig] Failed to load config:", error);
       // Config loading is best-effort; the menu still works without it.
     }
   }, [getClient]);
@@ -450,6 +557,7 @@ export default function App() {
     setSessionsLoading(true);
     setSessionsError(null);
     try {
+      const archivedSessionIds = getArchivedSessionIds();
       // TODO: This eagerly paginates all sessions so we can reverse-sort to
       // show newest first. Replace with a server-side descending sort or a
       // dedicated "recent sessions" query once the API supports it.
@@ -462,6 +570,7 @@ export default function App() {
             sessionId: s.id,
             agent: s.agent,
             ended: s.destroyedAt != null,
+            archived: archivedSessionIds.has(s.id),
           });
         }
         cursor = page.nextCursor;
@@ -473,6 +582,44 @@ export default function App() {
     } finally {
       setSessionsLoading(false);
     }
+  };
+
+  const archiveSession = async (targetSessionId: string) => {
+    archiveSessionId(targetSessionId);
+    try {
+      try {
+        await getClient().destroySession(targetSessionId);
+      } catch (error) {
+        // If the server already considers the session gone, still archive in local UI.
+        console.warn("Destroy session returned an error while archiving:", error);
+      }
+      setSessions((prev) =>
+        prev.map((session) =>
+          session.sessionId === targetSessionId
+            ? { ...session, archived: true, ended: true }
+            : session
+        )
+      );
+      setSessionModelById((prev) => {
+        if (!(targetSessionId in prev)) return prev;
+        const next = { ...prev };
+        delete next[targetSessionId];
+        return next;
+      });
+      await fetchSessions();
+    } catch (error) {
+      console.error("Failed to archive session:", error);
+    }
+  };
+
+  const unarchiveSession = async (targetSessionId: string) => {
+    unarchiveSessionId(targetSessionId);
+    setSessions((prev) =>
+      prev.map((session) =>
+        session.sessionId === targetSessionId ? { ...session, archived: false } : session
+      )
+    );
+    await fetchSessions();
   };
 
   const installAgent = async (targetId: string, reinstall: boolean) => {
@@ -509,6 +656,12 @@ export default function App() {
     setSessionId(session.sessionId);
     updateSessionPath(session.sessionId);
     setAgentId(session.agent);
+    setSessionModelById((prev) => {
+      if (prev[session.sessionId]) return prev;
+      const fallbackModel = defaultModelByAgent[session.agent];
+      if (!fallbackModel) return prev;
+      return { ...prev, [session.sessionId]: fallbackModel };
+    });
     setEvents([]);
     setSessionError(null);
 
@@ -521,12 +674,14 @@ export default function App() {
   };
 
   const createNewSession = async (nextAgentId: string, config: { agentMode: string; model: string }) => {
-    setAgentId(nextAgentId);
+    console.log("[createNewSession] Creating session for agent:", nextAgentId, "config:", config);
     setSessionError(null);
-    setEvents([]);
+    creatingSessionRef.current = true;
+    createNoiseIgnoreUntilRef.current = Date.now() + 10_000;
 
     try {
-      const session = await getClient().createSession({
+      console.log("[createNewSession] Calling createSession...");
+      const createSessionPromise = getClient().createSession({
         agent: nextAgentId,
         sessionInit: {
           cwd: "/",
@@ -534,12 +689,31 @@ export default function App() {
         },
       });
 
+      let slowWarningShown = false;
+      const slowWarningTimerId = window.setTimeout(() => {
+        slowWarningShown = true;
+        setSessionError("Session creation is taking longer than expected. Waiting for agent startup...");
+      }, CREATE_SESSION_SLOW_WARNING_MS);
+      let session: Awaited<ReturnType<SandboxAgent["createSession"]>>;
+      try {
+        session = await createSessionPromise;
+      } finally {
+        window.clearTimeout(slowWarningTimerId);
+      }
+      console.log("[createNewSession] Session created:", session.id);
+      if (slowWarningShown) {
+        setSessionError(null);
+      }
+
+      setAgentId(nextAgentId);
+      setEvents([]);
       setSessionId(session.id);
       updateSessionPath(session.id);
       subscribeToSession(session);
+      const skipPostCreateConfig = nextAgentId === "opencode";
 
       // Apply mode if selected
-      if (config.agentMode) {
+      if (!skipPostCreateConfig && config.agentMode) {
         try {
           await session.send("session/set_mode", { modeId: config.agentMode });
         } catch {
@@ -549,18 +723,49 @@ export default function App() {
 
       // Apply model if selected
       if (config.model) {
-        try {
-          await session.send("unstable/set_session_model", { modelId: config.model });
-        } catch {
-          // Model application is best-effort
+        setSessionModelById((prev) => ({ ...prev, [session.id]: config.model }));
+        if (!skipPostCreateConfig) {
+          try {
+            const agentInfo = agents.find((agent) => agent.id === nextAgentId);
+            const modelOption = ((agentInfo?.configOptions ?? []) as ConfigOption[]).find(
+              (opt) => opt.category === "model" && opt.type === "select" && typeof opt.id === "string"
+            );
+            if (modelOption && config.model !== modelOption.currentValue) {
+              await session.send("session/set_config_option", {
+                optionId: modelOption.id,
+                value: config.model,
+              });
+            }
+          } catch {
+            // Model application is best-effort
+          }
         }
       }
 
-      await fetchSessions();
+      // Refresh session list in background; UI should not stay blocked on list pagination.
+      void fetchSessions();
     } catch (error) {
+      console.error("[createNewSession] Failed to create session:", error);
       const messageText = getErrorMessage(error, "Unable to create session");
+      console.error("[createNewSession] Error message:", messageText);
       setSessionError(messageText);
       pushErrorToast(error, messageText);
+      if (!reconnectingAfterCreateFailureRef.current) {
+        reconnectingAfterCreateFailureRef.current = true;
+        // Run recovery in background so failed creates do not block UI.
+        void connectToDaemon(false)
+          .catch((reconnectError) => {
+            console.error("[createNewSession] Soft reconnect failed:", reconnectError);
+          })
+          .finally(() => {
+            reconnectingAfterCreateFailureRef.current = false;
+          });
+      }
+      throw error;
+    } finally {
+      creatingSessionRef.current = false;
+      // Keep a short post-create window for delayed transport rejections.
+      createNoiseIgnoreUntilRef.current = Date.now() + 2_000;
     }
   };
 
@@ -660,8 +865,13 @@ export default function App() {
         const params = payload.params as Record<string, unknown> | undefined;
         const promptArray = params?.prompt as Array<{ type: string; text?: string }> | undefined;
         const text = promptArray?.[0]?.text ?? "";
+        // Skip session replay context messages
+        if (text.startsWith("Previous session history is replayed below")) {
+          continue;
+        }
         entries.push({
           id: event.id,
+          eventId: event.id,
           kind: "message",
           time,
           role: "user",
@@ -684,6 +894,7 @@ export default function App() {
                 assistantAccumText = "";
                 entries.push({
                   id: assistantAccumId,
+                  eventId: event.id,
                   kind: "message",
                   time,
                   role: "assistant",
@@ -707,6 +918,7 @@ export default function App() {
                 thoughtAccumText = "";
                 entries.push({
                   id: thoughtAccumId,
+                  eventId: event.id,
                   kind: "reasoning",
                   time,
                   reasoning: { text: "", visibility: "public" },
@@ -726,6 +938,7 @@ export default function App() {
             const text = content?.type === "text" ? (content.text ?? "") : JSON.stringify(content);
             entries.push({
               id: event.id,
+              eventId: event.id,
               kind: "message",
               time,
               role: "user",
@@ -748,6 +961,7 @@ export default function App() {
             } else {
               const entry: TimelineEntry = {
                 id: `tool-${toolCallId}`,
+                eventId: event.id,
                 kind: "tool",
                 time,
                 toolName: (update.title as string) ?? "tool",
@@ -776,6 +990,7 @@ export default function App() {
             const detail = planEntries.map((e) => `[${e.status}] ${e.content}`).join("\n");
             entries.push({
               id: event.id,
+              eventId: event.id,
               kind: "meta",
               time,
               meta: { title: "Plan", detail, severity: "info" },
@@ -786,6 +1001,7 @@ export default function App() {
             const title = update.title as string | undefined;
             entries.push({
               id: event.id,
+              eventId: event.id,
               kind: "meta",
               time,
               meta: { title: "Session info update", detail: title ? `Title: ${title}` : undefined, severity: "info" },
@@ -793,24 +1009,13 @@ export default function App() {
             break;
           }
           case "usage_update": {
-            const size = update.size as number | undefined;
-            const used = update.used as number | undefined;
-            const cost = update.cost as { total?: number } | undefined;
-            const parts = [`${used ?? 0}/${size ?? 0} tokens`];
-            if (cost?.total != null) {
-              parts.push(`cost: $${cost.total.toFixed(4)}`);
-            }
-            entries.push({
-              id: event.id,
-              kind: "meta",
-              time,
-              meta: { title: "Usage update", detail: parts.join(" | "), severity: "info" },
-            });
+            // Token usage is displayed in the config bar, not in the transcript
             break;
           }
           case "current_mode_update": {
             entries.push({
               id: event.id,
+              eventId: event.id,
               kind: "meta",
               time,
               meta: { title: "Mode changed", detail: update.currentModeId as string, severity: "info" },
@@ -820,6 +1025,7 @@ export default function App() {
           case "config_option_update": {
             entries.push({
               id: event.id,
+              eventId: event.id,
               kind: "meta",
               time,
               meta: { title: "Config option update", severity: "info" },
@@ -829,6 +1035,7 @@ export default function App() {
           case "available_commands_update": {
             entries.push({
               id: event.id,
+              eventId: event.id,
               kind: "meta",
               time,
               meta: { title: "Available commands update", severity: "info" },
@@ -838,6 +1045,7 @@ export default function App() {
           default: {
             entries.push({
               id: event.id,
+              eventId: event.id,
               kind: "meta",
               time,
               meta: { title: `session/update: ${update.sessionUpdate}`, severity: "info" },
@@ -852,6 +1060,7 @@ export default function App() {
         const params = payload.params as { error?: string; location?: string } | undefined;
         entries.push({
           id: event.id,
+          eventId: event.id,
           kind: "meta",
           time,
           meta: {
@@ -867,6 +1076,7 @@ export default function App() {
       if (method) {
         entries.push({
           id: event.id,
+          eventId: event.id,
           kind: "meta",
           time,
           meta: { title: method, detail: event.sender, severity: "info" },
@@ -887,10 +1097,32 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const shouldIgnoreCreateNoise = (value: unknown): boolean => {
+      if (Date.now() > createNoiseIgnoreUntilRef.current) return false;
+      const message = getErrorMessage(value, "").trim().toLowerCase();
+      return (
+        message.length === 0 ||
+        message === "request failed" ||
+        message.includes("request failed") ||
+        message.includes("unhandled promise rejection")
+      );
+    };
+
     const handleWindowError = (event: ErrorEvent) => {
-      pushErrorToast(event.error ?? event.message, "Unexpected error");
+      const errorLike = event.error ?? event.message;
+      if (shouldIgnoreCreateNoise(errorLike)) return;
+      if (shouldIgnoreGlobalError(errorLike)) return;
+      pushErrorToast(errorLike, "Unexpected error");
     };
     const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+      if (shouldIgnoreCreateNoise(event.reason)) {
+        event.preventDefault();
+        return;
+      }
+      if (shouldIgnoreGlobalError(event.reason)) {
+        event.preventDefault();
+        return;
+      }
       pushErrorToast(event.reason, "Unhandled promise rejection");
     };
     const handleHttpError = (event: Event) => {
@@ -966,13 +1198,22 @@ export default function App() {
   // Auto-load session when sessionId changes
   useEffect(() => {
     if (!connected || !sessionId) return;
-    const hasSession = sessions.some((s) => s.sessionId === sessionId);
-    if (!hasSession) return;
+    if (creatingSessionRef.current) return;
+    const sessionInfo = sessions.find((s) => s.sessionId === sessionId);
+    if (!sessionInfo) return;
     if (activeSessionRef.current?.id === sessionId) return;
+
+    // Set the correct agent from the session
+    setAgentId(sessionInfo.agent);
+    // Clear stale events before loading
+    setEvents([]);
+    setSessionError(null);
 
     getClient().resumeSession(sessionId).then((session) => {
       subscribeToSession(session);
-    }).catch(() => {});
+    }).catch((error) => {
+      setSessionError(getErrorMessage(error, "Unable to resume session"));
+    });
   }, [connected, sessionId, sessions, getClient, subscribeToSession]);
 
   useEffect(() => {
@@ -981,7 +1222,59 @@ export default function App() {
 
   const currentAgent = agents.find((agent) => agent.id === agentId);
   const agentLabel = agentDisplayNames[agentId] ?? agentId;
-  const sessionEnded = sessions.find((s) => s.sessionId === sessionId)?.ended ?? false;
+  const selectedSession = sessions.find((s) => s.sessionId === sessionId);
+  const sessionArchived = selectedSession?.archived ?? false;
+  // Archived sessions are treated as ended in UI so they can never be "ended again".
+  const sessionEnded = (selectedSession?.ended ?? false) || sessionArchived;
+
+  // Determine if agent is thinking (has in-progress tools or waiting for response)
+  const isThinking = useMemo(() => {
+    if (!sessionId || sessionEnded) return false;
+    // If actively sending a prompt, show thinking
+    if (sending) return true;
+    // Check for in-progress tool calls
+    const hasInProgressTool = transcriptEntries.some(
+      (e) => e.kind === "tool" && e.toolStatus === "in_progress"
+    );
+    if (hasInProgressTool) return true;
+    // Check if last message was from user with no subsequent agent activity
+    const lastUserMessageIndex = [...transcriptEntries].reverse().findIndex((e) => e.kind === "message" && e.role === "user");
+    if (lastUserMessageIndex === -1) return false;
+    // If user message is the very last entry, we're waiting for response
+    if (lastUserMessageIndex === 0) return true;
+    // Check if there's any agent response after the user message
+    const entriesAfterUser = transcriptEntries.slice(-(lastUserMessageIndex));
+    const hasAgentResponse = entriesAfterUser.some(
+      (e) => e.kind === "message" && e.role === "assistant"
+    );
+    // If no assistant message after user, but there are completed tools, not thinking
+    const hasCompletedTools = entriesAfterUser.some(
+      (e) => e.kind === "tool" && (e.toolStatus === "completed" || e.toolStatus === "failed")
+    );
+    if (!hasAgentResponse && !hasCompletedTools) return true;
+    return false;
+  }, [sessionId, sessionEnded, transcriptEntries, sending]);
+
+  // Extract latest token usage from events
+  const tokenUsage = useMemo(() => {
+    let latest: { used: number; size: number; cost?: number } | null = null;
+    for (const event of events) {
+      const payload = event.payload as Record<string, unknown>;
+      const method = typeof payload.method === "string" ? payload.method : null;
+      if (event.sender === "agent" && method === "session/update") {
+        const params = payload.params as Record<string, unknown> | undefined;
+        const update = params?.update as Record<string, unknown> | undefined;
+        if (update?.sessionUpdate === "usage_update") {
+          latest = {
+            used: (update.used as number) ?? 0,
+            size: (update.size as number) ?? 0,
+            cost: (update.cost as { total?: number })?.total,
+          };
+        }
+      }
+    }
+    return latest;
+  }, [events]);
 
   // Extract modes and models from configOptions
   const modesByAgent = useMemo(() => {
@@ -1030,6 +1323,88 @@ export default function App() {
     return result;
   }, [agents]);
 
+  const currentSessionModelId = useMemo(() => {
+    let latestModelId: string | null = null;
+
+    for (const event of events) {
+      const payload = event.payload as Record<string, unknown>;
+      const method = typeof payload.method === "string" ? payload.method : null;
+      const params = payload.params as Record<string, unknown> | undefined;
+
+      if (event.sender === "agent" && method === "session/update") {
+        const update = params?.update as Record<string, unknown> | undefined;
+        if (update?.sessionUpdate !== "config_option_update") continue;
+
+        const category = (update.category as string | undefined)
+          ?? ((update.option as Record<string, unknown> | undefined)?.category as string | undefined);
+        if (category && category !== "model") continue;
+
+        const optionId = (update.optionId as string | undefined)
+          ?? (update.configOptionId as string | undefined)
+          ?? ((update.option as Record<string, unknown> | undefined)?.id as string | undefined);
+        const seemsModelOption = !optionId || optionId.toLowerCase().includes("model");
+        if (!seemsModelOption) continue;
+
+        const candidate = (update.value as string | undefined)
+          ?? (update.currentValue as string | undefined)
+          ?? (update.selectedValue as string | undefined)
+          ?? (update.modelId as string | undefined);
+        if (candidate) {
+          latestModelId = candidate;
+        }
+        continue;
+      }
+
+      // Capture explicit client-side model changes; these are persisted and survive refresh.
+      if (event.sender === "client" && method === "unstable/set_session_model") {
+        const candidate = params?.modelId as string | undefined;
+        if (candidate) {
+          latestModelId = candidate;
+        }
+        continue;
+      }
+
+      if (event.sender === "client" && method === "session/set_config_option") {
+        const category = params?.category as string | undefined;
+        const optionId = params?.optionId as string | undefined;
+        const seemsModelOption = category === "model" || (typeof optionId === "string" && optionId.toLowerCase().includes("model"));
+        if (!seemsModelOption) continue;
+        const candidate = (params?.value as string | undefined)
+          ?? (params?.currentValue as string | undefined)
+          ?? (params?.modelId as string | undefined);
+        if (candidate) {
+          latestModelId = candidate;
+        }
+      }
+    }
+
+    return latestModelId;
+  }, [events]);
+
+  const modelPillLabel = useMemo(() => {
+    const sessionModelId =
+      currentSessionModelId
+      ?? (sessionId ? sessionModelById[sessionId] : undefined)
+      ?? (sessionId ? defaultModelByAgent[agentId] : undefined);
+    if (!sessionModelId) return null;
+    return sessionModelId;
+  }, [agentId, currentSessionModelId, defaultModelByAgent, sessionId, sessionModelById]);
+
+  useEffect(() => {
+    if (!sessionId || !currentSessionModelId) return;
+    setSessionModelById((prev) =>
+      prev[sessionId] === currentSessionModelId ? prev : { ...prev, [sessionId]: currentSessionModelId }
+    );
+  }, [currentSessionModelId, sessionId]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(SESSION_MODELS_KEY, JSON.stringify(sessionModelById));
+    } catch {
+      // Ignore storage write failures.
+    }
+  }, [sessionModelById]);
+
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
@@ -1041,10 +1416,6 @@ export default function App() {
     <div className="toast-stack" aria-live="assertive" aria-atomic="false">
       {errorToasts.map((toast) => (
         <div key={toast.id} className="toast error" role="status">
-          <div className="toast-content">
-            <div className="toast-title">Request failed</div>
-            <div className="toast-message">{toast.message}</div>
-          </div>
           <button
             type="button"
             className="toast-close"
@@ -1053,6 +1424,10 @@ export default function App() {
           >
             x
           </button>
+          <div className="toast-content">
+            <div className="toast-title">Request failed</div>
+            <div className="toast-message">{toast.message}</div>
+          </div>
         </div>
       ))}
     </div>
@@ -1083,6 +1458,7 @@ export default function App() {
       <header className="header">
         <div className="header-left">
           <img src={logoUrl} alt="Sandbox Agent" className="logo-text" style={{ height: '20px', width: 'auto' }} />
+          <span className="header-endpoint">{endpoint}</span>
         </div>
         <div className="header-right">
           <a className="header-link" href={docsUrl} target="_blank" rel="noreferrer">
@@ -1097,7 +1473,6 @@ export default function App() {
             <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>
             Issues
           </a>
-          <span className="header-endpoint">{endpoint}</span>
           <button className="button secondary small" onClick={disconnect}>
             Disconnect
           </button>
@@ -1147,12 +1522,31 @@ export default function App() {
           agentsError={agentsError}
           messagesEndRef={messagesEndRef}
           agentLabel={agentLabel}
+          modelLabel={modelPillLabel}
           currentAgentVersion={currentAgent?.version ?? null}
           sessionEnded={sessionEnded}
+          sessionArchived={sessionArchived}
           onEndSession={endSession}
+          onArchiveSession={() => {
+            if (sessionId) {
+              void archiveSession(sessionId);
+            }
+          }}
+          onUnarchiveSession={() => {
+            if (sessionId) {
+              void unarchiveSession(sessionId);
+            }
+          }}
           modesByAgent={modesByAgent}
           modelsByAgent={modelsByAgent}
           defaultModelByAgent={defaultModelByAgent}
+          onEventClick={(eventId) => {
+            setDebugTab("events");
+            setHighlightedEventId(eventId);
+          }}
+          isThinking={isThinking}
+          agentId={agentId}
+          tokenUsage={tokenUsage}
         />
 
         <DebugPanel
@@ -1160,6 +1554,8 @@ export default function App() {
           onDebugTabChange={setDebugTab}
           events={events}
           onResetEvents={() => setEvents([])}
+          highlightedEventId={highlightedEventId}
+          onClearHighlight={() => setHighlightedEventId(null)}
           requestLog={requestLog}
           copiedLogId={copiedLogId}
           onClearRequestLog={() => setRequestLog([])}

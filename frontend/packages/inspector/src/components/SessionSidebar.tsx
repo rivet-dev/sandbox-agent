@@ -1,6 +1,7 @@
-import { Plus, RefreshCw } from "lucide-react";
+import { Archive, ArrowLeft, ArrowUpRight, Plus, RefreshCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { AgentInfo } from "sandbox-agent";
+import { formatShortId } from "../utils/format";
 
 type AgentModeInfo = { id: string; name: string; description: string };
 type AgentModelInfo = { id: string; name?: string };
@@ -10,6 +11,7 @@ type SessionListItem = {
   sessionId: string;
   agent: string;
   ended: boolean;
+  archived: boolean;
 };
 
 const agentLabels: Record<string, string> = {
@@ -42,7 +44,7 @@ const SessionSidebar = ({
   selectedSessionId: string;
   onSelectSession: (session: SessionListItem) => void;
   onRefresh: () => void;
-  onCreateSession: (agentId: string, config: SessionConfig) => void;
+  onCreateSession: (agentId: string, config: SessionConfig) => Promise<void>;
   onSelectAgent: (agentId: string) => Promise<void>;
   agents: AgentInfo[];
   agentsLoading: boolean;
@@ -54,7 +56,15 @@ const SessionSidebar = ({
   defaultModelByAgent: Record<string, string>;
 }) => {
   const [showMenu, setShowMenu] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const archivedCount = sessions.filter((session) => session.archived).length;
+  const activeSessions = sessions.filter((session) => !session.archived);
+  const archivedSessions = sessions.filter((session) => session.archived);
+  const visibleSessions = showArchived ? archivedSessions : activeSessions;
+  const orderedVisibleSessions = showArchived
+    ? [...visibleSessions].sort((a, b) => Number(a.ended) - Number(b.ended))
+    : visibleSessions;
 
   useEffect(() => {
     if (!showMenu) return;
@@ -68,13 +78,34 @@ const SessionSidebar = ({
     return () => document.removeEventListener("mousedown", handler);
   }, [showMenu]);
 
+  useEffect(() => {
+    // Prevent getting stuck in archived view when there are no archived sessions.
+    if (!showArchived) return;
+    if (archivedSessions.length === 0) {
+      setShowArchived(false);
+    }
+  }, [showArchived, archivedSessions.length]);
+
   return (
     <div className="session-sidebar">
       <div className="sidebar-header">
         <span className="sidebar-title">Sessions</span>
         <div className="sidebar-header-actions">
-          <button className="sidebar-icon-btn" onClick={onRefresh} title="Refresh sessions">
-            <RefreshCw size={14} />
+          {archivedCount > 0 && (
+            <button
+              className={`button secondary small ${showArchived ? "active" : ""}`}
+              onClick={() => setShowArchived((value) => !value)}
+              title={showArchived ? "Hide archived sessions" : `Show archived sessions (${archivedCount})`}
+            >
+              {showArchived ? (
+                <ArrowLeft size={12} className="button-icon" />
+              ) : (
+                <Archive size={12} className="button-icon" />
+              )}
+            </button>
+          )}
+          <button className="button secondary small" onClick={onRefresh} title="Refresh sessions">
+            <RefreshCw size={12} className="button-icon" />
           </button>
           <div className="sidebar-add-menu-wrapper" ref={menuRef}>
             <button
@@ -105,30 +136,41 @@ const SessionSidebar = ({
           <div className="sidebar-empty">Loading sessions...</div>
         ) : sessionsError ? (
           <div className="sidebar-empty error">{sessionsError}</div>
-        ) : sessions.length === 0 ? (
-          <div className="sidebar-empty">No sessions yet.</div>
+        ) : visibleSessions.length === 0 ? (
+          <div className="sidebar-empty">{showArchived ? "No archived sessions." : "No sessions yet."}</div>
         ) : (
-          sessions.map((session) => (
-            <button
-              key={session.sessionId}
-              className={`session-item ${session.sessionId === selectedSessionId ? "active" : ""}`}
-              onClick={() => onSelectSession(session)}
-            >
-              <div className="session-item-id">{session.sessionId}</div>
-              <div className="session-item-meta">
-                <span className="session-item-agent">{agentLabels[session.agent] ?? session.agent}</span>
-                {session.ended && <span className="session-item-ended">ended</span>}
-              </div>
-            </button>
-          ))
+          <>
+            {showArchived && <div className="sidebar-empty">Archived Sessions</div>}
+            {orderedVisibleSessions.map((session) => (
+                <div
+                  key={session.sessionId}
+                  className={`session-item ${session.sessionId === selectedSessionId ? "active" : ""} ${session.ended ? "ended" : ""} ${session.archived ? "ended" : ""}`}
+                >
+                  <button
+                    className="session-item-content"
+                    onClick={() => onSelectSession(session)}
+                  >
+                    <div className="session-item-id" title={session.sessionId}>
+                      {formatShortId(session.sessionId)}
+                    </div>
+                    <div className="session-item-meta">
+                      <span className="session-item-agent">
+                        {agentLabels[session.agent] ?? session.agent}
+                      </span>
+                      {(session.archived || session.ended) && <span className="session-item-ended">ended</span>}
+                    </div>
+                  </button>
+                </div>
+              ))}
+          </>
         )}
       </div>
       <div className="session-persistence-note">
         Sessions are persisted in your browser using IndexedDB.{" "}
-        <a href={persistenceDocsUrl} target="_blank" rel="noreferrer">
+        <a href={persistenceDocsUrl} target="_blank" rel="noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
           Configure persistence
+          <ArrowUpRight size={10} />
         </a>
-        .
       </div>
     </div>
   );

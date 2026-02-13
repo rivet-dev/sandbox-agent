@@ -158,7 +158,7 @@ const McpTab = ({
               value={editJson}
               onChange={(e) => { setEditJson(e.target.value); setEditError(null); }}
               rows={6}
-              style={{ width: "100%", boxSizing: "border-box", fontFamily: "monospace", fontSize: 11 }}
+              style={{ width: "100%", boxSizing: "border-box", fontFamily: "monospace", fontSize: 11, resize: "vertical" }}
             />
             {editError && <div className="banner error" style={{ marginTop: 4 }}>{editError}</div>}
           </div>

@@ -1,5 +1,5 @@
-import { FolderOpen, Loader2, Plus, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { ChevronDown, ChevronRight, FolderOpen, Loader2, Plus, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { SandboxAgent } from "sandbox-agent";
 import { formatJson } from "../../utils/format";
 
@@ -13,10 +13,47 @@ const SkillsTab = ({
 }: {
   getClient: () => SandboxAgent;
 }) => {
+  const officialSkills = [
+    {
+      name: "Sandbox Agent SDK",
+      skillId: "sandbox-agent",
+      source: "rivet-dev/skills",
+      summary: "Skills bundle for fast Sandbox Agent SDK setup and consistent workflows.",
+    },
+    {
+      name: "Rivet",
+      skillId: "rivet",
+      source: "rivet-dev/skills",
+      summary: "Open-source platform for building, deploying, and scaling AI agents.",
+      features: [
+        "Session Persistence",
+        "Resumable Sessions",
+        "Multi-Agent Support",
+        "Realtime Events",
+        "Tool Call Visibility",
+      ],
+    },
+  ];
+
   const [directory, setDirectory] = useState("/");
   const [entries, setEntries] = useState<SkillEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [showSdkSkills, setShowSdkSkills] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!showSdkSkills) return;
+    const handler = (event: MouseEvent) => {
+      if (!dropdownRef.current) return;
+      if (!dropdownRef.current.contains(event.target as Node)) {
+        setShowSdkSkills(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showSdkSkills]);
 
   // Add form state
   const [editing, setEditing] = useState(false);
@@ -128,11 +165,118 @@ const SkillsTab = ({
     }
   };
 
+  const fallbackCopy = (text: string) => {
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand("copy");
+    document.body.removeChild(textarea);
+  };
+
+  const copyText = async (id: string, text: string) => {
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        fallbackCopy(text);
+      }
+      setCopiedId(id);
+      window.setTimeout(() => {
+        setCopiedId((current) => (current === id ? null : current));
+      }, 1800);
+    } catch {
+      setError("Failed to copy snippet");
+    }
+  };
+
+  const applySkillPreset = (skill: typeof officialSkills[0]) => {
+    setEditing(true);
+    setEditName(skill.skillId);
+    setEditSource(skill.source);
+    setEditType("github");
+    setEditRef("");
+    setEditSubpath("");
+    setEditSkills(skill.skillId);
+    setEditError(null);
+    setShowSdkSkills(false);
+  };
+
+  const copySkillToInput = async (skillId: string) => {
+    const skill = officialSkills.find((s) => s.skillId === skillId);
+    if (skill) {
+      applySkillPreset(skill);
+      await copyText(`skill-input-${skillId}`, skillId);
+    }
+  };
+
   return (
     <>
       <div className="inline-row" style={{ marginBottom: 12, justifyContent: "space-between" }}>
         <span className="card-meta">Skills Configuration</span>
-        <div className="inline-row">
+        <div className="inline-row" style={{ gap: 6 }}>
+          <div style={{ position: "relative" }} ref={dropdownRef}>
+            <button
+              className="button secondary small"
+              onClick={() => setShowSdkSkills((prev) => !prev)}
+              title="Toggle official skills list"
+            >
+              {showSdkSkills ? <ChevronDown className="button-icon" style={{ width: 12, height: 12 }} /> : <ChevronRight className="button-icon" style={{ width: 12, height: 12 }} />}
+              Official Skills
+            </button>
+            {showSdkSkills && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: "100%",
+                  right: 0,
+                  marginTop: 4,
+                  width: 320,
+                  background: "var(--bg)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 8,
+                  padding: 12,
+                  zIndex: 100,
+                  boxShadow: "0 4px 12px rgba(0,0,0,0.5)",
+                }}
+              >
+                <div className="card-meta" style={{ marginBottom: 8 }}>
+                  Pick a skill to auto-fill the form.
+                </div>
+                {officialSkills.map((skill) => (
+                  <div
+                    key={skill.name}
+                    style={{
+                      border: "1px solid var(--border)",
+                      borderRadius: 6,
+                      padding: "8px 10px",
+                      background: "var(--surface-2)",
+                      marginBottom: 6,
+                    }}
+                  >
+                    <div className="inline-row" style={{ justifyContent: "space-between", gap: 8, marginBottom: 4 }}>
+                      <div style={{ fontWeight: 500, fontSize: 12 }}>{skill.name}</div>
+                      <button className="button ghost small" onClick={() => void copySkillToInput(skill.skillId)}>
+                        {copiedId === `skill-input-${skill.skillId}` ? "Filled" : "Use"}
+                      </button>
+                    </div>
+                    <div className="card-meta" style={{ fontSize: 10, marginBottom: skill.features ? 6 : 0 }}>{skill.summary}</div>
+                    {skill.features && (
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                        {skill.features.map((feature) => (
+                          <span key={feature} className="pill accent" style={{ fontSize: 9 }}>
+                            {feature}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
           {!editing && (
             <button className="button secondary small" onClick={startAdd}>
               <Plus className="button-icon" style={{ width: 12, height: 12 }} />

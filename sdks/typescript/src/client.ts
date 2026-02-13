@@ -175,6 +175,8 @@ export class LiveAcpConnection {
   private readonly pendingNewSessionLocals: string[] = [];
   private readonly pendingRequestSessionById = new Map<string, string>();
   private readonly pendingReplayByLocalSessionId = new Map<string, string>();
+  private lastAdapterExit: { success: boolean; code: number | null } | null = null;
+  private lastAdapterExitAt = 0;
 
   private readonly onObservedEnvelope: (
     connection: LiveAcpConnection,
@@ -229,6 +231,10 @@ export class LiveAcpConnection {
       client: {
         sessionUpdate: async (_notification: SessionNotification) => {
           // Session updates are observed via envelope persistence.
+        },
+        extNotification: async (method: string, params: Record<string, unknown>) => {
+          if (!live) return;
+          live.handleAdapterNotification(method, params);
         },
       },
       onEnvelope: (envelope, direction) => {
@@ -286,6 +292,7 @@ export class LiveAcpConnection {
     localSessionId: string,
     sessionInit: Omit<NewSessionRequest, "_meta">,
   ): Promise<NewSessionResponse> {
+    const createStartedAt = Date.now();
     this.pendingNewSessionLocals.push(localSessionId);
 
     try {
@@ -296,6 +303,11 @@ export class LiveAcpConnection {
       const index = this.pendingNewSessionLocals.indexOf(localSessionId);
       if (index !== -1) {
         this.pendingNewSessionLocals.splice(index, 1);
+      }
+      const adapterExit = this.lastAdapterExit;
+      if (adapterExit && this.lastAdapterExitAt >= createStartedAt) {
+        const suffix = adapterExit.code == null ? "" : ` (code ${adapterExit.code})`;
+        throw new Error(`Agent process exited while creating session${suffix}`);
       }
       throw error;
     }
@@ -356,6 +368,17 @@ export class LiveAcpConnection {
     this.onObservedEnvelope(this, envelope, direction, localSessionId);
   }
 
+  private handleAdapterNotification(method: string, params: Record<string, unknown>): void {
+    if (method !== "_adapter/agent_exited") {
+      return;
+    }
+    this.lastAdapterExit = {
+      success: params.success === true,
+      code: typeof params.code === "number" ? params.code : null,
+    };
+    this.lastAdapterExitAt = Date.now();
+  }
+
   private resolveSessionId(envelope: AnyMessage, direction: AcpEnvelopeDirection): string | null {
     const id = envelopeId(envelope);
     const method = envelopeMethod(envelope);
@@ -413,6 +436,7 @@ export class SandboxAgent {
   private spawnHandle?: SandboxAgentSpawnHandle;
 
   private readonly liveConnections = new Map<string, LiveAcpConnection>();
+  private readonly pendingLiveConnections = new Map<string, Promise<LiveAcpConnection>>();
   private readonly sessionHandles = new Map<string, Session>();
   private readonly eventListeners = new Map<string, Set<SessionEventListener>>();
   private readonly nextSessionEventIndexBySession = new Map<string, number>();
@@ -463,6 +487,15 @@ export class SandboxAgent {
   async dispose(): Promise<void> {
     const connections = [...this.liveConnections.values()];
     this.liveConnections.clear();
+    const pending = [...this.pendingLiveConnections.values()];
+    this.pendingLiveConnections.clear();
+
+    const pendingSettled = await Promise.allSettled(pending);
+    for (const item of pendingSettled) {
+      if (item.status === "fulfilled") {
+        connections.push(item.value);
+      }
+    }
 
     await Promise.all(
       connections.map(async (connection) => {
@@ -725,21 +758,43 @@ export class SandboxAgent {
       return existing;
     }
 
-    const serverId = `sdk-${agent}-${randomId()}`;
-    const created = await LiveAcpConnection.create({
-      baseUrl: this.baseUrl,
-      token: this.token,
-      fetcher: this.fetcher,
-      headers: this.defaultHeaders,
-      agent,
-      serverId,
-      onObservedEnvelope: (connection, envelope, direction, localSessionId) => {
-        void this.persistObservedEnvelope(connection, envelope, direction, localSessionId);
-      },
-    });
+    const pending = this.pendingLiveConnections.get(agent);
+    if (pending) {
+      return pending;
+    }
 
-    this.liveConnections.set(agent, created);
-    return created;
+    const creating = (async () => {
+      const serverId = `sdk-${agent}-${randomId()}`;
+      const created = await LiveAcpConnection.create({
+        baseUrl: this.baseUrl,
+        token: this.token,
+        fetcher: this.fetcher,
+        headers: this.defaultHeaders,
+        agent,
+        serverId,
+        onObservedEnvelope: (connection, envelope, direction, localSessionId) => {
+          void this.persistObservedEnvelope(connection, envelope, direction, localSessionId);
+        },
+      });
+
+      const raced = this.liveConnections.get(agent);
+      if (raced) {
+        await created.close();
+        return raced;
+      }
+
+      this.liveConnections.set(agent, created);
+      return created;
+    })();
+
+    this.pendingLiveConnections.set(agent, creating);
+    try {
+      return await creating;
+    } finally {
+      if (this.pendingLiveConnections.get(agent) === creating) {
+        this.pendingLiveConnections.delete(agent);
+      }
+    }
   }
 
   private async persistObservedEnvelope(

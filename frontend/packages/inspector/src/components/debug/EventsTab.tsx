@@ -28,9 +28,9 @@ import {
   Wrench,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { SessionEvent } from "sandbox-agent";
-import { formatJson, formatTime } from "../../utils/format";
+import { formatJson, formatShortId, formatTime } from "../../utils/format";
 
 type EventIconInfo = { Icon: LucideIcon; category: string };
 
@@ -111,9 +111,13 @@ function getEventIcon(method: string, payload: Record<string, unknown>): EventIc
 const EventsTab = ({
   events,
   onClear,
+  highlightedEventId,
+  onClearHighlight,
 }: {
   events: SessionEvent[];
   onClear: () => void;
+  highlightedEventId?: string | null;
+  onClearHighlight?: () => void;
 }) => {
   const [collapsedEvents, setCollapsedEvents] = useState<Record<string, boolean>>({});
   const [copied, setCopied] = useState(false);
@@ -154,6 +158,25 @@ const EventsTab = ({
       setCollapsedEvents({});
     }
   }, [events.length]);
+
+  // Scroll to highlighted event (with delay to ensure DOM is ready after tab switch)
+  useEffect(() => {
+    if (highlightedEventId) {
+      const scrollToEvent = () => {
+        const el = document.getElementById(`event-${highlightedEventId}`);
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth", block: "center" });
+          // Clear highlight after animation
+          setTimeout(() => {
+            onClearHighlight?.();
+          }, 2000);
+        }
+      };
+      // Small delay to ensure tab switch and DOM render completes
+      const timer = setTimeout(scrollToEvent, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [highlightedEventId, onClearHighlight]);
 
   const getMethod = (event: SessionEvent): string => {
     const payload = event.payload as Record<string, unknown>;
@@ -200,8 +223,14 @@ const EventsTab = ({
             const time = formatTime(new Date(event.createdAt).toISOString());
             const senderClass = event.sender === "client" ? "client" : "agent";
 
+            const isHighlighted = highlightedEventId === event.id;
+
             return (
-              <div key={eventKey} className={`event-item ${isCollapsed ? "collapsed" : "expanded"}`}>
+              <div
+                key={eventKey}
+                id={`event-${event.id}`}
+                className={`event-item ${isCollapsed ? "collapsed" : "expanded"} ${isHighlighted ? "highlighted" : ""}`}
+              >
                 <button
                   className="event-summary"
                   type="button"
@@ -219,8 +248,8 @@ const EventsTab = ({
                       </span>
                       <span className="event-time">{time}</span>
                     </div>
-                    <div className="event-id">
-                      {event.id}
+                    <div className="event-id" title={event.id}>
+                      {formatShortId(event.id)}
                     </div>
                   </div>
                   <span className="event-chevron">

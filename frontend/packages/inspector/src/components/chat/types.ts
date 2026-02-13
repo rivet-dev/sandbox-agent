@@ -1,5 +1,6 @@
 export type TimelineEntry = {
   id: string;
+  eventId?: string; // Links back to the original event for navigation
   kind: "message" | "tool" | "meta" | "reasoning";
   time: string;
   // For messages:

@@ -16,6 +16,8 @@ const DebugPanel = ({
   onDebugTabChange,
   events,
   onResetEvents,
+  highlightedEventId,
+  onClearHighlight,
   requestLog,
   copiedLogId,
   onClearRequestLog,
@@ -33,6 +35,8 @@ const DebugPanel = ({
   onDebugTabChange: (tab: DebugTab) => void;
   events: SessionEvent[];
   onResetEvents: () => void;
+  highlightedEventId?: string | null;
+  onClearHighlight?: () => void;
   requestLog: RequestLog[];
   copiedLogId: number | null;
   onClearRequestLog: () => void;
@@ -86,6 +90,8 @@ const DebugPanel = ({
           <EventsTab
             events={events}
             onClear={onResetEvents}
+            highlightedEventId={highlightedEventId}
+            onClearHighlight={onClearHighlight}
           />
         )}
 
