@@ -8,6 +8,9 @@ use acp_http_adapter::process::{AdapterError, AdapterRuntime, PostOutcome};
 use acp_http_adapter::registry::LaunchSpec;
 use axum::response::sse::Event;
 use futures::Stream;
+use sandbox_agent_agent_credentials::{
+    extract_all_credentials, AuthType, CredentialExtractionOptions, ExtractedCredentials,
+};
 use sandbox_agent_agent_management::agents::{AgentId, AgentManager, InstallOptions};
 use sandbox_agent_error::SandboxError;
 use sandbox_agent_opencode_adapter::{AcpDispatch, AcpDispatchResult, AcpPayloadStream};
@@ -303,6 +306,14 @@ impl AcpProxyRuntime {
                 message: err.to_string(),
             })?;
 
+        let credentials = tokio::task::spawn_blocking(move || {
+            extract_all_credentials(&CredentialExtractionOptions::new())
+        })
+        .await
+        .map_err(|err| SandboxError::StreamError {
+            message: format!("failed to resolve credentials: {err}"),
+        })?;
+
         tracing::info!(
             server_id = server_id,
             agent = agent.as_str(),
@@ -312,11 +323,14 @@ impl AcpProxyRuntime {
             "create_instance: launch spec resolved, spawning"
         );
 
+        let mut launch_env = launch.env;
+        merge_credentials_env(&mut launch_env, &credentials);
+
         let runtime = AdapterRuntime::start(
             LaunchSpec {
                 program: launch.program,
                 args: launch.args,
-                env: launch.env,
+                env: launch_env,
             },
             self.inner.request_timeout,
         )
@@ -486,6 +500,41 @@ fn annotate_agent_error(agent: AgentId, mut value: Value) -> Value {
     }
 
     value
+}
+
+fn merge_credentials_env(env: &mut HashMap<String, String>, credentials: &ExtractedCredentials) {
+    if let Some(cred) = &credentials.anthropic {
+        if cred.auth_type == AuthType::ApiKey {
+            insert_env_if_missing(env, "ANTHROPIC_API_KEY", &cred.api_key);
+        }
+    }
+
+    if let Some(cred) = &credentials.openai {
+        if cred.auth_type == AuthType::ApiKey {
+            insert_env_if_missing(env, "OPENAI_API_KEY", &cred.api_key);
+        }
+    }
+
+    for (provider, cred) in &credentials.other {
+        if cred.auth_type != AuthType::ApiKey {
+            continue;
+        }
+        let key = format!("{}_API_KEY", provider.to_uppercase().replace('-', "_"));
+        insert_env_if_missing(env, &key, &cred.api_key);
+    }
+}
+
+fn insert_env_if_missing(env: &mut HashMap<String, String>, key: &str, value: &str) {
+    if env.contains_key(key) || env_has_value(key) {
+        return;
+    }
+    env.insert(key.to_string(), value.to_string());
+}
+
+fn env_has_value(key: &str) -> bool {
+    std::env::var(key)
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false)
 }
 
 fn duration_from_env_ms(key: &str, default: Duration) -> Duration {

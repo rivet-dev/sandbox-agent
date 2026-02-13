@@ -17,7 +17,7 @@ use sandbox_agent_agent_management::agents::{
     AgentId, AgentManager, InstallOptions, InstallResult, InstallSource, InstalledArtifactKind,
 };
 use sandbox_agent_agent_management::credentials::{
-    extract_all_credentials, CredentialExtractionOptions,
+    extract_all_credentials, AuthType, CredentialExtractionOptions,
 };
 use sandbox_agent_error::{ErrorType, ProblemDetails, SandboxError};
 use sandbox_agent_opencode_adapter::{build_opencode_router, OpenCodeAdapterConfig};
@@ -427,6 +427,19 @@ async fn get_v1_agents(
 
     let has_anthropic = credentials.anthropic.is_some();
     let has_openai = credentials.openai.is_some();
+    let has_other = !credentials.other.is_empty();
+    let has_any_api_key = credentials
+        .anthropic
+        .as_ref()
+        .is_some_and(|cred| cred.auth_type == AuthType::ApiKey)
+        || credentials
+            .openai
+            .as_ref()
+            .is_some_and(|cred| cred.auth_type == AuthType::ApiKey)
+        || credentials
+            .other
+            .values()
+            .any(|cred| cred.auth_type == AuthType::ApiKey);
 
     let instances = state.acp_proxy().list_instances().await;
     let mut active_by_agent = HashMap::<AgentId, Vec<i64>>::new();
@@ -444,7 +457,13 @@ async fn get_v1_agents(
     for agent_id in AgentId::all().iter().copied() {
         let capabilities = agent_capabilities_for(agent_id);
         let installed = state.agent_manager().is_installed(agent_id);
-        let credentials_available = credentials_available_for(agent_id, has_anthropic, has_openai);
+        let credentials_available = credentials_available_for(
+            agent_id,
+            has_anthropic,
+            has_openai,
+            has_other,
+            has_any_api_key,
+        );
 
         let server_status = active_by_agent.get(&agent_id).map(|created_times| {
             let uptime_ms = created_times
@@ -569,6 +588,19 @@ async fn get_v1_agent(
 
     let has_anthropic = credentials.anthropic.is_some();
     let has_openai = credentials.openai.is_some();
+    let has_other = !credentials.other.is_empty();
+    let has_any_api_key = credentials
+        .anthropic
+        .as_ref()
+        .is_some_and(|cred| cred.auth_type == AuthType::ApiKey)
+        || credentials
+            .openai
+            .as_ref()
+            .is_some_and(|cred| cred.auth_type == AuthType::ApiKey)
+        || credentials
+            .other
+            .values()
+            .any(|cred| cred.auth_type == AuthType::ApiKey);
 
     let instances = state.acp_proxy().list_instances().await;
     let created_times: Vec<i64> = instances
@@ -579,7 +611,13 @@ async fn get_v1_agent(
 
     let capabilities = agent_capabilities_for(agent_id);
     let installed = state.agent_manager().is_installed(agent_id);
-    let credentials_available = credentials_available_for(agent_id, has_anthropic, has_openai);
+    let credentials_available = credentials_available_for(
+        agent_id,
+        has_anthropic,
+        has_openai,
+        has_other,
+        has_any_api_key,
+    );
 
     let server_status = if created_times.is_empty() {
         None

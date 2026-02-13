@@ -1,4 +1,7 @@
 use super::*;
+use sandbox_agent_agent_management::credentials::{
+    extract_all_credentials, AuthType, CredentialExtractionOptions,
+};
 
 pub(super) async fn not_found() -> Response {
     let problem = ProblemDetails {
@@ -48,12 +51,15 @@ pub(super) fn credentials_available_for(
     agent: AgentId,
     has_anthropic: bool,
     has_openai: bool,
+    has_other: bool,
+    has_any_api_key: bool,
 ) -> bool {
     match agent {
         AgentId::Claude | AgentId::Amp => has_anthropic,
         AgentId::Codex => has_openai,
-        AgentId::Opencode => has_anthropic || has_openai,
-        AgentId::Pi | AgentId::Cursor => true,
+        AgentId::Opencode => has_anthropic || has_openai || has_other,
+        AgentId::Pi => has_any_api_key,
+        AgentId::Cursor => true,
         AgentId::Mock => true,
     }
 }
@@ -524,8 +530,22 @@ pub(super) fn build_provider_payload_for_opencode(_state: &Arc<AppState>) -> Val
         AgentId::Cursor,
     ];
 
-    let has_anthropic = std::env::var("ANTHROPIC_API_KEY").is_ok();
-    let has_openai = std::env::var("OPENAI_API_KEY").is_ok();
+    let credentials = extract_all_credentials(&CredentialExtractionOptions::new());
+    let has_anthropic = credentials.anthropic.is_some();
+    let has_openai = credentials.openai.is_some();
+    let has_other = !credentials.other.is_empty();
+    let has_any_api_key = credentials
+        .anthropic
+        .as_ref()
+        .is_some_and(|cred| cred.auth_type == AuthType::ApiKey)
+        || credentials
+            .openai
+            .as_ref()
+            .is_some_and(|cred| cred.auth_type == AuthType::ApiKey)
+        || credentials
+            .other
+            .values()
+            .any(|cred| cred.auth_type == AuthType::ApiKey);
 
     let mut all_providers = Vec::new();
     let mut defaults = serde_json::Map::new();
@@ -579,7 +599,15 @@ pub(super) fn build_provider_payload_for_opencode(_state: &Arc<AppState>) -> Val
 
         defaults.insert(agent_str.to_string(), json!(current_value));
 
-        if agent == AgentId::Mock || credentials_available_for(agent, has_anthropic, has_openai) {
+        if agent == AgentId::Mock
+            || credentials_available_for(
+                agent,
+                has_anthropic,
+                has_openai,
+                has_other,
+                has_any_api_key,
+            )
+        {
             connected.push(json!(agent_str));
         }
 
