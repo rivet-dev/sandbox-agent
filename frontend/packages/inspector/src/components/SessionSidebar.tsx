@@ -188,7 +188,7 @@ const SessionSidebar = ({
         )}
       </div>
       <div className="session-persistence-note">
-        Sessions are persisted in your browser using IndexedDB.{" "}
+        Sessions are persisted in your browser using IndexedDB. These sessions are only from your browser; your SDK sessions are separate. Adding inspector support for SDK soon.{" "}
         <a href={persistenceDocsUrl} target="_blank" rel="noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
           Configure persistence
           <ArrowUpRight size={10} />
