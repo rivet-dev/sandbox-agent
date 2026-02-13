@@ -2,6 +2,7 @@ import { useState } from "react";
 import { getMessageClass } from "./messageUtils";
 import type { TimelineEntry } from "./types";
 import { AlertTriangle, ChevronRight, ChevronDown, Wrench, Brain, Info, ExternalLink, PlayCircle } from "lucide-react";
+import MarkdownText from "./MarkdownText";
 
 const ToolItem = ({
   entry,
@@ -253,7 +254,7 @@ const ChatMessages = ({
           <div key={entry.id} className={`message ${messageClass} no-avatar`}>
             <div className="message-content">
               {entry.text ? (
-                <div className="part-body">{entry.text}</div>
+                <MarkdownText text={entry.text} />
               ) : (
                 <span className="thinking-indicator">
                   <span className="thinking-dot" />

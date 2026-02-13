@@ -1970,6 +1970,84 @@
         white-space: pre-wrap;
       }
 
+      .markdown-body p {
+        margin: 0;
+      }
+
+      .markdown-body p + p {
+        margin-top: 8px;
+      }
+
+      .markdown-body h1,
+      .markdown-body h2,
+      .markdown-body h3,
+      .markdown-body h4,
+      .markdown-body h5,
+      .markdown-body h6 {
+        margin: 0 0 8px;
+        line-height: 1.35;
+        font-weight: 700;
+      }
+
+      .markdown-body h1 { font-size: 1.35em; }
+      .markdown-body h2 { font-size: 1.22em; }
+      .markdown-body h3 { font-size: 1.12em; }
+      .markdown-body h4,
+      .markdown-body h5,
+      .markdown-body h6 { font-size: 1em; }
+
+      .markdown-body ul,
+      .markdown-body ol {
+        margin: 8px 0 0 18px;
+        padding: 0;
+      }
+
+      .markdown-body li + li {
+        margin-top: 4px;
+      }
+
+      .markdown-body blockquote {
+        margin: 8px 0 0;
+        padding: 6px 10px;
+        border-left: 3px solid var(--border-2);
+        background: var(--surface-2);
+        color: var(--muted);
+        border-radius: 4px;
+      }
+
+      .markdown-body code {
+        font-family: ui-monospace, SFMono-Regular, 'SF Mono', Consolas, monospace;
+        font-size: 0.9em;
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid var(--border-2);
+        border-radius: 4px;
+        padding: 1px 5px;
+      }
+
+      .message.user .markdown-body code {
+        background: rgba(0, 0, 0, 0.08);
+        border-color: rgba(0, 0, 0, 0.12);
+      }
+
+      .markdown-body .md-pre {
+        margin: 8px 0 0;
+        padding: 8px 10px;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        background: var(--surface-2);
+        overflow-x: auto;
+      }
+
+      .markdown-body .md-pre code {
+        background: transparent;
+        border: none;
+        border-radius: 0;
+        padding: 0;
+        font-size: 11px;
+        line-height: 1.5;
+        display: block;
+      }
+
       .message-error {
         background: rgba(255, 59, 48, 0.1);
         border: 1px solid rgba(255, 59, 48, 0.3);

@@ -154,6 +154,7 @@ function UniversalAPIDiagram() {
 const CopyInstallButton = () => {
   const [copied, setCopied] = useState(false);
   const installCommand = 'npx skills add rivet-dev/skills -s sandbox-agent';
+  const shortCommand = 'npx skills add rivet-dev/skills';
 
   const handleCopy = async () => {
     try {
@@ -171,8 +172,9 @@ const CopyInstallButton = () => {
         onClick={handleCopy}
         className="w-full sm:w-auto inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md border border-white/10 px-4 py-2 text-sm text-zinc-300 transition-colors hover:border-white/20 hover:text-white font-mono"
       >
-        {copied ? <Check className="h-4 w-4 text-green-400" /> : <Terminal className="h-4 w-4" />}
-        {installCommand}
+        {copied ? <Check className="h-4 w-4 text-green-400" /> : <Terminal className="h-4 w-4 flex-shrink-0" />}
+        <span className="hidden sm:inline">{installCommand}</span>
+        <span className="sm:hidden">{shortCommand}</span>
       </button>
       <div className="absolute left-1/2 -translate-x-1/2 top-full mt-3 opacity-0 translate-y-2 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-200 ease-out text-xs text-zinc-500 whitespace-nowrap pointer-events-none font-mono">
         Give this to your coding agent
@@ -183,32 +185,49 @@ const CopyInstallButton = () => {
 
 export function Hero() {
   const [scrollOpacity, setScrollOpacity] = useState(1);
+  const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
+    const updateViewportMode = () => {
+      const mobile = window.innerWidth < 1024;
+      setIsMobile(mobile);
+      if (mobile) {
+        setScrollOpacity(1);
+      }
+    };
+
     const handleScroll = () => {
+      if (window.innerWidth < 1024) {
+        setScrollOpacity(1);
+        return;
+      }
       const scrollY = window.scrollY;
       const windowHeight = window.innerHeight;
-      const isMobile = window.innerWidth < 1024;
-
-      const fadeStart = windowHeight * (isMobile ? 0.3 : 0.15);
-      const fadeEnd = windowHeight * (isMobile ? 0.7 : 0.5);
+      const fadeStart = windowHeight * 0.15;
+      const fadeEnd = windowHeight * 0.5;
       const opacity = 1 - Math.min(1, Math.max(0, (scrollY - fadeStart) / (fadeEnd - fadeStart)));
       setScrollOpacity(opacity);
     };
 
+    updateViewportMode();
+    handleScroll();
+    window.addEventListener('resize', updateViewportMode);
     window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
+    return () => {
+      window.removeEventListener('resize', updateViewportMode);
+      window.removeEventListener('scroll', handleScroll);
+    };
   }, []);
 
   return (
-    <section className="relative flex min-h-screen flex-col overflow-hidden">
+    <section className="relative flex min-h-screen flex-col overflow-hidden pb-24 lg:pb-0">
       {/* Background gradient */}
       <div className="absolute inset-0 bg-gradient-to-b from-zinc-900/20 via-transparent to-transparent pointer-events-none" />
 
       {/* Main content */}
       <div
         className="flex flex-1 flex-col justify-start pt-32 lg:justify-center lg:pt-0 lg:pb-20 px-6"
-        style={{ opacity: scrollOpacity, filter: `blur(${(1 - scrollOpacity) * 8}px)` }}
+        style={isMobile ? undefined : { opacity: scrollOpacity, filter: `blur(${(1 - scrollOpacity) * 8}px)` }}
       >
         <div className="mx-auto w-full max-w-7xl">
           <div className="flex flex-col gap-12 lg:flex-row lg:items-center lg:justify-between lg:gap-16 xl:gap-24">
