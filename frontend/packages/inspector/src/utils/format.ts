@@ -16,3 +16,9 @@ export const formatTime = (value: string) => {
 };
 
 export const escapeSingleQuotes = (value: string) => value.replace(/'/g, `'\\''`);
+
+export const formatShortId = (value: string, head = 8, tail = 4) => {
+  if (!value) return "";
+  if (value.length <= head + tail + 1) return value;
+  return `${value.slice(0, head)}...${value.slice(-tail)}`;
+};

@@ -1,4 +1,4 @@
-import { FolderOpen, Loader2, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, FolderOpen, Loader2, Plus, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import type { SandboxAgent } from "sandbox-agent";
 import { formatJson } from "../../utils/format";
@@ -8,15 +8,49 @@ type SkillEntry = {
   config: { sources: Array<{ source: string; type: string; ref?: string | null; subpath?: string | null; skills?: string[] | null }> };
 };
 
+const SKILLS_DIRECTORY_STORAGE_KEY = "sandbox-agent-inspector-skills-directory";
+
 const SkillsTab = ({
   getClient,
 }: {
   getClient: () => SandboxAgent;
 }) => {
-  const [directory, setDirectory] = useState("/");
+  const officialSkills = [
+    {
+      name: "Sandbox Agent SDK",
+      skillId: "sandbox-agent",
+      source: "rivet-dev/skills",
+      summary: "Skills bundle for fast Sandbox Agent SDK setup and consistent workflows.",
+    },
+    {
+      name: "Rivet",
+      skillId: "rivet",
+      source: "rivet-dev/skills",
+      summary: "Open-source platform for building, deploying, and scaling AI agents.",
+      features: [
+        "Session Persistence",
+        "Resumable Sessions",
+        "Multi-Agent Support",
+        "Realtime Events",
+        "Tool Call Visibility",
+      ],
+    },
+  ];
+
+  const [directory, setDirectory] = useState(() => {
+    if (typeof window === "undefined") return "/";
+    try {
+      return window.localStorage.getItem(SKILLS_DIRECTORY_STORAGE_KEY) ?? "/";
+    } catch {
+      return "/";
+    }
+  });
   const [entries, setEntries] = useState<SkillEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [showSdkSkills, setShowSdkSkills] = useState(false);
+  const [collapsedSkills, setCollapsedSkills] = useState<Record<string, boolean>>({});
 
   // Add form state
   const [editing, setEditing] = useState(false);
@@ -55,6 +89,14 @@ const SkillsTab = ({
   useEffect(() => {
     loadAll(directory);
   }, [directory, loadAll]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(SKILLS_DIRECTORY_STORAGE_KEY, directory);
+    } catch {
+      // Ignore storage failures.
+    }
+  }, [directory]);
 
   const startAdd = () => {
     setEditing(true);
@@ -128,11 +170,66 @@ const SkillsTab = ({
     }
   };
 
+  const fallbackCopy = (text: string) => {
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand("copy");
+    document.body.removeChild(textarea);
+  };
+
+  const copyText = async (id: string, text: string) => {
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        fallbackCopy(text);
+      }
+      setCopiedId(id);
+      window.setTimeout(() => {
+        setCopiedId((current) => (current === id ? null : current));
+      }, 1800);
+    } catch {
+      setError("Failed to copy snippet");
+    }
+  };
+
+  const applySkillPreset = (skill: typeof officialSkills[0]) => {
+    setEditing(true);
+    setEditName(skill.skillId);
+    setEditSource(skill.source);
+    setEditType("github");
+    setEditRef("");
+    setEditSubpath("");
+    setEditSkills(skill.skillId);
+    setEditError(null);
+    setShowSdkSkills(false);
+  };
+
+  const copySkillToInput = async (skillId: string) => {
+    const skill = officialSkills.find((s) => s.skillId === skillId);
+    if (skill) {
+      applySkillPreset(skill);
+      await copyText(`skill-input-${skillId}`, skillId);
+    }
+  };
+
   return (
     <>
       <div className="inline-row" style={{ marginBottom: 12, justifyContent: "space-between" }}>
         <span className="card-meta">Skills Configuration</span>
-        <div className="inline-row">
+        <div className="inline-row" style={{ gap: 6 }}>
+          <button
+            className="button secondary small"
+            onClick={() => setShowSdkSkills((prev) => !prev)}
+            title="Toggle official skills list"
+          >
+            {showSdkSkills ? <ChevronDown className="button-icon" style={{ width: 12, height: 12 }} /> : <ChevronRight className="button-icon" style={{ width: 12, height: 12 }} />}
+            Official Skills
+          </button>
           {!editing && (
             <button className="button secondary small" onClick={startAdd}>
               <Plus className="button-icon" style={{ width: 12, height: 12 }} />
@@ -141,6 +238,43 @@ const SkillsTab = ({
           )}
         </div>
       </div>
+
+      {showSdkSkills && (
+        <div className="card" style={{ marginBottom: 12 }}>
+          <div className="card-meta" style={{ marginBottom: 8 }}>
+            Pick a skill to auto-fill the form.
+          </div>
+          {officialSkills.map((skill) => (
+            <div
+              key={skill.name}
+              style={{
+                border: "1px solid var(--border)",
+                borderRadius: 6,
+                padding: "8px 10px",
+                background: "var(--surface-2)",
+                marginBottom: 6,
+              }}
+            >
+              <div className="inline-row" style={{ justifyContent: "space-between", gap: 8, marginBottom: 4 }}>
+                <div style={{ fontWeight: 500, fontSize: 12 }}>{skill.name}</div>
+                <button className="button ghost small" onClick={() => void copySkillToInput(skill.skillId)}>
+                  {copiedId === `skill-input-${skill.skillId}` ? "Filled" : "Use"}
+                </button>
+              </div>
+              <div className="card-meta" style={{ fontSize: 10, marginBottom: skill.features ? 6 : 0 }}>{skill.summary}</div>
+              {skill.features && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                  {skill.features.map((feature) => (
+                    <span key={feature} className="pill accent" style={{ fontSize: 9 }}>
+                      {feature}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="inline-row" style={{ marginBottom: 12, gap: 6 }}>
         <FolderOpen size={14} className="muted" style={{ flexShrink: 0 }} />
@@ -233,29 +367,44 @@ const SkillsTab = ({
         </div>
       )}
 
-      {entries.map((entry) => (
-        <div key={entry.name} className="card" style={{ marginBottom: 8 }}>
-          <div className="card-header">
-            <span className="card-title">{entry.name}</span>
-            <div className="card-header-pills">
-              <span className="pill accent">
-                {entry.config.sources.length} source{entry.config.sources.length !== 1 ? "s" : ""}
-              </span>
-              <button
-                className="button ghost small"
-                onClick={() => remove(entry.name)}
-                title="Remove"
-                style={{ padding: "2px 4px" }}
-              >
-                <Trash2 size={12} />
-              </button>
+      {entries.map((entry) => {
+        const isCollapsed = collapsedSkills[entry.name] ?? true;
+        return (
+          <div key={entry.name} className="card" style={{ marginBottom: 8 }}>
+            <div className="card-header">
+              <div className="inline-row" style={{ gap: 6 }}>
+                <button
+                  className="button ghost small"
+                  onClick={() => setCollapsedSkills((prev) => ({ ...prev, [entry.name]: !(prev[entry.name] ?? true) }))}
+                  title={isCollapsed ? "Expand" : "Collapse"}
+                  style={{ padding: "2px 4px" }}
+                >
+                  {isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+                </button>
+                <span className="card-title">{entry.name}</span>
+              </div>
+              <div className="card-header-pills">
+                <span className="pill accent">
+                  {entry.config.sources.length} source{entry.config.sources.length !== 1 ? "s" : ""}
+                </span>
+                <button
+                  className="button ghost small"
+                  onClick={() => remove(entry.name)}
+                  title="Remove"
+                  style={{ padding: "2px 4px" }}
+                >
+                  <Trash2 size={12} />
+                </button>
+              </div>
             </div>
+            {!isCollapsed && (
+              <pre className="code-block" style={{ marginTop: 4, fontSize: 10 }}>
+                {formatJson(entry.config)}
+              </pre>
+            )}
           </div>
-          <pre className="code-block" style={{ marginTop: 4, fontSize: 10 }}>
-            {formatJson(entry.config)}
-          </pre>
-        </div>
-      ))}
+        );
+      })}
     </>
   );
 };

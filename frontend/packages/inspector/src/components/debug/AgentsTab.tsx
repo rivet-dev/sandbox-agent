@@ -5,6 +5,7 @@ import type { AgentInfo } from "sandbox-agent";
 type AgentModeInfo = { id: string; name: string; description: string };
 import FeatureCoverageBadges from "../agents/FeatureCoverageBadges";
 import { emptyFeatureCoverage } from "../../types/agents";
+const MIN_REFRESH_SPIN_MS = 350;
 
 const AgentsTab = ({
   agents,
@@ -24,6 +25,7 @@ const AgentsTab = ({
   error: string | null;
 }) => {
   const [installingAgent, setInstallingAgent] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   const handleInstall = async (agentId: string, reinstall: boolean) => {
     setInstallingAgent(agentId);
@@ -34,16 +36,30 @@ const AgentsTab = ({
     }
   };
 
+  const handleRefresh = async () => {
+    if (refreshing) return;
+    const startedAt = Date.now();
+    setRefreshing(true);
+    try {
+      await Promise.resolve(onRefresh());
+    } finally {
+      const elapsedMs = Date.now() - startedAt;
+      if (elapsedMs < MIN_REFRESH_SPIN_MS) {
+        await new Promise((resolve) => window.setTimeout(resolve, MIN_REFRESH_SPIN_MS - elapsedMs));
+      }
+      setRefreshing(false);
+    }
+  };
+
   return (
     <>
       <div className="inline-row" style={{ marginBottom: 16 }}>
-        <button className="button secondary small" onClick={onRefresh} disabled={loading}>
-          <RefreshCw className="button-icon" /> Refresh
+        <button className="button secondary small" onClick={() => void handleRefresh()} disabled={loading || refreshing}>
+          <RefreshCw className={`button-icon ${loading || refreshing ? "spinner-icon" : ""}`} /> Refresh
         </button>
       </div>
 
       {error && <div className="banner error">{error}</div>}
-      {loading && <div className="card-meta">Loading agents...</div>}
       {!loading && agents.length === 0 && (
         <div className="card-meta">No agents reported. Click refresh to check.</div>
       )}

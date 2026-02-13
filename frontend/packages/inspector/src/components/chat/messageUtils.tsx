@@ -1,5 +1,5 @@
 import type { TimelineEntry } from "./types";
-import { Settings, AlertTriangle, User } from "lucide-react";
+import { Settings, AlertTriangle } from "lucide-react";
 import type { ReactNode } from "react";
 
 export const getMessageClass = (entry: TimelineEntry) => {
@@ -11,7 +11,7 @@ export const getMessageClass = (entry: TimelineEntry) => {
 };
 
 export const getAvatarLabel = (messageClass: string): ReactNode => {
-  if (messageClass === "user") return <User size={14} />;
+  if (messageClass === "user") return null;
   if (messageClass === "tool") return "T";
   if (messageClass === "system") return <Settings size={14} />;
   if (messageClass === "error") return <AlertTriangle size={14} />;

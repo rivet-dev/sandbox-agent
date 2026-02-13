@@ -1,4 +1,4 @@
-import { FolderOpen, Loader2, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, FolderOpen, Loader2, Plus, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import type { SandboxAgent } from "sandbox-agent";
 import { formatJson } from "../../utils/format";
@@ -8,15 +8,25 @@ type McpEntry = {
   config: Record<string, unknown>;
 };
 
+const MCP_DIRECTORY_STORAGE_KEY = "sandbox-agent-inspector-mcp-directory";
+
 const McpTab = ({
   getClient,
 }: {
   getClient: () => SandboxAgent;
 }) => {
-  const [directory, setDirectory] = useState("/");
+  const [directory, setDirectory] = useState(() => {
+    if (typeof window === "undefined") return "/";
+    try {
+      return window.localStorage.getItem(MCP_DIRECTORY_STORAGE_KEY) ?? "/";
+    } catch {
+      return "/";
+    }
+  });
   const [entries, setEntries] = useState<McpEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [collapsedServers, setCollapsedServers] = useState<Record<string, boolean>>({});
 
   // Add/edit form state
   const [editing, setEditing] = useState(false);
@@ -51,6 +61,14 @@ const McpTab = ({
   useEffect(() => {
     loadAll(directory);
   }, [directory, loadAll]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(MCP_DIRECTORY_STORAGE_KEY, directory);
+    } catch {
+      // Ignore storage failures.
+    }
+  }, [directory]);
 
   const startAdd = () => {
     setEditing(true);
@@ -158,7 +176,7 @@ const McpTab = ({
               value={editJson}
               onChange={(e) => { setEditJson(e.target.value); setEditError(null); }}
               rows={6}
-              style={{ width: "100%", boxSizing: "border-box", fontFamily: "monospace", fontSize: 11 }}
+              style={{ width: "100%", boxSizing: "border-box", fontFamily: "monospace", fontSize: 11, resize: "vertical" }}
             />
             {editError && <div className="banner error" style={{ marginTop: 4 }}>{editError}</div>}
           </div>
@@ -180,29 +198,44 @@ const McpTab = ({
         </div>
       )}
 
-      {entries.map((entry) => (
-        <div key={entry.name} className="card" style={{ marginBottom: 8 }}>
-          <div className="card-header">
-            <span className="card-title">{entry.name}</span>
-            <div className="card-header-pills">
-              <span className="pill accent">
-                {(entry.config as { type?: string }).type ?? "unknown"}
-              </span>
-              <button
-                className="button ghost small"
-                onClick={() => remove(entry.name)}
-                title="Remove"
-                style={{ padding: "2px 4px" }}
-              >
-                <Trash2 size={12} />
-              </button>
+      {entries.map((entry) => {
+        const isCollapsed = collapsedServers[entry.name] ?? true;
+        return (
+          <div key={entry.name} className="card" style={{ marginBottom: 8 }}>
+            <div className="card-header">
+              <div className="inline-row" style={{ gap: 6 }}>
+                <button
+                  className="button ghost small"
+                  onClick={() => setCollapsedServers((prev) => ({ ...prev, [entry.name]: !(prev[entry.name] ?? true) }))}
+                  title={isCollapsed ? "Expand" : "Collapse"}
+                  style={{ padding: "2px 4px" }}
+                >
+                  {isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+                </button>
+                <span className="card-title">{entry.name}</span>
+              </div>
+              <div className="card-header-pills">
+                <span className="pill accent">
+                  {(entry.config as { type?: string }).type ?? "unknown"}
+                </span>
+                <button
+                  className="button ghost small"
+                  onClick={() => remove(entry.name)}
+                  title="Remove"
+                  style={{ padding: "2px 4px" }}
+                >
+                  <Trash2 size={12} />
+                </button>
+              </div>
             </div>
+            {!isCollapsed && (
+              <pre className="code-block" style={{ marginTop: 4, fontSize: 10 }}>
+                {formatJson(entry.config)}
+              </pre>
+            )}
           </div>
-          <pre className="code-block" style={{ marginTop: 4, fontSize: 10 }}>
-            {formatJson(entry.config)}
-          </pre>
-        </div>
-      ))}
+        );
+      })}
     </>
   );
 };

@@ -16,7 +16,17 @@ const agentLabels: Record<string, string> = {
   claude: "Claude Code",
   codex: "Codex",
   opencode: "OpenCode",
-  amp: "Amp"
+  amp: "Amp",
+  pi: "Pi",
+  cursor: "Cursor"
+};
+
+const agentLogos: Record<string, string> = {
+  claude: `${import.meta.env.BASE_URL}logos/claude.svg`,
+  codex: `${import.meta.env.BASE_URL}logos/openai.svg`,
+  opencode: `${import.meta.env.BASE_URL}logos/opencode.svg`,
+  amp: `${import.meta.env.BASE_URL}logos/amp.svg`,
+  pi: `${import.meta.env.BASE_URL}logos/pi.svg`,
 };
 
 const SessionCreateMenu = ({
@@ -37,7 +47,7 @@ const SessionCreateMenu = ({
   modesByAgent: Record<string, AgentModeInfo[]>;
   modelsByAgent: Record<string, AgentModelInfo[]>;
   defaultModelByAgent: Record<string, string>;
-  onCreateSession: (agentId: string, config: SessionConfig) => void;
+  onCreateSession: (agentId: string, config: SessionConfig) => Promise<void>;
   onSelectAgent: (agentId: string) => Promise<void>;
   open: boolean;
   onClose: () => void;
@@ -48,7 +58,7 @@ const SessionCreateMenu = ({
   const [selectedModel, setSelectedModel] = useState("");
   const [customModel, setCustomModel] = useState("");
   const [isCustomModel, setIsCustomModel] = useState(false);
-  const [configLoadDone, setConfigLoadDone] = useState(false);
+  const [creating, setCreating] = useState(false);
 
   // Reset state when menu closes
   useEffect(() => {
@@ -59,17 +69,9 @@ const SessionCreateMenu = ({
       setSelectedModel("");
       setCustomModel("");
       setIsCustomModel(false);
-      setConfigLoadDone(false);
+      setCreating(false);
     }
   }, [open]);
-
-  // Transition to config phase after load completes — deferred via useEffect
-  // so parent props (modelsByAgent) have settled before we render the config form
-  useEffect(() => {
-    if (phase === "loading-config" && configLoadDone) {
-      setPhase("config");
-    }
-  }, [phase, configLoadDone]);
 
   // Auto-select first mode when modes load for selected agent
   useEffect(() => {
@@ -79,6 +81,14 @@ const SessionCreateMenu = ({
       setAgentMode(modes[0].id);
     }
   }, [modesByAgent, selectedAgent, agentMode]);
+
+  // Agent-specific config should not leak between agent selections.
+  useEffect(() => {
+    setAgentMode("");
+    setSelectedModel("");
+    setCustomModel("");
+    setIsCustomModel(false);
+  }, [selectedAgent]);
 
   // Auto-select default model when agent is selected
   useEffect(() => {
@@ -99,21 +109,21 @@ const SessionCreateMenu = ({
 
   const handleAgentClick = (agentId: string) => {
     setSelectedAgent(agentId);
-    setPhase("loading-config");
-    setConfigLoadDone(false);
-    onSelectAgent(agentId).finally(() => {
-      setConfigLoadDone(true);
+    setPhase("config");
+    // Load agent config in background; creation should not block on this call.
+    void onSelectAgent(agentId).catch((error) => {
+      console.error("[SessionCreateMenu] Failed to load agent config:", error);
     });
   };
 
   const handleBack = () => {
+    if (creating) return;
     setPhase("agent");
     setSelectedAgent("");
     setAgentMode("");
     setSelectedModel("");
     setCustomModel("");
     setIsCustomModel(false);
-    setConfigLoadDone(false);
   };
 
   const handleModelSelectChange = (value: string) => {
@@ -129,9 +139,17 @@ const SessionCreateMenu = ({
 
   const resolvedModel = isCustomModel ? customModel : selectedModel;
 
-  const handleCreate = () => {
-    onCreateSession(selectedAgent, { agentMode, model: resolvedModel });
-    onClose();
+  const handleCreate = async () => {
+    if (!selectedAgent) return;
+    setCreating(true);
+    try {
+      await onCreateSession(selectedAgent, { agentMode, model: resolvedModel });
+      onClose();
+    } catch (error) {
+      console.error("[SessionCreateMenu] Failed to create session:", error);
+    } finally {
+      setCreating(false);
+    }
   };
 
   if (phase === "agent") {
@@ -142,42 +160,56 @@ const SessionCreateMenu = ({
         {!agentsLoading && !agentsError && agents.length === 0 && (
           <div className="sidebar-add-status">No agents available.</div>
         )}
-        {!agentsLoading && !agentsError &&
-          agents.map((agent) => (
-            <button
-              key={agent.id}
-              className="sidebar-add-option"
-              onClick={() => handleAgentClick(agent.id)}
-            >
-              <div className="agent-option-left">
-                <span className="agent-option-name">{agentLabels[agent.id] ?? agent.id}</span>
-                {agent.version && <span className="agent-option-version">{agent.version}</span>}
-              </div>
-              <div className="agent-option-badges">
-                {agent.installed && <span className="agent-badge installed">Installed</span>}
-                <ArrowRight size={12} className="agent-option-arrow" />
-              </div>
-            </button>
-          ))}
+        {!agentsLoading && !agentsError && (() => {
+          const codingAgents = agents.filter((a) => a.id !== "mock");
+          const mockAgent = agents.find((a) => a.id === "mock");
+          return (
+            <>
+              {codingAgents.map((agent) => (
+                <button
+                  key={agent.id}
+                  className="sidebar-add-option"
+                  onClick={() => handleAgentClick(agent.id)}
+                >
+                  <div className="agent-option-left">
+                    {agentLogos[agent.id] && (
+                      <img src={agentLogos[agent.id]} alt="" className="agent-option-logo" />
+                    )}
+                    <span className="agent-option-name">{agentLabels[agent.id] ?? agent.id}</span>
+                    {agent.version && <span className="agent-option-version">{agent.version}</span>}
+                  </div>
+                  <div className="agent-option-badges">
+                    {agent.installed && <span className="agent-badge installed">Installed</span>}
+                    <ArrowRight size={12} className="agent-option-arrow" />
+                  </div>
+                </button>
+              ))}
+              {mockAgent && (
+                <>
+                  <div className="agent-divider" />
+                  <button
+                    className="sidebar-add-option"
+                    onClick={() => handleAgentClick(mockAgent.id)}
+                  >
+                    <div className="agent-option-left">
+                      <span className="agent-option-name">{agentLabels[mockAgent.id] ?? mockAgent.id}</span>
+                      {mockAgent.version && <span className="agent-option-version">{mockAgent.version}</span>}
+                    </div>
+                    <div className="agent-option-badges">
+                      {mockAgent.installed && <span className="agent-badge installed">Installed</span>}
+                      <ArrowRight size={12} className="agent-option-arrow" />
+                    </div>
+                  </button>
+                </>
+              )}
+            </>
+          );
+        })()}
       </div>
     );
   }
 
   const agentLabel = agentLabels[selectedAgent] ?? selectedAgent;
-
-  if (phase === "loading-config") {
-    return (
-      <div className="session-create-menu">
-        <div className="session-create-header">
-          <button className="session-create-back" onClick={handleBack} title="Back to agents">
-            <ArrowLeft size={14} />
-          </button>
-          <span className="session-create-agent-name">{agentLabel}</span>
-        </div>
-        <div className="sidebar-add-status">Loading config...</div>
-      </div>
-    );
-  }
 
   // Phase 2: config form
   const activeModes = modesByAgent[selectedAgent] ?? [];
@@ -257,8 +289,8 @@ const SessionCreateMenu = ({
       </div>
 
       <div className="session-create-actions">
-        <button className="button primary" onClick={handleCreate}>
-          Create Session
+        <button className="button primary" onClick={() => void handleCreate()} disabled={creating}>
+          {creating ? "Creating..." : "Create Session"}
         </button>
       </div>
     </div>

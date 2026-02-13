@@ -271,6 +271,8 @@ class StreamableHttpAcpTransport {
   private closed = false;
   private closingPromise: Promise<void> | null = null;
   private postedOnce = false;
+  private readonly seenResponseIds = new Set<string>();
+  private readonly seenResponseIdOrder: string[] = [];
 
   constructor(options: StreamableHttpAcpTransportOptions) {
     this.baseUrl = options.baseUrl.replace(/\/$/, "");
@@ -535,6 +537,21 @@ class StreamableHttpAcpTransport {
       return;
     }
 
+    const responseId = responseEnvelopeId(envelope);
+    if (responseId) {
+      if (this.seenResponseIds.has(responseId)) {
+        return;
+      }
+      this.seenResponseIds.add(responseId);
+      this.seenResponseIdOrder.push(responseId);
+      if (this.seenResponseIdOrder.length > 2048) {
+        const oldest = this.seenResponseIdOrder.shift();
+        if (oldest) {
+          this.seenResponseIds.delete(oldest);
+        }
+      }
+    }
+
     this.observeEnvelope(envelope, "inbound");
 
     try {
@@ -632,8 +649,30 @@ function buildClientHandlers(client?: Partial<Client>): Client {
     waitForTerminalExit: client?.waitForTerminalExit,
     killTerminal: client?.killTerminal,
     extMethod: client?.extMethod,
-    extNotification: client?.extNotification,
+    extNotification: async (method: string, params: Record<string, unknown>) => {
+      if (client?.extNotification) {
+        await client.extNotification(method, params);
+      }
+    },
   };
+}
+
+function responseEnvelopeId(message: AnyMessage): string | null {
+  if (typeof message !== "object" || message === null) {
+    return null;
+  }
+  const record = message as Record<string, unknown>;
+  if ("method" in record) {
+    return null;
+  }
+  if (!("result" in record) && !("error" in record)) {
+    return null;
+  }
+  const id = record.id;
+  if (id === null || id === undefined) {
+    return null;
+  }
+  return String(id);
 }
 
 async function readProblem(response: Response): Promise<ProblemDetails | undefined> {
