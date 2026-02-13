@@ -288,6 +288,7 @@ export default function App() {
 
   const [debugTab, setDebugTab] = useState<DebugTab>("events");
   const [highlightedEventId, setHighlightedEventId] = useState<string | null>(null);
+  const [debugPanelCollapsed, setDebugPanelCollapsed] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -1614,7 +1615,7 @@ export default function App() {
         </div>
       </header>
 
-      <main className="main-layout">
+      <main className={`main-layout ${debugPanelCollapsed ? "debug-collapsed" : ""}`}>
         <SessionSidebar
           sessions={sessions}
           selectedSessionId={sessionId}
@@ -1704,6 +1705,8 @@ export default function App() {
           agentsLoading={agentsLoading}
           agentsError={agentsError}
           getClient={getClient}
+          collapsed={debugPanelCollapsed}
+          onToggleCollapse={() => setDebugPanelCollapsed(!debugPanelCollapsed)}
         />
       </main>
       {toastStack}

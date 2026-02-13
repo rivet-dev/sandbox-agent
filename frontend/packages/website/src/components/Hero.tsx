@@ -23,7 +23,7 @@ function UniversalAPIDiagram() {
   }, []);
 
   return (
-    <div className="relative w-full aspect-[16/9] bg-[#050505] rounded-2xl border border-white/10 overflow-hidden flex items-center justify-center shadow-2xl">
+    <div className="relative w-full aspect-[4/3] sm:aspect-[16/9] bg-[#050505] rounded-2xl border border-white/10 overflow-hidden flex items-center justify-center shadow-2xl">
       {/* Background Dots - color changes with active adapter */}
       <div
         className="absolute inset-0 opacity-[0.15] pointer-events-none transition-all duration-1000"

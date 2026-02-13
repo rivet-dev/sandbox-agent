@@ -14,16 +14,17 @@
         color-scheme: dark;
         /* Match landing page colors - high contrast */
         --bg: #000000;
-        --surface: rgba(255, 255, 255, 0.04);
-        --surface-2: rgba(255, 255, 255, 0.02);
-        --border: rgba(255, 255, 255, 0.15);
-        --border-2: rgba(255, 255, 255, 0.12);
-        --input-bg: rgba(255, 255, 255, 0.05);
-        --input-border: rgba(255, 255, 255, 0.18);
+        --bg-panel: #0a0a0b;
+        --surface: rgba(255, 255, 255, 0.06);
+        --surface-2: rgba(255, 255, 255, 0.03);
+        --border: rgba(255, 255, 255, 0.18);
+        --border-2: rgba(255, 255, 255, 0.14);
+        --input-bg: rgba(255, 255, 255, 0.07);
+        --input-border: rgba(255, 255, 255, 0.22);
         --text: #ffffff;
-        --text-secondary: #d4d4d8; /* zinc-300 */
+        --text-secondary: #e4e4e7; /* zinc-200 */
         --muted: #a1a1aa; /* zinc-400 */
-        --muted-2: #71717a; /* zinc-500 */
+        --muted-2: #8b8b93; /* between zinc-400 and zinc-500 */
         --accent: #ff4f00;
         --accent-hover: #ff6a00;
         --success: #4ade80; /* green-400 */
@@ -87,7 +88,7 @@
         justify-content: space-between;
         padding: 12px 20px;
         border-bottom: 1px solid var(--border);
-        background: var(--bg);
+        background: var(--bg-panel);
         flex-shrink: 0;
       }
 
@@ -476,6 +477,11 @@
         grid-template-columns: 200px 1fr 1fr;
         flex: 1;
         overflow: hidden;
+        transition: grid-template-columns 0.2s ease;
+      }
+
+      .main-layout.debug-collapsed {
+        grid-template-columns: 200px 1fr 42px;
       }
 
       /* Session Sidebar */
@@ -483,7 +489,7 @@
         display: flex;
         flex-direction: column;
         border-right: 1px solid var(--border);
-        background: var(--bg);
+        background: var(--bg-panel);
         overflow: visible;
       }
 
@@ -1234,7 +1240,7 @@
         height: 41px;
         padding: 0 16px;
         border-bottom: 1px solid var(--border);
-        background: var(--bg);
+        background: var(--bg-panel);
         flex-shrink: 0;
         display: flex;
         align-items: center;
@@ -2455,13 +2461,14 @@
         display: flex;
         flex-direction: column;
         overflow: hidden;
+        background: var(--bg-panel);
       }
 
       .debug-tabs {
         display: flex;
         height: 41px;
         border-bottom: 1px solid var(--border);
-        background: var(--bg);
+        background: var(--bg-panel);
         flex-shrink: 0;
         overflow-x: auto;
       }
@@ -2511,6 +2518,49 @@
         flex: 1;
         overflow-y: auto;
         padding: 16px;
+      }
+
+      .debug-panel.collapsed .debug-content {
+        display: none;
+      }
+
+      .debug-panel.collapsed .debug-tabs {
+        flex-direction: column;
+        height: auto;
+        border-bottom: none;
+        overflow: visible;
+      }
+
+      .debug-panel.collapsed .debug-tab {
+        display: none;
+      }
+
+      .debug-collapse-btn {
+        width: 28px;
+        height: 28px;
+        min-width: 28px;
+        margin: 6px;
+        padding: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: transparent;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        color: var(--muted);
+        cursor: pointer;
+        transition: color var(--transition), border-color var(--transition), background var(--transition);
+        flex-shrink: 0;
+      }
+
+      .debug-collapse-btn:hover {
+        color: var(--text);
+        border-color: var(--text-secondary);
+        background: var(--surface);
+      }
+
+      .debug-panel.collapsed .debug-collapse-btn {
+        margin: 6px auto;
       }
 
       /* Session Setup */
@@ -2637,19 +2687,19 @@
       }
 
       .event-item {
-        background: var(--surface);
-        border: 1px solid var(--border);
+        background: rgba(255, 255, 255, 0.02);
+        border: 1px solid rgba(255, 255, 255, 0.08);
         border-radius: var(--radius);
         overflow: hidden;
         transition: border-color var(--transition);
       }
 
       .event-item:hover {
-        border-color: rgba(255, 255, 255, 0.2);
+        border-color: rgba(255, 255, 255, 0.12);
       }
 
       .event-item.expanded {
-        border-color: rgba(255, 255, 255, 0.2);
+        border-color: rgba(255, 255, 255, 0.12);
       }
 
       .event-item.highlighted {
@@ -2684,9 +2734,9 @@
         width: 28px;
         height: 28px;
         border-radius: 8px;
-        border: 1px solid var(--border-2);
-        background: rgba(255, 255, 255, 0.04);
-        color: var(--text-secondary);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        background: rgba(255, 255, 255, 0.02);
+        color: var(--muted);
         flex-shrink: 0;
       }
 

@@ -1,4 +1,4 @@
-import { Cloud, PlayCircle, Server, Terminal, Wrench } from "lucide-react";
+import { ChevronLeft, ChevronRight, Cloud, PlayCircle, Server, Terminal, Wrench } from "lucide-react";
 import type { AgentInfo, SandboxAgent, SessionEvent } from "sandbox-agent";
 
 type AgentModeInfo = { id: string; name: string; description: string };
@@ -30,6 +30,8 @@ const DebugPanel = ({
   agentsLoading,
   agentsError,
   getClient,
+  collapsed,
+  onToggleCollapse,
 }: {
   debugTab: DebugTab;
   onDebugTabChange: (tab: DebugTab) => void;
@@ -49,10 +51,19 @@ const DebugPanel = ({
   agentsLoading: boolean;
   agentsError: string | null;
   getClient: () => SandboxAgent;
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
 }) => {
   return (
-    <div className="debug-panel">
+    <div className={`debug-panel ${collapsed ? "collapsed" : ""}`}>
       <div className="debug-tabs">
+        <button
+          className="debug-collapse-btn"
+          onClick={onToggleCollapse}
+          title={collapsed ? "Expand panel" : "Collapse panel"}
+        >
+          {collapsed ? <ChevronLeft size={14} /> : <ChevronRight size={14} />}
+        </button>
         <button className={`debug-tab ${debugTab === "events" ? "active" : ""}`} onClick={() => onDebugTabChange("events")}>
           <PlayCircle className="button-icon" style={{ marginRight: 4, width: 12, height: 12 }} />
           Events
