@@ -199,6 +199,8 @@ pub fn build_router_with_state(shared: Arc<AppState>) -> (Router, Arc<AppState>)
         native_proxy_manager: Some(shared.opencode_server_manager()),
         acp_dispatch: Some(shared.acp_proxy() as Arc<dyn sandbox_agent_opencode_adapter::AcpDispatch>),
         provider_payload: Some(build_provider_payload_for_opencode(&shared)),
+        agent_display_name: Some(shared.branding.product_name().to_string()),
+        agent_description: Some(format!("{} compatibility layer", shared.branding.product_name())),
         ..OpenCodeAdapterConfig::default()
     })
     .unwrap_or_else(|err| {

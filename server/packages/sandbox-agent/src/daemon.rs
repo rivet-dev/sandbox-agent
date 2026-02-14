@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command as ProcessCommand, Stdio};
 use std::time::{Duration, Instant};
@@ -15,6 +16,7 @@ pub use build_id::BUILD_ID;
 const DAEMON_HEALTH_TIMEOUT: Duration = Duration::from_secs(30);
 const HEALTH_CHECK_CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 const HEALTH_CHECK_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+const DAEMON_LOG_TAIL_BYTES: usize = 16 * 1024;
 
 // ---------------------------------------------------------------------------
 // Paths
@@ -187,6 +189,7 @@ pub fn wait_for_health(
     base_url: &str,
     token: Option<&str>,
     timeout: Duration,
+    log_path: Option<&Path>,
 ) -> Result<(), CliError> {
     let client = HttpClient::builder()
         .connect_timeout(HEALTH_CHECK_CONNECT_TIMEOUT)
@@ -199,8 +202,9 @@ pub fn wait_for_health(
         attempts += 1;
         if let Some(child) = server_child.as_mut() {
             if let Some(status) = child.try_wait()? {
-                return Err(CliError::Server(format!(
-                    "sandbox-agent exited before becoming healthy ({status})"
+                return Err(CliError::Server(with_log_tail(
+                    format!("sandbox-agent exited before becoming healthy ({status})"),
+                    log_path,
                 )));
             }
         }
@@ -248,9 +252,10 @@ pub fn wait_for_health(
         timeout_ms = timeout.as_millis(),
         "timed out waiting for daemon health"
     );
-    Err(CliError::Server(
+    Err(CliError::Server(with_log_tail(
         "timed out waiting for sandbox-agent health".to_string(),
-    ))
+        log_path,
+    )))
 }
 
 // ---------------------------------------------------------------------------
@@ -271,7 +276,8 @@ pub fn spawn_sandbox_agent_daemon(
     let log_file_err = log_file.try_clone()?;
 
     let exe = std::env::current_exe()?;
-    let mut cmd = ProcessCommand::new(exe);
+    let command_preview = format!("{} server --host {} --port {}", exe.display(), host, port);
+    let mut cmd = ProcessCommand::new(&exe);
     cmd.arg("server")
         .arg("--host")
         .arg(host)
@@ -286,7 +292,12 @@ pub fn spawn_sandbox_agent_daemon(
         cmd.arg("--token").arg(token);
     }
 
-    cmd.spawn().map_err(CliError::from)
+    cmd.spawn().map_err(|err| {
+        CliError::Server(format!(
+            "failed to spawn daemon subprocess `{command_preview}` (logs: {}): {err}",
+            log_path.display()
+        ))
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -384,7 +395,13 @@ pub fn start(cli: &CliConfig, host: &str, port: u16, token: Option<&str>) -> Res
     if let Some(pid) = read_pid(&pid_path) {
         if is_process_running(pid) {
             eprintln!("daemon process {pid} exists; waiting for health");
-            return wait_for_health(None, &base_url, token, DAEMON_HEALTH_TIMEOUT);
+            return wait_for_health(
+                None,
+                &base_url,
+                token,
+                DAEMON_HEALTH_TIMEOUT,
+                Some(&log_path),
+            );
         }
         let _ = remove_pid(&pid_path);
     }
@@ -399,7 +416,13 @@ pub fn start(cli: &CliConfig, host: &str, port: u16, token: Option<&str>) -> Res
     write_pid(&pid_path, pid)?;
     write_daemon_version(host, port)?;
 
-    let result = wait_for_health(Some(&mut child), &base_url, token, DAEMON_HEALTH_TIMEOUT);
+    let result = wait_for_health(
+        Some(&mut child),
+        &base_url,
+        token,
+        DAEMON_HEALTH_TIMEOUT,
+        Some(&log_path),
+    );
     if result.is_err() {
         let _ = remove_pid(&pid_path);
         let _ = remove_version_file(host, port);
@@ -572,11 +595,45 @@ pub fn ensure_running(
     if let Some(pid) = read_pid(&pid_path) {
         if is_process_running(pid) {
             eprintln!("daemon process {pid} running; waiting for health");
-            return wait_for_health(None, &base_url, token, DAEMON_HEALTH_TIMEOUT);
+            let log_path = daemon_log_path(host, port);
+            return wait_for_health(
+                None,
+                &base_url,
+                token,
+                DAEMON_HEALTH_TIMEOUT,
+                Some(&log_path),
+            );
         }
         let _ = remove_pid(&pid_path);
         let _ = remove_version_file(host, port);
     }
 
     start(cli, host, port, token)
+}
+
+fn with_log_tail(message: String, log_path: Option<&Path>) -> String {
+    let Some(log_path) = log_path else {
+        return message;
+    };
+
+    let mut output = format!("{message}\nlogs: {}", log_path.display());
+    match read_log_tail(log_path, DAEMON_LOG_TAIL_BYTES) {
+        Some(tail) if !tail.trim().is_empty() => {
+            output.push_str("\n--- log tail ---\n");
+            output.push_str(tail.trim());
+        }
+        _ => output.push_str("\n(log file is empty or unavailable)"),
+    }
+    output
+}
+
+fn read_log_tail(path: &Path, max_bytes: usize) -> Option<String> {
+    let mut file = fs::File::open(path).ok()?;
+    let len = file.metadata().ok()?.len();
+    let start = len.saturating_sub(max_bytes as u64);
+    file.seek(SeekFrom::Start(start)).ok()?;
+
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).ok()?;
+    Some(String::from_utf8_lossy(&bytes).to_string())
 }

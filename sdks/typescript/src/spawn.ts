@@ -25,6 +25,12 @@ export type SandboxAgentSpawnHandle = {
   dispose: () => Promise<void>;
 };
 
+type ProcessDiagnostics = {
+  getSpawnError: () => Error | undefined;
+  format: () => string;
+  dispose: () => void;
+};
+
 const PLATFORM_PACKAGES: Record<string, string> = {
   "darwin-arm64": "@sandbox-agent/cli-darwin-arm64",
   "darwin-x64": "@sandbox-agent/cli-darwin-x64",
@@ -35,6 +41,7 @@ const PLATFORM_PACKAGES: Record<string, string> = {
 
 const TRUST_PACKAGES =
   "@sandbox-agent/cli-linux-x64 @sandbox-agent/cli-linux-arm64 @sandbox-agent/cli-darwin-arm64 @sandbox-agent/cli-darwin-x64 @sandbox-agent/cli-win32-x64";
+const PROCESS_OUTPUT_TAIL_CHARS = 16_384;
 
 export function isNodeRuntime(): boolean {
   return typeof process !== "undefined" && !!process.versions?.node;
@@ -101,6 +108,7 @@ export async function spawnSandboxAgent(
 
   const stdio = logMode === "inherit" ? "inherit" : logMode === "silent" ? "ignore" : "pipe";
   const args = ["server", "--host", bindHost, "--port", String(port), "--token", token];
+  const command = formatCommand(binaryPath, args);
   const child = spawn(binaryPath, args, {
     stdio,
     env: {
@@ -108,15 +116,34 @@ export async function spawnSandboxAgent(
       ...(options.env ?? {}),
     },
   });
+  const diagnostics = attachProcessDiagnostics(child, logMode);
   const cleanup = registerProcessCleanup(child);
 
   const baseUrl = `http://${connectHost}:${port}`;
-  const ready = waitForHealth(baseUrl, fetcher ?? globalThis.fetch, timeoutMs, child, token);
-
-  await ready;
+  const ready = waitForHealth(
+    baseUrl,
+    fetcher ?? globalThis.fetch,
+    timeoutMs,
+    child,
+    token,
+    command,
+    diagnostics,
+  );
+  try {
+    await ready;
+  } catch (err) {
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill("SIGTERM");
+      await waitForExit(child, 1_000);
+    }
+    diagnostics.dispose();
+    cleanup.dispose();
+    throw err;
+  }
 
   const dispose = async () => {
-    if (child.exitCode !== null) {
+    if (child.exitCode !== null || child.signalCode !== null) {
+      diagnostics.dispose();
       cleanup.dispose();
       return;
     }
@@ -125,6 +152,7 @@ export async function spawnSandboxAgent(
     if (!exited) {
       child.kill("SIGKILL");
     }
+    diagnostics.dispose();
     cleanup.dispose();
   };
 
@@ -195,6 +223,8 @@ async function waitForHealth(
   timeoutMs: number,
   child: ChildProcess,
   token: string,
+  command: string,
+  diagnostics: ProcessDiagnostics,
 ): Promise<void> {
   if (!fetcher) {
     throw new Error("Fetch API is not available; provide a fetch implementation.");
@@ -203,8 +233,17 @@ async function waitForHealth(
   let lastError: string | undefined;
 
   while (Date.now() - start < timeoutMs) {
-    if (child.exitCode !== null) {
-      throw new Error("sandbox-agent exited before becoming healthy.");
+    const spawnError = diagnostics.getSpawnError();
+    if (spawnError) {
+      throw new Error(
+        `Failed to spawn sandbox-agent subprocess \`${command}\`: ${spawnError.message}${diagnostics.format()}`,
+      );
+    }
+
+    if (child.exitCode !== null || child.signalCode !== null) {
+      throw new Error(
+        `sandbox-agent exited before becoming healthy (exitCode=${child.exitCode ?? "null"}, signal=${child.signalCode ?? "none"}).${diagnostics.format()}`,
+      );
     }
     try {
       const response = await fetcher(`${baseUrl}/v1/health`, {
@@ -220,7 +259,9 @@ async function waitForHealth(
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
 
-  throw new Error(`Timed out waiting for sandbox-agent health (${lastError ?? "unknown error"}).`);
+  throw new Error(
+    `Timed out waiting for sandbox-agent health (${lastError ?? "unknown error"}).${diagnostics.format()}`,
+  );
 }
 
 async function waitForExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
@@ -252,6 +293,77 @@ function registerProcessCleanup(child: ChildProcess): { dispose: () => void } {
       process.off("exit", handler);
       process.off("SIGINT", handler);
       process.off("SIGTERM", handler);
+    },
+  };
+}
+
+function formatCommand(binaryPath: string, args: string[]): string {
+  const parts = [binaryPath, ...args].map(shellQuote);
+  return parts.join(" ");
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+function appendTail(current: string, chunk: string): string {
+  const merged = current + chunk;
+  if (merged.length <= PROCESS_OUTPUT_TAIL_CHARS) {
+    return merged;
+  }
+  return merged.slice(merged.length - PROCESS_OUTPUT_TAIL_CHARS);
+}
+
+function attachProcessDiagnostics(
+  child: ChildProcess,
+  logMode: SandboxAgentSpawnLogMode,
+): ProcessDiagnostics {
+  let stdoutTail = "";
+  let stderrTail = "";
+  let spawnError: Error | undefined;
+  const removers: Array<() => void> = [];
+
+  const onError = (error: Error) => {
+    spawnError = error;
+  };
+  child.on("error", onError);
+  removers.push(() => child.off("error", onError));
+
+  if (logMode === "pipe" && child.stdout) {
+    const onStdout = (chunk: string | Buffer) => {
+      stdoutTail = appendTail(stdoutTail, chunk.toString());
+    };
+    child.stdout.on("data", onStdout);
+    removers.push(() => child.stdout?.off("data", onStdout));
+  }
+
+  if (logMode === "pipe" && child.stderr) {
+    const onStderr = (chunk: string | Buffer) => {
+      stderrTail = appendTail(stderrTail, chunk.toString());
+    };
+    child.stderr.on("data", onStderr);
+    removers.push(() => child.stderr?.off("data", onStderr));
+  }
+
+  return {
+    getSpawnError: () => spawnError,
+    format: () => {
+      const parts: string[] = [];
+      if (stdoutTail.trim().length > 0) {
+        parts.push(`stdout:\n${stdoutTail.trim()}`);
+      }
+      if (stderrTail.trim().length > 0) {
+        parts.push(`stderr:\n${stderrTail.trim()}`);
+      }
+      if (parts.length === 0) {
+        return "";
+      }
+      return `\n--- subprocess output tail ---\n${parts.join("\n")}`;
+    },
+    dispose: () => {
+      for (const remove of removers) {
+        remove();
+      }
     },
   };
 }

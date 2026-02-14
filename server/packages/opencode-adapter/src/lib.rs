@@ -91,6 +91,11 @@ pub struct OpenCodeAdapterConfig {
     /// Optional pre-built provider payload for `/provider` and `/config/providers`.
     /// When `None`, falls back to the hardcoded mock/amp/claude/codex list.
     pub provider_payload: Option<Value>,
+    /// Optional display name for `/agent` metadata. Defaults to "Sandbox Agent".
+    pub agent_display_name: Option<String>,
+    /// Optional description for `/agent` metadata. Defaults to
+    /// "Sandbox Agent compatibility layer".
+    pub agent_description: Option<String>,
 }
 
 impl Default for OpenCodeAdapterConfig {
@@ -104,6 +109,8 @@ impl Default for OpenCodeAdapterConfig {
             native_proxy_manager: None,
             acp_dispatch: None,
             provider_payload: None,
+            agent_display_name: None,
+            agent_description: None,
         }
     }
 }
@@ -167,8 +174,14 @@ struct AcpPendingRequest {
 
 #[derive(Debug, Clone)]
 enum AcpPendingKind {
-    Permission,
+    Permission { options: Vec<AcpPermissionOption> },
     Question,
+}
+
+#[derive(Debug, Clone)]
+struct AcpPermissionOption {
+    option_id: String,
+    kind: String,
 }
 
 struct AdapterState {
@@ -898,12 +911,22 @@ async fn oc_agent_list(State(state): State<Arc<AdapterState>>) -> Response {
     if let Err(err) = state.ensure_initialized().await {
         return internal_error(err);
     }
+    let agent_name = state
+        .config
+        .agent_display_name
+        .clone()
+        .unwrap_or_else(|| "Sandbox Agent".to_string());
+    let agent_description = state
+        .config
+        .agent_description
+        .clone()
+        .unwrap_or_else(|| "Sandbox Agent compatibility layer".to_string());
     (
         StatusCode::OK,
         Json(json!([
             {
-                "name": "Sandbox Agent",
-                "description": "Sandbox Agent compatibility layer",
+                "name": agent_name,
+                "description": agent_description,
                 "mode": "all",
                 "native": false,
                 "hidden": false,
@@ -1929,13 +1952,33 @@ async fn oc_session_prompt(
             .map(|session| !session.messages.is_empty())
             .unwrap_or(false)
     };
+    let session_is_stale =
+        meta.last_connection_id != state.current_connection_for_agent(&meta.agent).await;
 
     if let Some(selection) = requested_selection.as_ref() {
         let selection_changed =
             meta.provider_id != selection.provider_id || meta.model_id != selection.model_id;
-        if has_messages && selection_changed {
+        let allow_stale_model_rebind = has_messages
+            && selection_changed
+            && session_is_stale
+            && meta.agent == selection.agent
+            && meta.provider_id == selection.provider_id;
+
+        if has_messages && selection_changed && !allow_stale_model_rebind {
             return bad_request(MODEL_CHANGE_ERROR);
         }
+
+        if allow_stale_model_rebind {
+            tracing::info!(
+                session_id = %session_id,
+                agent = %meta.agent,
+                provider_id = %meta.provider_id,
+                from_model_id = %meta.model_id,
+                to_model_id = %selection.model_id,
+                "allowing stale session model rebind on prompt"
+            );
+        }
+
         meta.provider_id = selection.provider_id.clone();
         meta.model_id = selection.model_id.clone();
         meta.agent = selection.agent.clone();
@@ -2815,8 +2858,11 @@ async fn oc_question_reply(
         }
     }));
 
-    if let Err(err) = set_session_status(&state, &session_id, "idle").await {
-        return internal_error(err);
+    // In ACP mode, the in-flight prompt turn emits idle when the turn completes.
+    if pending.is_none() {
+        if let Err(err) = set_session_status(&state, &session_id, "idle").await {
+            return internal_error(err);
+        }
     }
 
     (StatusCode::OK, Json(json!(true))).into_response()
@@ -2888,8 +2934,11 @@ async fn oc_question_reject(
         }
     }));
 
-    if let Err(err) = set_session_status(&state, &session_id, "idle").await {
-        return internal_error(err);
+    // In ACP mode, the in-flight prompt turn emits idle when the turn completes.
+    if pending.is_none() {
+        if let Err(err) = set_session_status(&state, &session_id, "idle").await {
+            return internal_error(err);
+        }
     }
 
     (StatusCode::OK, Json(json!(true))).into_response()
@@ -2925,6 +2974,102 @@ async fn oc_provider_oauth_callback() -> Response {
     (StatusCode::OK, Json(json!(true))).into_response()
 }
 
+fn parse_acp_permission_options(params: &Value) -> Vec<AcpPermissionOption> {
+    params
+        .get("options")
+        .and_then(Value::as_array)
+        .map(|options| {
+            options
+                .iter()
+                .filter_map(|option| {
+                    let option_id = option.get("optionId").and_then(Value::as_str)?;
+                    let kind = option.get("kind").and_then(Value::as_str)?;
+                    Some(AcpPermissionOption {
+                        option_id: option_id.to_string(),
+                        kind: kind.to_string(),
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+}
+
+fn preferred_permission_kinds_for_reply(reply: &str) -> &'static [&'static str] {
+    match reply {
+        "always" => &["allow_always", "allow_once"],
+        "reject" | "deny" => &["reject_once", "reject_always"],
+        _ => &["allow_once", "allow_always"],
+    }
+}
+
+fn select_permission_option_for_reply<'a>(
+    reply: &str,
+    options: &'a [AcpPermissionOption],
+) -> Option<&'a AcpPermissionOption> {
+    let preferred_kinds = preferred_permission_kinds_for_reply(reply);
+
+    for kind in preferred_kinds {
+        if let Some(option) = options.iter().find(|option| option.kind == *kind) {
+            return Some(option);
+        }
+    }
+
+    if matches!(reply, "reject" | "deny") {
+        if let Some(option) = options
+            .iter()
+            .find(|option| option.kind.starts_with("reject_"))
+        {
+            return Some(option);
+        }
+    } else if let Some(option) = options
+        .iter()
+        .find(|option| option.kind.starts_with("allow_"))
+    {
+        return Some(option);
+    }
+
+    options.first()
+}
+
+fn build_acp_permission_result(reply: &str, options: &[AcpPermissionOption]) -> Value {
+    let preferred_kind = preferred_permission_kinds_for_reply(reply)
+        .first()
+        .copied()
+        .unwrap_or("allow_once");
+
+    if let Some(option) = select_permission_option_for_reply(reply, options) {
+        let mut result = json!({
+            "outcome": {
+                "outcome": "selected",
+                "optionId": option.option_id,
+            }
+        });
+
+        if option.kind != preferred_kind {
+            if let Some(object) = result.as_object_mut() {
+                object.insert(
+                    "_meta".to_string(),
+                    json!({
+                        "sandboxagent.dev": {
+                            "requestedReply": reply,
+                            "selectedOptionKind": option.kind,
+                            "fallback": true,
+                        }
+                    }),
+                );
+            }
+        }
+
+        return result;
+    }
+
+    json!({
+        "outcome": {
+            "outcome": "cancelled",
+        }
+    })
+}
+
 async fn resolve_permission_inner(
     state: &Arc<AdapterState>,
     session_id: &str,
@@ -2945,20 +3090,28 @@ async fn resolve_permission_inner(
                     .map(|s| s.meta.agent_session_id.clone())
             };
             if let Some(server_id) = agent_session_id {
-                let option_kind = match reply {
-                    "always" => "allow_always",
-                    "reject" | "deny" => "reject_once",
-                    _ => "allow_once",
+                let response_result = match &pending.kind {
+                    AcpPendingKind::Permission { options } => {
+                        build_acp_permission_result(reply, options)
+                    }
+                    AcpPendingKind::Question => {
+                        warn!(
+                            session_id = %session_id,
+                            permission_id = %permission_id,
+                            "permission response matched pending question request; sending cancelled"
+                        );
+                        json!({
+                            "outcome": {
+                                "outcome": "cancelled",
+                            }
+                        })
+                    }
                 };
+
                 let response = json!({
                     "jsonrpc": "2.0",
                     "id": pending.jsonrpc_id,
-                    "result": {
-                        "outcome": "selected",
-                        "selectedOption": {
-                            "kind": option_kind
-                        }
-                    }
+                    "result": response_result,
                 });
                 if let Err(err) = dispatch.post(&server_id, None, response).await {
                     warn!(?err, "failed to forward permission response to ACP agent");
@@ -2991,6 +3144,12 @@ async fn resolve_permission_inner(
         if let Some(session) = projection.sessions.get_mut(session_id) {
             session.always_permissions.insert("execute".to_string());
         }
+    }
+
+    // In ACP mode, the in-flight `session/prompt` turn owns session completion
+    // and emits `session.idle` when the turn really ends.
+    if pending.is_some() {
+        return Ok(());
     }
 
     set_session_status(state, session_id, "idle").await
@@ -3731,6 +3890,7 @@ async fn acp_sse_translation_task(
             Some("session/request_permission") => {
                 let request_id = state.next_id("perm_");
                 let params = payload.get("params").cloned().unwrap_or(json!({}));
+                let options = parse_acp_permission_options(&params);
                 let permission_request = json!({
                     "id": request_id,
                     "sessionID": session_id,
@@ -3747,7 +3907,7 @@ async fn acp_sse_translation_task(
                         AcpPendingRequest {
                             opencode_session_id: session_id.clone(),
                             jsonrpc_id: jrpc_id,
-                            kind: AcpPendingKind::Permission,
+                            kind: AcpPendingKind::Permission { options },
                         },
                     );
                 }
@@ -4360,4 +4520,53 @@ fn internal_error(message: String) -> Response {
         Json(json!({"errors":[{"message": message}]})),
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn select_permission_option_prefers_reply_semantics() {
+        let options = vec![
+            AcpPermissionOption {
+                option_id: "allow-once".to_string(),
+                kind: "allow_once".to_string(),
+            },
+            AcpPermissionOption {
+                option_id: "allow-always".to_string(),
+                kind: "allow_always".to_string(),
+            },
+            AcpPermissionOption {
+                option_id: "reject-once".to_string(),
+                kind: "reject_once".to_string(),
+            },
+        ];
+
+        let once =
+            select_permission_option_for_reply("once", &options).expect("expected allow_once");
+        assert_eq!(once.option_id, "allow-once");
+
+        let always =
+            select_permission_option_for_reply("always", &options).expect("expected allow_always");
+        assert_eq!(always.option_id, "allow-always");
+
+        let reject =
+            select_permission_option_for_reply("reject", &options).expect("expected reject_once");
+        assert_eq!(reject.option_id, "reject-once");
+    }
+
+    #[test]
+    fn build_permission_result_uses_schema_shape() {
+        let options = vec![AcpPermissionOption {
+            option_id: "allow-once".to_string(),
+            kind: "allow_once".to_string(),
+        }];
+
+        let result = build_acp_permission_result("once", &options);
+
+        assert_eq!(result["outcome"]["outcome"], json!("selected"));
+        assert_eq!(result["outcome"]["optionId"], json!("allow-once"));
+        assert!(result.get("selectedOption").is_none());
+    }
 }

@@ -247,3 +247,13 @@ Update this file continuously during the migration.
 - Owner: Unassigned.
 - Status: in_progress
 - Links: `research/acp/simplify-server.md`, `docs/mcp-config.mdx`, `docs/skills-config.mdx`
+
+- Date: 2026-02-12
+- Area: OpenCode compat old-session prompt behavior
+- Issue: Prompting historical sessions could return immediate `400` (`MODEL_CHANGE_ERROR`) when the client sent a newer default model (for example `gpt-5.3-codex`) than the session's persisted model (`gpt-5.2-codex`), which appeared as a no-op in Gigacode.
+- Impact: Users could not continue old sessions after daemon/model-default changes, despite using the same provider/agent.
+- Proposed direction: Keep strict model-change rejection for active sessions, but allow same-agent/same-provider model rebinding for stale sessions (where `last_connection_id` differs) during `POST /opencode/session/{id}/message`.
+- Decision: Accepted and implemented.
+- Owner: Unassigned.
+- Status: resolved
+- Links: `server/packages/opencode-adapter/src/lib.rs`

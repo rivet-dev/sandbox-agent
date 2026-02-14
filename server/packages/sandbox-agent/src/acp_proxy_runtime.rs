@@ -446,8 +446,8 @@ fn map_adapter_error(err: AdapterError) -> SandboxError {
         AdapterError::Write(error) => SandboxError::StreamError {
             message: format!("failed writing to agent stdin: {error}"),
         },
-        AdapterError::Spawn(error) => SandboxError::StreamError {
-            message: format!("failed to start agent process: {error}"),
+        AdapterError::Spawn { command, error } => SandboxError::StreamError {
+            message: format!("failed to start agent process `{command}`: {error}"),
         },
         AdapterError::MissingStdin | AdapterError::MissingStdout | AdapterError::MissingStderr => {
             SandboxError::StreamError {
