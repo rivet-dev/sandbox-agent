@@ -16,7 +16,7 @@ jobs:
           node-version: 20
 
       - name: Generate skill artifacts
-        run: node scripts/skill-generator/generate.js
+        run: npx --yes tsx@4.21.0 scripts/skill-generator/generate.ts
 
       - name: Sync to skills repo
         env:
