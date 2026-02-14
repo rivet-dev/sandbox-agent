@@ -23,7 +23,7 @@ await run("sandbox-agent install-agent claude");
 await run("sandbox-agent install-agent codex");
 
 console.log("Starting server...");
-await sandbox.commands.run("sandbox-agent server --no-token --host 0.0.0.0 --port 3000", { background: true });
+await sandbox.commands.run("sandbox-agent server --no-token --host 0.0.0.0 --port 3000", { background: true, timeoutMs: 0 });
 
 const baseUrl = `https://${sandbox.getHost(3000)}`;
 
