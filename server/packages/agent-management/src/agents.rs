@@ -13,6 +13,7 @@ use url::Url;
 
 const DEFAULT_ACP_REGISTRY_URL: &str =
     "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json";
+const VERIFY_OUTPUT_TAIL_BYTES: usize = 16 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -875,25 +876,75 @@ fn write_text_file(path: &Path, contents: &str) -> Result<(), AgentError> {
 
 fn verify_command(path: &Path, args: &[&str]) -> Result<(), AgentError> {
     let mut command = Command::new(path);
-    if args.is_empty() {
-        command.arg("--help");
+    let effective_args = if args.is_empty() {
+        vec!["--help"]
     } else {
-        command.args(args);
-    }
-    command.stdout(Stdio::null()).stderr(Stdio::null());
+        args.to_vec()
+    };
+    command.args(&effective_args);
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
 
-    match command.status() {
-        Ok(status) if status.success() => Ok(()),
-        Ok(status) => Err(AgentError::VerifyFailed(format!(
-            "{} exited with status {}",
-            path.display(),
-            status
+    match command.output() {
+        Ok(output) if output.status.success() => Ok(()),
+        Ok(output) => Err(AgentError::VerifyFailed(format_subprocess_failure(
+            path,
+            &effective_args,
+            output.status.to_string(),
+            &output.stdout,
+            &output.stderr,
         ))),
         Err(err) => Err(AgentError::VerifyFailed(format!(
-            "{} failed to execute: {}",
-            path.display(),
-            err
+            "failed to execute `{}`: {err}",
+            format_command_for_display(path, &effective_args),
         ))),
+    }
+}
+
+fn format_subprocess_failure(
+    path: &Path,
+    args: &[&str],
+    status: String,
+    stdout: &[u8],
+    stderr: &[u8],
+) -> String {
+    format!(
+        "verification failed for `{}`\nstatus: {}\nstdout:\n{}\nstderr:\n{}",
+        format_command_for_display(path, args),
+        status,
+        format_output_tail(stdout),
+        format_output_tail(stderr),
+    )
+}
+
+fn format_command_for_display(path: &Path, args: &[&str]) -> String {
+    let mut parts = Vec::with_capacity(args.len() + 1);
+    parts.push(shell_quote(path.to_string_lossy().as_ref()));
+    for arg in args {
+        parts.push(shell_quote(arg));
+    }
+    parts.join(" ")
+}
+
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", shell_escape(value))
+}
+
+fn format_output_tail(bytes: &[u8]) -> String {
+    if bytes.is_empty() {
+        return "<empty>".to_string();
+    }
+
+    let start = bytes.len().saturating_sub(VERIFY_OUTPUT_TAIL_BYTES);
+    let suffix = String::from_utf8_lossy(&bytes[start..]).to_string();
+    let text = suffix.trim();
+    if text.is_empty() {
+        return "<empty>".to_string();
+    }
+
+    if start > 0 {
+        format!("[truncated {} bytes]\n{}", start, text)
+    } else {
+        text.to_string()
     }
 }
 
@@ -1651,6 +1702,39 @@ mod tests {
         assert!(
             result2.already_installed,
             "cursor re-install should be idempotent"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn verify_command_failure_contains_status_and_stdio() {
+        let temp_dir = tempfile::tempdir().expect("create tempdir");
+        let failing = temp_dir.path().join("failing");
+        write_exec(
+            &failing,
+            "#!/usr/bin/env sh\necho 'hello from stdout'\necho 'boom on stderr' 1>&2\nexit 42\n",
+        );
+
+        let err = verify_command(&failing, &[]).expect_err("verify should fail");
+        let AgentError::VerifyFailed(message) = err else {
+            panic!("expected VerifyFailed");
+        };
+
+        assert!(
+            message.contains("verification failed for"),
+            "missing prefix"
+        );
+        assert!(
+            message.contains("status: exit status: 42"),
+            "missing exit status"
+        );
+        assert!(
+            message.contains("stdout:\nhello from stdout"),
+            "missing stdout"
+        );
+        assert!(
+            message.contains("stderr:\nboom on stderr"),
+            "missing stderr"
         );
     }
 }
