@@ -19,8 +19,12 @@ const RING_BUFFER_SIZE: usize = 1024;
 
 #[derive(Debug, Error)]
 pub enum AdapterError {
-    #[error("failed to spawn subprocess: {0}")]
-    Spawn(std::io::Error),
+    #[error("failed to spawn subprocess `{command}`: {error}")]
+    Spawn {
+        command: String,
+        #[source]
+        error: std::io::Error,
+    },
     #[error("failed to capture subprocess stdin")]
     MissingStdin,
     #[error("failed to capture subprocess stdout")]
@@ -87,13 +91,18 @@ impl AdapterRuntime {
             "spawning agent process"
         );
 
+        let command_for_display = format_command_for_display(&launch.program, &launch.args);
         let mut child = command.spawn().map_err(|err| {
             tracing::error!(
                 program = ?launch.program,
+                args = ?launch.args,
                 error = %err,
                 "failed to spawn agent process"
             );
-            AdapterError::Spawn(err)
+            AdapterError::Spawn {
+                command: command_for_display.clone(),
+                error: err,
+            }
         })?;
 
         let pid = child.id().unwrap_or(0);
@@ -564,4 +573,17 @@ impl AdapterRuntime {
 
 fn id_key(value: &Value) -> String {
     serde_json::to_string(value).unwrap_or_else(|_| "null".to_string())
+}
+
+fn format_command_for_display(program: &std::path::Path, args: &[String]) -> String {
+    let mut parts = Vec::with_capacity(args.len() + 1);
+    parts.push(shell_quote(program.to_string_lossy().as_ref()));
+    for arg in args {
+        parts.push(shell_quote(arg));
+    }
+    parts.join(" ")
+}
+
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
 }
