@@ -26,7 +26,7 @@ use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use tar::Archive;
+use tar::{Archive, Builder};
 use tower_http::trace::TraceLayer;
 use tracing::Span;
 use utoipa::{Modify, OpenApi, ToSchema};
@@ -166,6 +166,7 @@ pub fn build_router_with_state(shared: Arc<AppState>) -> (Router, Arc<AppState>)
         .route("/fs/move", post(post_v1_fs_move))
         .route("/fs/stat", get(get_v1_fs_stat))
         .route("/fs/upload-batch", post(post_v1_fs_upload_batch))
+        .route("/fs/download-batch", get(get_v1_fs_download_batch))
         .route(
             "/config/mcp",
             get(get_v1_config_mcp)
@@ -295,6 +296,7 @@ pub async fn shutdown_servers(state: &Arc<AppState>) {
         post_v1_fs_move,
         get_v1_fs_stat,
         post_v1_fs_upload_batch,
+        get_v1_fs_download_batch,
         get_v1_config_mcp,
         put_v1_config_mcp,
         delete_v1_config_mcp,
@@ -321,6 +323,7 @@ pub async fn shutdown_servers(state: &Arc<AppState>) {
             FsEntriesQuery,
             FsDeleteQuery,
             FsUploadBatchQuery,
+            FsDownloadBatchQuery,
             FsEntryType,
             FsEntry,
             FsStat,
@@ -1073,6 +1076,129 @@ async fn post_v1_fs_upload_batch(
         paths: extracted,
         truncated,
     }))
+}
+
+fn tar_add_path(
+    builder: &mut Builder<&mut Vec<u8>>,
+    base: &StdPath,
+    path: &StdPath,
+) -> Result<(), SandboxError> {
+    let metadata = fs::symlink_metadata(path).map_err(|err| map_fs_error(path, err))?;
+    if metadata.file_type().is_symlink() {
+        return Err(SandboxError::InvalidRequest {
+            message: format!(
+                "symlinks are not supported in download-batch: {}",
+                path.display()
+            ),
+        });
+    }
+
+    let rel = path
+        .strip_prefix(base)
+        .map_err(|_| SandboxError::InvalidRequest {
+            message: format!("path is not under base: {}", path.display()),
+        })?;
+    let name = StdPath::new(".").join(rel);
+
+    if metadata.is_dir() {
+        builder
+            .append_dir(&name, path)
+            .map_err(|err| SandboxError::StreamError {
+                message: err.to_string(),
+            })?;
+        for entry in fs::read_dir(path).map_err(|err| map_fs_error(path, err))? {
+            let entry = entry.map_err(|err| SandboxError::StreamError {
+                message: err.to_string(),
+            })?;
+            tar_add_path(builder, base, &entry.path())?;
+        }
+        return Ok(());
+    }
+
+    if metadata.is_file() {
+        builder
+            .append_path_with_name(path, &name)
+            .map_err(|err| SandboxError::StreamError {
+                message: err.to_string(),
+            })?;
+        return Ok(());
+    }
+
+    Err(SandboxError::InvalidRequest {
+        message: format!("unsupported filesystem entry type: {}", path.display()),
+    })
+}
+
+/// Download a tar archive of a file or directory.
+///
+/// Returns `application/x-tar` bytes containing the requested path. If the path is a directory,
+/// the archive contains its contents (similar to `tar -C <dir> .`).
+#[utoipa::path(
+    get,
+    path = "/v1/fs/download-batch",
+    tag = "v1",
+    params(
+        ("path" = Option<String>, Query, description = "Source path (file or directory)")
+    ),
+    responses(
+        (status = 200, description = "tar archive bytes")
+    )
+)]
+async fn get_v1_fs_download_batch(
+    Query(query): Query<FsDownloadBatchQuery>,
+) -> Result<Response, ApiError> {
+    let raw = query.path.unwrap_or_else(|| ".".to_string());
+    let target = resolve_fs_path(&raw)?;
+    let metadata = fs::symlink_metadata(&target).map_err(|err| map_fs_error(&target, err))?;
+    if metadata.file_type().is_symlink() {
+        return Err(SandboxError::InvalidRequest {
+            message: format!(
+                "symlinks are not supported in download-batch: {}",
+                target.display()
+            ),
+        }
+        .into());
+    }
+
+    let mut out = Vec::<u8>::new();
+    {
+        let mut builder = Builder::new(&mut out);
+        if metadata.is_dir() {
+            // Pack directory contents, not an extra top-level folder wrapper.
+            for entry in fs::read_dir(&target).map_err(|err| map_fs_error(&target, err))? {
+                let entry = entry.map_err(|err| SandboxError::StreamError {
+                    message: err.to_string(),
+                })?;
+                tar_add_path(&mut builder, &target, &entry.path())?;
+            }
+        } else if metadata.is_file() {
+            let name = StdPath::new(".").join(target.file_name().ok_or_else(|| {
+                SandboxError::InvalidRequest {
+                    message: format!("invalid file path: {}", target.display()),
+                }
+            })?);
+            builder
+                .append_path_with_name(&target, name)
+                .map_err(|err| SandboxError::StreamError {
+                    message: err.to_string(),
+                })?;
+        } else {
+            return Err(SandboxError::InvalidRequest {
+                message: format!("unsupported filesystem entry type: {}", target.display()),
+            }
+            .into());
+        }
+
+        builder.finish().map_err(|err| SandboxError::StreamError {
+            message: err.to_string(),
+        })?;
+    }
+
+    Ok((
+        [(header::CONTENT_TYPE, "application/x-tar")],
+        Bytes::from(out),
+    )
+        .into_response())
 }
 
 #[utoipa::path(

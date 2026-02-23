@@ -35,9 +35,18 @@
   "devDependencies": {
     "@types/node": "^22.0.0",
     "openapi-typescript": "^6.7.0",
+    "tar": "^7.0.0",
     "tsup": "^8.0.0",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
+  },
+  "peerDependencies": {
+    "tar": "^7.0.0"
+  },
+  "peerDependenciesMeta": {
+    "tar": {
+      "optional": true
+    }
   },
   "optionalDependencies": {
     "@sandbox-agent/cli": "workspace:*"

@@ -1,7 +1,6 @@
 import { SandboxAgent } from "sandbox-agent";
 import { detectAgent, buildInspectorUrl } from "@sandbox-agent/example-shared";
 import { startDockerSandbox } from "@sandbox-agent/example-shared/docker";
-import * as tar from "tar";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -23,14 +22,9 @@ console.log("  Created 3 files in my-project/");
 console.log("Uploading files via batch tar...");
 const client = await SandboxAgent.connect({ baseUrl });
 
-const tarPath = path.join(tmpDir, "upload.tar");
-await tar.create(
-  { file: tarPath, cwd: tmpDir },
-  ["my-project"],
-);
-const tarBuffer = await fs.promises.readFile(tarPath);
-const uploadResult = await client.uploadFsBatch(tarBuffer, { path: "/opt" });
-console.log(`  Uploaded ${uploadResult.paths.length} files: ${uploadResult.paths.join(", ")}`);
+// Requires `tar` to be installed (optional peer dependency of `sandbox-agent`).
+const uploadResult = await client.uploadFsBatch({ sourcePath: projectDir }, { path: "/opt/my-project" });
+console.log(`  Uploaded ${uploadResult.paths.length} entries: ${uploadResult.paths.join(", ")}`);
 
 // Cleanup temp files
 fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -45,6 +39,22 @@ for (const entry of entries) {
 const readmeBytes = await client.readFsFile({ path: "/opt/my-project/README.md" });
 const readmeText = new TextDecoder().decode(readmeBytes);
 console.log(`  README.md content: ${readmeText.trim()}`);
+
+console.log("Downloading the uploaded project via batch tar...");
+const downloadTmp = path.resolve(__dirname, "../.tmp-download");
+fs.rmSync(downloadTmp, { recursive: true, force: true });
+fs.mkdirSync(downloadTmp, { recursive: true });
+await client.downloadFsBatch(
+  { path: "/opt/my-project" },
+  { outPath: path.join(downloadTmp, "my-project.tar"), extractTo: downloadTmp },
+);
+console.log(`  Extracted to: ${downloadTmp}`);
+for (const entry of fs.readdirSync(downloadTmp)) {
+  if (entry.endsWith(".tar")) {
+    continue;
+  }
+  console.log(`    ${entry}`);
+}
 
 console.log("Creating session...");
 const session = await client.createSession({ agent: detectAgent(), sessionInit: { cwd: "/opt/my-project", mcpServers: [] } });

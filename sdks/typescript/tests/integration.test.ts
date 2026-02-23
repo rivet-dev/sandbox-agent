@@ -1,6 +1,12 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { existsSync } from "node:fs";
-import { mkdtempSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  rmSync,
+  readFileSync,
+  writeFileSync,
+  mkdirSync,
+} from "node:fs";
 import { dirname, resolve } from "node:path";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,6 +20,77 @@ import { spawnSandboxAgent, isNodeRuntime, type SandboxAgentSpawnHandle } from "
 import { prepareMockAgentDataHome } from "./helpers/mock-agent.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+function isZeroBlock(block: Uint8Array): boolean {
+  for (const b of block) {
+    if (b !== 0) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function readTarString(block: Uint8Array, offset: number, length: number): string {
+  const slice = block.subarray(offset, offset + length);
+  let end = 0;
+  while (end < slice.length && slice[end] !== 0) {
+    end += 1;
+  }
+  return new TextDecoder().decode(slice.subarray(0, end));
+}
+
+function readTarOctal(block: Uint8Array, offset: number, length: number): number {
+  const raw = readTarString(block, offset, length).trim();
+  if (!raw) {
+    return 0;
+  }
+  return Number.parseInt(raw, 8);
+}
+
+function normalizeTarPath(p: string): string {
+  let out = p.replaceAll("\\", "/");
+  while (out.startsWith("./")) {
+    out = out.slice(2);
+  }
+  while (out.startsWith("/")) {
+    out = out.slice(1);
+  }
+  return out;
+}
+
+function untarFiles(tarBytes: Uint8Array): Map<string, Uint8Array> {
+  // Minimal ustar tar reader for tests. Supports regular files and directories.
+  const files = new Map<string, Uint8Array>();
+  let offset = 0;
+  while (offset + 512 <= tarBytes.length) {
+    const header = tarBytes.subarray(offset, offset + 512);
+    if (isZeroBlock(header)) {
+      const next = tarBytes.subarray(offset + 512, offset + 1024);
+      if (next.length === 512 && isZeroBlock(next)) {
+        break;
+      }
+      offset += 512;
+      continue;
+    }
+
+    const name = readTarString(header, 0, 100);
+    const prefix = readTarString(header, 345, 155);
+    const fullName = normalizeTarPath(prefix ? `${prefix}/${name}` : name);
+    const size = readTarOctal(header, 124, 12);
+    const typeflag = readTarString(header, 156, 1);
+
+    offset += 512;
+    const content = tarBytes.subarray(offset, offset + size);
+
+    // Regular file type is "0" (or NUL). Directories are "5".
+    if ((typeflag === "" || typeflag === "0") && fullName) {
+      files.set(fullName, content);
+    }
+
+    offset += Math.ceil(size / 512) * 512;
+  }
+  return files;
+}
 
 function findBinary(): string | null {
   if (process.env.SANDBOX_AGENT_BIN) {
@@ -280,5 +357,95 @@ describe("Integration: TypeScript SDK flat session API", () => {
 
     await sdk.dispose();
     rmSync(directory, { recursive: true, force: true });
+  });
+
+  it("supports filesystem download batch (tar)", async () => {
+    const sdk = await SandboxAgent.connect({
+      baseUrl,
+      token,
+    });
+
+    const root = mkdtempSync(join(tmpdir(), "sdk-fs-download-batch-"));
+    const dir = join(root, "docs");
+    const nested = join(dir, "nested");
+    await sdk.mkdirFs({ path: nested });
+    await sdk.writeFsFile({ path: join(dir, "a.txt") }, new TextEncoder().encode("aaa"));
+    await sdk.writeFsFile({ path: join(nested, "b.txt") }, new TextEncoder().encode("bbb"));
+
+    const tarBytes = await sdk.downloadFsBatch({ path: dir });
+    expect(tarBytes.length).toBeGreaterThan(0);
+
+    const files = untarFiles(tarBytes);
+    const a = files.get("a.txt");
+    const b = files.get("nested/b.txt");
+    expect(a).toBeTruthy();
+    expect(b).toBeTruthy();
+    expect(new TextDecoder().decode(a!)).toBe("aaa");
+    expect(new TextDecoder().decode(b!)).toBe("bbb");
+
+    await sdk.dispose();
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("supports filesystem upload batch from sourcePath (requires tar)", async () => {
+    const sdk = await SandboxAgent.connect({
+      baseUrl,
+      token,
+    });
+
+    const sourceRoot = mkdtempSync(join(tmpdir(), "sdk-upload-source-"));
+    const sourceDir = join(sourceRoot, "project");
+    mkdirSync(join(sourceDir, "nested"), { recursive: true });
+    writeFileSync(join(sourceDir, "a.txt"), "aaa");
+    writeFileSync(join(sourceDir, "nested", "b.txt"), "bbb");
+
+    const destRoot = mkdtempSync(join(tmpdir(), "sdk-upload-dest-"));
+    const destDir = join(destRoot, "uploaded");
+
+    await sdk.uploadFsBatch({ sourcePath: sourceDir }, { path: destDir });
+
+    const a = await sdk.readFsFile({ path: join(destDir, "a.txt") });
+    const b = await sdk.readFsFile({ path: join(destDir, "nested", "b.txt") });
+    expect(new TextDecoder().decode(a)).toBe("aaa");
+    expect(new TextDecoder().decode(b)).toBe("bbb");
+
+    await sdk.dispose();
+    rmSync(sourceRoot, { recursive: true, force: true });
+    rmSync(destRoot, { recursive: true, force: true });
+  });
+
+  it("supports filesystem download batch to outPath and extractTo (requires tar for extract)", async () => {
+    const sdk = await SandboxAgent.connect({
+      baseUrl,
+      token,
+    });
+
+    const serverRoot = mkdtempSync(join(tmpdir(), "sdk-download-server-"));
+    const serverDir = join(serverRoot, "docs");
+    await sdk.mkdirFs({ path: join(serverDir, "nested") });
+    await sdk.writeFsFile({ path: join(serverDir, "a.txt") }, new TextEncoder().encode("aaa"));
+    await sdk.writeFsFile(
+      { path: join(serverDir, "nested", "b.txt") },
+      new TextEncoder().encode("bbb"),
+    );
+
+    const localRoot = mkdtempSync(join(tmpdir(), "sdk-download-local-"));
+    const outTar = join(localRoot, "docs.tar");
+    const extractTo = join(localRoot, "extracted");
+
+    const bytes = await sdk.downloadFsBatch(
+      { path: serverDir },
+      { outPath: outTar, extractTo },
+    );
+    expect(bytes.length).toBeGreaterThan(0);
+
+    const extractedA = readFileSync(join(extractTo, "a.txt"), "utf8");
+    const extractedB = readFileSync(join(extractTo, "nested", "b.txt"), "utf8");
+    expect(extractedA).toBe("aaa");
+    expect(extractedB).toBe("bbb");
+
+    await sdk.dispose();
+    rmSync(serverRoot, { recursive: true, force: true });
+    rmSync(localRoot, { recursive: true, force: true });
   });
 });

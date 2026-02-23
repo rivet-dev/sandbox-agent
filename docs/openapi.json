@@ -654,6 +654,33 @@
         }
       }
     },
+    "/v1/fs/download-batch": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Download a tar archive of a file or directory.",
+        "description": "Returns `application/x-tar` bytes containing the requested path. If the path is a directory,\nthe archive contains its contents (similar to `tar -C <dir> .`).",
+        "operationId": "get_v1_fs_download_batch",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "query",
+            "description": "Source path (file or directory)",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "tar archive bytes"
+          }
+        }
+      }
+    },
     "/v1/fs/entries": {
       "get": {
         "tags": [
@@ -1263,6 +1290,15 @@
           },
           "recursive": {
             "type": "boolean",
+            "nullable": true
+          }
+        }
+      },
+      "FsDownloadBatchQuery": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
             "nullable": true
           }
         }

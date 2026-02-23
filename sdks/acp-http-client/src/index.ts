@@ -53,6 +53,13 @@ export type QueryValue = string | number | boolean | null | undefined;
 export interface AcpHttpTransportOptions {
   path?: string;
   bootstrapQuery?: Record<string, QueryValue>;
+  /**
+   * Disable the background SSE GET loop. When true, the client operates in
+   * POST-only mode where all responses are read from the POST response body.
+   * Useful for environments where streaming GET requests are not supported
+   * (e.g. Cloudflare Workers `containerFetch`).
+   */
+  disableSse?: boolean;
 }
 
 export interface AcpHttpClientOptions {
@@ -271,6 +278,7 @@ class StreamableHttpAcpTransport {
   private closed = false;
   private closingPromise: Promise<void> | null = null;
   private postedOnce = false;
+  private readonly sseDisabled: boolean;
 
   constructor(options: StreamableHttpAcpTransportOptions) {
     this.baseUrl = options.baseUrl.replace(/\/$/, "");
@@ -279,6 +287,7 @@ class StreamableHttpAcpTransport {
     this.token = options.token;
     this.defaultHeaders = options.defaultHeaders;
     this.onEnvelope = options.onEnvelope;
+    this.sseDisabled = options.transport?.disableSse ?? false;
     this.bootstrapQuery = options.transport?.bootstrapQuery
       ? buildQueryParams(options.transport.bootstrapQuery)
       : null;
@@ -405,7 +414,7 @@ class StreamableHttpAcpTransport {
   }
 
   private ensureSseLoop(): void {
-    if (this.sseLoop || this.closed || !this.postedOnce) {
+    if (this.sseDisabled || this.sseLoop || this.closed || !this.postedOnce) {
       return;
     }
 

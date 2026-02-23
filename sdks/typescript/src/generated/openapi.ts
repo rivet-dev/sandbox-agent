@@ -32,6 +32,14 @@ export interface paths {
     put: operations["put_v1_config_skills"];
     delete: operations["delete_v1_config_skills"];
   };
+  "/v1/fs/download-batch": {
+    /**
+     * Download a tar archive of a file or directory.
+     * @description Returns `application/x-tar` bytes containing the requested path. If the path is a directory,
+     * the archive contains its contents (similar to `tar -C <dir> .`).
+     */
+    get: operations["get_v1_fs_download_batch"];
+  };
   "/v1/fs/entries": {
     get: operations["get_v1_fs_entries"];
   };
@@ -140,6 +148,9 @@ export interface components {
     FsDeleteQuery: {
       path: string;
       recursive?: boolean | null;
+    };
+    FsDownloadBatchQuery: {
+      path?: string | null;
     };
     FsEntriesQuery: {
       path?: string | null;
@@ -595,6 +606,25 @@ export interface operations {
     responses: {
       /** @description Deleted */
       204: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Download a tar archive of a file or directory.
+   * @description Returns `application/x-tar` bytes containing the requested path. If the path is a directory,
+   * the archive contains its contents (similar to `tar -C <dir> .`).
+   */
+  get_v1_fs_download_batch: {
+    parameters: {
+      query?: {
+        /** @description Source path (file or directory) */
+        path?: string | null;
+      };
+    };
+    responses: {
+      /** @description tar archive bytes */
+      200: {
         content: never;
       };
     };

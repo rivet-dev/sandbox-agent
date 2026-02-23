@@ -122,22 +122,13 @@ Batch upload accepts `application/x-tar` and extracts into the destination direc
 <CodeGroup>
 ```ts TypeScript
 import { SandboxAgent } from "sandbox-agent";
-import fs from "node:fs";
-import path from "node:path";
-import tar from "tar";
 
 const sdk = await SandboxAgent.connect({
   baseUrl: "http://127.0.0.1:2468",
 });
 
-const archivePath = path.join(process.cwd(), "skills.tar");
-await tar.c({
-  cwd: "./skills",
-  file: archivePath,
-}, ["."]);
-
-const tarBuffer = await fs.promises.readFile(archivePath);
-const result = await sdk.uploadFsBatch(tarBuffer, {
+// Requires `tar` to be installed (it's an optional peer dependency).
+const result = await sdk.uploadFsBatch({ sourcePath: "./skills" }, {
   path: "./skills",
 });
 
@@ -150,5 +141,29 @@ tar -cf skills.tar -C ./skills .
 curl -X POST "http://127.0.0.1:2468/v1/fs/upload-batch?path=./skills" \
   -H "Content-Type: application/x-tar" \
   --data-binary @skills.tar
+```
+</CodeGroup>
+
+## Batch download (tar)
+
+Batch download returns `application/x-tar` bytes for a file or directory. If the path is a directory,
+the archive contains the directory contents (similar to `tar -C <dir> .`).
+
+<CodeGroup>
+```ts TypeScript
+import { SandboxAgent } from "sandbox-agent";
+
+const sdk = await SandboxAgent.connect({
+  baseUrl: "http://127.0.0.1:2468",
+});
+
+// Requires `tar` to be installed if you want to extract (it's an optional peer dependency).
+await sdk.downloadFsBatch({ path: "./skills" }, { outPath: "./skills.tar" });
+await sdk.downloadFsBatch({ path: "./skills" }, { extractTo: "./skills-extracted" });
+```
+
+```bash cURL
+curl -X GET "http://127.0.0.1:2468/v1/fs/download-batch?path=./skills" \
+  --output ./skills.tar
 ```
 </CodeGroup>

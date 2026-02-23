@@ -1,4 +1,5 @@
 use super::*;
+use std::io::Cursor;
 
 #[tokio::test]
 async fn v1_health_removed_legacy_and_opencode_unmounted() {
@@ -132,6 +133,73 @@ async fn v1_filesystem_endpoints_round_trip() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn v1_filesystem_download_batch_returns_tar() {
+    let test_app = TestApp::new(AuthConfig::disabled());
+
+    let (status, _, _) = send_request_raw(
+        &test_app.app,
+        Method::PUT,
+        "/v1/fs/file?path=docs/a.txt",
+        Some(b"aaa".to_vec()),
+        &[],
+        Some("application/octet-stream"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, _, _) = send_request_raw(
+        &test_app.app,
+        Method::PUT,
+        "/v1/fs/file?path=docs/nested/b.txt",
+        Some(b"bbb".to_vec()),
+        &[],
+        Some("application/octet-stream"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, headers, body) = send_request_raw(
+        &test_app.app,
+        Method::GET,
+        "/v1/fs/download-batch?path=docs",
+        None,
+        &[],
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        headers
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or(""),
+        "application/x-tar"
+    );
+
+    let mut archive = tar::Archive::new(Cursor::new(body));
+    let mut paths: Vec<String> = archive
+        .entries()
+        .expect("tar entries")
+        .map(|entry| {
+            entry
+                .expect("tar entry")
+                .path()
+                .expect("tar path")
+                .to_string_lossy()
+                .to_string()
+        })
+        .collect();
+    paths.sort();
+
+    let has_a = paths.iter().any(|p| p == "a.txt" || p == "./a.txt");
+    let has_b = paths
+        .iter()
+        .any(|p| p == "nested/b.txt" || p == "./nested/b.txt");
+    assert!(has_a, "expected a.txt in tar, got: {paths:?}");
+    assert!(has_b, "expected nested/b.txt in tar, got: {paths:?}");
 }
 
 #[tokio::test]

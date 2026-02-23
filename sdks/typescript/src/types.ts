@@ -18,6 +18,7 @@ export type FsEntry = components["schemas"]["FsEntry"];
 export type FsPathQuery = QueryParams<operations["get_v1_fs_file"]>;
 export type FsDeleteQuery = QueryParams<operations["delete_v1_fs_entry"]>;
 export type FsUploadBatchQuery = QueryParams<operations["post_v1_fs_upload_batch"]>;
+export type FsDownloadBatchQuery = QueryParams<operations["get_v1_fs_download_batch"]>;
 export type FsWriteResponse = JsonResponse<operations["put_v1_fs_file"], 200>;
 export type FsActionResponse = JsonResponse<operations["delete_v1_fs_entry"], 200>;
 export type FsMoveRequest = JsonRequestBody<operations["post_v1_fs_move"]>;

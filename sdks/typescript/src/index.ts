@@ -38,6 +38,7 @@ export type {
   FsEntry,
   FsMoveRequest,
   FsMoveResponse,
+  FsDownloadBatchQuery,
   FsPathQuery,
   FsStat,
   FsUploadBatchQuery,
