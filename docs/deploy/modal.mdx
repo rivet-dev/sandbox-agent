@@ -73,6 +73,22 @@ await sb.terminate();
 
 Modal caches image layers, so the `dockerfileCommands` that install `curl` and `sandbox-agent` only run on the first build. Subsequent sandbox creates reuse the cached image.
 
+## Running the test
+
+The example includes a health-check test. First, build the SDK:
+
+```bash
+pnpm --filter sandbox-agent build
+```
+
+Then run the test with your Modal credentials:
+
+```bash
+MODAL_TOKEN_ID=<your-token-id> MODAL_TOKEN_SECRET=<your-token-secret> npx vitest run
+```
+
+Run from `examples/modal/`. The test will skip if credentials are not set.
+
 ## Notes
 
 - Modal sandboxes use [gVisor](https://gvisor.dev/) for strong isolation.
