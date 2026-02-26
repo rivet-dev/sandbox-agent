@@ -1,4 +1,5 @@
-use std::fs::{self, OpenOptions};
+use std::fs::{self, File, OpenOptions};
+use std::io::{Read, Seek, SeekFrom};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
@@ -15,6 +16,7 @@ const HEALTH_ENDPOINTS: [&str; 4] = ["health", "healthz", "app/agents", "agents"
 const HEALTH_ATTEMPTS: usize = 20;
 const HEALTH_DELAY_MS: u64 = 150;
 const MONITOR_DELAY_MS: u64 = 500;
+const OPENCODE_LOG_TAIL_BYTES: usize = 16 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct OpenCodeServerManagerConfig {
@@ -157,7 +159,20 @@ impl OpenCodeServerManager {
             sleep(Duration::from_millis(HEALTH_DELAY_MS)).await;
         }
 
-        Err("OpenCode server health check failed".to_string())
+        let log_path = opencode_log_path(&self.inner.config.log_dir);
+        let mut message = format!(
+            "OpenCode server health check failed (logs: {})",
+            log_path.display()
+        );
+        match read_log_tail(&log_path, OPENCODE_LOG_TAIL_BYTES) {
+            Some(tail) if !tail.trim().is_empty() => {
+                message.push_str("\n--- log tail ---\n");
+                message.push_str(tail.trim());
+            }
+            _ => message.push_str("\n(log file is empty or unavailable)"),
+        }
+
+        Err(message)
     }
 
     async fn spawn_http_server(&self) -> Result<(String, Arc<StdMutex<Option<Child>>>), String> {
@@ -169,16 +184,26 @@ impl OpenCodeServerManager {
                 .resolve_binary(AgentId::Opencode)
                 .map_err(|err| err.to_string())?;
             let port = find_available_port()?;
-            let mut command = Command::new(path);
-            let stderr = open_opencode_log(&log_dir).unwrap_or_else(|_| Stdio::null());
+            let command_preview = format!("{} serve --port {port}", path.display());
+            let mut command = Command::new(&path);
+            let log_path = opencode_log_path(&log_dir);
+            let log_file = open_opencode_log_file(&log_dir)?;
+            let log_file_err = log_file
+                .try_clone()
+                .map_err(|err| format!("failed to clone OpenCode log file: {err}"))?;
             command
                 .arg("serve")
                 .arg("--port")
                 .arg(port.to_string())
-                .stdout(Stdio::null())
-                .stderr(stderr);
+                .stdout(Stdio::from(log_file))
+                .stderr(Stdio::from(log_file_err));
 
-            let child = command.spawn().map_err(|err| err.to_string())?;
+            let child = command.spawn().map_err(|err| {
+                format!(
+                    "failed to spawn OpenCode server `{command_preview}` (logs: {}): {err}",
+                    log_path.display()
+                )
+            })?;
             Ok::<(String, Child), String>((format!("http://127.0.0.1:{port}"), child))
         })
         .await
@@ -263,16 +288,29 @@ fn default_log_dir() -> PathBuf {
     base
 }
 
-fn open_opencode_log(log_dir: &Path) -> Result<Stdio, String> {
+fn opencode_log_path(log_dir: &Path) -> PathBuf {
+    log_dir.join("opencode").join("opencode-compat.log")
+}
+
+fn open_opencode_log_file(log_dir: &Path) -> Result<File, String> {
     let directory = log_dir.join("opencode");
     fs::create_dir_all(&directory).map_err(|err| err.to_string())?;
-    let path = directory.join("opencode-compat.log");
-    let file = OpenOptions::new()
+    OpenOptions::new()
         .create(true)
         .append(true)
-        .open(path)
-        .map_err(|err| err.to_string())?;
-    Ok(file.into())
+        .open(opencode_log_path(log_dir))
+        .map_err(|err| err.to_string())
+}
+
+fn read_log_tail(path: &Path, max_bytes: usize) -> Option<String> {
+    let mut file = File::open(path).ok()?;
+    let len = file.metadata().ok()?.len();
+    let start = len.saturating_sub(max_bytes as u64);
+    file.seek(SeekFrom::Start(start)).ok()?;
+
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).ok()?;
+    Some(String::from_utf8_lossy(&bytes).to_string())
 }
 
 fn find_available_port() -> Result<u16, String> {
