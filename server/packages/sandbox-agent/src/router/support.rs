@@ -205,7 +205,7 @@ pub(super) fn agent_capabilities_for(agent: AgentId) -> AgentCapabilities {
             tool_calls: true,
             tool_results: true,
             text_messages: true,
-            images: false,
+            images: true,
             file_attachments: false,
             session_lifecycle: false,
             error_events: false,
