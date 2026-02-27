@@ -208,7 +208,7 @@ pub(super) fn agent_capabilities_for(agent: AgentId) -> AgentCapabilities {
             images: true,
             file_attachments: false,
             session_lifecycle: false,
-            error_events: false,
+            error_events: true,
             reasoning: false,
             status: false,
             command_execution: false,
