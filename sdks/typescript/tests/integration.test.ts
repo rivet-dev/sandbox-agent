@@ -254,6 +254,127 @@ describe("Integration: TypeScript SDK flat session API", () => {
     await sdk.dispose();
   });
 
+  it("blocks manual session/cancel and requires destroySession", async () => {
+    const sdk = await SandboxAgent.connect({
+      baseUrl,
+      token,
+    });
+
+    const session = await sdk.createSession({ agent: "mock" });
+
+    await expect(session.send("session/cancel")).rejects.toThrow(
+      "Use destroySession(sessionId) instead.",
+    );
+    await expect(sdk.sendSessionMethod(session.id, "session/cancel", {})).rejects.toThrow(
+      "Use destroySession(sessionId) instead.",
+    );
+
+    const destroyed = await sdk.destroySession(session.id);
+    expect(destroyed.destroyedAt).toBeDefined();
+
+    const reloaded = await sdk.getSession(session.id);
+    expect(reloaded?.destroyedAt).toBeDefined();
+
+    await sdk.dispose();
+  });
+
+  it("supports typed config helpers and createSession preconfiguration", async () => {
+    const sdk = await SandboxAgent.connect({
+      baseUrl,
+      token,
+    });
+
+    const session = await sdk.createSession({
+      agent: "mock",
+      model: "mock",
+    });
+
+    const options = await session.getConfigOptions();
+    expect(options.some((option) => option.category === "model")).toBe(true);
+
+    await expect(session.setModel("unknown-model")).rejects.toThrow("does not support value");
+
+    await sdk.dispose();
+  });
+
+  it("setModel happy path switches to a valid model", async () => {
+    const sdk = await SandboxAgent.connect({
+      baseUrl,
+      token,
+    });
+
+    const session = await sdk.createSession({ agent: "mock" });
+    await session.setModel("mock-fast");
+
+    const options = await session.getConfigOptions();
+    const modelOption = options.find((o) => o.category === "model");
+    expect(modelOption?.currentValue).toBe("mock-fast");
+
+    await sdk.dispose();
+  });
+
+  it("setMode happy path switches to a valid mode", async () => {
+    const sdk = await SandboxAgent.connect({
+      baseUrl,
+      token,
+    });
+
+    const session = await sdk.createSession({ agent: "mock" });
+    await session.setMode("plan");
+
+    const modes = await session.getModes();
+    expect(modes?.currentModeId).toBe("plan");
+
+    await sdk.dispose();
+  });
+
+  it("setThoughtLevel happy path switches to a valid thought level", async () => {
+    const sdk = await SandboxAgent.connect({
+      baseUrl,
+      token,
+    });
+
+    const session = await sdk.createSession({ agent: "mock" });
+    await session.setThoughtLevel("high");
+
+    const options = await session.getConfigOptions();
+    const thoughtOption = options.find((o) => o.category === "thought_level");
+    expect(thoughtOption?.currentValue).toBe("high");
+
+    await sdk.dispose();
+  });
+
+  it("setModel/setMode/setThoughtLevel can be changed multiple times", async () => {
+    const sdk = await SandboxAgent.connect({
+      baseUrl,
+      token,
+    });
+
+    const session = await sdk.createSession({ agent: "mock" });
+
+    // Model: mock → mock-fast → mock
+    await session.setModel("mock-fast");
+    expect((await session.getConfigOptions()).find((o) => o.category === "model")?.currentValue).toBe("mock-fast");
+    await session.setModel("mock");
+    expect((await session.getConfigOptions()).find((o) => o.category === "model")?.currentValue).toBe("mock");
+
+    // Mode: normal → plan → normal
+    await session.setMode("plan");
+    expect((await session.getModes())?.currentModeId).toBe("plan");
+    await session.setMode("normal");
+    expect((await session.getModes())?.currentModeId).toBe("normal");
+
+    // Thought level: low → high → medium → low
+    await session.setThoughtLevel("high");
+    expect((await session.getConfigOptions()).find((o) => o.category === "thought_level")?.currentValue).toBe("high");
+    await session.setThoughtLevel("medium");
+    expect((await session.getConfigOptions()).find((o) => o.category === "thought_level")?.currentValue).toBe("medium");
+    await session.setThoughtLevel("low");
+    expect((await session.getConfigOptions()).find((o) => o.category === "thought_level")?.currentValue).toBe("low");
+
+    await sdk.dispose();
+  });
+
   it("supports MCP and skills config HTTP helpers", async () => {
     const sdk = await SandboxAgent.connect({
       baseUrl,

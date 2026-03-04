@@ -78,7 +78,7 @@ impl AgentId {
 
     fn agent_process_registry_id(self) -> Option<&'static str> {
         match self {
-            AgentId::Claude => Some("claude-code-acp"),
+            AgentId::Claude => Some("claude-acp"),
             AgentId::Codex => Some("codex-acp"),
             AgentId::Opencode => Some("opencode"),
             AgentId::Amp => Some("amp-acp"),
@@ -90,7 +90,7 @@ impl AgentId {
 
     fn agent_process_binary_hint(self) -> Option<&'static str> {
         match self {
-            AgentId::Claude => Some("claude-code-acp"),
+            AgentId::Claude => Some("claude-agent-acp"),
             AgentId::Codex => Some("codex-acp"),
             AgentId::Opencode => Some("opencode"),
             AgentId::Amp => Some("amp-acp"),
@@ -606,7 +606,7 @@ impl AgentManager {
         match agent {
             AgentId::Claude => {
                 let package = fallback_npx_package(
-                    "@zed-industries/claude-code-acp",
+                    "@zed-industries/claude-agent-acp",
                     options.agent_process_version.as_deref(),
                 );
                 write_npx_agent_process_launcher(&launcher, &package, &[], &HashMap::new())?;

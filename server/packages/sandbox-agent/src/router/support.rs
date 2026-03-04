@@ -90,6 +90,9 @@ pub(super) fn fallback_config_options(agent: AgentId) -> Vec<Value> {
         AgentId::Codex => CODEX.clone(),
         AgentId::Opencode => OPENCODE.clone(),
         AgentId::Cursor => CURSOR.clone(),
+        // Amp returns empty configOptions from session/new but exposes modes via
+        // the `modes` field. The model is hardcoded. Modes discovered from ACP
+        // session/new response (amp-acp v0.7.0).
         AgentId::Amp => vec![
             json!({
                 "id": "model",
@@ -106,12 +109,10 @@ pub(super) fn fallback_config_options(agent: AgentId) -> Vec<Value> {
                 "name": "Mode",
                 "category": "mode",
                 "type": "select",
-                "currentValue": "smart",
+                "currentValue": "default",
                 "options": [
-                    { "value": "smart", "name": "Smart" },
-                    { "value": "deep", "name": "Deep" },
-                    { "value": "free", "name": "Free" },
-                    { "value": "rush", "name": "Rush" }
+                    { "value": "default", "name": "Default" },
+                    { "value": "bypass", "name": "Bypass" }
                 ]
             }),
         ],
@@ -125,41 +126,76 @@ pub(super) fn fallback_config_options(agent: AgentId) -> Vec<Value> {
                 { "value": "default", "name": "Default" }
             ]
         })],
-        AgentId::Mock => vec![json!({
-            "id": "model",
-            "name": "Model",
-            "category": "model",
-            "type": "select",
-            "currentValue": "mock",
-            "options": [
-                { "value": "mock", "name": "Mock" }
-            ]
-        })],
+        AgentId::Mock => vec![
+            json!({
+                "id": "model",
+                "name": "Model",
+                "category": "model",
+                "type": "select",
+                "currentValue": "mock",
+                "options": [
+                    { "value": "mock", "name": "Mock" },
+                    { "value": "mock-fast", "name": "Mock Fast" }
+                ]
+            }),
+            json!({
+                "id": "mode",
+                "name": "Mode",
+                "category": "mode",
+                "type": "select",
+                "currentValue": "normal",
+                "options": [
+                    { "value": "normal", "name": "Normal" },
+                    { "value": "plan", "name": "Plan" }
+                ]
+            }),
+            json!({
+                "id": "thought_level",
+                "name": "Thought Level",
+                "category": "thought_level",
+                "type": "select",
+                "currentValue": "low",
+                "options": [
+                    { "value": "low", "name": "Low" },
+                    { "value": "medium", "name": "Medium" },
+                    { "value": "high", "name": "High" }
+                ]
+            }),
+        ],
     }
 }
 
 /// Parse an agent config JSON file (from `scripts/agent-configs/resources/`) into
 /// ACP `SessionConfigOption` values. The JSON format is:
 /// ```json
-/// { "defaultModel": "...", "models": [{id, name}], "defaultMode?": "...", "modes?": [{id, name}] }
+/// {
+///   "defaultModel": "...", "models": [{id, name}],
+///   "defaultMode?": "...", "modes?": [{id, name}],
+///   "defaultThoughtLevel?": "...", "thoughtLevels?": [{id, name}]
+/// }
 /// ```
+///
+/// Note: Claude and Codex don't report configOptions from `session/new`, so these
+/// JSON resource files are the source of truth for the capabilities report.
+/// Claude modes (plan, default) were discovered via manual ACP probing —
+/// `session/set_mode` works but `session/set_config_option` is not implemented.
+/// Codex modes/thought levels were discovered from its `session/new` response.
 fn parse_agent_config(json_str: &str) -> Vec<Value> {
     #[derive(serde::Deserialize)]
     struct AgentConfig {
         #[serde(rename = "defaultModel")]
         default_model: String,
-        models: Vec<ModelEntry>,
+        models: Vec<ConfigEntry>,
         #[serde(rename = "defaultMode")]
         default_mode: Option<String>,
-        modes: Option<Vec<ModeEntry>>,
+        modes: Option<Vec<ConfigEntry>>,
+        #[serde(rename = "defaultThoughtLevel")]
+        default_thought_level: Option<String>,
+        #[serde(rename = "thoughtLevels")]
+        thought_levels: Option<Vec<ConfigEntry>>,
     }
     #[derive(serde::Deserialize)]
-    struct ModelEntry {
-        id: String,
-        name: String,
-    }
-    #[derive(serde::Deserialize)]
-    struct ModeEntry {
+    struct ConfigEntry {
         id: String,
         name: String,
     }
@@ -189,6 +225,20 @@ fn parse_agent_config(json_str: &str) -> Vec<Value> {
             "options": modes.iter().map(|m| json!({
                 "value": m.id,
                 "name": m.name,
+            })).collect::<Vec<_>>(),
+        }));
+    }
+
+    if let Some(thought_levels) = config.thought_levels {
+        options.push(json!({
+            "id": "thought_level",
+            "name": "Thought Level",
+            "category": "thought_level",
+            "type": "select",
+            "currentValue": config.default_thought_level.unwrap_or_else(|| thought_levels[0].id.clone()),
+            "options": thought_levels.iter().map(|t| json!({
+                "value": t.id,
+                "name": t.name,
             })).collect::<Vec<_>>(),
         }));
     }

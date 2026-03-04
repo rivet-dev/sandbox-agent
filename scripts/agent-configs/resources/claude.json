@@ -3,19 +3,42 @@
   "models": [
     {
       "id": "default",
-      "name": "Default (recommended)"
-    },
-    {
-      "id": "opus",
-      "name": "Opus"
+      "name": "Default"
     },
     {
       "id": "sonnet",
       "name": "Sonnet"
     },
     {
+      "id": "opus",
+      "name": "Opus"
+    },
+    {
       "id": "haiku",
       "name": "Haiku"
+    }
+  ],
+  "defaultMode": "default",
+  "modes": [
+    {
+      "id": "default",
+      "name": "Default"
+    },
+    {
+      "id": "acceptEdits",
+      "name": "Accept Edits"
+    },
+    {
+      "id": "plan",
+      "name": "Plan"
+    },
+    {
+      "id": "dontAsk",
+      "name": "Don't Ask"
+    },
+    {
+      "id": "bypassPermissions",
+      "name": "Bypass Permissions"
     }
   ]
 }

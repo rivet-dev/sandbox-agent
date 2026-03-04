@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::Command as ProcessCommand;
@@ -24,7 +24,7 @@ use sandbox_agent_agent_credentials::{
     ProviderCredentials,
 };
 use sandbox_agent_agent_management::agents::{AgentId, AgentManager, InstallOptions};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use thiserror::Error;
 use tower_http::cors::{Any, CorsLayer};
@@ -220,6 +220,8 @@ pub struct AgentsArgs {
 pub enum AgentsCommand {
     /// List all agents and install status.
     List(ClientArgs),
+    /// Emit JSON report of model/mode/thought options for all agents.
+    Report(ClientArgs),
     /// Install or reinstall an agent.
     Install(ApiInstallAgentArgs),
 }
@@ -475,6 +477,7 @@ fn run_agents(command: &AgentsCommand, cli: &CliConfig) -> Result<(), CliError> 
             let result = call_acp_extension(&ctx, ACP_EXTENSION_AGENT_LIST_METHOD, json!({}))?;
             write_stdout_line(&serde_json::to_string_pretty(&result)?)
         }
+        AgentsCommand::Report(args) => run_agents_report(args, cli),
         AgentsCommand::Install(args) => {
             let ctx = ClientContext::new(cli, &args.client)?;
             let mut params = serde_json::Map::new();
@@ -495,6 +498,223 @@ fn run_agents(command: &AgentsCommand, cli: &CliConfig) -> Result<(), CliError> 
             )?;
             write_stdout_line(&serde_json::to_string_pretty(&result)?)
         }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentListApiResponse {
+    agents: Vec<AgentListApiAgent>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentListApiAgent {
+    id: String,
+    installed: bool,
+    #[serde(default)]
+    config_error: Option<String>,
+    #[serde(default)]
+    config_options: Option<Vec<Value>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawConfigOption {
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    category: Option<String>,
+    #[serde(default)]
+    current_value: Option<Value>,
+    #[serde(default)]
+    options: Vec<RawConfigOptionChoice>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawConfigOptionChoice {
+    #[serde(default)]
+    value: Value,
+    #[serde(default)]
+    name: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentConfigReport {
+    generated_at_ms: u128,
+    endpoint: String,
+    agents: Vec<AgentConfigReportEntry>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentConfigReportEntry {
+    id: String,
+    installed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    config_error: Option<String>,
+    models: AgentConfigCategoryReport,
+    modes: AgentConfigCategoryReport,
+    thought_levels: AgentConfigCategoryReport,
+}
+
+#[derive(Debug, Serialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct AgentConfigCategoryReport {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    current_value: Option<String>,
+    values: Vec<AgentConfigValueReport>,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct AgentConfigValueReport {
+    value: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+}
+
+#[derive(Clone, Copy)]
+enum ConfigReportCategory {
+    Model,
+    Mode,
+    ThoughtLevel,
+}
+
+#[derive(Default)]
+struct CategoryAccumulator {
+    current_value: Option<String>,
+    values: BTreeMap<String, Option<String>>,
+}
+
+impl CategoryAccumulator {
+    fn absorb(&mut self, option: &RawConfigOption) {
+        if self.current_value.is_none() {
+            self.current_value = config_value_to_string(option.current_value.as_ref());
+        }
+
+        for candidate in &option.options {
+            let Some(value) = config_value_to_string(Some(&candidate.value)) else {
+                continue;
+            };
+            let name = candidate
+                .name
+                .as_ref()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty());
+            let entry = self.values.entry(value).or_insert(None);
+            if entry.is_none() && name.is_some() {
+                *entry = name;
+            }
+        }
+    }
+
+    fn into_report(mut self) -> AgentConfigCategoryReport {
+        if let Some(current) = self.current_value.clone() {
+            self.values.entry(current).or_insert(None);
+        }
+        AgentConfigCategoryReport {
+            current_value: self.current_value,
+            values: self
+                .values
+                .into_iter()
+                .map(|(value, name)| AgentConfigValueReport { value, name })
+                .collect(),
+        }
+    }
+}
+
+fn run_agents_report(args: &ClientArgs, cli: &CliConfig) -> Result<(), CliError> {
+    let ctx = ClientContext::new(cli, args)?;
+    let response = ctx.get(&format!("{API_PREFIX}/agents?config=true"))?;
+    let status = response.status();
+    let text = response.text()?;
+
+    if !status.is_success() {
+        print_error_body(&text)?;
+        return Err(CliError::HttpStatus(status));
+    }
+
+    let parsed: AgentListApiResponse = serde_json::from_str(&text)?;
+    let report = build_agent_config_report(parsed, &ctx.endpoint);
+    write_stdout_line(&serde_json::to_string_pretty(&report)?)
+}
+
+fn build_agent_config_report(input: AgentListApiResponse, endpoint: &str) -> AgentConfigReport {
+    let generated_at_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or(0);
+
+    let agents = input
+        .agents
+        .into_iter()
+        .map(|agent| {
+            let mut model = CategoryAccumulator::default();
+            let mut mode = CategoryAccumulator::default();
+            let mut thought_level = CategoryAccumulator::default();
+
+            for option_value in agent.config_options.unwrap_or_default() {
+                let Ok(option) = serde_json::from_value::<RawConfigOption>(option_value) else {
+                    continue;
+                };
+                let Some(category) = option
+                    .category
+                    .as_deref()
+                    .or(option.id.as_deref())
+                    .and_then(classify_report_category)
+                else {
+                    continue;
+                };
+
+                match category {
+                    ConfigReportCategory::Model => model.absorb(&option),
+                    ConfigReportCategory::Mode => mode.absorb(&option),
+                    ConfigReportCategory::ThoughtLevel => thought_level.absorb(&option),
+                }
+            }
+
+            AgentConfigReportEntry {
+                id: agent.id,
+                installed: agent.installed,
+                config_error: agent.config_error,
+                models: model.into_report(),
+                modes: mode.into_report(),
+                thought_levels: thought_level.into_report(),
+            }
+        })
+        .collect();
+
+    AgentConfigReport {
+        generated_at_ms,
+        endpoint: endpoint.to_string(),
+        agents,
+    }
+}
+
+fn classify_report_category(raw: &str) -> Option<ConfigReportCategory> {
+    let normalized = raw
+        .trim()
+        .to_ascii_lowercase()
+        .replace('-', "_")
+        .replace(' ', "_");
+
+    match normalized.as_str() {
+        "model" | "model_id" => Some(ConfigReportCategory::Model),
+        "mode" | "agent_mode" => Some(ConfigReportCategory::Mode),
+        "thought" | "thoughtlevel" | "thought_level" | "thinking" | "thinking_level"
+        | "reasoning" | "reasoning_effort" => Some(ConfigReportCategory::ThoughtLevel),
+        _ => None,
+    }
+}
+
+fn config_value_to_string(value: Option<&Value>) -> Option<String> {
+    match value {
+        Some(Value::String(value)) => Some(value.clone()),
+        Some(Value::Null) | None => None,
+        Some(other) => Some(other.to_string()),
     }
 }
 
@@ -1218,5 +1438,97 @@ mod tests {
             .build()
             .expect("build request");
         assert!(request.headers().get("last-event-id").is_none());
+    }
+
+    #[test]
+    fn classify_report_category_supports_common_aliases() {
+        assert!(matches!(
+            classify_report_category("model"),
+            Some(ConfigReportCategory::Model)
+        ));
+        assert!(matches!(
+            classify_report_category("mode"),
+            Some(ConfigReportCategory::Mode)
+        ));
+        assert!(matches!(
+            classify_report_category("thought_level"),
+            Some(ConfigReportCategory::ThoughtLevel)
+        ));
+        assert!(matches!(
+            classify_report_category("reasoning_effort"),
+            Some(ConfigReportCategory::ThoughtLevel)
+        ));
+        assert!(classify_report_category("arbitrary").is_none());
+    }
+
+    #[test]
+    fn build_agent_config_report_extracts_model_mode_and_thought() {
+        let response = AgentListApiResponse {
+            agents: vec![AgentListApiAgent {
+                id: "codex".to_string(),
+                installed: true,
+                config_error: None,
+                config_options: Some(vec![
+                    json!({
+                        "id": "model",
+                        "category": "model",
+                        "currentValue": "gpt-5",
+                        "options": [
+                            {"value": "gpt-5", "name": "GPT-5"},
+                            {"value": "gpt-5-mini", "name": "GPT-5 mini"}
+                        ]
+                    }),
+                    json!({
+                        "id": "mode",
+                        "category": "mode",
+                        "currentValue": "default",
+                        "options": [
+                            {"value": "default", "name": "Default"},
+                            {"value": "plan", "name": "Plan"}
+                        ]
+                    }),
+                    json!({
+                        "id": "thought",
+                        "category": "thought_level",
+                        "currentValue": "medium",
+                        "options": [
+                            {"value": "low", "name": "Low"},
+                            {"value": "medium", "name": "Medium"},
+                            {"value": "high", "name": "High"}
+                        ]
+                    }),
+                ]),
+            }],
+        };
+
+        let report = build_agent_config_report(response, "http://127.0.0.1:2468");
+        let agent = report.agents.first().expect("agent report");
+
+        assert_eq!(agent.id, "codex");
+        assert_eq!(agent.models.current_value.as_deref(), Some("gpt-5"));
+        assert_eq!(agent.modes.current_value.as_deref(), Some("default"));
+        assert_eq!(
+            agent.thought_levels.current_value.as_deref(),
+            Some("medium")
+        );
+
+        let model_values: Vec<&str> = agent
+            .models
+            .values
+            .iter()
+            .map(|item| item.value.as_str())
+            .collect();
+        assert!(model_values.contains(&"gpt-5"));
+        assert!(model_values.contains(&"gpt-5-mini"));
+
+        let thought_values: Vec<&str> = agent
+            .thought_levels
+            .values
+            .iter()
+            .map(|item| item.value.as_str())
+            .collect();
+        assert!(thought_values.contains(&"low"));
+        assert!(thought_values.contains(&"medium"));
+        assert!(thought_values.contains(&"high"));
     }
 }

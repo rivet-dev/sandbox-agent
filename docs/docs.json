@@ -94,6 +94,7 @@
 					{
 						"group": "Reference",
 						"pages": [
+							"agent-capabilities",
 							"cli",
 							"inspector",
 							"opencode-compatibility",

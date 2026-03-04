@@ -1,4 +1,9 @@
-import type { AnyMessage, NewSessionRequest } from "acp-http-client";
+import type {
+  AnyMessage,
+  NewSessionRequest,
+  SessionConfigOption,
+  SessionModeState,
+} from "acp-http-client";
 import type { components, operations } from "./generated/openapi.ts";
 
 export type ProblemDetails = components["schemas"]["ProblemDetails"];
@@ -39,6 +44,8 @@ export interface SessionRecord {
   createdAt: number;
   destroyedAt?: number;
   sessionInit?: Omit<NewSessionRequest, "_meta">;
+  configOptions?: SessionConfigOption[];
+  modes?: SessionModeState | null;
 }
 
 export type SessionEventSender = "client" | "agent";
@@ -178,6 +185,12 @@ function cloneSessionRecord(session: SessionRecord): SessionRecord {
     sessionInit: session.sessionInit
       ? (JSON.parse(JSON.stringify(session.sessionInit)) as SessionRecord["sessionInit"])
       : undefined,
+    configOptions: session.configOptions
+      ? (JSON.parse(JSON.stringify(session.configOptions)) as SessionRecord["configOptions"])
+      : undefined,
+    modes: session.modes
+      ? (JSON.parse(JSON.stringify(session.modes)) as SessionRecord["modes"])
+      : session.modes,
   };
 }
 
