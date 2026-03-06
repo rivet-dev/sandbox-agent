@@ -167,6 +167,65 @@ Shared option:
 
 ```bash
 sandbox-agent api agents list [--endpoint <URL>]
+sandbox-agent api agents report [--endpoint <URL>]
 sandbox-agent api agents install <AGENT> [--reinstall] [--endpoint <URL>]
 ```
 
+#### api agents list
+
+List all agents and their install status.
+
+```bash
+sandbox-agent api agents list
+```
+
+#### api agents report
+
+Emit a JSON report of available models, modes, and thought levels for every agent. Calls `GET /v1/agents?config=true` and groups each agent's config options by category.
+
+```bash
+sandbox-agent api agents report --endpoint http://127.0.0.1:2468 | jq .
+```
+
+Example output:
+
+```json
+{
+  "generatedAtMs": 1740000000000,
+  "endpoint": "http://127.0.0.1:2468",
+  "agents": [
+    {
+      "id": "claude",
+      "installed": true,
+      "models": {
+        "currentValue": "default",
+        "values": [
+          { "value": "default", "name": "Default" },
+          { "value": "sonnet", "name": "Sonnet" },
+          { "value": "opus", "name": "Opus" },
+          { "value": "haiku", "name": "Haiku" }
+        ]
+      },
+      "modes": {
+        "currentValue": "default",
+        "values": [
+          { "value": "default", "name": "Default" },
+          { "value": "acceptEdits", "name": "Accept Edits" },
+          { "value": "plan", "name": "Plan" },
+          { "value": "dontAsk", "name": "Don't Ask" },
+          { "value": "bypassPermissions", "name": "Bypass Permissions" }
+        ]
+      },
+      "thoughtLevels": { "values": [] }
+    }
+  ]
+}
+```
+
+See [Agent Capabilities](/agent-capabilities) for a full reference of supported models, modes, and thought levels per agent.
+
+#### api agents install
+
+```bash
+sandbox-agent api agents install codex --reinstall
+```

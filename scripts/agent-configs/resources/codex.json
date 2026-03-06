@@ -2,24 +2,62 @@
   "defaultModel": "gpt-5.3-codex",
   "models": [
     {
-      "id": "gpt-5.1-codex-max",
-      "name": "gpt-5.1-codex-max"
+      "id": "gpt-5.3-codex",
+      "name": "gpt-5.3-codex"
     },
     {
-      "id": "gpt-5.1-codex-mini",
-      "name": "gpt-5.1-codex-mini"
-    },
-    {
-      "id": "gpt-5.2",
-      "name": "gpt-5.2"
+      "id": "gpt-5.3-codex-spark",
+      "name": "GPT-5.3-Codex-Spark"
     },
     {
       "id": "gpt-5.2-codex",
       "name": "gpt-5.2-codex"
     },
     {
-      "id": "gpt-5.3-codex",
-      "name": "gpt-5.3-codex"
+      "id": "gpt-5.1-codex-max",
+      "name": "gpt-5.1-codex-max"
+    },
+    {
+      "id": "gpt-5.2",
+      "name": "gpt-5.2"
+    },
+    {
+      "id": "gpt-5.1-codex-mini",
+      "name": "gpt-5.1-codex-mini"
+    }
+  ],
+  "defaultMode": "read-only",
+  "modes": [
+    {
+      "id": "read-only",
+      "name": "Read Only"
+    },
+    {
+      "id": "auto",
+      "name": "Default"
+    },
+    {
+      "id": "full-access",
+      "name": "Full Access"
+    }
+  ],
+  "defaultThoughtLevel": "high",
+  "thoughtLevels": [
+    {
+      "id": "low",
+      "name": "Low"
+    },
+    {
+      "id": "medium",
+      "name": "Medium"
+    },
+    {
+      "id": "high",
+      "name": "High"
+    },
+    {
+      "id": "xhigh",
+      "name": "Xhigh"
     }
   ]
 }

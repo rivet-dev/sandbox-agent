@@ -3,6 +3,9 @@ export {
   SandboxAgent,
   SandboxAgentError,
   Session,
+  UnsupportedSessionCategoryError,
+  UnsupportedSessionConfigOptionError,
+  UnsupportedSessionValueError,
 } from "./client.ts";
 
 export { AcpRpcError } from "acp-http-client";
