@@ -1,7 +1,7 @@
 export type TimelineEntry = {
   id: string;
   eventId?: string; // Links back to the original event for navigation
-  kind: "message" | "tool" | "meta" | "reasoning";
+  kind: "message" | "tool" | "meta" | "reasoning" | "image";
   time: string;
   // For messages:
   role?: "user" | "assistant";
@@ -15,4 +15,6 @@ export type TimelineEntry = {
   reasoning?: { text: string; visibility?: string };
   // For meta:
   meta?: { title: string; detail?: string; severity?: "info" | "error" };
+  // For images:
+  image?: { uri: string; mimeType: string };
 };

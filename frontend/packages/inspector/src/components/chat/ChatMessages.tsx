@@ -246,14 +246,20 @@ const ChatMessages = ({
           return <ToolGroup key={`group-${idx}`} entries={group.entries} onEventClick={onEventClick} />;
         }
 
-        // Regular message
+        // Regular message or image
         const entry = group.entries[0];
         const messageClass = getMessageClass(entry);
 
         return (
           <div key={entry.id} className={`message ${messageClass} no-avatar`}>
             <div className="message-content">
-              {entry.text ? (
+              {entry.image ? (
+                <img
+                  src={entry.image.uri}
+                  alt="Agent image"
+                  style={{ maxWidth: "100%", borderRadius: 6 }}
+                />
+              ) : entry.text ? (
                 <MarkdownText text={entry.text} />
               ) : (
                 <span className="thinking-indicator">

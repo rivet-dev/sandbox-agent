@@ -996,8 +996,25 @@ export default function App() {
 
         switch (update.sessionUpdate) {
           case "agent_message_chunk": {
-            const content = update.content as { type?: string; text?: string } | undefined;
-            if (content?.type === "text" && content.text) {
+            const content = update.content as { type?: string; text?: string; uri?: string; mimeType?: string } | undefined;
+            if (content?.type === "image" && content.uri) {
+              // Flush any accumulated text before the image
+              flushAssistant(time);
+              // Convert file:// URIs to the /v1/fs/file API endpoint so the
+              // browser can fetch the image from the Sandbox Agent server.
+              const filePath = content.uri.startsWith("file://")
+                ? content.uri.slice("file://".length)
+                : content.uri;
+              const displayUri = `/v1/fs/file?path=${encodeURIComponent(filePath)}`;
+              entries.push({
+                id: `image-${event.id}`,
+                eventId: event.id,
+                kind: "image",
+                time,
+                role: "assistant",
+                image: { uri: displayUri, mimeType: content.mimeType ?? "image/png" },
+              });
+            } else if (content?.type === "text" && content.text) {
               if (!assistantAccumId) {
                 assistantAccumId = `assistant-${event.id}`;
                 assistantAccumText = "";
