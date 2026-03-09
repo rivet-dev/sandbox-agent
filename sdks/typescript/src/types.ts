@@ -9,6 +9,27 @@ import type { components, operations } from "./generated/openapi.ts";
 export type ProblemDetails = components["schemas"]["ProblemDetails"];
 
 export type HealthResponse = JsonResponse<operations["get_v1_health"], 200>;
+export type DesktopState = components["schemas"]["DesktopState"];
+export type DesktopResolution = components["schemas"]["DesktopResolution"];
+export type DesktopErrorInfo = components["schemas"]["DesktopErrorInfo"];
+export type DesktopProcessInfo = components["schemas"]["DesktopProcessInfo"];
+export type DesktopStatusResponse = JsonResponse<operations["get_v1_desktop_status"], 200>;
+export type DesktopStartRequest = JsonRequestBody<operations["post_v1_desktop_start"]>;
+export type DesktopScreenshotQuery =
+  QueryParams<operations["get_v1_desktop_screenshot"]> extends never
+    ? Record<string, never>
+    : QueryParams<operations["get_v1_desktop_screenshot"]>;
+export type DesktopRegionScreenshotQuery = QueryParams<operations["get_v1_desktop_screenshot_region"]>;
+export type DesktopMousePositionResponse = JsonResponse<operations["get_v1_desktop_mouse_position"], 200>;
+export type DesktopMouseButton = components["schemas"]["DesktopMouseButton"];
+export type DesktopMouseMoveRequest = JsonRequestBody<operations["post_v1_desktop_mouse_move"]>;
+export type DesktopMouseClickRequest = JsonRequestBody<operations["post_v1_desktop_mouse_click"]>;
+export type DesktopMouseDragRequest = JsonRequestBody<operations["post_v1_desktop_mouse_drag"]>;
+export type DesktopMouseScrollRequest = JsonRequestBody<operations["post_v1_desktop_mouse_scroll"]>;
+export type DesktopKeyboardTypeRequest = JsonRequestBody<operations["post_v1_desktop_keyboard_type"]>;
+export type DesktopKeyboardPressRequest = JsonRequestBody<operations["post_v1_desktop_keyboard_press"]>;
+export type DesktopActionResponse = JsonResponse<operations["post_v1_desktop_keyboard_type"], 200>;
+export type DesktopDisplayInfoResponse = JsonResponse<operations["get_v1_desktop_display_info"], 200>;
 export type AgentListResponse = JsonResponse<operations["get_v1_agents"], 200>;
 export type AgentInfo = components["schemas"]["AgentInfo"];
 export type AgentQuery = QueryParams<operations["get_v1_agents"]>;

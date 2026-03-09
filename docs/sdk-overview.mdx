@@ -177,6 +177,44 @@ const writeResult = await sdk.writeFsFile({ path: "./hello.txt" }, "hello");
 console.log(health.status, agents.agents.length, entries.length, writeResult.path);
 ```
 
+## Desktop API
+
+The SDK also wraps the desktop host/runtime HTTP API.
+
+Install desktop dependencies first on Linux hosts:
+
+```bash
+sandbox-agent install desktop --yes
+```
+
+Then query status, surface remediation if needed, and start the runtime:
+
+```ts
+const status = await sdk.getDesktopStatus();
+
+if (status.state === "install_required") {
+  console.log(status.installCommand);
+}
+
+const started = await sdk.startDesktop({
+  width: 1440,
+  height: 900,
+  dpi: 96,
+});
+
+const screenshot = await sdk.takeDesktopScreenshot();
+const displayInfo = await sdk.getDesktopDisplayInfo();
+
+await sdk.moveDesktopMouse({ x: 400, y: 300 });
+await sdk.clickDesktop({ x: 400, y: 300, button: "left", clickCount: 1 });
+await sdk.typeDesktopText({ text: "hello world", delayMs: 10 });
+await sdk.pressDesktopKey({ key: "ctrl+l" });
+
+await sdk.stopDesktop();
+```
+
+Screenshot helpers return `Uint8Array` PNG bytes. The SDK does not attempt to install OS packages remotely; callers should surface `missingDependencies` and `installCommand` from `getDesktopStatus()`.
+
 ## Error handling
 
 ```ts

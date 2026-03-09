@@ -2768,6 +2768,94 @@
         gap: 20px;
       }
 
+      .desktop-panel {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+
+      .desktop-state-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+        margin-bottom: 12px;
+      }
+
+      .desktop-start-controls {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .desktop-input-group {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+
+      .desktop-chip-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .desktop-command {
+        margin-top: 6px;
+        padding: 8px 10px;
+        border-radius: var(--radius);
+        border: 1px solid var(--border);
+        background: var(--surface);
+        overflow-x: auto;
+      }
+
+      .desktop-diagnostic-block + .desktop-diagnostic-block {
+        margin-top: 14px;
+      }
+
+      .desktop-process-list {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        margin-top: 8px;
+      }
+
+      .desktop-process-item {
+        padding: 10px;
+        border-radius: var(--radius);
+        border: 1px solid var(--border);
+        background: var(--surface);
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+
+      .desktop-screenshot-empty {
+        padding: 18px;
+        border: 1px dashed var(--border);
+        border-radius: var(--radius);
+        color: var(--muted);
+        background: var(--surface);
+        text-align: center;
+      }
+
+      .desktop-screenshot-frame {
+        border-radius: calc(var(--radius) + 2px);
+        overflow: hidden;
+        border: 1px solid var(--border);
+        background:
+          linear-gradient(135deg, rgba(15, 23, 42, 0.9), rgba(30, 41, 59, 0.92)),
+          radial-gradient(circle at top right, rgba(56, 189, 248, 0.12), transparent 40%);
+        padding: 10px;
+      }
+
+      .desktop-screenshot-image {
+        display: block;
+        width: 100%;
+        height: auto;
+        border-radius: var(--radius);
+        background: rgba(0, 0, 0, 0.24);
+      }
+
       .processes-section {
         display: flex;
         flex-direction: column;
@@ -3427,6 +3515,11 @@
 
       @media (max-width: 1024px) {
         .main-layout {
+          grid-template-columns: 1fr;
+        }
+
+        .desktop-state-grid,
+        .desktop-start-controls {
           grid-template-columns: 1fr;
         }
 

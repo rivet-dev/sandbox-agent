@@ -224,6 +224,16 @@ icon: "rocket"
     If agents are not installed up front, they are lazily installed when creating a session.
   </Step>
 
+  <Step title="Install desktop dependencies (optional, Linux only)">
+    If you want to use `/v1/desktop/*`, install the desktop runtime packages first:
+
+    ```bash
+    sandbox-agent install desktop --yes
+    ```
+
+    Then use `GET /v1/desktop/status` or `sdk.getDesktopStatus()` to verify the runtime is ready before calling desktop screenshot or input APIs.
+  </Step>
+
   <Step title="Create a session">
     ```typescript
     import { SandboxAgent } from "sandbox-agent";

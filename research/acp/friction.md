@@ -247,3 +247,13 @@ Update this file continuously during the migration.
 - Owner: Unassigned.
 - Status: in_progress
 - Links: `research/acp/simplify-server.md`, `docs/mcp-config.mdx`, `docs/skills-config.mdx`
+
+- Date: 2026-03-07
+- Area: Desktop host/runtime API boundary
+- Issue: Desktop automation needed screenshot/input/file-transfer-like host capabilities, but routing it through ACP would have mixed agent protocol semantics with host-owned runtime control and binary payloads.
+- Impact: A desktop feature built as ACP methods would blur the division between agent/session behavior and Sandbox Agent host/runtime APIs, and would complicate binary screenshot transport.
+- Proposed direction: Ship desktop as first-party HTTP endpoints under `/v1/desktop/*`, keep health/install/remediation in the server runtime, and expose the feature through the SDK and inspector without ACP extension methods.
+- Decision: Accepted and implemented for phase one.
+- Owner: Unassigned.
+- Status: resolved
+- Links: `server/packages/sandbox-agent/src/router.rs`, `server/packages/sandbox-agent/src/desktop_runtime.rs`, `sdks/typescript/src/client.ts`, `frontend/packages/inspector/src/components/debug/DesktopTab.tsx`

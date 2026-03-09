@@ -413,22 +413,17 @@ async fn v1_process_logs_follow_sse_streams_entries() {
         .expect("process id")
         .to_string();
 
-    let request = Request::builder()
-        .method(Method::GET)
-        .uri(format!(
+    let response = reqwest::Client::new()
+        .get(test_app.app.http_url(&format!(
             "/v1/processes/{process_id}/logs?stream=stdout&follow=true"
-        ))
-        .body(Body::empty())
-        .expect("build request");
-    let response = test_app
-        .app
-        .clone()
-        .oneshot(request)
+        )))
+        .header("accept", "text/event-stream")
+        .send()
         .await
         .expect("sse response");
     assert_eq!(response.status(), StatusCode::OK);
 
-    let mut stream = response.into_body().into_data_stream();
+    let mut stream = response.bytes_stream();
     let chunk = tokio::time::timeout(Duration::from_secs(5), async move {
         while let Some(chunk) = stream.next().await {
             let bytes = chunk.expect("stream chunk");

@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Cloud, Play, PlayCircle, Server, Terminal, Wrench } from "lucide-react";
+import { ChevronLeft, ChevronRight, Cloud, Monitor, Play, PlayCircle, Server, Terminal, Wrench } from "lucide-react";
 import type { AgentInfo, SandboxAgent, SessionEvent } from "sandbox-agent";
 
 type AgentModeInfo = { id: string; name: string; description: string };
@@ -9,9 +9,10 @@ import ProcessesTab from "./ProcessesTab";
 import ProcessRunTab from "./ProcessRunTab";
 import SkillsTab from "./SkillsTab";
 import RequestLogTab from "./RequestLogTab";
+import DesktopTab from "./DesktopTab";
 import type { RequestLog } from "../../types/requestLog";
 
-export type DebugTab = "log" | "events" | "agents" | "mcp" | "skills" | "processes" | "run-process";
+export type DebugTab = "log" | "events" | "agents" | "desktop" | "mcp" | "skills" | "processes" | "run-process";
 
 const DebugPanel = ({
   debugTab,
@@ -79,6 +80,10 @@ const DebugPanel = ({
           <Cloud className="button-icon" style={{ marginRight: 4, width: 12, height: 12 }} />
           Agents
         </button>
+        <button className={`debug-tab ${debugTab === "desktop" ? "active" : ""}`} onClick={() => onDebugTabChange("desktop")}>
+          <Monitor className="button-icon" style={{ marginRight: 4, width: 12, height: 12 }} />
+          Desktop
+        </button>
         <button className={`debug-tab ${debugTab === "mcp" ? "active" : ""}`} onClick={() => onDebugTabChange("mcp")}>
           <Server className="button-icon" style={{ marginRight: 4, width: 12, height: 12 }} />
           MCP
@@ -126,6 +131,10 @@ const DebugPanel = ({
             loading={agentsLoading}
             error={agentsError}
           />
+        )}
+
+        {debugTab === "desktop" && (
+          <DesktopTab getClient={getClient} />
         )}
 
         {debugTab === "mcp" && (

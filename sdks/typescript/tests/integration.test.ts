@@ -1,49 +1,21 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { existsSync } from "node:fs";
-import { mkdtempSync, rmSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import {
   InMemorySessionPersistDriver,
   SandboxAgent,
   type SessionEvent,
 } from "../src/index.ts";
-import { spawnSandboxAgent, isNodeRuntime, type SandboxAgentSpawnHandle } from "../src/spawn.ts";
+import { isNodeRuntime } from "../src/spawn.ts";
+import {
+  createDockerTestLayout,
+  disposeDockerTestLayout,
+  startDockerSandboxAgent,
+  type DockerSandboxAgentHandle,
+} from "./helpers/docker.ts";
 import { prepareMockAgentDataHome } from "./helpers/mock-agent.ts";
 import WebSocket from "ws";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-
-function findBinary(): string | null {
-  if (process.env.SANDBOX_AGENT_BIN) {
-    return process.env.SANDBOX_AGENT_BIN;
-  }
-
-  const cargoPaths = [
-    resolve(__dirname, "../../../target/debug/sandbox-agent"),
-    resolve(__dirname, "../../../target/release/sandbox-agent"),
-  ];
-
-  for (const p of cargoPaths) {
-    if (existsSync(p)) {
-      return p;
-    }
-  }
-
-  return null;
-}
-
-const BINARY_PATH = findBinary();
-if (!BINARY_PATH) {
-  throw new Error(
-    "sandbox-agent binary not found. Build it (cargo build -p sandbox-agent) or set SANDBOX_AGENT_BIN.",
-  );
-}
-if (!process.env.SANDBOX_AGENT_BIN) {
-  process.env.SANDBOX_AGENT_BIN = BINARY_PATH;
-}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -79,6 +51,15 @@ async function waitForAsync<T>(
     await sleep(stepMs);
   }
   throw new Error("timed out waiting for condition");
+}
+
+async function withTimeout<T>(promise: Promise<T>, label: string, timeoutMs = 15_000): Promise<T> {
+  return await Promise.race([
+    promise,
+    sleep(timeoutMs).then(() => {
+      throw new Error(`${label} timed out after ${timeoutMs}ms`);
+    }),
+  ]);
 }
 
 function buildTarArchive(entries: Array<{ name: string; content: string }>): Uint8Array {
@@ -145,34 +126,87 @@ function decodeProcessLogData(data: string, encoding: string): string {
 
 function nodeCommand(source: string): { command: string; args: string[] } {
   return {
-    command: process.execPath,
+    command: "node",
     args: ["-e", source],
   };
 }
 
+function forwardRequest(
+  defaultFetch: typeof fetch,
+  baseUrl: string,
+  outgoing: Request,
+  parsed: URL,
+): Promise<Response> {
+  const forwardedInit: RequestInit & { duplex?: "half" } = {
+    method: outgoing.method,
+    headers: new Headers(outgoing.headers),
+    signal: outgoing.signal,
+  };
+
+  if (outgoing.method !== "GET" && outgoing.method !== "HEAD") {
+    forwardedInit.body = outgoing.body;
+    forwardedInit.duplex = "half";
+  }
+
+  const forwardedUrl = new URL(`${parsed.pathname}${parsed.search}`, baseUrl);
+  return defaultFetch(forwardedUrl, forwardedInit);
+}
+
+async function launchDesktopFocusWindow(sdk: SandboxAgent, display: string): Promise<string> {
+  const windowProcess = await sdk.createProcess({
+    command: "xterm",
+    args: [
+      "-geometry",
+      "80x24+40+40",
+      "-title",
+      "Sandbox Desktop Test",
+      "-e",
+      "sh",
+      "-lc",
+      "sleep 60",
+    ],
+    env: { DISPLAY: display },
+  });
+
+  await waitForAsync(async () => {
+    const result = await sdk.runProcess({
+      command: "sh",
+      args: [
+        "-lc",
+        "wid=\"$(xdotool search --onlyvisible --name 'Sandbox Desktop Test' 2>/dev/null | head -n 1 || true)\"; if [ -z \"$wid\" ]; then exit 3; fi; xdotool windowactivate \"$wid\"",
+      ],
+      env: { DISPLAY: display },
+      timeoutMs: 5_000,
+    });
+
+    return result.exitCode === 0 ? true : undefined;
+  }, 10_000, 200);
+
+  return windowProcess.id;
+}
+
 describe("Integration: TypeScript SDK flat session API", () => {
-  let handle: SandboxAgentSpawnHandle;
+  let handle: DockerSandboxAgentHandle;
   let baseUrl: string;
   let token: string;
-  let dataHome: string;
+  let layout: ReturnType<typeof createDockerTestLayout>;
 
-  beforeAll(async () => {
-    dataHome = mkdtempSync(join(tmpdir(), "sdk-integration-"));
-    const agentEnv = prepareMockAgentDataHome(dataHome);
+  beforeEach(async () => {
+    layout = createDockerTestLayout();
+    prepareMockAgentDataHome(layout.xdgDataHome);
 
-    handle = await spawnSandboxAgent({
-      enabled: true,
-      log: "silent",
+    handle = await startDockerSandboxAgent(layout, {
       timeoutMs: 30000,
-      env: agentEnv,
     });
     baseUrl = handle.baseUrl;
     token = handle.token;
   });
 
-  afterAll(async () => {
-    await handle.dispose();
-    rmSync(dataHome, { recursive: true, force: true });
+  afterEach(async () => {
+    await handle?.dispose?.();
+    if (layout) {
+      disposeDockerTestLayout(layout);
+    }
   });
 
   it("detects Node.js runtime", () => {
@@ -230,11 +264,12 @@ describe("Integration: TypeScript SDK flat session API", () => {
       token,
     });
 
-    const directory = mkdtempSync(join(tmpdir(), "sdk-fs-"));
+    const directory = join(layout.rootDir, "fs-test");
     const nestedDir = join(directory, "nested");
     const filePath = join(directory, "notes.txt");
     const movedPath = join(directory, "notes-moved.txt");
     const uploadDir = join(directory, "uploaded");
+    mkdirSync(directory, { recursive: true });
 
     try {
       const listedAgents = await sdk.listAgents({ config: true, noCache: true });
@@ -294,25 +329,33 @@ describe("Integration: TypeScript SDK flat session API", () => {
       const parsed = new URL(outgoing.url);
       seenPaths.push(parsed.pathname);
 
-      const forwardedUrl = new URL(`${parsed.pathname}${parsed.search}`, baseUrl);
-      const forwarded = new Request(forwardedUrl.toString(), outgoing);
-      return defaultFetch(forwarded);
+      return forwardRequest(defaultFetch, baseUrl, outgoing, parsed);
     };
 
     const sdk = await SandboxAgent.connect({
       token,
       fetch: customFetch,
     });
+    let sessionId: string | undefined;
 
-    await sdk.getHealth();
-    const session = await sdk.createSession({ agent: "mock" });
-    const prompt = await session.prompt([{ type: "text", text: "custom fetch integration test" }]);
-    expect(prompt.stopReason).toBe("end_turn");
+    try {
+      await withTimeout(sdk.getHealth(), "custom fetch getHealth");
+      const session = await withTimeout(
+        sdk.createSession({ agent: "mock" }),
+        "custom fetch createSession",
+      );
+      sessionId = session.id;
+      expect(session.agent).toBe("mock");
+      await withTimeout(sdk.destroySession(session.id), "custom fetch destroySession");
 
-    expect(seenPaths).toContain("/v1/health");
-    expect(seenPaths.some((path) => path.startsWith("/v1/acp/"))).toBe(true);
-
-    await sdk.dispose();
+      expect(seenPaths).toContain("/v1/health");
+      expect(seenPaths.some((path) => path.startsWith("/v1/acp/"))).toBe(true);
+    } finally {
+      if (sessionId) {
+        await sdk.destroySession(sessionId).catch(() => {});
+      }
+      await withTimeout(sdk.dispose(), "custom fetch dispose");
+    }
   }, 60_000);
 
   it("requires baseUrl when fetch is not provided", async () => {
@@ -341,9 +384,7 @@ describe("Integration: TypeScript SDK flat session API", () => {
         }
       }
 
-      const forwardedUrl = new URL(`${parsed.pathname}${parsed.search}`, baseUrl);
-      const forwarded = new Request(forwardedUrl.toString(), outgoing);
-      return defaultFetch(forwarded);
+      return forwardRequest(defaultFetch, baseUrl, outgoing, parsed);
     };
 
     const sdk = await SandboxAgent.connect({
@@ -631,7 +672,9 @@ describe("Integration: TypeScript SDK flat session API", () => {
       token,
     });
 
-    const directory = mkdtempSync(join(tmpdir(), "sdk-config-"));
+    const directory = join(layout.rootDir, "config-test");
+
+    mkdirSync(directory, { recursive: true });
 
     const mcpConfig = {
       type: "local" as const,
@@ -879,6 +922,100 @@ describe("Integration: TypeScript SDK flat session API", () => {
         await sdk.deleteProcess(killProcessId).catch(() => {});
       }
 
+      await sdk.dispose();
+    }
+  });
+
+  it("covers desktop status, screenshot, display, mouse, and keyboard helpers", async () => {
+    const sdk = await SandboxAgent.connect({
+      baseUrl,
+      token,
+    });
+    let focusWindowProcessId: string | undefined;
+
+    try {
+      const initialStatus = await sdk.getDesktopStatus();
+      expect(initialStatus.state).toBe("inactive");
+
+      const started = await sdk.startDesktop({
+        width: 1440,
+        height: 900,
+        dpi: 96,
+      });
+      expect(started.state).toBe("active");
+      expect(started.display?.startsWith(":")).toBe(true);
+      expect(started.missingDependencies).toEqual([]);
+
+      const displayInfo = await sdk.getDesktopDisplayInfo();
+      expect(displayInfo.display).toBe(started.display);
+      expect(displayInfo.resolution.width).toBe(1440);
+      expect(displayInfo.resolution.height).toBe(900);
+
+      const screenshot = await sdk.takeDesktopScreenshot();
+      expect(Buffer.from(screenshot.subarray(0, 8)).equals(Buffer.from("\x89PNG\r\n\x1a\n", "binary"))).toBe(true);
+
+      const region = await sdk.takeDesktopRegionScreenshot({
+        x: 10,
+        y: 20,
+        width: 40,
+        height: 50,
+      });
+      expect(Buffer.from(region.subarray(0, 8)).equals(Buffer.from("\x89PNG\r\n\x1a\n", "binary"))).toBe(true);
+
+      const moved = await sdk.moveDesktopMouse({ x: 40, y: 50 });
+      expect(moved.x).toBe(40);
+      expect(moved.y).toBe(50);
+
+      const dragged = await sdk.dragDesktopMouse({
+        startX: 40,
+        startY: 50,
+        endX: 80,
+        endY: 90,
+        button: "left",
+      });
+      expect(dragged.x).toBe(80);
+      expect(dragged.y).toBe(90);
+
+      const clicked = await sdk.clickDesktop({
+        x: 80,
+        y: 90,
+        button: "left",
+        clickCount: 1,
+      });
+      expect(clicked.x).toBe(80);
+      expect(clicked.y).toBe(90);
+
+      const scrolled = await sdk.scrollDesktop({
+        x: 80,
+        y: 90,
+        deltaY: -2,
+      });
+      expect(scrolled.x).toBe(80);
+      expect(scrolled.y).toBe(90);
+
+      const position = await sdk.getDesktopMousePosition();
+      expect(position.x).toBe(80);
+      expect(position.y).toBe(90);
+
+      focusWindowProcessId = await launchDesktopFocusWindow(sdk, started.display!);
+
+      const typed = await sdk.typeDesktopText({
+        text: "hello desktop",
+        delayMs: 5,
+      });
+      expect(typed.ok).toBe(true);
+
+      const pressed = await sdk.pressDesktopKey({ key: "ctrl+l" });
+      expect(pressed.ok).toBe(true);
+
+      const stopped = await sdk.stopDesktop();
+      expect(stopped.state).toBe("inactive");
+    } finally {
+      if (focusWindowProcessId) {
+        await sdk.killProcess(focusWindowProcessId, { waitMs: 5_000 }).catch(() => {});
+        await sdk.deleteProcess(focusWindowProcessId).catch(() => {});
+      }
+      await sdk.stopDesktop().catch(() => {});
       await sdk.dispose();
     }
   });

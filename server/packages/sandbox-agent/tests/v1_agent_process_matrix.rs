@@ -1,37 +1,14 @@
 use std::fs;
 use std::path::Path;
 
-use axum::body::Body;
-use axum::http::{Method, Request, StatusCode};
 use futures::StreamExt;
-use http_body_util::BodyExt;
-use sandbox_agent::router::{build_router, AppState, AuthConfig};
-use sandbox_agent_agent_management::agents::AgentManager;
+use reqwest::{Method, StatusCode};
+use sandbox_agent::router::AuthConfig;
 use serde_json::{json, Value};
-use tempfile::TempDir;
-use tower::util::ServiceExt;
 
-struct TestApp {
-    app: axum::Router,
-    _install_dir: TempDir,
-}
-
-impl TestApp {
-    fn with_setup<F>(setup: F) -> Self
-    where
-        F: FnOnce(&Path),
-    {
-        let install_dir = tempfile::tempdir().expect("create temp install dir");
-        setup(install_dir.path());
-        let manager = AgentManager::new(install_dir.path()).expect("create agent manager");
-        let state = AppState::new(AuthConfig::disabled(), manager);
-        let app = build_router(state);
-        Self {
-            app,
-            _install_dir: install_dir,
-        }
-    }
-}
+#[path = "support/docker.rs"]
+mod docker_support;
+use docker_support::TestApp;
 
 fn write_executable(path: &Path, script: &str) {
     fs::write(path, script).expect("write executable");
@@ -101,28 +78,29 @@ fn setup_stub_agent_process_only(install_dir: &Path, agent: &str) {
 }
 
 async fn send_request(
-    app: &axum::Router,
+    app: &docker_support::DockerApp,
     method: Method,
     uri: &str,
     body: Option<Value>,
 ) -> (StatusCode, Vec<u8>) {
-    let mut builder = Request::builder().method(method).uri(uri);
-    let request_body = if let Some(body) = body {
-        builder = builder.header("content-type", "application/json");
-        Body::from(body.to_string())
+    let client = reqwest::Client::new();
+    let response = if let Some(body) = body {
+        client
+            .request(method, app.http_url(uri))
+            .header("content-type", "application/json")
+            .body(body.to_string())
+            .send()
+            .await
+            .expect("request handled")
     } else {
-        Body::empty()
+        client
+            .request(method, app.http_url(uri))
+            .send()
+            .await
+            .expect("request handled")
     };
-
-    let request = builder.body(request_body).expect("build request");
-    let response = app.clone().oneshot(request).await.expect("request handled");
     let status = response.status();
-    let bytes = response
-        .into_body()
-        .collect()
-        .await
-        .expect("collect body")
-        .to_bytes();
+    let bytes = response.bytes().await.expect("collect body");
 
     (status, bytes.to_vec())
 }
@@ -145,7 +123,7 @@ async fn agent_process_matrix_smoke_and_jsonrpc_conformance() {
         .chain(agent_process_only_agents.iter())
         .copied()
         .collect();
-    let test_app = TestApp::with_setup(|install_dir| {
+    let test_app = TestApp::with_setup(AuthConfig::disabled(), |install_dir| {
         for agent in native_agents {
             setup_stub_artifacts(install_dir, agent);
         }
@@ -201,21 +179,15 @@ async fn agent_process_matrix_smoke_and_jsonrpc_conformance() {
         assert_eq!(new_json["id"], 2, "{agent}: session/new id");
         assert_eq!(new_json["result"]["echoedMethod"], "session/new");
 
-        let request = Request::builder()
-            .method(Method::GET)
-            .uri(format!("/v1/acp/{agent}-server"))
-            .body(Body::empty())
-            .expect("build sse request");
-
-        let response = test_app
-            .app
-            .clone()
-            .oneshot(request)
+        let response = reqwest::Client::new()
+            .get(test_app.app.http_url(&format!("/v1/acp/{agent}-server")))
+            .header("accept", "text/event-stream")
+            .send()
             .await
             .expect("sse response");
         assert_eq!(response.status(), StatusCode::OK);
 
-        let mut stream = response.into_body().into_data_stream();
+        let mut stream = response.bytes_stream();
         let chunk = tokio::time::timeout(std::time::Duration::from_secs(5), async move {
             while let Some(item) = stream.next().await {
                 let bytes = item.expect("sse chunk");

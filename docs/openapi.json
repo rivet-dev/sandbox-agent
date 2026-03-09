@@ -654,6 +654,722 @@
         }
       }
     },
+    "/v1/desktop/display/info": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Get desktop display information.",
+        "description": "Performs a health-gated display query against the managed desktop and\nreturns the current display identifier and resolution.",
+        "operationId": "get_v1_desktop_display_info",
+        "responses": {
+          "200": {
+            "description": "Desktop display information",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DesktopDisplayInfoResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Desktop runtime is not ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Desktop runtime health or display query failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/desktop/keyboard/press": {
+      "post": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Press a desktop keyboard shortcut.",
+        "description": "Performs a health-gated `xdotool key` operation against the managed\ndesktop.",
+        "operationId": "post_v1_desktop_keyboard_press",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DesktopKeyboardPressRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Desktop keyboard action result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DesktopActionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid keyboard press request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Desktop runtime is not ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Desktop runtime health or input failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/desktop/keyboard/type": {
+      "post": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Type desktop keyboard text.",
+        "description": "Performs a health-gated `xdotool type` operation against the managed\ndesktop.",
+        "operationId": "post_v1_desktop_keyboard_type",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DesktopKeyboardTypeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Desktop keyboard action result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DesktopActionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid keyboard type request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Desktop runtime is not ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Desktop runtime health or input failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/desktop/mouse/click": {
+      "post": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Click on the desktop.",
+        "description": "Performs a health-gated pointer move and click against the managed desktop\nand returns the resulting mouse position.",
+        "operationId": "post_v1_desktop_mouse_click",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DesktopMouseClickRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Desktop mouse position after click",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DesktopMousePositionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid mouse click request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Desktop runtime is not ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Desktop runtime health or input failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/desktop/mouse/drag": {
+      "post": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Drag the desktop mouse.",
+        "description": "Performs a health-gated drag gesture against the managed desktop and\nreturns the resulting mouse position.",
+        "operationId": "post_v1_desktop_mouse_drag",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DesktopMouseDragRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Desktop mouse position after drag",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DesktopMousePositionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid mouse drag request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Desktop runtime is not ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Desktop runtime health or input failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/desktop/mouse/move": {
+      "post": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Move the desktop mouse.",
+        "description": "Performs a health-gated absolute pointer move on the managed desktop and\nreturns the resulting mouse position.",
+        "operationId": "post_v1_desktop_mouse_move",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DesktopMouseMoveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Desktop mouse position after move",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DesktopMousePositionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid mouse move request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Desktop runtime is not ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Desktop runtime health or input failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/desktop/mouse/position": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Get the current desktop mouse position.",
+        "description": "Performs a health-gated mouse position query against the managed desktop.",
+        "operationId": "get_v1_desktop_mouse_position",
+        "responses": {
+          "200": {
+            "description": "Desktop mouse position",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DesktopMousePositionResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Desktop runtime is not ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Desktop runtime health or input check failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/desktop/mouse/scroll": {
+      "post": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Scroll the desktop mouse wheel.",
+        "description": "Performs a health-gated scroll gesture at the requested coordinates and\nreturns the resulting mouse position.",
+        "operationId": "post_v1_desktop_mouse_scroll",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DesktopMouseScrollRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Desktop mouse position after scroll",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DesktopMousePositionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid mouse scroll request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Desktop runtime is not ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Desktop runtime health or input failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/desktop/screenshot": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Capture a full desktop screenshot.",
+        "description": "Performs a health-gated full-frame screenshot of the managed desktop and\nreturns PNG bytes.",
+        "operationId": "get_v1_desktop_screenshot",
+        "responses": {
+          "200": {
+            "description": "Desktop screenshot as PNG bytes"
+          },
+          "409": {
+            "description": "Desktop runtime is not ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Desktop runtime health or screenshot capture failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/desktop/screenshot/region": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Capture a desktop screenshot region.",
+        "description": "Performs a health-gated screenshot crop against the managed desktop and\nreturns the requested PNG region bytes.",
+        "operationId": "get_v1_desktop_screenshot_region",
+        "parameters": [
+          {
+            "name": "x",
+            "in": "query",
+            "description": "Region x coordinate",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "y",
+            "in": "query",
+            "description": "Region y coordinate",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "width",
+            "in": "query",
+            "description": "Region width",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "height",
+            "in": "query",
+            "description": "Region height",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Desktop screenshot region as PNG bytes"
+          },
+          "400": {
+            "description": "Invalid screenshot region",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Desktop runtime is not ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Desktop runtime health or screenshot capture failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/desktop/start": {
+      "post": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Start the private desktop runtime.",
+        "description": "Lazily launches the managed Xvfb/openbox stack, validates display health,\nand returns the resulting desktop status snapshot.",
+        "operationId": "post_v1_desktop_start",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DesktopStartRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Desktop runtime status after start",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DesktopStatusResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid desktop start request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Desktop runtime is already transitioning",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Desktop API unsupported on this platform",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Desktop runtime could not be started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/desktop/status": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Get desktop runtime status.",
+        "description": "Returns the current desktop runtime state, dependency status, active\ndisplay metadata, and supervised process information.",
+        "operationId": "get_v1_desktop_status",
+        "responses": {
+          "200": {
+            "description": "Desktop runtime status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DesktopStatusResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/desktop/stop": {
+      "post": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Stop the private desktop runtime.",
+        "description": "Terminates the managed openbox/Xvfb/dbus processes owned by the desktop\nruntime and returns the resulting status snapshot.",
+        "operationId": "post_v1_desktop_stop",
+        "responses": {
+          "200": {
+            "description": "Desktop runtime status after stop",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DesktopStatusResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Desktop runtime is already transitioning",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/fs/entries": {
       "get": {
         "tags": [
@@ -2023,6 +2739,390 @@
             "items": {
               "$ref": "#/components/schemas/AgentInfo"
             }
+          }
+        }
+      },
+      "DesktopActionResponse": {
+        "type": "object",
+        "required": [
+          "ok"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          }
+        }
+      },
+      "DesktopDisplayInfoResponse": {
+        "type": "object",
+        "required": [
+          "display",
+          "resolution"
+        ],
+        "properties": {
+          "display": {
+            "type": "string"
+          },
+          "resolution": {
+            "$ref": "#/components/schemas/DesktopResolution"
+          }
+        }
+      },
+      "DesktopErrorInfo": {
+        "type": "object",
+        "required": [
+          "code",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "DesktopKeyboardPressRequest": {
+        "type": "object",
+        "required": [
+          "key"
+        ],
+        "properties": {
+          "key": {
+            "type": "string"
+          }
+        }
+      },
+      "DesktopKeyboardTypeRequest": {
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "properties": {
+          "delayMs": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true,
+            "minimum": 0
+          },
+          "text": {
+            "type": "string"
+          }
+        }
+      },
+      "DesktopMouseButton": {
+        "type": "string",
+        "enum": [
+          "left",
+          "middle",
+          "right"
+        ]
+      },
+      "DesktopMouseClickRequest": {
+        "type": "object",
+        "required": [
+          "x",
+          "y"
+        ],
+        "properties": {
+          "button": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DesktopMouseButton"
+              }
+            ],
+            "nullable": true
+          },
+          "clickCount": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true,
+            "minimum": 0
+          },
+          "x": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "y": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "DesktopMouseDragRequest": {
+        "type": "object",
+        "required": [
+          "startX",
+          "startY",
+          "endX",
+          "endY"
+        ],
+        "properties": {
+          "button": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DesktopMouseButton"
+              }
+            ],
+            "nullable": true
+          },
+          "endX": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "endY": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "startX": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "startY": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "DesktopMouseMoveRequest": {
+        "type": "object",
+        "required": [
+          "x",
+          "y"
+        ],
+        "properties": {
+          "x": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "y": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "DesktopMousePositionResponse": {
+        "type": "object",
+        "required": [
+          "x",
+          "y"
+        ],
+        "properties": {
+          "screen": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "window": {
+            "type": "string",
+            "nullable": true
+          },
+          "x": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "y": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "DesktopMouseScrollRequest": {
+        "type": "object",
+        "required": [
+          "x",
+          "y"
+        ],
+        "properties": {
+          "deltaX": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "deltaY": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "x": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "y": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "DesktopProcessInfo": {
+        "type": "object",
+        "required": [
+          "name",
+          "running"
+        ],
+        "properties": {
+          "logPath": {
+            "type": "string",
+            "nullable": true
+          },
+          "name": {
+            "type": "string"
+          },
+          "pid": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true,
+            "minimum": 0
+          },
+          "running": {
+            "type": "boolean"
+          }
+        }
+      },
+      "DesktopRegionScreenshotQuery": {
+        "type": "object",
+        "required": [
+          "x",
+          "y",
+          "width",
+          "height"
+        ],
+        "properties": {
+          "height": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "width": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "x": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "y": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "DesktopResolution": {
+        "type": "object",
+        "required": [
+          "width",
+          "height"
+        ],
+        "properties": {
+          "dpi": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true,
+            "minimum": 0
+          },
+          "height": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "width": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "DesktopScreenshotQuery": {
+        "type": "object"
+      },
+      "DesktopStartRequest": {
+        "type": "object",
+        "properties": {
+          "dpi": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true,
+            "minimum": 0
+          },
+          "height": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true,
+            "minimum": 0
+          },
+          "width": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true,
+            "minimum": 0
+          }
+        }
+      },
+      "DesktopState": {
+        "type": "string",
+        "enum": [
+          "inactive",
+          "install_required",
+          "starting",
+          "active",
+          "stopping",
+          "failed"
+        ]
+      },
+      "DesktopStatusResponse": {
+        "type": "object",
+        "required": [
+          "state"
+        ],
+        "properties": {
+          "display": {
+            "type": "string",
+            "nullable": true
+          },
+          "installCommand": {
+            "type": "string",
+            "nullable": true
+          },
+          "lastError": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DesktopErrorInfo"
+              }
+            ],
+            "nullable": true
+          },
+          "missingDependencies": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "processes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DesktopProcessInfo"
+            }
+          },
+          "resolution": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DesktopResolution"
+              }
+            ],
+            "nullable": true
+          },
+          "runtimeLogPath": {
+            "type": "string",
+            "nullable": true
+          },
+          "startedAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "state": {
+            "$ref": "#/components/schemas/DesktopState"
           }
         }
       },

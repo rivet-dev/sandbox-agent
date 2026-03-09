@@ -25,6 +25,19 @@ import {
   type AgentInstallRequest,
   type AgentInstallResponse,
   type AgentListResponse,
+  type DesktopActionResponse,
+  type DesktopDisplayInfoResponse,
+  type DesktopKeyboardPressRequest,
+  type DesktopKeyboardTypeRequest,
+  type DesktopMouseClickRequest,
+  type DesktopMouseDragRequest,
+  type DesktopMouseMoveRequest,
+  type DesktopMousePositionResponse,
+  type DesktopMouseScrollRequest,
+  type DesktopRegionScreenshotQuery,
+  type DesktopScreenshotQuery,
+  type DesktopStartRequest,
+  type DesktopStatusResponse,
   type FsActionResponse,
   type FsDeleteQuery,
   type FsEntriesQuery,
@@ -1292,6 +1305,82 @@ export class SandboxAgent {
 
   async getHealth(): Promise<HealthResponse> {
     return this.requestHealth();
+  }
+
+  async startDesktop(request: DesktopStartRequest = {}): Promise<DesktopStatusResponse> {
+    return this.requestJson("POST", `${API_PREFIX}/desktop/start`, {
+      body: request,
+    });
+  }
+
+  async stopDesktop(): Promise<DesktopStatusResponse> {
+    return this.requestJson("POST", `${API_PREFIX}/desktop/stop`);
+  }
+
+  async getDesktopStatus(): Promise<DesktopStatusResponse> {
+    return this.requestJson("GET", `${API_PREFIX}/desktop/status`);
+  }
+
+  async getDesktopDisplayInfo(): Promise<DesktopDisplayInfoResponse> {
+    return this.requestJson("GET", `${API_PREFIX}/desktop/display/info`);
+  }
+
+  async takeDesktopScreenshot(query: DesktopScreenshotQuery = {}): Promise<Uint8Array> {
+    const response = await this.requestRaw("GET", `${API_PREFIX}/desktop/screenshot`, {
+      query,
+      accept: "image/png",
+    });
+    const buffer = await response.arrayBuffer();
+    return new Uint8Array(buffer);
+  }
+
+  async takeDesktopRegionScreenshot(query: DesktopRegionScreenshotQuery): Promise<Uint8Array> {
+    const response = await this.requestRaw("GET", `${API_PREFIX}/desktop/screenshot/region`, {
+      query,
+      accept: "image/png",
+    });
+    const buffer = await response.arrayBuffer();
+    return new Uint8Array(buffer);
+  }
+
+  async getDesktopMousePosition(): Promise<DesktopMousePositionResponse> {
+    return this.requestJson("GET", `${API_PREFIX}/desktop/mouse/position`);
+  }
+
+  async moveDesktopMouse(request: DesktopMouseMoveRequest): Promise<DesktopMousePositionResponse> {
+    return this.requestJson("POST", `${API_PREFIX}/desktop/mouse/move`, {
+      body: request,
+    });
+  }
+
+  async clickDesktop(request: DesktopMouseClickRequest): Promise<DesktopMousePositionResponse> {
+    return this.requestJson("POST", `${API_PREFIX}/desktop/mouse/click`, {
+      body: request,
+    });
+  }
+
+  async dragDesktopMouse(request: DesktopMouseDragRequest): Promise<DesktopMousePositionResponse> {
+    return this.requestJson("POST", `${API_PREFIX}/desktop/mouse/drag`, {
+      body: request,
+    });
+  }
+
+  async scrollDesktop(request: DesktopMouseScrollRequest): Promise<DesktopMousePositionResponse> {
+    return this.requestJson("POST", `${API_PREFIX}/desktop/mouse/scroll`, {
+      body: request,
+    });
+  }
+
+  async typeDesktopText(request: DesktopKeyboardTypeRequest): Promise<DesktopActionResponse> {
+    return this.requestJson("POST", `${API_PREFIX}/desktop/keyboard/type`, {
+      body: request,
+    });
+  }
+
+  async pressDesktopKey(request: DesktopKeyboardPressRequest): Promise<DesktopActionResponse> {
+    return this.requestJson("POST", `${API_PREFIX}/desktop/keyboard/press`, {
+      body: request,
+    });
   }
 
   async listAgents(options?: AgentQueryOptions): Promise<AgentListResponse> {

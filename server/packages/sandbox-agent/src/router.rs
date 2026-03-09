@@ -37,6 +37,9 @@ use tracing::Span;
 use utoipa::{Modify, OpenApi, ToSchema};
 
 use crate::acp_proxy_runtime::{AcpProxyRuntime, ProxyPostOutcome};
+use crate::desktop_errors::DesktopProblem;
+use crate::desktop_runtime::DesktopRuntime;
+use crate::desktop_types::*;
 use crate::process_runtime::{
     decode_input_bytes, ProcessLogFilter, ProcessLogFilterStream, ProcessRuntime,
     ProcessRuntimeConfig, ProcessSnapshot, ProcessStartSpec, ProcessStatus, ProcessStream, RunSpec,
@@ -87,6 +90,7 @@ pub struct AppState {
     acp_proxy: Arc<AcpProxyRuntime>,
     opencode_server_manager: Arc<OpenCodeServerManager>,
     process_runtime: Arc<ProcessRuntime>,
+    desktop_runtime: Arc<DesktopRuntime>,
     pub(crate) branding: BrandingMode,
     version_cache: Mutex<HashMap<AgentId, CachedAgentVersion>>,
 }
@@ -111,12 +115,14 @@ impl AppState {
             },
         ));
         let process_runtime = Arc::new(ProcessRuntime::new());
+        let desktop_runtime = Arc::new(DesktopRuntime::new());
         Self {
             auth,
             agent_manager,
             acp_proxy,
             opencode_server_manager,
             process_runtime,
+            desktop_runtime,
             branding,
             version_cache: Mutex::new(HashMap::new()),
         }
@@ -136,6 +142,10 @@ impl AppState {
 
     pub(crate) fn process_runtime(&self) -> Arc<ProcessRuntime> {
         self.process_runtime.clone()
+    }
+
+    pub(crate) fn desktop_runtime(&self) -> Arc<DesktopRuntime> {
+        self.desktop_runtime.clone()
     }
 
     pub(crate) fn purge_version_cache(&self, agent: AgentId) {
@@ -172,6 +182,31 @@ pub fn build_router(state: AppState) -> Router {
 pub fn build_router_with_state(shared: Arc<AppState>) -> (Router, Arc<AppState>) {
     let mut v1_router = Router::new()
         .route("/health", get(get_v1_health))
+        .route("/desktop/status", get(get_v1_desktop_status))
+        .route("/desktop/start", post(post_v1_desktop_start))
+        .route("/desktop/stop", post(post_v1_desktop_stop))
+        .route("/desktop/screenshot", get(get_v1_desktop_screenshot))
+        .route(
+            "/desktop/screenshot/region",
+            get(get_v1_desktop_screenshot_region),
+        )
+        .route(
+            "/desktop/mouse/position",
+            get(get_v1_desktop_mouse_position),
+        )
+        .route("/desktop/mouse/move", post(post_v1_desktop_mouse_move))
+        .route("/desktop/mouse/click", post(post_v1_desktop_mouse_click))
+        .route("/desktop/mouse/drag", post(post_v1_desktop_mouse_drag))
+        .route("/desktop/mouse/scroll", post(post_v1_desktop_mouse_scroll))
+        .route(
+            "/desktop/keyboard/type",
+            post(post_v1_desktop_keyboard_type),
+        )
+        .route(
+            "/desktop/keyboard/press",
+            post(post_v1_desktop_keyboard_press),
+        )
+        .route("/desktop/display/info", get(get_v1_desktop_display_info))
         .route("/agents", get(get_v1_agents))
         .route("/agents/:agent", get(get_v1_agent))
         .route("/agents/:agent/install", post(post_v1_agent_install))
@@ -316,12 +351,26 @@ async fn opencode_unavailable() -> Response {
 pub async fn shutdown_servers(state: &Arc<AppState>) {
     state.acp_proxy().shutdown_all().await;
     state.opencode_server_manager().shutdown().await;
+    state.desktop_runtime().shutdown().await;
 }
 
 #[derive(OpenApi)]
 #[openapi(
     paths(
         get_v1_health,
+        get_v1_desktop_status,
+        post_v1_desktop_start,
+        post_v1_desktop_stop,
+        get_v1_desktop_screenshot,
+        get_v1_desktop_screenshot_region,
+        get_v1_desktop_mouse_position,
+        post_v1_desktop_mouse_move,
+        post_v1_desktop_mouse_click,
+        post_v1_desktop_mouse_drag,
+        post_v1_desktop_mouse_scroll,
+        post_v1_desktop_keyboard_type,
+        post_v1_desktop_keyboard_press,
+        get_v1_desktop_display_info,
         get_v1_agents,
         get_v1_agent,
         post_v1_agent_install,
@@ -360,6 +409,24 @@ pub async fn shutdown_servers(state: &Arc<AppState>) {
     components(
         schemas(
             HealthResponse,
+            DesktopState,
+            DesktopResolution,
+            DesktopErrorInfo,
+            DesktopProcessInfo,
+            DesktopStatusResponse,
+            DesktopStartRequest,
+            DesktopScreenshotQuery,
+            DesktopRegionScreenshotQuery,
+            DesktopMousePositionResponse,
+            DesktopMouseButton,
+            DesktopMouseMoveRequest,
+            DesktopMouseClickRequest,
+            DesktopMouseDragRequest,
+            DesktopMouseScrollRequest,
+            DesktopKeyboardTypeRequest,
+            DesktopKeyboardPressRequest,
+            DesktopActionResponse,
+            DesktopDisplayInfoResponse,
             ServerStatus,
             ServerStatusInfo,
             AgentCapabilities,
@@ -438,6 +505,12 @@ impl From<ProblemDetails> for ApiError {
     }
 }
 
+impl From<DesktopProblem> for ApiError {
+    fn from(value: DesktopProblem) -> Self {
+        Self::Problem(value.to_problem_details())
+    }
+}
+
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let problem = match &self {
@@ -474,6 +547,305 @@ async fn get_v1_health() -> Json<HealthResponse> {
     Json(HealthResponse {
         status: "ok".to_string(),
     })
+}
+
+/// Get desktop runtime status.
+///
+/// Returns the current desktop runtime state, dependency status, active
+/// display metadata, and supervised process information.
+#[utoipa::path(
+    get,
+    path = "/v1/desktop/status",
+    tag = "v1",
+    responses(
+        (status = 200, description = "Desktop runtime status", body = DesktopStatusResponse),
+        (status = 401, description = "Authentication required", body = ProblemDetails)
+    )
+)]
+async fn get_v1_desktop_status(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<DesktopStatusResponse>, ApiError> {
+    Ok(Json(state.desktop_runtime().status().await))
+}
+
+/// Start the private desktop runtime.
+///
+/// Lazily launches the managed Xvfb/openbox stack, validates display health,
+/// and returns the resulting desktop status snapshot.
+#[utoipa::path(
+    post,
+    path = "/v1/desktop/start",
+    tag = "v1",
+    request_body = DesktopStartRequest,
+    responses(
+        (status = 200, description = "Desktop runtime status after start", body = DesktopStatusResponse),
+        (status = 400, description = "Invalid desktop start request", body = ProblemDetails),
+        (status = 409, description = "Desktop runtime is already transitioning", body = ProblemDetails),
+        (status = 501, description = "Desktop API unsupported on this platform", body = ProblemDetails),
+        (status = 503, description = "Desktop runtime could not be started", body = ProblemDetails)
+    )
+)]
+async fn post_v1_desktop_start(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<DesktopStartRequest>,
+) -> Result<Json<DesktopStatusResponse>, ApiError> {
+    let status = state.desktop_runtime().start(body).await?;
+    Ok(Json(status))
+}
+
+/// Stop the private desktop runtime.
+///
+/// Terminates the managed openbox/Xvfb/dbus processes owned by the desktop
+/// runtime and returns the resulting status snapshot.
+#[utoipa::path(
+    post,
+    path = "/v1/desktop/stop",
+    tag = "v1",
+    responses(
+        (status = 200, description = "Desktop runtime status after stop", body = DesktopStatusResponse),
+        (status = 409, description = "Desktop runtime is already transitioning", body = ProblemDetails)
+    )
+)]
+async fn post_v1_desktop_stop(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<DesktopStatusResponse>, ApiError> {
+    let status = state.desktop_runtime().stop().await?;
+    Ok(Json(status))
+}
+
+/// Capture a full desktop screenshot.
+///
+/// Performs a health-gated full-frame screenshot of the managed desktop and
+/// returns PNG bytes.
+#[utoipa::path(
+    get,
+    path = "/v1/desktop/screenshot",
+    tag = "v1",
+    responses(
+        (status = 200, description = "Desktop screenshot as PNG bytes"),
+        (status = 409, description = "Desktop runtime is not ready", body = ProblemDetails),
+        (status = 502, description = "Desktop runtime health or screenshot capture failed", body = ProblemDetails)
+    )
+)]
+async fn get_v1_desktop_screenshot(
+    State(state): State<Arc<AppState>>,
+) -> Result<Response, ApiError> {
+    let bytes = state.desktop_runtime().screenshot().await?;
+    Ok(([(header::CONTENT_TYPE, "image/png")], Bytes::from(bytes)).into_response())
+}
+
+/// Capture a desktop screenshot region.
+///
+/// Performs a health-gated screenshot crop against the managed desktop and
+/// returns the requested PNG region bytes.
+#[utoipa::path(
+    get,
+    path = "/v1/desktop/screenshot/region",
+    tag = "v1",
+    params(
+        ("x" = i32, Query, description = "Region x coordinate"),
+        ("y" = i32, Query, description = "Region y coordinate"),
+        ("width" = u32, Query, description = "Region width"),
+        ("height" = u32, Query, description = "Region height")
+    ),
+    responses(
+        (status = 200, description = "Desktop screenshot region as PNG bytes"),
+        (status = 400, description = "Invalid screenshot region", body = ProblemDetails),
+        (status = 409, description = "Desktop runtime is not ready", body = ProblemDetails),
+        (status = 502, description = "Desktop runtime health or screenshot capture failed", body = ProblemDetails)
+    )
+)]
+async fn get_v1_desktop_screenshot_region(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<DesktopRegionScreenshotQuery>,
+) -> Result<Response, ApiError> {
+    let bytes = state.desktop_runtime().screenshot_region(query).await?;
+    Ok(([(header::CONTENT_TYPE, "image/png")], Bytes::from(bytes)).into_response())
+}
+
+/// Get the current desktop mouse position.
+///
+/// Performs a health-gated mouse position query against the managed desktop.
+#[utoipa::path(
+    get,
+    path = "/v1/desktop/mouse/position",
+    tag = "v1",
+    responses(
+        (status = 200, description = "Desktop mouse position", body = DesktopMousePositionResponse),
+        (status = 409, description = "Desktop runtime is not ready", body = ProblemDetails),
+        (status = 502, description = "Desktop runtime health or input check failed", body = ProblemDetails)
+    )
+)]
+async fn get_v1_desktop_mouse_position(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<DesktopMousePositionResponse>, ApiError> {
+    let position = state.desktop_runtime().mouse_position().await?;
+    Ok(Json(position))
+}
+
+/// Move the desktop mouse.
+///
+/// Performs a health-gated absolute pointer move on the managed desktop and
+/// returns the resulting mouse position.
+#[utoipa::path(
+    post,
+    path = "/v1/desktop/mouse/move",
+    tag = "v1",
+    request_body = DesktopMouseMoveRequest,
+    responses(
+        (status = 200, description = "Desktop mouse position after move", body = DesktopMousePositionResponse),
+        (status = 400, description = "Invalid mouse move request", body = ProblemDetails),
+        (status = 409, description = "Desktop runtime is not ready", body = ProblemDetails),
+        (status = 502, description = "Desktop runtime health or input failed", body = ProblemDetails)
+    )
+)]
+async fn post_v1_desktop_mouse_move(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<DesktopMouseMoveRequest>,
+) -> Result<Json<DesktopMousePositionResponse>, ApiError> {
+    let position = state.desktop_runtime().move_mouse(body).await?;
+    Ok(Json(position))
+}
+
+/// Click on the desktop.
+///
+/// Performs a health-gated pointer move and click against the managed desktop
+/// and returns the resulting mouse position.
+#[utoipa::path(
+    post,
+    path = "/v1/desktop/mouse/click",
+    tag = "v1",
+    request_body = DesktopMouseClickRequest,
+    responses(
+        (status = 200, description = "Desktop mouse position after click", body = DesktopMousePositionResponse),
+        (status = 400, description = "Invalid mouse click request", body = ProblemDetails),
+        (status = 409, description = "Desktop runtime is not ready", body = ProblemDetails),
+        (status = 502, description = "Desktop runtime health or input failed", body = ProblemDetails)
+    )
+)]
+async fn post_v1_desktop_mouse_click(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<DesktopMouseClickRequest>,
+) -> Result<Json<DesktopMousePositionResponse>, ApiError> {
+    let position = state.desktop_runtime().click_mouse(body).await?;
+    Ok(Json(position))
+}
+
+/// Drag the desktop mouse.
+///
+/// Performs a health-gated drag gesture against the managed desktop and
+/// returns the resulting mouse position.
+#[utoipa::path(
+    post,
+    path = "/v1/desktop/mouse/drag",
+    tag = "v1",
+    request_body = DesktopMouseDragRequest,
+    responses(
+        (status = 200, description = "Desktop mouse position after drag", body = DesktopMousePositionResponse),
+        (status = 400, description = "Invalid mouse drag request", body = ProblemDetails),
+        (status = 409, description = "Desktop runtime is not ready", body = ProblemDetails),
+        (status = 502, description = "Desktop runtime health or input failed", body = ProblemDetails)
+    )
+)]
+async fn post_v1_desktop_mouse_drag(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<DesktopMouseDragRequest>,
+) -> Result<Json<DesktopMousePositionResponse>, ApiError> {
+    let position = state.desktop_runtime().drag_mouse(body).await?;
+    Ok(Json(position))
+}
+
+/// Scroll the desktop mouse wheel.
+///
+/// Performs a health-gated scroll gesture at the requested coordinates and
+/// returns the resulting mouse position.
+#[utoipa::path(
+    post,
+    path = "/v1/desktop/mouse/scroll",
+    tag = "v1",
+    request_body = DesktopMouseScrollRequest,
+    responses(
+        (status = 200, description = "Desktop mouse position after scroll", body = DesktopMousePositionResponse),
+        (status = 400, description = "Invalid mouse scroll request", body = ProblemDetails),
+        (status = 409, description = "Desktop runtime is not ready", body = ProblemDetails),
+        (status = 502, description = "Desktop runtime health or input failed", body = ProblemDetails)
+    )
+)]
+async fn post_v1_desktop_mouse_scroll(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<DesktopMouseScrollRequest>,
+) -> Result<Json<DesktopMousePositionResponse>, ApiError> {
+    let position = state.desktop_runtime().scroll_mouse(body).await?;
+    Ok(Json(position))
+}
+
+/// Type desktop keyboard text.
+///
+/// Performs a health-gated `xdotool type` operation against the managed
+/// desktop.
+#[utoipa::path(
+    post,
+    path = "/v1/desktop/keyboard/type",
+    tag = "v1",
+    request_body = DesktopKeyboardTypeRequest,
+    responses(
+        (status = 200, description = "Desktop keyboard action result", body = DesktopActionResponse),
+        (status = 400, description = "Invalid keyboard type request", body = ProblemDetails),
+        (status = 409, description = "Desktop runtime is not ready", body = ProblemDetails),
+        (status = 502, description = "Desktop runtime health or input failed", body = ProblemDetails)
+    )
+)]
+async fn post_v1_desktop_keyboard_type(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<DesktopKeyboardTypeRequest>,
+) -> Result<Json<DesktopActionResponse>, ApiError> {
+    let response = state.desktop_runtime().type_text(body).await?;
+    Ok(Json(response))
+}
+
+/// Press a desktop keyboard shortcut.
+///
+/// Performs a health-gated `xdotool key` operation against the managed
+/// desktop.
+#[utoipa::path(
+    post,
+    path = "/v1/desktop/keyboard/press",
+    tag = "v1",
+    request_body = DesktopKeyboardPressRequest,
+    responses(
+        (status = 200, description = "Desktop keyboard action result", body = DesktopActionResponse),
+        (status = 400, description = "Invalid keyboard press request", body = ProblemDetails),
+        (status = 409, description = "Desktop runtime is not ready", body = ProblemDetails),
+        (status = 502, description = "Desktop runtime health or input failed", body = ProblemDetails)
+    )
+)]
+async fn post_v1_desktop_keyboard_press(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<DesktopKeyboardPressRequest>,
+) -> Result<Json<DesktopActionResponse>, ApiError> {
+    let response = state.desktop_runtime().press_key(body).await?;
+    Ok(Json(response))
+}
+
+/// Get desktop display information.
+///
+/// Performs a health-gated display query against the managed desktop and
+/// returns the current display identifier and resolution.
+#[utoipa::path(
+    get,
+    path = "/v1/desktop/display/info",
+    tag = "v1",
+    responses(
+        (status = 200, description = "Desktop display information", body = DesktopDisplayInfoResponse),
+        (status = 409, description = "Desktop runtime is not ready", body = ProblemDetails),
+        (status = 503, description = "Desktop runtime health or display query failed", body = ProblemDetails)
+    )
+)]
+async fn get_v1_desktop_display_info(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<DesktopDisplayInfoResponse>, ApiError> {
+    let info = state.desktop_runtime().display_info().await?;
+    Ok(Json(info))
 }
 
 #[utoipa::path(

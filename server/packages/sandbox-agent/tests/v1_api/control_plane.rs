@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::BTreeMap;
 
 #[tokio::test]
 async fn v1_health_removed_legacy_and_opencode_unmounted() {
@@ -137,10 +138,19 @@ async fn v1_filesystem_endpoints_round_trip() {
 #[tokio::test]
 #[serial]
 async fn require_preinstall_blocks_missing_agent() {
-    let test_app = {
-        let _preinstall = EnvVarGuard::set("SANDBOX_AGENT_REQUIRE_PREINSTALL", "true");
-        TestApp::new(AuthConfig::disabled())
-    };
+    let mut env = BTreeMap::new();
+    env.insert(
+        "SANDBOX_AGENT_REQUIRE_PREINSTALL".to_string(),
+        "true".to_string(),
+    );
+    let test_app = TestApp::with_options(
+        AuthConfig::disabled(),
+        docker_support::TestAppOptions {
+            env,
+            ..Default::default()
+        },
+        |_| {},
+    );
 
     let (status, _, body) = send_request(
         &test_app.app,
@@ -176,20 +186,26 @@ async fn lazy_install_runs_on_first_bootstrap() {
         ]
     }));
 
-    let _registry = EnvVarGuard::set("SANDBOX_AGENT_ACP_REGISTRY_URL", &registry_url);
-    let test_app = TestApp::with_setup(AuthConfig::disabled(), |install_path| {
-        fs::create_dir_all(install_path.join("agent_processes"))
-            .expect("create agent processes dir");
-        write_executable(&install_path.join("codex"), "#!/usr/bin/env sh\nexit 0\n");
-        fs::create_dir_all(install_path.join("bin")).expect("create bin dir");
-        write_fake_npm(&install_path.join("bin").join("npm"));
-    });
+    let helper_bin_root = tempfile::tempdir().expect("helper bin tempdir");
+    let helper_bin = helper_bin_root.path().join("bin");
+    fs::create_dir_all(&helper_bin).expect("create helper bin dir");
+    write_fake_npm(&helper_bin.join("npm"));
 
-    let original_path = std::env::var_os("PATH").unwrap_or_default();
-    let mut paths = vec![test_app.install_path().join("bin")];
-    paths.extend(std::env::split_paths(&original_path));
-    let merged_path = std::env::join_paths(paths).expect("join PATH");
-    let _path_guard = EnvVarGuard::set_os("PATH", merged_path.as_os_str());
+    let mut env = BTreeMap::new();
+    env.insert("SANDBOX_AGENT_ACP_REGISTRY_URL".to_string(), registry_url);
+    let test_app = TestApp::with_options(
+        AuthConfig::disabled(),
+        docker_support::TestAppOptions {
+            env,
+            extra_paths: vec![helper_bin.clone()],
+            ..Default::default()
+        },
+        |install_path| {
+            fs::create_dir_all(install_path.join("agent_processes"))
+                .expect("create agent processes dir");
+            write_executable(&install_path.join("codex"), "#!/usr/bin/env sh\nexit 0\n");
+        },
+    );
 
     let (status, _, _) = send_request(
         &test_app.app,

@@ -22,8 +22,9 @@ async fn mcp_config_requires_directory_and_name() {
 #[tokio::test]
 async fn mcp_config_crud_round_trip() {
     let test_app = TestApp::new(AuthConfig::disabled());
-    let project = tempfile::tempdir().expect("tempdir");
-    let directory = project.path().to_string_lossy().to_string();
+    let project = test_app.root_path().join("mcp-config-project");
+    fs::create_dir_all(&project).expect("create project dir");
+    let directory = project.to_string_lossy().to_string();
 
     let entry = json!({
         "type": "local",
@@ -99,8 +100,9 @@ async fn skills_config_requires_directory_and_name() {
 #[tokio::test]
 async fn skills_config_crud_round_trip() {
     let test_app = TestApp::new(AuthConfig::disabled());
-    let project = tempfile::tempdir().expect("tempdir");
-    let directory = project.path().to_string_lossy().to_string();
+    let project = test_app.root_path().join("skills-config-project");
+    fs::create_dir_all(&project).expect("create project dir");
+    let directory = project.to_string_lossy().to_string();
 
     let entry = json!({
         "sources": [

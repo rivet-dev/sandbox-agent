@@ -37,6 +37,36 @@ Notes:
 - Set `SANDBOX_AGENT_LOG_STDOUT=1` to force stdout/stderr logging.
 - Use `SANDBOX_AGENT_LOG_DIR` to override log directory.
 
+## install
+
+Install first-party runtime dependencies.
+
+### install desktop
+
+Install the Linux desktop runtime packages required by `/v1/desktop/*`.
+
+```bash
+sandbox-agent install desktop [OPTIONS]
+```
+
+| Option | Description |
+|--------|-------------|
+| `--yes` | Skip the confirmation prompt |
+| `--print-only` | Print the package-manager command without executing it |
+| `--package-manager <apt\|dnf\|apk>` | Override package-manager detection |
+| `--no-fonts` | Skip the default DejaVu font package |
+
+```bash
+sandbox-agent install desktop --yes
+sandbox-agent install desktop --print-only
+```
+
+Notes:
+
+- Supported on Linux only.
+- The command detects `apt`, `dnf`, or `apk`.
+- If the host is not already running as root, the command requires `sudo`.
+
 ## install-agent
 
 Install or reinstall a single agent.

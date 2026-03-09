@@ -11,6 +11,7 @@ mod build_version {
     include!(concat!(env!("OUT_DIR"), "/version.rs"));
 }
 
+use crate::desktop_install::{install_desktop, DesktopInstallRequest, DesktopPackageManager};
 use crate::router::{
     build_router_with_state, shutdown_servers, AppState, AuthConfig, BrandingMode,
 };
@@ -75,6 +76,8 @@ pub enum Command {
     Server(ServerArgs),
     /// Call the HTTP API without writing client code.
     Api(ApiArgs),
+    /// Install first-party runtime dependencies.
+    Install(InstallArgs),
     /// EXPERIMENTAL: OpenCode compatibility layer (disabled until ACP Phase 7).
     Opencode(OpencodeArgs),
     /// Manage the sandbox-agent background daemon.
@@ -116,6 +119,12 @@ pub struct ApiArgs {
 }
 
 #[derive(Args, Debug)]
+pub struct InstallArgs {
+    #[command(subcommand)]
+    command: InstallCommand,
+}
+
+#[derive(Args, Debug)]
 pub struct OpencodeArgs {
     #[arg(long, short = 'H', default_value = DEFAULT_HOST)]
     host: String,
@@ -151,6 +160,12 @@ pub struct CredentialsArgs {
 pub struct DaemonArgs {
     #[command(subcommand)]
     command: DaemonCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum InstallCommand {
+    /// Install desktop runtime dependencies.
+    Desktop(InstallDesktopArgs),
 }
 
 #[derive(Subcommand, Debug)]
@@ -305,6 +320,18 @@ pub struct InstallAgentArgs {
 }
 
 #[derive(Args, Debug)]
+pub struct InstallDesktopArgs {
+    #[arg(long, default_value_t = false)]
+    yes: bool,
+    #[arg(long, default_value_t = false)]
+    print_only: bool,
+    #[arg(long, value_enum)]
+    package_manager: Option<DesktopPackageManager>,
+    #[arg(long, default_value_t = false)]
+    no_fonts: bool,
+}
+
+#[derive(Args, Debug)]
 pub struct CredentialsExtractArgs {
     #[arg(long, short = 'a', value_enum)]
     agent: Option<CredentialAgent>,
@@ -399,10 +426,17 @@ pub fn run_command(command: &Command, cli: &CliConfig) -> Result<(), CliError> {
     match command {
         Command::Server(args) => run_server(cli, args),
         Command::Api(subcommand) => run_api(&subcommand.command, cli),
+        Command::Install(subcommand) => run_install(&subcommand.command),
         Command::Opencode(args) => run_opencode(cli, args),
         Command::Daemon(subcommand) => run_daemon(&subcommand.command, cli),
         Command::InstallAgent(args) => install_agent_local(args),
         Command::Credentials(subcommand) => run_credentials(&subcommand.command),
+    }
+}
+
+fn run_install(command: &InstallCommand) -> Result<(), CliError> {
+    match command {
+        InstallCommand::Desktop(args) => install_desktop_local(args),
     }
 }
 
@@ -468,6 +502,17 @@ fn run_api(command: &ApiCommand, cli: &CliConfig) -> Result<(), CliError> {
         ApiCommand::Agents(subcommand) => run_agents(&subcommand.command, cli),
         ApiCommand::Acp(subcommand) => run_acp(&subcommand.command, cli),
     }
+}
+
+fn install_desktop_local(args: &InstallDesktopArgs) -> Result<(), CliError> {
+    install_desktop(DesktopInstallRequest {
+        yes: args.yes,
+        print_only: args.print_only,
+        package_manager: args.package_manager,
+        no_fonts: args.no_fonts,
+    })
+    .map(|_| ())
+    .map_err(CliError::Server)
 }
 
 fn run_agents(command: &AgentsCommand, cli: &CliConfig) -> Result<(), CliError> {

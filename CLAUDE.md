@@ -97,6 +97,11 @@
 - This triggers `examples/shared/Dockerfile.dev` which builds the server binary from local source and packages it into the Docker image.
 - Example: `SANDBOX_AGENT_DEV=1 pnpm --filter @sandbox-agent/example-mcp start`
 
+## Docker Test Image
+
+- Docker-backed Rust and TypeScript tests build `docker/test-agent/Dockerfile` directly in-process and cache the image tag only in memory (`OnceLock` in Rust, module-level variable in TypeScript).
+- Do not add cross-process image-build scripts unless there is a concrete need for them.
+
 ## Install Version References
 
 - Channel policy:

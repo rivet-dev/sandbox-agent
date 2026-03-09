@@ -21,6 +21,27 @@ docker run --rm -p 3000:3000 \
     sandbox-agent server --no-token --host 0.0.0.0 --port 3000"
 ```
 
+If you also want the desktop API inside the container, install desktop dependencies before starting the server:
+
+```bash
+docker run --rm -p 3000:3000 \
+  -e ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
+  -e OPENAI_API_KEY="$OPENAI_API_KEY" \
+  node:22-bookworm-slim sh -c "\
+    apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y curl ca-certificates bash libstdc++6 && \
+    rm -rf /var/lib/apt/lists/* && \
+    curl -fsSL https://releases.rivet.dev/sandbox-agent/0.3.x/install.sh | sh && \
+    sandbox-agent install desktop --yes && \
+    sandbox-agent server --no-token --host 0.0.0.0 --port 3000"
+```
+
+In a Dockerfile:
+
+```dockerfile
+RUN sandbox-agent install desktop --yes
+```
+
 ## TypeScript with dockerode
 
 ```typescript
