@@ -3,6 +3,8 @@
  * Provides minimal helpers for connecting to and interacting with sandbox-agent servers.
  */
 
+import { setTimeout as delay } from "node:timers/promises";
+
 function normalizeBaseUrl(baseUrl: string): string {
   return baseUrl.replace(/\/+$/, "");
 }
@@ -72,6 +74,41 @@ export function buildHeaders({
   return headers;
 }
 
+export async function waitForHealth({
+  baseUrl,
+  token,
+  extraHeaders,
+  timeoutMs = 120_000,
+}: {
+  baseUrl: string;
+  token?: string;
+  extraHeaders?: Record<string, string>;
+  timeoutMs?: number;
+}): Promise<void> {
+  const normalized = normalizeBaseUrl(baseUrl);
+  const deadline = Date.now() + timeoutMs;
+  let lastError: unknown;
+  while (Date.now() < deadline) {
+    try {
+      const headers = buildHeaders({ token, extraHeaders });
+      const response = await fetch(`${normalized}/v1/health`, { headers });
+      if (response.ok) {
+        const data = await response.json();
+        if (data?.status === "ok") {
+          return;
+        }
+        lastError = new Error(`Unexpected health response: ${JSON.stringify(data)}`);
+      } else {
+        lastError = new Error(`Health check failed: ${response.status}`);
+      }
+    } catch (error) {
+      lastError = error;
+    }
+    await delay(500);
+  }
+  throw (lastError ?? new Error("Timed out waiting for /v1/health")) as Error;
+}
+
 export function generateSessionId(): string {
   const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
   let id = "session-";
@@ -107,3 +144,4 @@ export function detectAgent(): string {
   }
   return "claude";
 }
+

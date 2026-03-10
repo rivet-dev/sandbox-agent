@@ -1,29 +1,18 @@
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-function candidateInstallDirs(dataHome: string): string[] {
-  const dirs = [join(dataHome, "sandbox-agent", "bin")];
-  if (process.platform === "darwin") {
-    dirs.push(join(dataHome, "Library", "Application Support", "sandbox-agent", "bin"));
-  } else if (process.platform === "win32") {
-    dirs.push(join(dataHome, "AppData", "Roaming", "sandbox-agent", "bin"));
-  }
-  return dirs;
-}
+export function prepareMockAgentDataHome(dataHome: string): void {
+  const installDir = join(dataHome, "sandbox-agent", "bin");
+  const processDir = join(installDir, "agent_processes");
+  mkdirSync(processDir, { recursive: true });
 
-export function prepareMockAgentDataHome(dataHome: string): Record<string, string> {
-  const runtimeEnv: Record<string, string> = {};
-  if (process.platform === "darwin") {
-    runtimeEnv.HOME = dataHome;
-    runtimeEnv.XDG_DATA_HOME = join(dataHome, ".local", "share");
-  } else if (process.platform === "win32") {
-    runtimeEnv.USERPROFILE = dataHome;
-    runtimeEnv.APPDATA = join(dataHome, "AppData", "Roaming");
-    runtimeEnv.LOCALAPPDATA = join(dataHome, "AppData", "Local");
-  } else {
-    runtimeEnv.HOME = dataHome;
-    runtimeEnv.XDG_DATA_HOME = dataHome;
-  }
+  const runner = process.platform === "win32"
+    ? join(processDir, "mock-acp.cmd")
+    : join(processDir, "mock-acp");
+
+  const scriptFile = process.platform === "win32"
+    ? join(processDir, "mock-acp.js")
+    : runner;
 
   const nodeScript = String.raw`#!/usr/bin/env node
 const { createInterface } = require("node:readline");
@@ -138,29 +127,14 @@ rl.on("line", (line) => {
 });
 `;
 
-  for (const installDir of candidateInstallDirs(dataHome)) {
-    const processDir = join(installDir, "agent_processes");
-    mkdirSync(processDir, { recursive: true });
+  writeFileSync(scriptFile, nodeScript);
 
-    const runner = process.platform === "win32"
-      ? join(processDir, "mock-acp.cmd")
-      : join(processDir, "mock-acp");
-
-    const scriptFile = process.platform === "win32"
-      ? join(processDir, "mock-acp.js")
-      : runner;
-
-    writeFileSync(scriptFile, nodeScript);
-
-    if (process.platform === "win32") {
-      writeFileSync(runner, `@echo off\r\nnode "${scriptFile}" %*\r\n`);
-    }
-
-    chmodSync(scriptFile, 0o755);
-    if (process.platform === "win32") {
-      chmodSync(runner, 0o755);
-    }
+  if (process.platform === "win32") {
+    writeFileSync(runner, `@echo off\r\nnode "${scriptFile}" %*\r\n`);
   }
 
-  return runtimeEnv;
+  chmodSync(scriptFile, 0o755);
+  if (process.platform === "win32") {
+    chmodSync(runner, 0o755);
+  }
 }

@@ -82,49 +82,6 @@ if (sessions.items.length > 0) {
 }
 ```
 
-## Configure model, mode, and thought level
-
-Set the model, mode, or thought level on a session at creation time or after:
-
-```ts
-// At creation time
-const session = await sdk.createSession({
-  agent: "codex",
-  model: "gpt-5.3-codex",
-  mode: "auto",
-  thoughtLevel: "high",
-});
-```
-
-```ts
-// After creation
-await session.setModel("gpt-5.2-codex");
-await session.setMode("full-access");
-await session.setThoughtLevel("medium");
-```
-
-Query available modes:
-
-```ts
-const modes = await session.getModes();
-console.log(modes?.currentModeId, modes?.availableModes);
-```
-
-### Advanced config options
-
-For config options beyond model, mode, and thought level, use `getConfigOptions` to discover what the agent supports and `setConfigOption` to set any option by ID:
-
-```ts
-const options = await session.getConfigOptions();
-for (const opt of options) {
-  console.log(opt.id, opt.category, opt.type);
-}
-```
-
-```ts
-await session.setConfigOption("some-agent-option", "value");
-```
-
 ## Destroy a session
 
 ```ts

@@ -28,7 +28,7 @@ if (process.env.OPENAI_API_KEY) envVars.OPENAI_API_KEY = process.env.OPENAI_API_
 const sandbox = await daytona.create({ envVars });
 
 await sandbox.process.executeCommand(
-  "curl -fsSL https://releases.rivet.dev/sandbox-agent/0.3.x/install.sh | sh"
+  "curl -fsSL https://releases.rivet.dev/sandbox-agent/0.2.x/install.sh | sh"
 );
 
 await sandbox.process.executeCommand("sandbox-agent install-agent claude");
@@ -64,7 +64,7 @@ if (!hasSnapshot) {
     name: SNAPSHOT,
     image: Image.base("ubuntu:22.04").runCommands(
       "apt-get update && apt-get install -y curl ca-certificates",
-      "curl -fsSL https://releases.rivet.dev/sandbox-agent/0.3.x/install.sh | sh",
+      "curl -fsSL https://releases.rivet.dev/sandbox-agent/0.2.x/install.sh | sh",
       "sandbox-agent install-agent claude",
       "sandbox-agent install-agent codex",
     ),

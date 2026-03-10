@@ -1,6 +1,5 @@
 import {
   AcpHttpClient,
-  AcpRpcError,
   PROTOCOL_VERSION,
   type AcpEnvelopeDirection,
   type AnyMessage,
@@ -10,12 +9,8 @@ import {
   type NewSessionResponse,
   type PromptRequest,
   type PromptResponse,
-  type SessionConfigOption,
   type SessionNotification,
-  type SessionModeState,
-  type SetSessionConfigOptionResponse,
   type SetSessionConfigOptionRequest,
-  type SetSessionModeResponse,
   type SetSessionModeRequest,
 } from "acp-http-client";
 import type { SandboxAgentSpawnHandle, SandboxAgentSpawnOptions } from "./spawn.ts";
@@ -44,31 +39,11 @@ import {
   type McpConfigQuery,
   type McpServerConfig,
   type ProblemDetails,
-  type ProcessConfig,
-  type ProcessCreateRequest,
-  type ProcessInfo,
-  type ProcessInputRequest,
-  type ProcessInputResponse,
-  type ProcessListResponse,
-  type ProcessLogEntry,
-  type ProcessLogsQuery,
-  type ProcessLogsResponse,
-  type ProcessRunRequest,
-  type ProcessRunResponse,
-  type ProcessSignalQuery,
-  type ProcessTerminalClientFrame,
-  type ProcessTerminalServerFrame,
-  type ProcessTerminalResizeRequest,
-  type ProcessTerminalResizeResponse,
   type SessionEvent,
   type SessionPersistDriver,
   type SessionRecord,
   type SkillsConfig,
   type SkillsConfigQuery,
-  type TerminalErrorStatus,
-  type TerminalExitStatus,
-  type TerminalReadyStatus,
-  type TerminalResizePayload,
 } from "./types.ts";
 
 const API_PREFIX = "/v1";
@@ -78,26 +53,13 @@ const DEFAULT_BASE_URL = "http://sandbox-agent";
 const DEFAULT_REPLAY_MAX_EVENTS = 50;
 const DEFAULT_REPLAY_MAX_CHARS = 12_000;
 const EVENT_INDEX_SCAN_EVENTS_LIMIT = 500;
-const SESSION_CANCEL_METHOD = "session/cancel";
-const MANUAL_CANCEL_ERROR =
-  "Manual session/cancel calls are not allowed. Use destroySession(sessionId) instead.";
-const HEALTH_WAIT_MIN_DELAY_MS = 500;
-const HEALTH_WAIT_MAX_DELAY_MS = 15_000;
-const HEALTH_WAIT_LOG_AFTER_MS = 5_000;
-const HEALTH_WAIT_LOG_EVERY_MS = 10_000;
-
-export interface SandboxAgentHealthWaitOptions {
-  timeoutMs?: number;
-}
 
 interface SandboxAgentConnectCommonOptions {
   headers?: HeadersInit;
   persist?: SessionPersistDriver;
   replayMaxEvents?: number;
   replayMaxChars?: number;
-  signal?: AbortSignal;
   token?: string;
-  waitForHealth?: boolean | SandboxAgentHealthWaitOptions;
 }
 
 export type SandboxAgentConnectOptions =
@@ -123,18 +85,12 @@ export interface SessionCreateRequest {
   id?: string;
   agent: string;
   sessionInit?: Omit<NewSessionRequest, "_meta">;
-  model?: string;
-  mode?: string;
-  thoughtLevel?: string;
 }
 
 export interface SessionResumeOrCreateRequest {
   id: string;
   agent: string;
   sessionInit?: Omit<NewSessionRequest, "_meta">;
-  model?: string;
-  mode?: string;
-  thoughtLevel?: string;
 }
 
 export interface SessionSendOptions {
@@ -142,29 +98,6 @@ export interface SessionSendOptions {
 }
 
 export type SessionEventListener = (event: SessionEvent) => void;
-export type ProcessLogListener = (entry: ProcessLogEntry) => void;
-export type ProcessLogFollowQuery = Omit<ProcessLogsQuery, "follow">;
-
-export interface AgentQueryOptions {
-  config?: boolean;
-  noCache?: boolean;
-}
-
-export interface ProcessLogSubscription {
-  close(): void;
-  closed: Promise<void>;
-}
-
-export interface ProcessTerminalWebSocketUrlOptions {
-  accessToken?: string;
-}
-
-export interface ProcessTerminalConnectOptions extends ProcessTerminalWebSocketUrlOptions {
-  protocols?: string | string[];
-  WebSocket?: typeof WebSocket;
-}
-
-export type ProcessTerminalSessionOptions = ProcessTerminalConnectOptions;
 
 export class SandboxAgentError extends Error {
   readonly status: number;
@@ -177,64 +110,6 @@ export class SandboxAgentError extends Error {
     this.status = status;
     this.problem = problem;
     this.response = response;
-  }
-}
-
-export class UnsupportedSessionCategoryError extends Error {
-  readonly sessionId: string;
-  readonly category: string;
-  readonly availableCategories: string[];
-
-  constructor(sessionId: string, category: string, availableCategories: string[]) {
-    super(
-      `Session '${sessionId}' does not support category '${category}'. Available categories: ${availableCategories.join(", ") || "(none)"}`,
-    );
-    this.name = "UnsupportedSessionCategoryError";
-    this.sessionId = sessionId;
-    this.category = category;
-    this.availableCategories = availableCategories;
-  }
-}
-
-export class UnsupportedSessionValueError extends Error {
-  readonly sessionId: string;
-  readonly category: string;
-  readonly configId: string;
-  readonly requestedValue: string;
-  readonly allowedValues: string[];
-
-  constructor(
-    sessionId: string,
-    category: string,
-    configId: string,
-    requestedValue: string,
-    allowedValues: string[],
-  ) {
-    super(
-      `Session '${sessionId}' does not support value '${requestedValue}' for category '${category}' (configId='${configId}'). Allowed values: ${allowedValues.join(", ") || "(none)"}`,
-    );
-    this.name = "UnsupportedSessionValueError";
-    this.sessionId = sessionId;
-    this.category = category;
-    this.configId = configId;
-    this.requestedValue = requestedValue;
-    this.allowedValues = allowedValues;
-  }
-}
-
-export class UnsupportedSessionConfigOptionError extends Error {
-  readonly sessionId: string;
-  readonly configId: string;
-  readonly availableConfigIds: string[];
-
-  constructor(sessionId: string, configId: string, availableConfigIds: string[]) {
-    super(
-      `Session '${sessionId}' does not expose config option '${configId}'. Available configIds: ${availableConfigIds.join(", ") || "(none)"}`,
-    );
-    this.name = "UnsupportedSessionConfigOptionError";
-    this.sessionId = sessionId;
-    this.configId = configId;
-    this.availableConfigIds = availableConfigIds;
   }
 }
 
@@ -289,38 +164,6 @@ export class Session {
   async prompt(prompt: PromptRequest["prompt"]): Promise<PromptResponse> {
     const response = await this.send("session/prompt", { prompt });
     return response as PromptResponse;
-  }
-
-  async setMode(modeId: string): Promise<SetSessionModeResponse | void> {
-    const updated = await this.sandbox.setSessionMode(this.id, modeId);
-    this.apply(updated.session.toRecord());
-    return updated.response;
-  }
-
-  async setConfigOption(configId: string, value: string): Promise<SetSessionConfigOptionResponse> {
-    const updated = await this.sandbox.setSessionConfigOption(this.id, configId, value);
-    this.apply(updated.session.toRecord());
-    return updated.response;
-  }
-
-  async setModel(model: string): Promise<SetSessionConfigOptionResponse> {
-    const updated = await this.sandbox.setSessionModel(this.id, model);
-    this.apply(updated.session.toRecord());
-    return updated.response;
-  }
-
-  async setThoughtLevel(thoughtLevel: string): Promise<SetSessionConfigOptionResponse> {
-    const updated = await this.sandbox.setSessionThoughtLevel(this.id, thoughtLevel);
-    this.apply(updated.session.toRecord());
-    return updated.response;
-  }
-
-  async getConfigOptions(): Promise<SessionConfigOption[]> {
-    return this.sandbox.getSessionConfigOptions(this.id);
-  }
-
-  async getModes(): Promise<SessionModeState | null> {
-    return this.sandbox.getSessionModes(this.id);
   }
 
   onEvent(listener: SessionEventListener): () => void {
@@ -594,189 +437,17 @@ export class LiveAcpConnection {
   }
 }
 
-export class ProcessTerminalSession {
-  readonly socket: WebSocket;
-  readonly closed: Promise<void>;
-
-  private readonly readyListeners = new Set<(status: TerminalReadyStatus) => void>();
-  private readonly dataListeners = new Set<(data: Uint8Array) => void>();
-  private readonly exitListeners = new Set<(status: TerminalExitStatus) => void>();
-  private readonly errorListeners = new Set<(error: TerminalErrorStatus | Error) => void>();
-  private readonly closeListeners = new Set<() => void>();
-
-  private closeSignalSent = false;
-  private closedResolve!: () => void;
-
-  constructor(socket: WebSocket) {
-    this.socket = socket;
-    this.socket.binaryType = "arraybuffer";
-    this.closed = new Promise<void>((resolve) => {
-      this.closedResolve = resolve;
-    });
-
-    this.socket.addEventListener("message", (event) => {
-      void this.handleMessage(event.data);
-    });
-    this.socket.addEventListener("error", () => {
-      this.emitError(new Error("Terminal websocket connection failed."));
-    });
-    this.socket.addEventListener("close", () => {
-      this.closedResolve();
-      for (const listener of this.closeListeners) {
-        listener();
-      }
-    });
-  }
-
-  onReady(listener: (status: TerminalReadyStatus) => void): () => void {
-    this.readyListeners.add(listener);
-    return () => {
-      this.readyListeners.delete(listener);
-    };
-  }
-
-  onData(listener: (data: Uint8Array) => void): () => void {
-    this.dataListeners.add(listener);
-    return () => {
-      this.dataListeners.delete(listener);
-    };
-  }
-
-  onExit(listener: (status: TerminalExitStatus) => void): () => void {
-    this.exitListeners.add(listener);
-    return () => {
-      this.exitListeners.delete(listener);
-    };
-  }
-
-  onError(listener: (error: TerminalErrorStatus | Error) => void): () => void {
-    this.errorListeners.add(listener);
-    return () => {
-      this.errorListeners.delete(listener);
-    };
-  }
-
-  onClose(listener: () => void): () => void {
-    this.closeListeners.add(listener);
-    return () => {
-      this.closeListeners.delete(listener);
-    };
-  }
-
-  sendInput(data: string | ArrayBuffer | ArrayBufferView): void {
-    const payload = encodeTerminalInput(data);
-    this.sendFrame({
-      type: "input",
-      data: payload.data,
-      encoding: payload.encoding,
-    });
-  }
-
-  resize(payload: TerminalResizePayload): void {
-    this.sendFrame({
-      type: "resize",
-      cols: payload.cols,
-      rows: payload.rows,
-    });
-  }
-
-  close(): void {
-    if (this.socket.readyState === WS_READY_STATE_CONNECTING) {
-      this.socket.addEventListener(
-        "open",
-        () => {
-          this.close();
-        },
-        { once: true },
-      );
-      return;
-    }
-
-    if (this.socket.readyState === WS_READY_STATE_OPEN) {
-      if (!this.closeSignalSent) {
-        this.closeSignalSent = true;
-        this.sendFrame({ type: "close" });
-      }
-      this.socket.close();
-      return;
-    }
-
-    if (this.socket.readyState !== WS_READY_STATE_CLOSED) {
-      this.socket.close();
-    }
-  }
-
-  private async handleMessage(data: unknown): Promise<void> {
-    try {
-      if (typeof data === "string") {
-        const frame = parseProcessTerminalServerFrame(data);
-        if (!frame) {
-          this.emitError(new Error("Received invalid terminal control frame."));
-          return;
-        }
-
-        if (frame.type === "ready") {
-          for (const listener of this.readyListeners) {
-            listener(frame);
-          }
-          return;
-        }
-
-        if (frame.type === "exit") {
-          for (const listener of this.exitListeners) {
-            listener(frame);
-          }
-          return;
-        }
-
-        this.emitError(frame);
-        return;
-      }
-
-      const bytes = await decodeTerminalBytes(data);
-      for (const listener of this.dataListeners) {
-        listener(bytes);
-      }
-    } catch (error) {
-      this.emitError(error instanceof Error ? error : new Error(String(error)));
-    }
-  }
-
-  private sendFrame(frame: ProcessTerminalClientFrame): void {
-    if (this.socket.readyState !== WS_READY_STATE_OPEN) {
-      return;
-    }
-
-    this.socket.send(JSON.stringify(frame));
-  }
-
-  private emitError(error: TerminalErrorStatus | Error): void {
-    for (const listener of this.errorListeners) {
-      listener(error);
-    }
-  }
-}
-
-const WS_READY_STATE_CONNECTING = 0;
-const WS_READY_STATE_OPEN = 1;
-const WS_READY_STATE_CLOSED = 3;
-
 export class SandboxAgent {
   private readonly baseUrl: string;
   private readonly token?: string;
   private readonly fetcher: typeof fetch;
   private readonly defaultHeaders?: HeadersInit;
-  private readonly healthWait: NormalizedHealthWaitOptions;
-  private readonly healthWaitAbortController = new AbortController();
 
   private readonly persist: SessionPersistDriver;
   private readonly replayMaxEvents: number;
   private readonly replayMaxChars: number;
 
   private spawnHandle?: SandboxAgentSpawnHandle;
-  private healthPromise?: Promise<void>;
-  private healthError?: Error;
-  private disposed = false;
 
   private readonly liveConnections = new Map<string, LiveAcpConnection>();
   private readonly pendingLiveConnections = new Map<string, Promise<LiveAcpConnection>>();
@@ -798,13 +469,10 @@ export class SandboxAgent {
     }
     this.fetcher = resolvedFetch;
     this.defaultHeaders = options.headers;
-    this.healthWait = normalizeHealthWaitOptions(options.waitForHealth, options.signal);
     this.persist = options.persist ?? new InMemorySessionPersistDriver();
 
     this.replayMaxEvents = normalizePositiveInt(options.replayMaxEvents, DEFAULT_REPLAY_MAX_EVENTS);
     this.replayMaxChars = normalizePositiveInt(options.replayMaxChars, DEFAULT_REPLAY_MAX_CHARS);
-
-    this.startHealthWait();
   }
 
   static async connect(options: SandboxAgentConnectOptions): Promise<SandboxAgent> {
@@ -826,7 +494,6 @@ export class SandboxAgent {
       token: handle.token,
       fetch: options.fetch,
       headers: options.headers,
-      waitForHealth: false,
       persist: options.persist,
       replayMaxEvents: options.replayMaxEvents,
       replayMaxChars: options.replayMaxChars,
@@ -837,9 +504,6 @@ export class SandboxAgent {
   }
 
   async dispose(): Promise<void> {
-    this.disposed = true;
-    this.healthWaitAbortController.abort(createAbortError("SandboxAgent was disposed."));
-
     const connections = [...this.liveConnections.values()];
     this.liveConnections.clear();
     const pending = [...this.pendingLiveConnections.values()];
@@ -902,35 +566,12 @@ export class SandboxAgent {
       lastConnectionId: live.connectionId,
       createdAt: nowMs(),
       sessionInit,
-      configOptions: cloneConfigOptions(response.configOptions),
-      modes: cloneModes(response.modes),
     };
 
     await this.persist.updateSession(record);
     this.nextSessionEventIndexBySession.set(record.id, 1);
     live.bindSession(record.id, record.agentSessionId);
-    let session = this.upsertSessionHandle(record);
-
-    try {
-      if (request.mode) {
-        session = (await this.setSessionMode(session.id, request.mode)).session;
-      }
-      if (request.model) {
-        session = (await this.setSessionModel(session.id, request.model)).session;
-      }
-      if (request.thoughtLevel) {
-        session = (await this.setSessionThoughtLevel(session.id, request.thoughtLevel)).session;
-      }
-    } catch (err) {
-      try {
-        await this.destroySession(session.id);
-      } catch {
-        // Best-effort cleanup
-      }
-      throw err;
-    }
-
-    return session;
+    return this.upsertSessionHandle(record);
   }
 
   async resumeSession(id: string): Promise<Session> {
@@ -954,8 +595,6 @@ export class SandboxAgent {
       agentSessionId: recreated.sessionId,
       lastConnectionId: live.connectionId,
       destroyedAt: undefined,
-      configOptions: cloneConfigOptions(recreated.configOptions),
-      modes: cloneModes(recreated.modes),
     };
 
     await this.persist.updateSession(updated);
@@ -968,28 +607,16 @@ export class SandboxAgent {
   async resumeOrCreateSession(request: SessionResumeOrCreateRequest): Promise<Session> {
     const existing = await this.persist.getSession(request.id);
     if (existing) {
-      let session = await this.resumeSession(existing.id);
-      if (request.mode) {
-        session = (await this.setSessionMode(session.id, request.mode)).session;
-      }
-      if (request.model) {
-        session = (await this.setSessionModel(session.id, request.model)).session;
-      }
-      if (request.thoughtLevel) {
-        session = (await this.setSessionThoughtLevel(session.id, request.thoughtLevel)).session;
-      }
-      return session;
+      return this.resumeSession(existing.id);
     }
     return this.createSession(request);
   }
 
   async destroySession(id: string): Promise<Session> {
-    try {
-      await this.sendSessionMethodInternal(id, SESSION_CANCEL_METHOD, {}, {}, true);
-    } catch {
-      // Best-effort: agent may already be gone
+    const existing = await this.persist.getSession(id);
+    if (!existing) {
+      throw new Error(`session '${id}' not found`);
     }
-    const existing = await this.requireSessionRecord(id);
 
     const updated: SessionRecord = {
       ...existing,
@@ -1000,181 +627,12 @@ export class SandboxAgent {
     return this.upsertSessionHandle(updated);
   }
 
-  async setSessionMode(
-    sessionId: string,
-    modeId: string,
-  ): Promise<{ session: Session; response: SetSessionModeResponse | void }> {
-    const mode = modeId.trim();
-    if (!mode) {
-      throw new Error("setSessionMode requires a non-empty modeId");
-    }
-
-    const record = await this.requireSessionRecord(sessionId);
-    const knownModeIds = extractKnownModeIds(record.modes);
-    if (knownModeIds.length > 0 && !knownModeIds.includes(mode)) {
-      throw new UnsupportedSessionValueError(sessionId, "mode", "mode", mode, knownModeIds);
-    }
-
-    try {
-      return (await this.sendSessionMethodInternal(
-        sessionId,
-        "session/set_mode",
-        { modeId: mode },
-        {},
-        false,
-      )) as { session: Session; response: SetSessionModeResponse | void };
-    } catch (error) {
-      if (!(error instanceof AcpRpcError) || error.code !== -32601) {
-        throw error;
-      }
-      return this.setSessionCategoryValue(sessionId, "mode", mode);
-    }
-  }
-
-  async setSessionConfigOption(
-    sessionId: string,
-    configId: string,
-    value: string,
-  ): Promise<{ session: Session; response: SetSessionConfigOptionResponse }> {
-    const resolvedConfigId = configId.trim();
-    if (!resolvedConfigId) {
-      throw new Error("setSessionConfigOption requires a non-empty configId");
-    }
-    const resolvedValue = value.trim();
-    if (!resolvedValue) {
-      throw new Error("setSessionConfigOption requires a non-empty value");
-    }
-
-    const options = await this.getSessionConfigOptions(sessionId);
-    const option = findConfigOptionById(options, resolvedConfigId);
-    if (!option) {
-      throw new UnsupportedSessionConfigOptionError(
-        sessionId,
-        resolvedConfigId,
-        options.map((item) => item.id),
-      );
-    }
-
-    const allowedValues = extractConfigValues(option);
-    if (allowedValues.length > 0 && !allowedValues.includes(resolvedValue)) {
-      throw new UnsupportedSessionValueError(
-        sessionId,
-        option.category ?? "uncategorized",
-        option.id,
-        resolvedValue,
-        allowedValues,
-      );
-    }
-
-    return (await this.sendSessionMethodInternal(
-      sessionId,
-      "session/set_config_option",
-      {
-        configId: resolvedConfigId,
-        value: resolvedValue,
-      },
-      {},
-      false,
-    )) as { session: Session; response: SetSessionConfigOptionResponse };
-  }
-
-  async setSessionModel(
-    sessionId: string,
-    model: string,
-  ): Promise<{ session: Session; response: SetSessionConfigOptionResponse }> {
-    return this.setSessionCategoryValue(sessionId, "model", model);
-  }
-
-  async setSessionThoughtLevel(
-    sessionId: string,
-    thoughtLevel: string,
-  ): Promise<{ session: Session; response: SetSessionConfigOptionResponse }> {
-    return this.setSessionCategoryValue(sessionId, "thought_level", thoughtLevel);
-  }
-
-  async getSessionConfigOptions(sessionId: string): Promise<SessionConfigOption[]> {
-    const record = await this.requireSessionRecord(sessionId);
-    const hydrated = await this.hydrateSessionConfigOptions(record.id, record);
-    return cloneConfigOptions(hydrated.configOptions) ?? [];
-  }
-
-  async getSessionModes(sessionId: string): Promise<SessionModeState | null> {
-    const record = await this.requireSessionRecord(sessionId);
-    return cloneModes(record.modes);
-  }
-
-  private async setSessionCategoryValue(
-    sessionId: string,
-    category: string,
-    value: string,
-  ): Promise<{ session: Session; response: SetSessionConfigOptionResponse }> {
-    const resolvedValue = value.trim();
-    if (!resolvedValue) {
-      throw new Error(`setSession${toTitleCase(category)} requires a non-empty value`);
-    }
-
-    const options = await this.getSessionConfigOptions(sessionId);
-    const option = findConfigOptionByCategory(options, category);
-    if (!option) {
-      const categories = uniqueCategories(options);
-      throw new UnsupportedSessionCategoryError(sessionId, category, categories);
-    }
-
-    const allowedValues = extractConfigValues(option);
-    if (allowedValues.length > 0 && !allowedValues.includes(resolvedValue)) {
-      throw new UnsupportedSessionValueError(
-        sessionId,
-        category,
-        option.id,
-        resolvedValue,
-        allowedValues,
-      );
-    }
-
-    return this.setSessionConfigOption(sessionId, option.id, resolvedValue);
-  }
-
-  private async hydrateSessionConfigOptions(sessionId: string, snapshot: SessionRecord): Promise<SessionRecord> {
-    if (snapshot.configOptions !== undefined) {
-      return snapshot;
-    }
-
-    const info = await this.getAgent(snapshot.agent, { config: true });
-    const configOptions = normalizeSessionConfigOptions(info.configOptions) ?? [];
-    // Re-read the record from persistence so we merge against the latest
-    // state, not a stale snapshot captured before the network await.
-    const record = await this.persist.getSession(sessionId);
-    if (!record) {
-      return { ...snapshot, configOptions };
-    }
-    const updated: SessionRecord = {
-      ...record,
-      configOptions,
-    };
-    await this.persist.updateSession(updated);
-    return updated;
-  }
-
   async sendSessionMethod(
     sessionId: string,
     method: string,
     params: Record<string, unknown>,
     options: SessionSendOptions = {},
   ): Promise<{ session: Session; response: unknown }> {
-    return this.sendSessionMethodInternal(sessionId, method, params, options, false);
-  }
-
-  private async sendSessionMethodInternal(
-    sessionId: string,
-    method: string,
-    params: Record<string, unknown>,
-    options: SessionSendOptions,
-    allowManagedCancel: boolean,
-  ): Promise<{ session: Session; response: unknown }> {
-    if (method === SESSION_CANCEL_METHOD && !allowManagedCancel) {
-      throw new Error(MANUAL_CANCEL_ERROR);
-    }
-
     const record = await this.persist.getSession(sessionId);
     if (!record) {
       throw new Error(`session '${sessionId}' not found`);
@@ -1184,93 +642,15 @@ export class SandboxAgent {
     if (!live.hasBoundSession(record.id, record.agentSessionId)) {
       // The persisted session points at a stale connection; restore lazily.
       const restored = await this.resumeSession(record.id);
-      return this.sendSessionMethodInternal(restored.id, method, params, options, allowManagedCancel);
+      return this.sendSessionMethod(restored.id, method, params, options);
     }
 
     const response = await live.sendSessionMethod(record.id, method, params, options);
-    await this.persistSessionStateFromMethod(record.id, method, params, response);
     const refreshed = await this.requireSessionRecord(record.id);
     return {
       session: this.upsertSessionHandle(refreshed),
       response,
     };
-  }
-
-  private async persistSessionStateFromMethod(
-    sessionId: string,
-    method: string,
-    params: Record<string, unknown>,
-    response: unknown,
-  ): Promise<void> {
-    // Re-read the record from persistence so we merge against the latest
-    // state, not a stale snapshot captured before the RPC await.
-    const record = await this.persist.getSession(sessionId);
-    if (!record) {
-      return;
-    }
-
-    if (method === "session/set_config_option") {
-      const configId = typeof params.configId === "string" ? params.configId : null;
-      const value = typeof params.value === "string" ? params.value : null;
-      const updates: Partial<SessionRecord> = {};
-
-      const serverConfigOptions = extractConfigOptionsFromSetResponse(response);
-      if (serverConfigOptions) {
-        updates.configOptions = cloneConfigOptions(serverConfigOptions);
-      } else if (record.configOptions && configId && value) {
-        // Server didn't return configOptions — optimistically update the
-        // cached currentValue so subsequent getConfigOptions() reflects the
-        // change without a round-trip.
-        const updated = applyConfigOptionValue(record.configOptions, configId, value);
-        if (updated) {
-          updates.configOptions = updated;
-        }
-      }
-
-      // When a mode-category config option is set via set_config_option
-      // (fallback path from setSessionMode), keep modes.currentModeId in sync.
-      if (configId && value) {
-        const source = updates.configOptions ?? record.configOptions;
-        const option = source ? findConfigOptionById(source, configId) : null;
-        if (option?.category === "mode") {
-          const nextModes = applyCurrentMode(record.modes, value);
-          if (nextModes) {
-            updates.modes = nextModes;
-          }
-        }
-      }
-
-      if (Object.keys(updates).length > 0) {
-        await this.persist.updateSession({ ...record, ...updates });
-      }
-      return;
-    }
-
-    if (method === "session/set_mode") {
-      const modeId = typeof params.modeId === "string" ? params.modeId : null;
-      if (!modeId) {
-        return;
-      }
-      const updates: Partial<SessionRecord> = {};
-      const nextModes = applyCurrentMode(record.modes, modeId);
-      if (nextModes) {
-        updates.modes = nextModes;
-      }
-      // Keep configOptions mode-category currentValue in sync with the new
-      // mode, mirroring the reverse sync in the set_config_option path above.
-      if (record.configOptions) {
-        const modeOption = findConfigOptionByCategory(record.configOptions, "mode");
-        if (modeOption) {
-          const updated = applyConfigOptionValue(record.configOptions, modeOption.id, modeId);
-          if (updated) {
-            updates.configOptions = updated;
-          }
-        }
-      }
-      if (Object.keys(updates).length > 0) {
-        await this.persist.updateSession({ ...record, ...updates });
-      }
-    }
   }
 
   onSessionEvent(sessionId: string, listener: SessionEventListener): () => void {
@@ -1291,18 +671,18 @@ export class SandboxAgent {
   }
 
   async getHealth(): Promise<HealthResponse> {
-    return this.requestHealth();
+    return this.requestJson("GET", `${API_PREFIX}/health`);
   }
 
-  async listAgents(options?: AgentQueryOptions): Promise<AgentListResponse> {
+  async listAgents(options?: { config?: boolean }): Promise<AgentListResponse> {
     return this.requestJson("GET", `${API_PREFIX}/agents`, {
-      query: toAgentQuery(options),
+      query: options?.config ? { config: "true" } : undefined,
     });
   }
 
-  async getAgent(agent: string, options?: AgentQueryOptions): Promise<AgentInfo> {
+  async getAgent(agent: string, options?: { config?: boolean }): Promise<AgentInfo> {
     return this.requestJson("GET", `${API_PREFIX}/agents/${encodeURIComponent(agent)}`, {
-      query: toAgentQuery(options),
+      query: options?.config ? { config: "true" } : undefined,
     });
   }
 
@@ -1391,144 +771,7 @@ export class SandboxAgent {
     await this.requestRaw("DELETE", `${API_PREFIX}/config/skills`, { query });
   }
 
-  async getProcessConfig(): Promise<ProcessConfig> {
-    return this.requestJson("GET", `${API_PREFIX}/processes/config`);
-  }
-
-  async setProcessConfig(config: ProcessConfig): Promise<ProcessConfig> {
-    return this.requestJson("POST", `${API_PREFIX}/processes/config`, {
-      body: config,
-    });
-  }
-
-  async createProcess(request: ProcessCreateRequest): Promise<ProcessInfo> {
-    return this.requestJson("POST", `${API_PREFIX}/processes`, {
-      body: request,
-    });
-  }
-
-  async runProcess(request: ProcessRunRequest): Promise<ProcessRunResponse> {
-    return this.requestJson("POST", `${API_PREFIX}/processes/run`, {
-      body: request,
-    });
-  }
-
-  async listProcesses(): Promise<ProcessListResponse> {
-    return this.requestJson("GET", `${API_PREFIX}/processes`);
-  }
-
-  async getProcess(id: string): Promise<ProcessInfo> {
-    return this.requestJson("GET", `${API_PREFIX}/processes/${encodeURIComponent(id)}`);
-  }
-
-  async stopProcess(id: string, query?: ProcessSignalQuery): Promise<ProcessInfo> {
-    return this.requestJson("POST", `${API_PREFIX}/processes/${encodeURIComponent(id)}/stop`, {
-      query,
-    });
-  }
-
-  async killProcess(id: string, query?: ProcessSignalQuery): Promise<ProcessInfo> {
-    return this.requestJson("POST", `${API_PREFIX}/processes/${encodeURIComponent(id)}/kill`, {
-      query,
-    });
-  }
-
-  async deleteProcess(id: string): Promise<void> {
-    await this.requestRaw("DELETE", `${API_PREFIX}/processes/${encodeURIComponent(id)}`);
-  }
-
-  async getProcessLogs(id: string, query: ProcessLogFollowQuery = {}): Promise<ProcessLogsResponse> {
-    return this.requestJson("GET", `${API_PREFIX}/processes/${encodeURIComponent(id)}/logs`, {
-      query,
-    });
-  }
-
-  async followProcessLogs(
-    id: string,
-    listener: ProcessLogListener,
-    query: ProcessLogFollowQuery = {},
-  ): Promise<ProcessLogSubscription> {
-    const abortController = new AbortController();
-    const response = await this.requestRaw(
-      "GET",
-      `${API_PREFIX}/processes/${encodeURIComponent(id)}/logs`,
-      {
-        query: { ...query, follow: true },
-        accept: "text/event-stream",
-        signal: abortController.signal,
-      },
-    );
-
-    if (!response.body) {
-      abortController.abort();
-      throw new Error("SSE stream is not readable in this environment.");
-    }
-
-    const closed = consumeProcessLogSse(response.body, listener, abortController.signal);
-
-    return {
-      close: () => abortController.abort(),
-      closed,
-    };
-  }
-
-  async sendProcessInput(id: string, request: ProcessInputRequest): Promise<ProcessInputResponse> {
-    return this.requestJson("POST", `${API_PREFIX}/processes/${encodeURIComponent(id)}/input`, {
-      body: request,
-    });
-  }
-
-  async resizeProcessTerminal(
-    id: string,
-    request: ProcessTerminalResizeRequest,
-  ): Promise<ProcessTerminalResizeResponse> {
-    return this.requestJson(
-      "POST",
-      `${API_PREFIX}/processes/${encodeURIComponent(id)}/terminal/resize`,
-      {
-        body: request,
-      },
-    );
-  }
-
-  buildProcessTerminalWebSocketUrl(
-    id: string,
-    options: ProcessTerminalWebSocketUrlOptions = {},
-  ): string {
-    return toWebSocketUrl(
-      this.buildUrl(`${API_PREFIX}/processes/${encodeURIComponent(id)}/terminal/ws`, {
-        access_token: options.accessToken ?? this.token,
-      }),
-    );
-  }
-
-  connectProcessTerminalWebSocket(
-    id: string,
-    options: ProcessTerminalConnectOptions = {},
-  ): WebSocket {
-    const WebSocketCtor = options.WebSocket ?? globalThis.WebSocket;
-    if (!WebSocketCtor) {
-      throw new Error("WebSocket API is not available; provide a WebSocket implementation.");
-    }
-
-    return new WebSocketCtor(
-      this.buildProcessTerminalWebSocketUrl(id, {
-        accessToken: options.accessToken,
-      }),
-      options.protocols,
-    );
-  }
-
-  connectProcessTerminal(
-    id: string,
-    options: ProcessTerminalSessionOptions = {},
-  ): ProcessTerminalSession {
-    return new ProcessTerminalSession(this.connectProcessTerminalWebSocket(id, options));
-  }
-
   private async getLiveConnection(agent: string): Promise<LiveAcpConnection> {
-    await this.awaitHealthy();
-
     const existing = this.liveConnections.get(agent);
     if (existing) {
       return existing;
@@ -1594,7 +837,6 @@ export class SandboxAgent {
     };
 
     await this.persist.insertEvent(event);
-    await this.persistSessionStateFromEvent(localSessionId, envelope, direction);
 
     const listeners = this.eventListeners.get(localSessionId);
     if (!listeners || listeners.size === 0) {
@@ -1603,56 +845,6 @@ export class SandboxAgent {
 
     for (const listener of listeners) {
       listener(event);
-    }
-  }
-
-  private async persistSessionStateFromEvent(
-    sessionId: string,
-    envelope: AnyMessage,
-    direction: AcpEnvelopeDirection,
-  ): Promise<void> {
-    if (direction !== "inbound") {
-      return;
-    }
-
-    if (envelopeMethod(envelope) !== "session/update") {
-      return;
-    }
-
-    const update = envelopeSessionUpdate(envelope);
-    if (!update || typeof update.sessionUpdate !== "string") {
-      return;
-    }
-
-    const record = await this.persist.getSession(sessionId);
-    if (!record) {
-      return;
-    }
-
-    if (update.sessionUpdate === "config_option_update") {
-      const configOptions = normalizeSessionConfigOptions(update.configOptions);
-      if (configOptions) {
-        await this.persist.updateSession({
-          ...record,
-          configOptions,
-        });
-      }
-      return;
-    }
-
-    if (update.sessionUpdate === "current_mode_update") {
-      const modeId = typeof update.currentModeId === "string" ? update.currentModeId : null;
-      if (!modeId) {
-        return;
-      }
-      const nextModes = applyCurrentMode(record.modes, modeId);
-      if (!nextModes) {
-        return;
-      }
-      await this.persist.updateSession({
-        ...record,
-        modes: nextModes,
-      });
     }
   }
 
@@ -1760,7 +952,6 @@ export class SandboxAgent {
       headers: options.headers,
       accept: options.accept ?? "application/json",
       signal: options.signal,
-      skipReadyWait: options.skipReadyWait,
     });
 
     if (response.status === 204) {
@@ -1771,10 +962,6 @@ export class SandboxAgent {
   }
 
   private async requestRaw(method: string, path: string, options: RequestOptions = {}): Promise<Response> {
-    if (!options.skipReadyWait) {
-      await this.awaitHealthy(options.signal);
-    }
-
     const url = this.buildUrl(path, options.query);
     const headers = this.buildHeaders(options.headers);
 
@@ -1811,79 +998,6 @@ export class SandboxAgent {
     return response;
   }
 
-  private startHealthWait(): void {
-    if (!this.healthWait.enabled || this.healthPromise) {
-      return;
-    }
-
-    this.healthPromise = this.runHealthWait().catch((error) => {
-      this.healthError = error instanceof Error ? error : new Error(String(error));
-    });
-  }
-
-  private async awaitHealthy(signal?: AbortSignal): Promise<void> {
-    if (!this.healthPromise) {
-      throwIfAborted(signal);
-      return;
-    }
-
-    await waitForAbortable(this.healthPromise, signal);
-    throwIfAborted(signal);
-    if (this.healthError) {
-      throw this.healthError;
-    }
-  }
-
-  private async runHealthWait(): Promise<void> {
-    const signal = this.healthWait.enabled
-      ? anyAbortSignal([this.healthWait.signal, this.healthWaitAbortController.signal])
-      : undefined;
-    const startedAt = Date.now();
-    const deadline =
-      typeof this.healthWait.timeoutMs === "number" ? startedAt + this.healthWait.timeoutMs : undefined;
-
-    let delayMs = HEALTH_WAIT_MIN_DELAY_MS;
-    let nextLogAt = startedAt + HEALTH_WAIT_LOG_AFTER_MS;
-    let lastError: unknown;
-
-    while (!this.disposed && (deadline === undefined || Date.now() < deadline)) {
-      throwIfAborted(signal);
-
-      try {
-        const health = await this.requestHealth({ signal });
-        if (health.status === "ok") {
-          return;
-        }
-        lastError = new Error(`Unexpected health response: ${JSON.stringify(health)}`);
-      } catch (error) {
-        if (isAbortError(error)) {
-          throw error;
-        }
-        lastError = error;
-      }
-
-      const now = Date.now();
-      if (now >= nextLogAt) {
-        const details = formatHealthWaitError(lastError);
-        console.warn(
-          `sandbox-agent at ${this.baseUrl} is not healthy after ${now - startedAt}ms; still waiting (${details})`,
-        );
-        nextLogAt = now + HEALTH_WAIT_LOG_EVERY_MS;
-      }
-
-      await sleep(delayMs, signal);
-      delayMs = Math.min(HEALTH_WAIT_MAX_DELAY_MS, delayMs * 2);
-    }
-
-    if (this.disposed) {
-      return;
-    }
-
-    throw new Error(
-      `Timed out waiting for sandbox-agent health after ${this.healthWait.timeoutMs}ms (${formatHealthWaitError(lastError)})`,
-    );
-  }
-
   private buildHeaders(extra?: HeadersInit): Headers {
     const headers = new Headers(this.defaultHeaders ?? undefined);
 
@@ -1913,13 +1027,6 @@ export class SandboxAgent {
 
     return url.toString();
   }
-
-  private async requestHealth(options: { signal?: AbortSignal } = {}): Promise<HealthResponse> {
-    return this.requestJson("GET", `${API_PREFIX}/health`, {
-      signal: options.signal,
-      skipReadyWait: true,
-    });
-  }
 }
 
 type QueryValue = string | number | boolean | null | undefined;
@@ -1932,97 +1039,7 @@ type RequestOptions = {
   headers?: HeadersInit;
   accept?: string;
   signal?: AbortSignal;
-  skipReadyWait?: boolean;
 };
-
-type NormalizedHealthWaitOptions =
-  | { enabled: false; timeoutMs?: undefined; signal?: undefined }
-  | { enabled: true; timeoutMs?: number; signal?: AbortSignal };
-
-function parseProcessTerminalServerFrame(payload: string): ProcessTerminalServerFrame | null {
-  try {
-    const parsed = JSON.parse(payload) as unknown;
-    if (!isRecord(parsed) || typeof parsed.type !== "string") {
-      return null;
-    }
-
-    if (parsed.type === "ready" && typeof parsed.processId === "string") {
-      return parsed as ProcessTerminalServerFrame;
-    }
-
-    if (
-      parsed.type === "exit" &&
-      (parsed.exitCode === undefined ||
-        parsed.exitCode === null ||
-        typeof parsed.exitCode === "number")
-    ) {
-      return parsed as ProcessTerminalServerFrame;
-    }
-
-    if (parsed.type === "error" && typeof parsed.message === "string") {
-      return parsed as ProcessTerminalServerFrame;
-    }
-  } catch {
-    return null;
-  }
-
-  return null;
-}
-
-function encodeTerminalInput(
-  data: string | ArrayBuffer | ArrayBufferView,
-): { data: string; encoding?: "base64" } {
-  if (typeof data === "string") {
-    return { data };
-  }
-
-  const bytes = encodeTerminalBytes(data);
-  return {
-    data: bytesToBase64(bytes),
-    encoding: "base64",
-  };
-}
-
-function encodeTerminalBytes(data: ArrayBuffer | ArrayBufferView): Uint8Array {
-  if (data instanceof ArrayBuffer) {
-    return new Uint8Array(data);
-  }
-
-  return new Uint8Array(data.buffer, data.byteOffset, data.byteLength).slice();
-}
-
-async function decodeTerminalBytes(data: unknown): Promise<Uint8Array> {
-  if (data instanceof ArrayBuffer) {
-    return new Uint8Array(data);
-  }
-
-  if (ArrayBuffer.isView(data)) {
-    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength).slice();
-  }
-
-  if (typeof Blob !== "undefined" && data instanceof Blob) {
-    return new Uint8Array(await data.arrayBuffer());
-  }
-
-  throw new Error(`Unsupported terminal frame payload: ${String(data)}`);
-}
-
-function bytesToBase64(bytes: Uint8Array): string {
-  if (typeof Buffer !== "undefined") {
-    return Buffer.from(bytes).toString("base64");
-  }
-
-  if (typeof btoa === "function") {
-    let binary = "";
-    const chunkSize = 0x8000;
-    for (let index = 0; index < bytes.length; index += chunkSize) {
-      binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
-    }
-    return btoa(binary);
-  }
-
-  throw new Error("Base64 encoding is not available in this environment.");
-}
 
 /**
  * Auto-select and call `authenticate` based on the agent's advertised auth methods.
@@ -2049,17 +1066,6 @@ async function autoAuthenticate(acp: AcpHttpClient, methods: AuthMethod[]): Prom
     // Authentication is best-effort; the agent may already have credentials
     // from env vars or credential files configured on the server side.
   }
-}
-
-function toAgentQuery(options: AgentQueryOptions | undefined): Record<string, QueryValue> | undefined {
-  if (!options) {
-    return undefined;
-  }
-
-  return {
-    config: options.config,
-    no_cache: options.noCache,
-  };
 }
 
 function normalizeSessionInit(
@@ -2195,30 +1201,6 @@ function normalizePositiveInt(value: number | undefined, fallback: number): numb
   return Math.floor(value as number);
 }
 
-function normalizeHealthWaitOptions(
-  value: boolean | SandboxAgentHealthWaitOptions | undefined,
-  signal: AbortSignal | undefined,
-): NormalizedHealthWaitOptions {
-  if (value === false) {
-    return { enabled: false };
-  }
-
-  if (value === true || value === undefined) {
-    return { enabled: true, signal };
-  }
-
-  const timeoutMs =
-    typeof value.timeoutMs === "number" && Number.isFinite(value.timeoutMs) && value.timeoutMs > 0
-      ? Math.floor(value.timeoutMs)
-      : undefined;
-
-  return {
-    enabled: true,
-    signal,
-    timeoutMs,
-  };
-}
-
 function normalizeSpawnOptions(
   spawn: SandboxAgentSpawnOptions | boolean | undefined,
   defaultEnabled: boolean,
@@ -2247,359 +1229,4 @@ async function readProblem(response: Response): Promise<ProblemDetails | undefin
   } catch {
     return undefined;
   }
-}
-
-function normalizeSessionConfigOptions(value: unknown): SessionConfigOption[] | undefined {
-  if (!Array.isArray(value)) {
-    return undefined;
-  }
-  const normalized = value.filter(isSessionConfigOption) as SessionConfigOption[];
-  return cloneConfigOptions(normalized) ?? [];
-}
-
-function extractConfigOptionsFromSetResponse(response: unknown): SessionConfigOption[] | undefined {
-  if (!isRecord(response)) {
-    return undefined;
-  }
-  return normalizeSessionConfigOptions(response.configOptions);
-}
-
-function findConfigOptionByCategory(
-  options: SessionConfigOption[],
-  category: string,
-): SessionConfigOption | undefined {
-  return options.find((option) => option.category === category);
-}
-
-function findConfigOptionById(
-  options: SessionConfigOption[],
-  configId: string,
-): SessionConfigOption | undefined {
-  return options.find((option) => option.id === configId);
-}
-
-function uniqueCategories(options: SessionConfigOption[]): string[] {
-  return [...new Set(options.map((option) => option.category).filter((value): value is string => !!value))].sort();
-}
-
-function extractConfigValues(option: SessionConfigOption): string[] {
-  if (!isRecord(option) || option.type !== "select" || !Array.isArray(option.options)) {
-    return [];
-  }
-
-  const values: string[] = [];
-  for (const entry of option.options as unknown[]) {
-    if (isRecord(entry) && typeof entry.value === "string") {
-      values.push(entry.value);
-      continue;
-    }
-    if (isRecord(entry) && Array.isArray(entry.options)) {
-      for (const nested of entry.options) {
-        if (isRecord(nested) && typeof nested.value === "string") {
-          values.push(nested.value);
-        }
-      }
-    }
-  }
-
-  return [...new Set(values)];
-}
-
-function extractKnownModeIds(modes: SessionModeState | null | undefined): string[] {
-  if (!modes || !Array.isArray(modes.availableModes)) {
-    return [];
-  }
-  return modes.availableModes
-    .map((mode) => (typeof mode.id === "string" ? mode.id : null))
-    .filter((value): value is string => !!value);
-}
-
-function applyCurrentMode(
-  modes: SessionModeState | null | undefined,
-  currentModeId: string,
-): SessionModeState | null {
-  if (modes && Array.isArray(modes.availableModes)) {
-    return {
-      ...modes,
-      currentModeId,
-    };
-  }
-  return {
-    currentModeId,
-    availableModes: [],
-  };
-}
-
-function applyConfigOptionValue(
-  configOptions: SessionConfigOption[],
-  configId: string,
-  value: string,
-): SessionConfigOption[] | null {
-  const idx = configOptions.findIndex((o) => o.id === configId);
-  if (idx === -1) {
-    return null;
-  }
-  const updated = cloneConfigOptions(configOptions) ?? [];
-  updated[idx] = { ...updated[idx]!, currentValue: value };
-  return updated;
-}
-
-function envelopeSessionUpdate(message: AnyMessage): Record<string, unknown> | null {
-  if (!isRecord(message) || !("params" in message) || !isRecord(message.params)) {
-    return null;
-  }
-  if (!("update" in message.params) || !isRecord(message.params.update)) {
-    return null;
-  }
-  return message.params.update;
-}
-
-function cloneConfigOptions(value: SessionConfigOption[] | null | undefined): SessionConfigOption[] | undefined {
-  if (!value) {
-    return undefined;
-  }
-  return JSON.parse(JSON.stringify(value)) as SessionConfigOption[];
-}
-
-function cloneModes(value: SessionModeState | null | undefined): SessionModeState | null {
-  if (!value) {
-    return null;
-  }
-  return JSON.parse(JSON.stringify(value)) as SessionModeState;
-}
-
-function isSessionConfigOption(value: unknown): value is SessionConfigOption {
-  return (
-    isRecord(value) &&
-    typeof value.id === "string" &&
-    typeof value.name === "string" &&
-    typeof value.type === "string"
-  );
-}
-
-function toTitleCase(input: string): string {
-  if (!input) {
-    return "";
-  }
-  return input
-    .split(/[_\s-]+/)
-    .filter(Boolean)
-    .map((part) => part[0]!.toUpperCase() + part.slice(1))
-    .join("");
-}
-
-function formatHealthWaitError(error: unknown): string {
-  if (error instanceof Error && error.message) {
-    return error.message;
-  }
-
-  if (error === undefined || error === null) {
-    return "unknown error";
-  }
-
-  return String(error);
-}
-
-function anyAbortSignal(signals: Array<AbortSignal | undefined>): AbortSignal | undefined {
-  const active = signals.filter((signal): signal is AbortSignal => Boolean(signal));
-  if (active.length === 0) {
-    return undefined;
-  }
-
-  if (active.length === 1) {
-    return active[0];
-  }
-
-  const controller = new AbortController();
-  const onAbort = (event: Event) => {
-    cleanup();
-    const signal = event.target as AbortSignal;
-    controller.abort(signal.reason ?? createAbortError());
-  };
-  const cleanup = () => {
-    for (const signal of active) {
-      signal.removeEventListener("abort", onAbort);
-    }
-  };
-
-  for (const signal of active) {
-    if (signal.aborted) {
-      controller.abort(signal.reason ?? createAbortError());
-      return controller.signal;
-    }
-  }
-
-  for (const signal of active) {
-    signal.addEventListener("abort", onAbort, { once: true });
-  }
-
-  return controller.signal;
-}
-
-function throwIfAborted(signal: AbortSignal | undefined): void {
-  if (!signal?.aborted) {
-    return;
-  }
-
-  throw signal.reason instanceof Error ? signal.reason : createAbortError(signal.reason);
-}
-
-async function waitForAbortable<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
-  if (!signal) {
-    return promise;
-  }
-
-  throwIfAborted(signal);
-
-  return new Promise<T>((resolve, reject) => {
-    const onAbort = () => {
-      cleanup();
-      reject(signal.reason instanceof Error ? signal.reason : createAbortError(signal.reason));
-    };
-    const cleanup = () => {
-      signal.removeEventListener("abort", onAbort);
-    };
-
-    signal.addEventListener("abort", onAbort, { once: true });
-    promise.then(
-      (value) => {
-        cleanup();
-        resolve(value);
-      },
-      (error) => {
-        cleanup();
-        reject(error);
-      },
-    );
-  });
-}
-
-async function consumeProcessLogSse(
-  body: ReadableStream<Uint8Array>,
-  listener: ProcessLogListener,
-  signal: AbortSignal,
-): Promise<void> {
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  try {
-    while (!signal.aborted) {
-      const { done, value } = await reader.read();
-      if (done) {
-        return;
-      }
-
-      buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
-
-      let separatorIndex = buffer.indexOf("\n\n");
-      while (separatorIndex !== -1) {
-        const chunk = buffer.slice(0, separatorIndex);
-        buffer = buffer.slice(separatorIndex + 2);
-
-        const entry = parseProcessLogSseChunk(chunk);
-        if (entry) {
-          listener(entry);
-        }
-
-        separatorIndex = buffer.indexOf("\n\n");
-      }
-    }
-  } catch (error) {
-    if (signal.aborted || isAbortError(error)) {
-      return;
-    }
-    throw error;
-  } finally {
-    reader.releaseLock();
-  }
-}
-
-function parseProcessLogSseChunk(chunk: string): ProcessLogEntry | null {
-  if (!chunk.trim()) {
-    return null;
-  }
-
-  let eventName = "message";
-  const dataLines: string[] = [];
-
-  for (const line of chunk.split("\n")) {
-    if (!line || line.startsWith(":")) {
-      continue;
-    }
-
-    if (line.startsWith("event:")) {
-      eventName = line.slice(6).trim();
-      continue;
-    }
-
-    if (line.startsWith("data:")) {
-      dataLines.push(line.slice(5).trimStart());
-    }
-  }
-
-  if (eventName !== "log") {
-    return null;
-  }
-
-  const data = dataLines.join("\n");
-  if (!data.trim()) {
-    return null;
-  }
-
-  return JSON.parse(data) as ProcessLogEntry;
-}
-
-function toWebSocketUrl(url: string): string {
-  const parsed = new URL(url);
-  if (parsed.protocol === "http:") {
-    parsed.protocol = "ws:";
-  } else if (parsed.protocol === "https:") {
-    parsed.protocol = "wss:";
-  }
-  return parsed.toString();
-}
-
-function isAbortError(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError";
-}
-
-function createAbortError(reason?: unknown): Error {
-  if (reason instanceof Error) {
-    return reason;
-  }
-
-  const message = typeof reason === "string" ? reason : "This operation was aborted.";
-  if (typeof DOMException !== "undefined") {
-    return new DOMException(message, "AbortError");
-  }
-
-  const error = new Error(message);
-  error.name = "AbortError";
-  return error;
-}
-
-function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-  if (!signal) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-  }
-
-  throwIfAborted(signal);
-
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      cleanup();
-      resolve();
-    }, ms);
-    const onAbort = () => {
-      cleanup();
-      reject(signal.reason instanceof Error ? signal.reason : createAbortError(signal.reason));
-    };
-    const cleanup = () => {
-      clearTimeout(timer);
-      signal.removeEventListener("abort", onAbort);
-    };
-
-    signal.addEventListener("abort", onAbort, { once: true });
-  });
 }

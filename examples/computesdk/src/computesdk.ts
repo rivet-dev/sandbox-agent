@@ -10,7 +10,7 @@ import {
   type ProviderName,
 } from "computesdk";
 import { SandboxAgent } from "sandbox-agent";
-import { detectAgent, buildInspectorUrl } from "@sandbox-agent/example-shared";
+import { detectAgent, buildInspectorUrl, waitForHealth } from "@sandbox-agent/example-shared";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 
@@ -115,6 +115,9 @@ export async function setupComputeSdkSandboxAgent(): Promise<{
   await run(`sandbox-agent server --no-token --host 0.0.0.0 --port ${PORT}`, { background: true });
 
   const baseUrl = await sandbox.getUrl({ port: PORT });
+
+  console.log("Waiting for server...");
+  await waitForHealth({ baseUrl });
 
   const cleanup = async () => {
     try {

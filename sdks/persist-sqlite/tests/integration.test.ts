@@ -55,10 +55,6 @@ describe("SQLite persistence driver", () => {
       timeoutMs: 30000,
       env: {
         XDG_DATA_HOME: dataHome,
-        HOME: dataHome,
-        USERPROFILE: dataHome,
-        APPDATA: join(dataHome, "AppData", "Roaming"),
-        LOCALAPPDATA: join(dataHome, "AppData", "Local"),
       },
     });
     baseUrl = handle.baseUrl;

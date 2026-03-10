@@ -1,6 +1,6 @@
 import { Sandbox } from "@vercel/sandbox";
 import { SandboxAgent } from "sandbox-agent";
-import { detectAgent, buildInspectorUrl } from "@sandbox-agent/example-shared";
+import { detectAgent, buildInspectorUrl, waitForHealth } from "@sandbox-agent/example-shared";
 
 const envs: Record<string, string> = {};
 if (process.env.ANTHROPIC_API_KEY) envs.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
@@ -22,7 +22,7 @@ const run = async (cmd: string, args: string[] = []) => {
 };
 
 console.log("Installing sandbox-agent...");
-await run("sh", ["-c", "curl -fsSL https://releases.rivet.dev/sandbox-agent/0.3.x/install.sh | sh"]);
+await run("sh", ["-c", "curl -fsSL https://releases.rivet.dev/sandbox-agent/0.2.x/install.sh | sh"]);
 
 console.log("Installing agents...");
 await run("sandbox-agent", ["install-agent", "claude"]);
@@ -38,7 +38,9 @@ await sandbox.runCommand({
 
 const baseUrl = sandbox.domain(3000);
 
-console.log("Connecting to server...");
+console.log("Waiting for server...");
+await waitForHealth({ baseUrl });
+
 const client = await SandboxAgent.connect({ baseUrl });
 const session = await client.createSession({ agent: detectAgent(), sessionInit: { cwd: "/home/vercel-sandbox", mcpServers: [] } });
 const sessionId = session.id;
