@@ -4,7 +4,6 @@ use std::fs;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::Instant;
 
 use flate2::read::GzDecoder;
 use reqwest::blocking::Client;
@@ -79,7 +78,7 @@ impl AgentId {
 
     fn agent_process_registry_id(self) -> Option<&'static str> {
         match self {
-            AgentId::Claude => Some("claude-acp"),
+            AgentId::Claude => Some("claude-code-acp"),
             AgentId::Codex => Some("codex-acp"),
             AgentId::Opencode => Some("opencode"),
             AgentId::Amp => Some("amp-acp"),
@@ -91,7 +90,7 @@ impl AgentId {
 
     fn agent_process_binary_hint(self) -> Option<&'static str> {
         match self {
-            AgentId::Claude => Some("claude-agent-acp"),
+            AgentId::Claude => Some("claude-code-acp"),
             AgentId::Codex => Some("codex-acp"),
             AgentId::Opencode => Some("opencode"),
             AgentId::Amp => Some("amp-acp"),
@@ -322,14 +321,6 @@ impl AgentManager {
         agent: AgentId,
         options: InstallOptions,
     ) -> Result<InstallResult, AgentError> {
-        let install_started = Instant::now();
-        tracing::info!(
-            agent = agent.as_str(),
-            reinstall = options.reinstall,
-            native_version = ?options.version,
-            agent_process_version = ?options.agent_process_version,
-            "agent_manager.install: starting"
-        );
         fs::create_dir_all(&self.install_dir)?;
         fs::create_dir_all(self.install_dir.join("agent_processes"))?;
 
@@ -354,20 +345,10 @@ impl AgentManager {
             artifacts.push(artifact);
         }
 
-        let result = InstallResult {
+        Ok(InstallResult {
             artifacts,
             already_installed,
-        };
-
-        tracing::info!(
-            agent = agent.as_str(),
-            already_installed = result.already_installed,
-            artifact_count = result.artifacts.len(),
-            total_ms = elapsed_ms(install_started),
-            "agent_manager.install: completed"
-        );
-
-        Ok(result)
+        })
     }
 
     pub fn is_installed(&self, agent: AgentId) -> bool {
@@ -411,41 +392,25 @@ impl AgentManager {
         &self,
         agent: AgentId,
     ) -> Result<AgentProcessLaunchSpec, AgentError> {
-        let started = Instant::now();
         if agent == AgentId::Mock {
-            let spec = AgentProcessLaunchSpec {
+            return Ok(AgentProcessLaunchSpec {
                 program: self.agent_process_path(agent),
                 args: Vec::new(),
                 env: HashMap::new(),
                 source: InstallSource::Builtin,
                 version: Some("builtin".to_string()),
-            };
-            tracing::info!(
-                agent = agent.as_str(),
-                source = ?spec.source,
-                total_ms = elapsed_ms(started),
-                "agent_manager.resolve_agent_process: resolved builtin"
-            );
-            return Ok(spec);
+            });
         }
 
         let launcher = self.agent_process_path(agent);
         if launcher.exists() {
-            let spec = AgentProcessLaunchSpec {
+            return Ok(AgentProcessLaunchSpec {
                 program: launcher,
                 args: Vec::new(),
                 env: HashMap::new(),
                 source: InstallSource::LocalPath,
                 version: None,
-            };
-            tracing::info!(
-                agent = agent.as_str(),
-                source = ?spec.source,
-                program = %spec.program.display(),
-                total_ms = elapsed_ms(started),
-                "agent_manager.resolve_agent_process: resolved local launcher"
-            );
-            return Ok(spec);
+            });
         }
 
         if let Some(bin) = agent.agent_process_binary_hint().and_then(find_in_path) {
@@ -454,47 +419,29 @@ impl AgentManager {
             } else {
                 Vec::new()
             };
-            let spec = AgentProcessLaunchSpec {
+            return Ok(AgentProcessLaunchSpec {
                 program: bin,
                 args,
                 env: HashMap::new(),
                 source: InstallSource::LocalPath,
                 version: None,
-            };
-            tracing::info!(
-                agent = agent.as_str(),
-                source = ?spec.source,
-                program = %spec.program.display(),
-                args = ?spec.args,
-                total_ms = elapsed_ms(started),
-                "agent_manager.resolve_agent_process: resolved PATH binary hint"
-            );
-            return Ok(spec);
+            });
         }
 
         if agent == AgentId::Opencode {
             let native = self.resolve_binary(agent)?;
-            let spec = AgentProcessLaunchSpec {
+            return Ok(AgentProcessLaunchSpec {
                 program: native,
                 args: vec!["acp".to_string()],
                 env: HashMap::new(),
                 source: InstallSource::LocalPath,
                 version: None,
-            };
-            tracing::info!(
-                agent = agent.as_str(),
-                source = ?spec.source,
-                program = %spec.program.display(),
-                args = ?spec.args,
-                total_ms = elapsed_ms(started),
-                "agent_manager.resolve_agent_process: resolved opencode native"
-            );
-            return Ok(spec);
+            });
         }
 
         Err(AgentError::AgentProcessNotFound {
             agent,
-            hint: Some(format!("run step 3: `sandbox-agent install-agent {agent}`")),
+            hint: Some("run install to provision ACP agent process".to_string()),
         })
     }
 
@@ -507,23 +454,11 @@ impl AgentManager {
         agent: AgentId,
         options: &InstallOptions,
     ) -> Result<Option<InstalledArtifact>, AgentError> {
-        let started = Instant::now();
         if !options.reinstall && self.native_installed(agent) {
-            tracing::info!(
-                agent = agent.as_str(),
-                total_ms = elapsed_ms(started),
-                "agent_manager.install_native: already installed"
-            );
             return Ok(None);
         }
 
         let path = self.binary_path(agent);
-        tracing::info!(
-            agent = agent.as_str(),
-            path = %path.display(),
-            version_override = ?options.version,
-            "agent_manager.install_native: installing"
-        );
         match agent {
             AgentId::Claude => install_claude(&path, self.platform, options.version.as_deref())?,
             AgentId::Codex => install_codex(&path, self.platform, options.version.as_deref())?,
@@ -539,22 +474,12 @@ impl AgentManager {
             }
         }
 
-        let artifact = InstalledArtifact {
+        Ok(Some(InstalledArtifact {
             kind: InstalledArtifactKind::NativeAgent,
             path,
             version: self.version(agent).ok().flatten(),
             source: InstallSource::Fallback,
-        };
-
-        tracing::info!(
-            agent = agent.as_str(),
-            source = ?artifact.source,
-            version = ?artifact.version,
-            total_ms = elapsed_ms(started),
-            "agent_manager.install_native: completed"
-        );
-
-        Ok(Some(artifact))
+        }))
     }
 
     fn install_agent_process(
@@ -562,14 +487,8 @@ impl AgentManager {
         agent: AgentId,
         options: &InstallOptions,
     ) -> Result<Option<InstalledArtifact>, AgentError> {
-        let started = Instant::now();
         if !options.reinstall {
             if self.agent_process_status(agent).is_some() {
-                tracing::info!(
-                    agent = agent.as_str(),
-                    total_ms = elapsed_ms(started),
-                    "agent_manager.install_agent_process: already installed"
-                );
                 return Ok(None);
             }
         }
@@ -577,102 +496,20 @@ impl AgentManager {
         if agent == AgentId::Mock {
             let path = self.agent_process_path(agent);
             write_mock_agent_process_launcher(&path)?;
-            let artifact = InstalledArtifact {
+            return Ok(Some(InstalledArtifact {
                 kind: InstalledArtifactKind::AgentProcess,
                 path,
                 version: Some("builtin".to_string()),
                 source: InstallSource::Builtin,
-            };
-            tracing::info!(
-                agent = agent.as_str(),
-                source = ?artifact.source,
-                total_ms = elapsed_ms(started),
-                "agent_manager.install_agent_process: installed builtin launcher"
-            );
-            return Ok(Some(artifact));
+            }));
         }
 
         if let Some(artifact) = self.install_agent_process_from_registry(agent, options)? {
-            tracing::info!(
-                agent = agent.as_str(),
-                source = ?artifact.source,
-                version = ?artifact.version,
-                total_ms = elapsed_ms(started),
-                "agent_manager.install_agent_process: installed from registry"
-            );
             return Ok(Some(artifact));
         }
 
         let artifact = self.install_agent_process_fallback(agent, options)?;
-        tracing::info!(
-            agent = agent.as_str(),
-            source = ?artifact.source,
-            version = ?artifact.version,
-            total_ms = elapsed_ms(started),
-            "agent_manager.install_agent_process: installed from fallback"
-        );
         Ok(Some(artifact))
-    }
-
-    fn install_npm_agent_process_package(
-        &self,
-        agent: AgentId,
-        package: &str,
-        args: &[String],
-        env: &HashMap<String, String>,
-        source: InstallSource,
-        version: Option<String>,
-    ) -> Result<InstalledArtifact, AgentError> {
-        let started = Instant::now();
-        let root = self.agent_process_storage_dir(agent);
-        if root.exists() {
-            fs::remove_dir_all(&root)?;
-        }
-        fs::create_dir_all(&root)?;
-
-        let npm_install_started = Instant::now();
-        install_npm_package(&root, package, agent)?;
-        let npm_install_ms = elapsed_ms(npm_install_started);
-
-        let bin_name = agent.agent_process_binary_hint().ok_or_else(|| {
-            AgentError::ExtractFailed(format!(
-                "missing executable hint for agent process package: {agent}"
-            ))
-        })?;
-
-        let cmd_path = npm_bin_path(&root, bin_name);
-        if !cmd_path.exists() {
-            return Err(AgentError::ExtractFailed(format!(
-                "installed package missing executable: {}",
-                cmd_path.display()
-            )));
-        }
-
-        let launcher = self.agent_process_path(agent);
-        let write_started = Instant::now();
-        write_exec_agent_process_launcher(&launcher, &cmd_path, args, env)?;
-        let write_ms = elapsed_ms(write_started);
-        let verify_started = Instant::now();
-        verify_command(&launcher, &[])?;
-        let verify_ms = elapsed_ms(verify_started);
-
-        tracing::info!(
-            agent = agent.as_str(),
-            package = %package,
-            cmd = %cmd_path.display(),
-            npm_install_ms = npm_install_ms,
-            write_ms = write_ms,
-            verify_ms = verify_ms,
-            total_ms = elapsed_ms(started),
-            "agent_manager.install_npm_agent_process_package: completed"
-        );
-
-        Ok(InstalledArtifact {
-            kind: InstalledArtifactKind::AgentProcess,
-            path: launcher,
-            version,
-            source,
-        })
     }
 
     fn agent_process_status(&self, agent: AgentId) -> Option<AgentProcessStatus> {
@@ -703,111 +540,59 @@ impl AgentManager {
         agent: AgentId,
         options: &InstallOptions,
     ) -> Result<Option<InstalledArtifact>, AgentError> {
-        let started = Instant::now();
         let Some(registry_id) = agent.agent_process_registry_id() else {
             return Ok(None);
         };
 
-        tracing::info!(
-            agent = agent.as_str(),
-            registry_id = registry_id,
-            url = %self.registry_url,
-            "agent_manager.install_agent_process_from_registry: fetching registry"
-        );
-        let fetch_started = Instant::now();
         let registry = fetch_registry(&self.registry_url)?;
-        tracing::info!(
-            agent = agent.as_str(),
-            registry_id = registry_id,
-            fetch_ms = elapsed_ms(fetch_started),
-            "agent_manager.install_agent_process_from_registry: registry fetched"
-        );
         let Some(entry) = registry.agents.into_iter().find(|a| a.id == registry_id) else {
-            tracing::info!(
-                agent = agent.as_str(),
-                registry_id = registry_id,
-                total_ms = elapsed_ms(started),
-                "agent_manager.install_agent_process_from_registry: missing entry"
-            );
             return Ok(None);
         };
 
         if let Some(npx) = entry.distribution.npx {
             let package =
                 apply_npx_version_override(&npx.package, options.agent_process_version.as_deref());
-            let version = options
-                .agent_process_version
-                .clone()
-                .or(entry.version)
-                .or(extract_npx_version(&package));
-            let artifact = self.install_npm_agent_process_package(
-                agent,
-                &package,
-                &npx.args,
-                &npx.env,
-                InstallSource::Registry,
-                version,
-            )?;
-            tracing::info!(
-                agent = agent.as_str(),
-                package = %package,
-                total_ms = elapsed_ms(started),
-                "agent_manager.install_agent_process_from_registry: npm package installed"
-            );
-            return Ok(Some(artifact));
+            let launcher = self.agent_process_path(agent);
+            write_npx_agent_process_launcher(&launcher, &package, &npx.args, &npx.env)?;
+            verify_command(&launcher, &[])?;
+            return Ok(Some(InstalledArtifact {
+                kind: InstalledArtifactKind::AgentProcess,
+                path: launcher,
+                version: options
+                    .agent_process_version
+                    .clone()
+                    .or(entry.version)
+                    .or(extract_npx_version(&package)),
+                source: InstallSource::Registry,
+            }));
         }
 
         if let Some(binary) = entry.distribution.binary {
             let key = self.platform.registry_key();
             if let Some(target) = binary.get(key) {
                 let archive_url = Url::parse(&target.archive)?;
-                let download_started = Instant::now();
                 let payload = download_bytes(&archive_url)?;
-                let download_ms = elapsed_ms(download_started);
                 let root = self.agent_process_storage_dir(agent);
                 if root.exists() {
                     fs::remove_dir_all(&root)?;
                 }
                 fs::create_dir_all(&root)?;
-                let unpack_started = Instant::now();
                 unpack_archive(&payload, &archive_url, &root)?;
-                let unpack_ms = elapsed_ms(unpack_started);
 
                 let cmd_path = resolve_extracted_command(&root, &target.cmd)?;
                 let launcher = self.agent_process_path(agent);
-                let write_started = Instant::now();
                 write_exec_agent_process_launcher(&launcher, &cmd_path, &target.args, &target.env)?;
-                let write_ms = elapsed_ms(write_started);
-                let verify_started = Instant::now();
                 verify_command(&launcher, &[])?;
-                let verify_ms = elapsed_ms(verify_started);
 
-                let artifact = InstalledArtifact {
+                return Ok(Some(InstalledArtifact {
                     kind: InstalledArtifactKind::AgentProcess,
                     path: launcher,
                     version: options.agent_process_version.clone().or(entry.version),
                     source: InstallSource::Registry,
-                };
-                tracing::info!(
-                    agent = agent.as_str(),
-                    archive_url = %archive_url,
-                    download_ms = download_ms,
-                    unpack_ms = unpack_ms,
-                    write_ms = write_ms,
-                    verify_ms = verify_ms,
-                    total_ms = elapsed_ms(started),
-                    "agent_manager.install_agent_process_from_registry: binary launcher installed"
-                );
-                return Ok(Some(artifact));
+                }));
             }
         }
 
-        tracing::info!(
-            agent = agent.as_str(),
-            registry_id = registry_id,
-            total_ms = elapsed_ms(started),
-            "agent_manager.install_agent_process_from_registry: no compatible distribution"
-        );
         Ok(None)
     }
 
@@ -816,44 +601,24 @@ impl AgentManager {
         agent: AgentId,
         options: &InstallOptions,
     ) -> Result<InstalledArtifact, AgentError> {
-        let started = Instant::now();
-        let artifact = match agent {
+        let launcher = self.agent_process_path(agent);
+
+        match agent {
             AgentId::Claude => {
                 let package = fallback_npx_package(
-                    "@zed-industries/claude-agent-acp",
+                    "@zed-industries/claude-code-acp",
                     options.agent_process_version.as_deref(),
                 );
-                self.install_npm_agent_process_package(
-                    agent,
-                    &package,
-                    &[],
-                    &HashMap::new(),
-                    InstallSource::Fallback,
-                    options
-                        .agent_process_version
-                        .clone()
-                        .or(extract_npx_version(&package)),
-                )?
+                write_npx_agent_process_launcher(&launcher, &package, &[], &HashMap::new())?;
             }
             AgentId::Codex => {
                 let package = fallback_npx_package(
                     "@zed-industries/codex-acp",
                     options.agent_process_version.as_deref(),
                 );
-                self.install_npm_agent_process_package(
-                    agent,
-                    &package,
-                    &[],
-                    &HashMap::new(),
-                    InstallSource::Fallback,
-                    options
-                        .agent_process_version
-                        .clone()
-                        .or(extract_npx_version(&package)),
-                )?
+                write_npx_agent_process_launcher(&launcher, &package, &[], &HashMap::new())?;
             }
             AgentId::Opencode => {
-                let launcher = self.agent_process_path(agent);
                 let native = self.resolve_binary(agent)?;
                 write_exec_agent_process_launcher(
                     &launcher,
@@ -861,82 +626,37 @@ impl AgentManager {
                     &["acp".to_string()],
                     &HashMap::new(),
                 )?;
-                verify_command(&launcher, &[])?;
-                InstalledArtifact {
-                    kind: InstalledArtifactKind::AgentProcess,
-                    path: launcher,
-                    version: options.agent_process_version.clone(),
-                    source: InstallSource::Fallback,
-                }
             }
             AgentId::Amp => {
                 let package =
                     fallback_npx_package("amp-acp", options.agent_process_version.as_deref());
-                self.install_npm_agent_process_package(
-                    agent,
-                    &package,
-                    &[],
-                    &HashMap::new(),
-                    InstallSource::Fallback,
-                    options
-                        .agent_process_version
-                        .clone()
-                        .or(extract_npx_version(&package)),
-                )?
+                write_npx_agent_process_launcher(&launcher, &package, &[], &HashMap::new())?;
             }
             AgentId::Pi => {
                 let package =
                     fallback_npx_package("pi-acp", options.agent_process_version.as_deref());
-                self.install_npm_agent_process_package(
-                    agent,
-                    &package,
-                    &[],
-                    &HashMap::new(),
-                    InstallSource::Fallback,
-                    options
-                        .agent_process_version
-                        .clone()
-                        .or(extract_npx_version(&package)),
-                )?
+                write_npx_agent_process_launcher(&launcher, &package, &[], &HashMap::new())?;
             }
             AgentId::Cursor => {
                 let package = fallback_npx_package(
                     "@blowmage/cursor-agent-acp",
                     options.agent_process_version.as_deref(),
                 );
-                self.install_npm_agent_process_package(
-                    agent,
-                    &package,
-                    &[],
-                    &HashMap::new(),
-                    InstallSource::Fallback,
-                    options
-                        .agent_process_version
-                        .clone()
-                        .or(extract_npx_version(&package)),
-                )?
+                write_npx_agent_process_launcher(&launcher, &package, &[], &HashMap::new())?;
             }
             AgentId::Mock => {
-                let launcher = self.agent_process_path(agent);
                 write_mock_agent_process_launcher(&launcher)?;
-                InstalledArtifact {
-                    kind: InstalledArtifactKind::AgentProcess,
-                    path: launcher,
-                    version: options.agent_process_version.clone(),
-                    source: InstallSource::Fallback,
-                }
             }
-        };
+        }
 
-        tracing::info!(
-            agent = agent.as_str(),
-            source = ?artifact.source,
-            version = ?artifact.version,
-            total_ms = elapsed_ms(started),
-            "agent_manager.install_agent_process_fallback: launcher installed"
-        );
+        verify_command(&launcher, &[])?;
 
-        Ok(artifact)
+        Ok(InstalledArtifact {
+            kind: InstalledArtifactKind::AgentProcess,
+            path: launcher,
+            version: options.agent_process_version.clone(),
+            source: InstallSource::Fallback,
+        })
     }
 }
 
@@ -1012,10 +732,6 @@ pub enum AgentError {
     RegistryParse(String),
     #[error("command verification failed: {0}")]
     VerifyFailed(String),
-    #[error(
-        "npm is required to install {agent}. install npm, then run step 3: `sandbox-agent install-agent {agent}`"
-    )]
-    MissingNpm { agent: AgentId },
 }
 
 fn fallback_npx_package(base: &str, version: Option<&str>) -> String {
@@ -1063,36 +779,15 @@ fn split_package_version(package: &str) -> Option<(&str, &str)> {
     }
 }
 
-fn install_npm_package(root: &Path, package: &str, agent: AgentId) -> Result<(), AgentError> {
-    let mut command = Command::new("npm");
-    command
-        .arg("install")
-        .arg("--no-audit")
-        .arg("--no-fund")
-        .arg("--prefix")
-        .arg(root)
-        .arg(package)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-
-    match command.status() {
-        Ok(status) if status.success() => Ok(()),
-        Ok(status) => Err(AgentError::VerifyFailed(format!(
-            "npm install failed for {agent} with status {status}. run step 3: `sandbox-agent install-agent {agent}`"
-        ))),
-        Err(err) if err.kind() == io::ErrorKind::NotFound => Err(AgentError::MissingNpm { agent }),
-        Err(err) => Err(AgentError::VerifyFailed(format!(
-            "failed to execute npm for {agent}: {err}"
-        ))),
-    }
-}
-
-fn npm_bin_path(root: &Path, bin_name: &str) -> PathBuf {
-    let mut path = root.join("node_modules").join(".bin").join(bin_name);
-    if cfg!(windows) {
-        path.set_extension("cmd");
-    }
-    path
+fn write_npx_agent_process_launcher(
+    path: &Path,
+    package: &str,
+    args: &[String],
+    env: &HashMap<String, String>,
+) -> Result<(), AgentError> {
+    let mut command = vec!["npx".to_string(), "-y".to_string(), package.to_string()];
+    command.extend(args.iter().cloned());
+    write_launcher(path, &command, env)
 }
 
 fn write_exec_agent_process_launcher(
@@ -1303,15 +998,6 @@ fn install_claude(
     platform: Platform,
     version: Option<&str>,
 ) -> Result<(), AgentError> {
-    let started = Instant::now();
-    tracing::info!(
-        path = %path.display(),
-        platform = ?platform,
-        version_override = ?version,
-        "agent_manager.install_claude: starting"
-    );
-
-    let version_started = Instant::now();
     let version = match version {
         Some(version) => version.to_string(),
         None => {
@@ -1323,7 +1009,6 @@ fn install_claude(
             text.trim().to_string()
         }
     };
-    let version_ms = elapsed_ms(version_started);
 
     let platform_segment = match platform {
         Platform::LinuxX64 => "linux-x64",
@@ -1338,26 +1023,12 @@ fn install_claude(
     let url = Url::parse(&format!(
         "https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/claude-code-releases/{version}/{platform_segment}/claude"
     ))?;
-    let download_started = Instant::now();
     let bytes = download_bytes(&url)?;
-    let download_ms = elapsed_ms(download_started);
-    let write_started = Instant::now();
     write_executable(path, &bytes)?;
-    tracing::info!(
-        version = %version,
-        url = %url,
-        bytes = bytes.len(),
-        version_ms = version_ms,
-        download_ms = download_ms,
-        write_ms = elapsed_ms(write_started),
-        total_ms = elapsed_ms(started),
-        "agent_manager.install_claude: completed"
-    );
     Ok(())
 }
 
 fn install_amp(path: &Path, platform: Platform, version: Option<&str>) -> Result<(), AgentError> {
-    let started = Instant::now();
     let version = match version {
         Some(version) => version.to_string(),
         None => {
@@ -1382,25 +1053,12 @@ fn install_amp(path: &Path, platform: Platform, version: Option<&str>) -> Result
     let url = Url::parse(&format!(
         "https://storage.googleapis.com/amp-public-assets-prod-0/cli/{version}/amp-{platform_segment}"
     ))?;
-    let download_started = Instant::now();
     let bytes = download_bytes(&url)?;
-    let download_ms = elapsed_ms(download_started);
-    let write_started = Instant::now();
     write_executable(path, &bytes)?;
-    tracing::info!(
-        version = %version,
-        url = %url,
-        bytes = bytes.len(),
-        download_ms = download_ms,
-        write_ms = elapsed_ms(write_started),
-        total_ms = elapsed_ms(started),
-        "agent_manager.install_amp: completed"
-    );
     Ok(())
 }
 
 fn install_codex(path: &Path, platform: Platform, version: Option<&str>) -> Result<(), AgentError> {
-    let started = Instant::now();
     let target = match platform {
         Platform::LinuxX64 | Platform::LinuxX64Musl => "x86_64-unknown-linux-musl",
         Platform::LinuxArm64 => "aarch64-unknown-linux-musl",
@@ -1419,15 +1077,11 @@ fn install_codex(path: &Path, platform: Platform, version: Option<&str>) -> Resu
         ))?,
     };
 
-    let download_started = Instant::now();
     let bytes = download_bytes(&url)?;
-    let download_ms = elapsed_ms(download_started);
     let temp_dir = tempfile::tempdir()?;
-    let unpack_started = Instant::now();
     let cursor = io::Cursor::new(bytes);
     let mut archive = tar::Archive::new(GzDecoder::new(cursor));
     archive.unpack(temp_dir.path())?;
-    let unpack_ms = elapsed_ms(unpack_started);
 
     let expected = if cfg!(windows) {
         format!("codex-{target}.exe")
@@ -1437,17 +1091,7 @@ fn install_codex(path: &Path, platform: Platform, version: Option<&str>) -> Resu
 
     let binary = find_file_recursive(temp_dir.path(), &expected)?
         .ok_or_else(|| AgentError::ExtractFailed(format!("missing {expected}")))?;
-    let move_started = Instant::now();
     move_executable(&binary, path)?;
-    tracing::info!(
-        url = %url,
-        target = target,
-        download_ms = download_ms,
-        unpack_ms = unpack_ms,
-        move_ms = elapsed_ms(move_started),
-        total_ms = elapsed_ms(started),
-        "agent_manager.install_codex: completed"
-    );
     Ok(())
 }
 
@@ -1456,15 +1100,7 @@ fn install_opencode(
     platform: Platform,
     version: Option<&str>,
 ) -> Result<(), AgentError> {
-    let started = Instant::now();
-    tracing::info!(
-        path = %path.display(),
-        platform = ?platform,
-        version_override = ?version,
-        "agent_manager.install_opencode: starting"
-    );
-
-    let result = match platform {
+    match platform {
         Platform::MacosArm64 => {
             let url = match version {
                 Some(version) => Url::parse(&format!(
@@ -1505,46 +1141,22 @@ fn install_opencode(
                 ))?,
             };
 
-            let download_started = Instant::now();
             let bytes = download_bytes(&url)?;
-            let download_ms = elapsed_ms(download_started);
             let temp_dir = tempfile::tempdir()?;
-            let unpack_started = Instant::now();
             let cursor = io::Cursor::new(bytes);
             let mut archive = tar::Archive::new(GzDecoder::new(cursor));
             archive.unpack(temp_dir.path())?;
-            let unpack_ms = elapsed_ms(unpack_started);
             let binary = find_file_recursive(temp_dir.path(), "opencode")
                 .or_else(|_| find_file_recursive(temp_dir.path(), "opencode.exe"))?
                 .ok_or_else(|| AgentError::ExtractFailed("missing opencode".to_string()))?;
-            let move_started = Instant::now();
             move_executable(&binary, path)?;
-            tracing::info!(
-                url = %url,
-                download_ms = download_ms,
-                unpack_ms = unpack_ms,
-                move_ms = elapsed_ms(move_started),
-                "agent_manager.install_opencode: tarball extraction complete"
-            );
             Ok(())
         }
-    };
-
-    if result.is_ok() {
-        tracing::info!(
-            total_ms = elapsed_ms(started),
-            "agent_manager.install_opencode: completed"
-        );
     }
-
-    result
 }
 
 fn install_zip_binary(path: &Path, url: &Url, binary_name: &str) -> Result<(), AgentError> {
-    let started = Instant::now();
-    let download_started = Instant::now();
     let bytes = download_bytes(url)?;
-    let download_ms = elapsed_ms(download_started);
     let reader = io::Cursor::new(bytes);
     let mut archive =
         zip::ZipArchive::new(reader).map_err(|err| AgentError::ExtractFailed(err.to_string()))?;
@@ -1561,16 +1173,7 @@ fn install_zip_binary(path: &Path, url: &Url, binary_name: &str) -> Result<(), A
         let out_path = temp_dir.path().join(binary_name);
         let mut out_file = fs::File::create(&out_path)?;
         io::copy(&mut file, &mut out_file)?;
-        let move_started = Instant::now();
         move_executable(&out_path, path)?;
-        tracing::info!(
-            url = %url,
-            binary_name = binary_name,
-            download_ms = download_ms,
-            move_ms = elapsed_ms(move_started),
-            total_ms = elapsed_ms(started),
-            "agent_manager.install_zip_binary: completed"
-        );
         return Ok(());
     }
     Err(AgentError::ExtractFailed(format!("missing {binary_name}")))
@@ -1628,10 +1231,6 @@ fn find_file_recursive(dir: &Path, filename: &str) -> Result<Option<PathBuf>, Ag
     Ok(None)
 }
 
-fn elapsed_ms(start: Instant) -> u64 {
-    start.elapsed().as_millis() as u64
-}
-
 fn parse_version_output(output: &std::process::Output) -> Option<String> {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -1664,38 +1263,6 @@ mod tests {
             perms.set_mode(0o755);
             fs::set_permissions(path, perms).expect("set mode");
         }
-    }
-
-    fn write_fake_npm(path: &Path) {
-        write_exec(
-            path,
-            r#"#!/usr/bin/env sh
-set -e
-prefix=""
-while [ "$#" -gt 0 ]; do
-  case "$1" in
-    install|--no-audit|--no-fund)
-      shift
-      ;;
-    --prefix)
-      prefix="$2"
-      shift 2
-      ;;
-    *)
-      shift
-      ;;
-  esac
-done
-[ -n "$prefix" ] || exit 1
-mkdir -p "$prefix/node_modules/.bin"
-for bin in claude-code-acp codex-acp amp-acp pi-acp cursor-agent-acp; do
-  echo '#!/usr/bin/env sh' > "$prefix/node_modules/.bin/$bin"
-  echo 'exit 0' >> "$prefix/node_modules/.bin/$bin"
-  chmod +x "$prefix/node_modules/.bin/$bin"
-done
-exit 0
-"#,
-        );
     }
 
     fn env_lock() -> &'static Mutex<()> {
@@ -1840,7 +1407,7 @@ exit 0
 
         let bin_dir = temp_dir.path().join("bin");
         fs::create_dir_all(&bin_dir).expect("create bin dir");
-        write_fake_npm(&bin_dir.join("npm"));
+        write_exec(&bin_dir.join("npx"), "#!/usr/bin/env sh\nexit 0\n");
 
         let original_path = std::env::var_os("PATH").unwrap_or_default();
         let mut paths = vec![bin_dir.clone()];
@@ -1888,8 +1455,8 @@ exit 0
         let launcher =
             fs::read_to_string(manager.agent_process_path(AgentId::Codex)).expect("launcher");
         assert!(
-            launcher.contains("node_modules/.bin/codex-acp"),
-            "launcher should invoke installed codex executable"
+            launcher.contains("@example/codex-acp@9.9.9"),
+            "launcher should include overridden package version"
         );
     }
 
@@ -1907,7 +1474,7 @@ exit 0
 
         let bin_dir = temp_dir.path().join("bin");
         fs::create_dir_all(&bin_dir).expect("create bin dir");
-        write_fake_npm(&bin_dir.join("npm"));
+        write_exec(&bin_dir.join("npx"), "#!/usr/bin/env sh\nexit 0\n");
 
         let original_path = std::env::var_os("PATH").unwrap_or_default();
         let mut paths = vec![bin_dir.clone()];
@@ -1927,39 +1494,6 @@ exit 0
             .find(|artifact| artifact.kind == InstalledArtifactKind::AgentProcess)
             .expect("agent process artifact");
         assert_eq!(agent_process_artifact.source, InstallSource::Fallback);
-    }
-
-    #[test]
-    fn install_returns_missing_npm_error_for_npm_backed_agents() {
-        let _env_lock = env_lock().lock().expect("env lock");
-
-        let temp_dir = tempfile::tempdir().expect("create tempdir");
-        let mut manager = AgentManager::with_platform(temp_dir.path(), Platform::LinuxX64);
-
-        write_exec(
-            &manager.binary_path(AgentId::Codex),
-            "#!/usr/bin/env sh\nexit 0\n",
-        );
-
-        let bin_dir = temp_dir.path().join("bin");
-        fs::create_dir_all(&bin_dir).expect("create bin dir");
-
-        let original_path = std::env::var_os("PATH").unwrap_or_default();
-        let combined_path = std::env::join_paths([bin_dir]).expect("join PATH");
-        let _path_guard = EnvVarGuard::set("PATH", &combined_path);
-
-        manager.registry_url = serve_registry_once(serde_json::json!({ "agents": [] }));
-
-        let error = manager
-            .install(AgentId::Codex, InstallOptions::default())
-            .expect_err("install should fail without npm");
-
-        match error {
-            AgentError::MissingNpm { agent } => assert_eq!(agent, AgentId::Codex),
-            other => panic!("expected MissingNpm, got {other:?}"),
-        }
-
-        drop(original_path);
     }
 
     #[test]
@@ -1988,7 +1522,7 @@ exit 0
     }
 
     #[test]
-    fn install_pi_skips_native_and_installs_fallback_npm_launcher() {
+    fn install_pi_skips_native_and_writes_fallback_npx_launcher() {
         let _env_lock = env_lock().lock().expect("env lock");
 
         let temp_dir = tempfile::tempdir().expect("create tempdir");
@@ -1996,7 +1530,7 @@ exit 0
 
         let bin_dir = temp_dir.path().join("bin");
         fs::create_dir_all(&bin_dir).expect("create bin dir");
-        write_fake_npm(&bin_dir.join("npm"));
+        write_exec(&bin_dir.join("npx"), "#!/usr/bin/env sh\nexit 0\n");
 
         let original_path = std::env::var_os("PATH").unwrap_or_default();
         let mut paths = vec![bin_dir.clone()];
@@ -2030,8 +1564,8 @@ exit 0
         let launcher =
             fs::read_to_string(manager.agent_process_path(AgentId::Pi)).expect("read pi launcher");
         assert!(
-            launcher.contains("node_modules/.bin/pi-acp"),
-            "pi launcher should use installed pi executable"
+            launcher.contains("pi-acp"),
+            "pi launcher should reference pi-acp package"
         );
 
         // resolve_agent_process should now find it.
@@ -2056,7 +1590,7 @@ exit 0
     }
 
     #[test]
-    fn install_cursor_skips_native_and_installs_fallback_npm_launcher() {
+    fn install_cursor_skips_native_and_writes_fallback_npx_launcher() {
         let _env_lock = env_lock().lock().expect("env lock");
 
         let temp_dir = tempfile::tempdir().expect("create tempdir");
@@ -2064,7 +1598,7 @@ exit 0
 
         let bin_dir = temp_dir.path().join("bin");
         fs::create_dir_all(&bin_dir).expect("create bin dir");
-        write_fake_npm(&bin_dir.join("npm"));
+        write_exec(&bin_dir.join("npx"), "#!/usr/bin/env sh\nexit 0\n");
 
         let original_path = std::env::var_os("PATH").unwrap_or_default();
         let mut paths = vec![bin_dir.clone()];
@@ -2096,8 +1630,8 @@ exit 0
         let launcher = fs::read_to_string(manager.agent_process_path(AgentId::Cursor))
             .expect("read cursor launcher");
         assert!(
-            launcher.contains("node_modules/.bin/cursor-agent-acp"),
-            "cursor launcher should use installed cursor executable"
+            launcher.contains("@blowmage/cursor-agent-acp"),
+            "cursor launcher should reference @blowmage/cursor-agent-acp package"
         );
 
         let spec = manager

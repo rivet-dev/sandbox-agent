@@ -6,13 +6,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "SKIP_OPENAPI_GEN=1 pnpm --filter @sandbox-agent/persist-indexeddb build && pnpm --filter @sandbox-agent/react build && vite build",
+    "build": "SKIP_OPENAPI_GEN=1 pnpm --filter @sandbox-agent/persist-indexeddb build && vite build",
     "preview": "vite preview",
-    "typecheck": "SKIP_OPENAPI_GEN=1 pnpm --filter @sandbox-agent/persist-indexeddb build && pnpm --filter @sandbox-agent/react build && tsc --noEmit",
-    "test": "SKIP_OPENAPI_GEN=1 pnpm --filter @sandbox-agent/persist-indexeddb build && pnpm --filter @sandbox-agent/react build && vitest run"
+    "typecheck": "SKIP_OPENAPI_GEN=1 pnpm --filter @sandbox-agent/persist-indexeddb build && tsc --noEmit",
+    "test": "SKIP_OPENAPI_GEN=1 pnpm --filter @sandbox-agent/persist-indexeddb build && vitest run"
   },
   "devDependencies": {
-    "@sandbox-agent/react": "workspace:*",
     "sandbox-agent": "workspace:*",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",

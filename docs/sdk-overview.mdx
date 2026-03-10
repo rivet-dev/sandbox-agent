@@ -11,12 +11,12 @@ The TypeScript SDK is centered on `sandbox-agent` and its `SandboxAgent` class.
 <Tabs>
   <Tab title="npm">
     ```bash
-    npm install sandbox-agent@0.3.x
+    npm install sandbox-agent@0.2.x
     ```
   </Tab>
   <Tab title="bun">
     ```bash
-    bun add sandbox-agent@0.3.x
+    bun add sandbox-agent@0.2.x
     # Allow Bun to run postinstall scripts for native binaries (required for SandboxAgent.start()).
     bun pm trust @sandbox-agent/cli-linux-x64 @sandbox-agent/cli-linux-arm64 @sandbox-agent/cli-darwin-arm64 @sandbox-agent/cli-darwin-x64 @sandbox-agent/cli-win32-x64
     ```
@@ -26,13 +26,7 @@ The TypeScript SDK is centered on `sandbox-agent` and its `SandboxAgent` class.
 ## Optional persistence drivers
 
 ```bash
-npm install @sandbox-agent/persist-indexeddb@0.3.x @sandbox-agent/persist-sqlite@0.3.x @sandbox-agent/persist-postgres@0.3.x
-```
-
-## Optional React components
-
-```bash
-npm install @sandbox-agent/react@0.3.x
+npm install @sandbox-agent/persist-indexeddb@0.2.x @sandbox-agent/persist-sqlite@0.2.x @sandbox-agent/persist-postgres@0.2.x
 ```
 
 ## Create a client
@@ -45,27 +39,12 @@ const sdk = await SandboxAgent.connect({
 });
 ```
 
-`SandboxAgent.connect(...)` now waits for `/v1/health` by default before other SDK requests proceed. To disable that gate, pass `waitForHealth: false`. To keep the default gate but fail after a bounded wait, pass `waitForHealth: { timeoutMs: 120_000 }`. To cancel the startup wait early, pass `signal: abortController.signal`.
-
 With a custom fetch handler (for example, proxying requests inside Workers):
 
 ```ts
 const sdk = await SandboxAgent.connect({
   fetch: (input, init) => customFetch(input, init),
 });
-```
-
-With an abort signal for the startup health gate:
-
-```ts
-const controller = new AbortController();
-
-const sdk = await SandboxAgent.connect({
-  baseUrl: "http://127.0.0.1:2468",
-  signal: controller.signal,
-});
-
-controller.abort();
 ```
 
 With persistence:
@@ -120,25 +99,6 @@ await restored.prompt([{ type: "text", text: "Continue from previous context." }
 
 await sdk.destroySession(restored.id);
 ```
-
-## Session configuration
-
-Set model, mode, or thought level at creation or on an existing session:
-
-```ts
-const session = await sdk.createSession({
-  agent: "codex",
-  model: "gpt-5.3-codex",
-});
-
-await session.setModel("gpt-5.2-codex");
-await session.setMode("auto");
-
-const options = await session.getConfigOptions();
-const modes = await session.getModes();
-```
-
-See [Agent Sessions](/agent-sessions) for full details on config options and error handling.
 
 ## Events
 
@@ -210,5 +170,14 @@ Parameters:
 - `token` (optional): Bearer token for authenticated servers
 - `headers` (optional): Additional request headers
 - `fetch` (optional): Custom fetch implementation used by SDK HTTP and ACP calls
-- `waitForHealth` (optional, defaults to enabled): waits for `/v1/health` before HTTP helpers and ACP session setup proceed; pass `false` to disable or `{ timeoutMs }` to bound the wait
-- `signal` (optional): aborts the startup `/v1/health` wait used by `connect()`
+
+## Types
+
+```ts
+import type {
+  AgentInfo,
+  HealthResponse,
+  SessionEvent,
+  SessionRecord,
+} from "sandbox-agent";
+```

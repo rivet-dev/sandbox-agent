@@ -33,67 +33,13 @@ pub(super) async fn require_token(
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.strip_prefix("Bearer "));
 
-    let allow_query_token = request.uri().path().ends_with("/terminal/ws");
-    let query_token = if allow_query_token {
-        request
-            .uri()
-            .query()
-            .and_then(|query| query_param(query, "access_token"))
-    } else {
-        None
-    };
-
-    if bearer == Some(expected.as_str()) || query_token.as_deref() == Some(expected.as_str()) {
+    if bearer == Some(expected.as_str()) {
         return Ok(next.run(request).await);
     }
 
     Err(ApiError::Sandbox(SandboxError::TokenInvalid {
         message: Some("missing or invalid bearer token".to_string()),
     }))
-}
-
-fn query_param(query: &str, key: &str) -> Option<String> {
-    query
-        .split('&')
-        .filter_map(|part| part.split_once('='))
-        .find_map(|(k, v)| {
-            if k == key {
-                Some(percent_decode(v))
-            } else {
-                None
-            }
-        })
-}
-
-fn percent_decode(input: &str) -> String {
-    let mut output = Vec::with_capacity(input.len());
-    let bytes = input.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let (Some(hi), Some(lo)) = (hex_nibble(bytes[i + 1]), hex_nibble(bytes[i + 2])) {
-                output.push((hi << 4) | lo);
-                i += 3;
-                continue;
-            }
-        }
-        if bytes[i] == b'+' {
-            output.push(b' ');
-        } else {
-            output.push(bytes[i]);
-        }
-        i += 1;
-    }
-    String::from_utf8(output).unwrap_or_else(|_| input.to_string())
-}
-
-fn hex_nibble(b: u8) -> Option<u8> {
-    match b {
-        b'0'..=b'9' => Some(b - b'0'),
-        b'a'..=b'f' => Some(b - b'a' + 10),
-        b'A'..=b'F' => Some(b - b'A' + 10),
-        _ => None,
-    }
 }
 
 pub(super) type PinBoxSseStream = crate::acp_proxy_runtime::PinBoxSseStream;
@@ -144,9 +90,6 @@ pub(super) fn fallback_config_options(agent: AgentId) -> Vec<Value> {
         AgentId::Codex => CODEX.clone(),
         AgentId::Opencode => OPENCODE.clone(),
         AgentId::Cursor => CURSOR.clone(),
-        // Amp returns empty configOptions from session/new but exposes modes via
-        // the `modes` field. The model is hardcoded. Modes discovered from ACP
-        // session/new response (amp-acp v0.7.0).
         AgentId::Amp => vec![
             json!({
                 "id": "model",
@@ -163,10 +106,12 @@ pub(super) fn fallback_config_options(agent: AgentId) -> Vec<Value> {
                 "name": "Mode",
                 "category": "mode",
                 "type": "select",
-                "currentValue": "default",
+                "currentValue": "smart",
                 "options": [
-                    { "value": "default", "name": "Default" },
-                    { "value": "bypass", "name": "Bypass" }
+                    { "value": "smart", "name": "Smart" },
+                    { "value": "deep", "name": "Deep" },
+                    { "value": "free", "name": "Free" },
+                    { "value": "rush", "name": "Rush" }
                 ]
             }),
         ],
@@ -180,76 +125,41 @@ pub(super) fn fallback_config_options(agent: AgentId) -> Vec<Value> {
                 { "value": "default", "name": "Default" }
             ]
         })],
-        AgentId::Mock => vec![
-            json!({
-                "id": "model",
-                "name": "Model",
-                "category": "model",
-                "type": "select",
-                "currentValue": "mock",
-                "options": [
-                    { "value": "mock", "name": "Mock" },
-                    { "value": "mock-fast", "name": "Mock Fast" }
-                ]
-            }),
-            json!({
-                "id": "mode",
-                "name": "Mode",
-                "category": "mode",
-                "type": "select",
-                "currentValue": "normal",
-                "options": [
-                    { "value": "normal", "name": "Normal" },
-                    { "value": "plan", "name": "Plan" }
-                ]
-            }),
-            json!({
-                "id": "thought_level",
-                "name": "Thought Level",
-                "category": "thought_level",
-                "type": "select",
-                "currentValue": "low",
-                "options": [
-                    { "value": "low", "name": "Low" },
-                    { "value": "medium", "name": "Medium" },
-                    { "value": "high", "name": "High" }
-                ]
-            }),
-        ],
+        AgentId::Mock => vec![json!({
+            "id": "model",
+            "name": "Model",
+            "category": "model",
+            "type": "select",
+            "currentValue": "mock",
+            "options": [
+                { "value": "mock", "name": "Mock" }
+            ]
+        })],
     }
 }
 
 /// Parse an agent config JSON file (from `scripts/agent-configs/resources/`) into
 /// ACP `SessionConfigOption` values. The JSON format is:
 /// ```json
-/// {
-///   "defaultModel": "...", "models": [{id, name}],
-///   "defaultMode?": "...", "modes?": [{id, name}],
-///   "defaultThoughtLevel?": "...", "thoughtLevels?": [{id, name}]
-/// }
+/// { "defaultModel": "...", "models": [{id, name}], "defaultMode?": "...", "modes?": [{id, name}] }
 /// ```
-///
-/// Note: Claude and Codex don't report configOptions from `session/new`, so these
-/// JSON resource files are the source of truth for the capabilities report.
-/// Claude modes (plan, default) were discovered via manual ACP probing —
-/// `session/set_mode` works but `session/set_config_option` is not implemented.
-/// Codex modes/thought levels were discovered from its `session/new` response.
 fn parse_agent_config(json_str: &str) -> Vec<Value> {
     #[derive(serde::Deserialize)]
     struct AgentConfig {
         #[serde(rename = "defaultModel")]
         default_model: String,
-        models: Vec<ConfigEntry>,
+        models: Vec<ModelEntry>,
         #[serde(rename = "defaultMode")]
         default_mode: Option<String>,
-        modes: Option<Vec<ConfigEntry>>,
-        #[serde(rename = "defaultThoughtLevel")]
-        default_thought_level: Option<String>,
-        #[serde(rename = "thoughtLevels")]
-        thought_levels: Option<Vec<ConfigEntry>>,
+        modes: Option<Vec<ModeEntry>>,
     }
     #[derive(serde::Deserialize)]
-    struct ConfigEntry {
+    struct ModelEntry {
+        id: String,
+        name: String,
+    }
+    #[derive(serde::Deserialize)]
+    struct ModeEntry {
         id: String,
         name: String,
     }
@@ -275,24 +185,10 @@ fn parse_agent_config(json_str: &str) -> Vec<Value> {
             "name": "Mode",
             "category": "mode",
             "type": "select",
-            "currentValue": config.default_mode.or_else(|| modes.first().map(|m| m.id.clone())).unwrap_or_default(),
+            "currentValue": config.default_mode.unwrap_or_else(|| modes[0].id.clone()),
             "options": modes.iter().map(|m| json!({
                 "value": m.id,
                 "name": m.name,
-            })).collect::<Vec<_>>(),
-        }));
-    }
-
-    if let Some(thought_levels) = config.thought_levels {
-        options.push(json!({
-            "id": "thought_level",
-            "name": "Thought Level",
-            "category": "thought_level",
-            "type": "select",
-            "currentValue": config.default_thought_level.or_else(|| thought_levels.first().map(|t| t.id.clone())).unwrap_or_default(),
-            "options": thought_levels.iter().map(|t| json!({
-                "value": t.id,
-                "name": t.name,
             })).collect::<Vec<_>>(),
         }));
     }
@@ -601,17 +497,8 @@ pub(super) fn problem_from_sandbox_error(error: &SandboxError) -> ProblemDetails
     let mut problem = error.to_problem_details();
 
     match error {
-        SandboxError::InvalidRequest { message } => {
-            if message.starts_with("input payload exceeds maxInputBytesPerRequest") {
-                problem.status = 413;
-                problem.title = "Payload Too Large".to_string();
-            } else {
-                problem.status = 400;
-            }
-        }
-        SandboxError::NotFound { .. } => {
-            problem.status = 404;
-            problem.title = "Not Found".to_string();
+        SandboxError::InvalidRequest { .. } => {
+            problem.status = 400;
         }
         SandboxError::Timeout { .. } => {
             problem.status = 504;

@@ -11,7 +11,6 @@ fn main() {
 }
 
 fn run() -> Result<(), CliError> {
-    let started = std::time::Instant::now();
     let cli = GigacodeCli::parse();
     let config = CliConfig {
         token: cli.token,
@@ -35,18 +34,5 @@ fn run() -> Result<(), CliError> {
         eprintln!("failed to init logging: {err}");
         return Err(err);
     }
-    tracing::info!(
-        command = ?command,
-        startup_ms = started.elapsed().as_millis() as u64,
-        "gigacode.run: command starting"
-    );
-    let command_started = std::time::Instant::now();
-    let result = run_command(&command, &config);
-    tracing::info!(
-        command = ?command,
-        command_ms = command_started.elapsed().as_millis() as u64,
-        total_ms = started.elapsed().as_millis() as u64,
-        "gigacode.run: command exited"
-    );
-    result
+    run_command(&command, &config)
 }

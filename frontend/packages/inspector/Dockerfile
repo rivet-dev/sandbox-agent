@@ -9,7 +9,6 @@ COPY sdks/typescript/package.json ./sdks/typescript/
 COPY sdks/cli-shared/package.json ./sdks/cli-shared/
 COPY sdks/acp-http-client/package.json ./sdks/acp-http-client/
 COPY sdks/persist-indexeddb/package.json ./sdks/persist-indexeddb/
-COPY sdks/react/package.json ./sdks/react/
 
 # Install dependencies
 RUN pnpm install --filter @sandbox-agent/inspector...
@@ -29,10 +28,6 @@ RUN cd sdks/typescript && pnpm exec tsup
 # Copy persist-indexeddb and build (depends on SDK)
 COPY sdks/persist-indexeddb ./sdks/persist-indexeddb
 RUN cd sdks/persist-indexeddb && pnpm exec tsup
-
-# Copy react and build (depends on SDK)
-COPY sdks/react ./sdks/react
-RUN cd sdks/react && pnpm exec tsup
 
 # Copy inspector source
 COPY frontend/packages/inspector ./frontend/packages/inspector

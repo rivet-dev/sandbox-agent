@@ -11,7 +11,6 @@ COPY sdks/typescript/ sdks/typescript/
 COPY sdks/acp-http-client/ sdks/acp-http-client/
 COPY sdks/cli-shared/ sdks/cli-shared/
 COPY sdks/persist-indexeddb/ sdks/persist-indexeddb/
-COPY sdks/react/ sdks/react/
 COPY frontend/packages/inspector/ frontend/packages/inspector/
 COPY docs/openapi.json docs/
 

@@ -1,6 +1,6 @@
 use std::fs;
 use std::io::{Read, Write};
-use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::net::{TcpListener, TcpStream};
 use std::path::Path;
 use std::time::Duration;
 
@@ -14,8 +14,6 @@ use sandbox_agent_agent_management::agents::AgentManager;
 use serde_json::{json, Value};
 use serial_test::serial;
 use tempfile::TempDir;
-use tokio::sync::oneshot;
-use tokio::task::JoinHandle;
 use tower::util::ServiceExt;
 
 struct TestApp {
@@ -48,56 +46,6 @@ impl TestApp {
 struct EnvVarGuard {
     key: &'static str,
     previous: Option<std::ffi::OsString>,
-}
-
-struct LiveServer {
-    address: SocketAddr,
-    shutdown_tx: Option<oneshot::Sender<()>>,
-    task: JoinHandle<()>,
-}
-
-impl LiveServer {
-    async fn spawn(app: Router) -> Self {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind live server");
-        let address = listener.local_addr().expect("live server address");
-        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
-
-        let task = tokio::spawn(async move {
-            let server =
-                axum::serve(listener, app.into_make_service()).with_graceful_shutdown(async {
-                    let _ = shutdown_rx.await;
-                });
-
-            let _ = server.await;
-        });
-
-        Self {
-            address,
-            shutdown_tx: Some(shutdown_tx),
-            task,
-        }
-    }
-
-    fn http_url(&self, path: &str) -> String {
-        format!("http://{}{}", self.address, path)
-    }
-
-    fn ws_url(&self, path: &str) -> String {
-        format!("ws://{}{}", self.address, path)
-    }
-
-    async fn shutdown(mut self) {
-        if let Some(shutdown_tx) = self.shutdown_tx.take() {
-            let _ = shutdown_tx.send(());
-        }
-
-        let _ = tokio::time::timeout(Duration::from_secs(3), async {
-            let _ = self.task.await;
-        })
-        .await;
-    }
 }
 
 impl EnvVarGuard {
@@ -133,38 +81,6 @@ fn write_executable(path: &Path, script: &str) {
         perms.set_mode(0o755);
         fs::set_permissions(path, perms).expect("set mode");
     }
-}
-
-fn write_fake_npm(path: &Path) {
-    write_executable(
-        path,
-        r#"#!/usr/bin/env sh
-set -e
-prefix=""
-while [ "$#" -gt 0 ]; do
-  case "$1" in
-    install|--no-audit|--no-fund)
-      shift
-      ;;
-    --prefix)
-      prefix="$2"
-      shift 2
-      ;;
-    *)
-      shift
-      ;;
-  esac
-done
-[ -n "$prefix" ] || exit 1
-mkdir -p "$prefix/node_modules/.bin"
-for bin in claude-code-acp codex-acp amp-acp pi-acp cursor-agent-acp; do
-  echo '#!/usr/bin/env sh' > "$prefix/node_modules/.bin/$bin"
-  echo 'exit 0' >> "$prefix/node_modules/.bin/$bin"
-  chmod +x "$prefix/node_modules/.bin/$bin"
-done
-exit 0
-"#,
-    );
 }
 
 fn serve_registry_once(document: Value) -> String {
@@ -375,5 +291,3 @@ mod acp_transport;
 mod config_endpoints;
 #[path = "v1_api/control_plane.rs"]
 mod control_plane;
-#[path = "v1_api/processes.rs"]
-mod processes;

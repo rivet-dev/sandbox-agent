@@ -1,6 +1,6 @@
 {
   "name": "sandbox-agent",
-  "version": "0.3.0",
+  "version": "0.2.1",
   "description": "Universal API for automatic coding agents in sandboxes. Supports Claude Code, Codex, OpenCode, and Amp.",
   "license": "Apache-2.0",
   "repository": {
@@ -17,8 +17,8 @@
     }
   },
   "dependencies": {
-    "@sandbox-agent/cli-shared": "workspace:*",
-    "acp-http-client": "workspace:*"
+    "acp-http-client": "workspace:*",
+    "@sandbox-agent/cli-shared": "workspace:*"
   },
   "files": [
     "dist"
@@ -34,12 +34,10 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
-    "@types/ws": "^8.18.1",
     "openapi-typescript": "^6.7.0",
     "tsup": "^8.0.0",
     "typescript": "^5.7.0",
-    "vitest": "^3.0.0",
-    "ws": "^8.19.0"
+    "vitest": "^3.0.0"
   },
   "optionalDependencies": {
     "@sandbox-agent/cli": "workspace:*"

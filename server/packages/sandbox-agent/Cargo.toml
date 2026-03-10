@@ -55,7 +55,6 @@ insta.workspace = true
 tower.workspace = true
 tempfile.workspace = true
 serial_test = "3.2"
-tokio-tungstenite = "0.24"
 
 [features]
 test-utils = ["tempfile"]

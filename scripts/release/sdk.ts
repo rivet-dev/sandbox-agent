@@ -302,16 +302,8 @@ export async function publishNpmLibraries(opts: ReleaseOpts) {
 		}
 
 		console.log(`==> Publishing to NPM: ${pkg.name}@${opts.version}`);
-		try {
-			await $({ stdio: "inherit", cwd: pkg.dir })`pnpm publish --access public --tag ${tag} --no-git-checks`;
-			console.log(`✅ Published ${pkg.name}@${opts.version}`);
-		} catch (err: any) {
-			if (err.stderr?.includes("You cannot publish over the previously published versions") || err.stderr?.includes("403")) {
-				console.log(`⚠️ ${pkg.name}@${opts.version} already published (npm registry). Skipping.`);
-			} else {
-				throw err;
-			}
-		}
+		await $({ stdio: "inherit", cwd: pkg.dir })`pnpm publish --access public --tag ${tag} --no-git-checks`;
+		console.log(`✅ Published ${pkg.name}@${opts.version}`);
 	}
 
 	console.log("✅ All library packages published");
@@ -392,13 +384,9 @@ export async function publishNpmCli(opts: ReleaseOpts) {
 				cwd: pkg.dir,
 			})`pnpm publish --access public --tag ${tag} --no-git-checks`;
 			console.log(`✅ Published ${pkg.name}@${opts.version}`);
-		} catch (err: any) {
-			if (err.stderr?.includes("You cannot publish over the previously published versions") || err.stderr?.includes("403")) {
-				console.log(`⚠️ ${pkg.name}@${opts.version} already published (npm registry). Skipping.`);
-			} else {
-				console.error(`❌ Failed to publish ${pkg.name}`);
-				throw err;
-			}
+		} catch (err) {
+			console.error(`❌ Failed to publish ${pkg.name}`);
+			throw err;
 		}
 	}
 

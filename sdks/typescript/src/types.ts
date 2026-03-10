@@ -1,9 +1,4 @@
-import type {
-  AnyMessage,
-  NewSessionRequest,
-  SessionConfigOption,
-  SessionModeState,
-} from "acp-http-client";
+import type { AnyMessage, NewSessionRequest } from "acp-http-client";
 import type { components, operations } from "./generated/openapi.ts";
 
 export type ProblemDetails = components["schemas"]["ProblemDetails"];
@@ -11,7 +6,6 @@ export type ProblemDetails = components["schemas"]["ProblemDetails"];
 export type HealthResponse = JsonResponse<operations["get_v1_health"], 200>;
 export type AgentListResponse = JsonResponse<operations["get_v1_agents"], 200>;
 export type AgentInfo = components["schemas"]["AgentInfo"];
-export type AgentQuery = QueryParams<operations["get_v1_agents"]>;
 export type AgentInstallRequest = JsonRequestBody<operations["post_v1_agent_install"]>;
 export type AgentInstallResponse = JsonResponse<operations["post_v1_agent_install"], 200>;
 
@@ -37,68 +31,6 @@ export type McpServerConfig = components["schemas"]["McpServerConfig"];
 export type SkillsConfigQuery = QueryParams<operations["get_v1_config_skills"]>;
 export type SkillsConfig = components["schemas"]["SkillsConfig"];
 
-export type ProcessConfig = JsonResponse<operations["get_v1_processes_config"], 200>;
-export type ProcessCreateRequest = JsonRequestBody<operations["post_v1_processes"]>;
-export type ProcessInfo = components["schemas"]["ProcessInfo"];
-export type ProcessInputRequest = JsonRequestBody<operations["post_v1_process_input"]>;
-export type ProcessInputResponse = JsonResponse<operations["post_v1_process_input"], 200>;
-export type ProcessListResponse = JsonResponse<operations["get_v1_processes"], 200>;
-export type ProcessLogEntry = components["schemas"]["ProcessLogEntry"];
-export type ProcessLogsQuery = QueryParams<operations["get_v1_process_logs"]>;
-export type ProcessLogsResponse = JsonResponse<operations["get_v1_process_logs"], 200>;
-export type ProcessLogsStream = components["schemas"]["ProcessLogsStream"];
-export type ProcessRunRequest = JsonRequestBody<operations["post_v1_processes_run"]>;
-export type ProcessRunResponse = JsonResponse<operations["post_v1_processes_run"], 200>;
-export type ProcessSignalQuery = QueryParams<operations["post_v1_process_stop"]>;
-export type ProcessState = components["schemas"]["ProcessState"];
-export type ProcessTerminalResizeRequest = JsonRequestBody<operations["post_v1_process_terminal_resize"]>;
-export type ProcessTerminalResizeResponse = JsonResponse<operations["post_v1_process_terminal_resize"], 200>;
-
-export type ProcessTerminalClientFrame =
-  | {
-      type: "input";
-      data: string;
-      encoding?: string;
-    }
-  | {
-      type: "resize";
-      cols: number;
-      rows: number;
-    }
-  | {
-      type: "close";
-    };
-
-export interface ProcessTerminalReadyFrame {
-  type: "ready";
-  processId: string;
-}
-
-export interface ProcessTerminalExitFrame {
-  type: "exit";
-  exitCode?: number | null;
-}
-
-export interface ProcessTerminalErrorFrame {
-  type: "error";
-  message: string;
-}
-
-export type ProcessTerminalServerFrame =
-  | ProcessTerminalReadyFrame
-  | ProcessTerminalExitFrame
-  | ProcessTerminalErrorFrame;
-
-export type TerminalReadyStatus = ProcessTerminalReadyFrame;
-export type TerminalExitStatus = ProcessTerminalExitFrame;
-export type TerminalErrorStatus = ProcessTerminalErrorFrame;
-export type TerminalStatusMessage = ProcessTerminalServerFrame;
-
-export interface TerminalResizePayload {
-  cols: number;
-  rows: number;
-}
-
 export interface SessionRecord {
   id: string;
   agent: string;
@@ -107,8 +39,6 @@ export interface SessionRecord {
   createdAt: number;
   destroyedAt?: number;
   sessionInit?: Omit<NewSessionRequest, "_meta">;
-  configOptions?: SessionConfigOption[];
-  modes?: SessionModeState | null;
 }
 
 export type SessionEventSender = "client" | "agent";
@@ -248,12 +178,6 @@ function cloneSessionRecord(session: SessionRecord): SessionRecord {
     sessionInit: session.sessionInit
       ? (JSON.parse(JSON.stringify(session.sessionInit)) as SessionRecord["sessionInit"])
       : undefined,
-    configOptions: session.configOptions
-      ? (JSON.parse(JSON.stringify(session.configOptions)) as SessionRecord["configOptions"])
-      : undefined,
-    modes: session.modes
-      ? (JSON.parse(JSON.stringify(session.modes)) as SessionRecord["modes"])
-      : session.modes,
   };
 }
 

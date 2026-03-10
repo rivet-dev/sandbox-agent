@@ -1,29 +1,21 @@
-# Snapshot and Refs
+# Snapshot + Refs Workflow
 
-Compact element references that reduce context usage dramatically for AI agents.
+The core innovation of agent-browser: compact element references that reduce context usage dramatically for AI agents.
 
-**Related**: [commands.md](commands.md) for full command reference, [SKILL.md](../SKILL.md) for quick start.
+## How It Works
 
-## Contents
-
-- [How Refs Work](#how-refs-work)
-- [Snapshot Command](#the-snapshot-command)
-- [Using Refs](#using-refs)
-- [Ref Lifecycle](#ref-lifecycle)
-- [Best Practices](#best-practices)
-- [Ref Notation Details](#ref-notation-details)
-- [Troubleshooting](#troubleshooting)
-
-## How Refs Work
-
-Traditional approach:
+### The Problem
+Traditional browser automation sends full DOM to AI agents:
 ```
-Full DOM/HTML → AI parses → CSS selector → Action (~3000-5000 tokens)
+Full DOM/HTML sent → AI parses → Generates CSS selector → Executes action
+~3000-5000 tokens per interaction
 ```
 
-agent-browser approach:
+### The Solution
+agent-browser uses compact snapshots with refs:
 ```
-Compact snapshot → @refs assigned → Direct interaction (~200-400 tokens)
+Compact snapshot → @refs assigned → Direct ref interaction
+~200-400 tokens per interaction
 ```
 
 ## The Snapshot Command
@@ -174,8 +166,8 @@ agent-browser snapshot -i
 ### Element Not Visible in Snapshot
 
 ```bash
-# Scroll down to reveal element
-agent-browser scroll down 1000
+# Scroll to reveal element
+agent-browser scroll --bottom
 agent-browser snapshot -i
 
 # Or wait for dynamic content

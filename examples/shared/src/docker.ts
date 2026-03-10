@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
+import { waitForHealth } from "./sandbox-agent-client.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const EXAMPLE_IMAGE = "sandbox-agent-examples:latest";
@@ -172,7 +173,7 @@ async function ensureExampleImage(_docker: Docker): Promise<string> {
 }
 
 /**
- * Start a Docker container running sandbox-agent.
+ * Start a Docker container running sandbox-agent and wait for it to be healthy.
  * Registers SIGINT/SIGTERM handlers for cleanup.
  */
 export async function startDockerSandbox(opts: DockerSandboxOptions): Promise<DockerSandbox> {
@@ -274,8 +275,18 @@ export async function startDockerSandbox(opts: DockerSandboxOptions): Promise<Do
   }
   const baseUrl = `http://127.0.0.1:${mappedHostPort}`;
 
+  try {
+    await waitForHealth({ baseUrl });
+  } catch (err) {
+    stopStartupLogs();
+    console.error("  Container logs:");
+    for (const chunk of logChunks) {
+      process.stderr.write(`    ${chunk}`);
+    }
+    throw err;
+  }
   stopStartupLogs();
-  console.log(`  Started (${baseUrl})`);
+  console.log(`  Ready (${baseUrl})`);
 
   const cleanup = async () => {
     stopStartupLogs();
