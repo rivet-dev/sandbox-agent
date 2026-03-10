@@ -54,8 +54,8 @@
   - `acp-http-client`: protocol-pure ACP-over-HTTP (`/v1/acp`) with no Sandbox-specific HTTP helpers.
   - `sandbox-agent`: `SandboxAgent` SDK wrapper that combines ACP session operations with Sandbox control-plane and filesystem helpers.
 - `SandboxAgent` entry points are `SandboxAgent.connect(...)` and `SandboxAgent.start(...)`.
-- Stable Sandbox session methods are `createSession`, `resumeSession`, `resumeOrCreateSession`, `destroySession`, `sendSessionMethod`, `onSessionEvent`, `setSessionMode`, `setSessionModel`, `setSessionThoughtLevel`, `setSessionConfigOption`, `getSessionConfigOptions`, and `getSessionModes`.
-- `Session` helpers are `prompt(...)`, `send(...)`, `onEvent(...)`, `setMode(...)`, `setModel(...)`, `setThoughtLevel(...)`, `setConfigOption(...)`, `getConfigOptions()`, and `getModes()`.
+- Stable Sandbox session methods are `createSession`, `resumeSession`, `resumeOrCreateSession`, `destroySession`, `sendSessionMethod`, and `onSessionEvent`.
+- `Session` helpers are `prompt(...)`, `send(...)`, and `onEvent(...)`.
 - Cleanup is `sdk.dispose()`.
 
 ### Docs Source Of Truth
@@ -86,8 +86,6 @@
 - Regenerate `docs/openapi.json` when HTTP contracts change.
 - Keep `docs/inspector.mdx` and `docs/sdks/typescript.mdx` aligned with implementation.
 - Append blockers/decisions to `research/acp/friction.md` during ACP work.
-- `docs/agent-capabilities.mdx` lists models/modes/thought levels per agent. Update it when adding a new agent or changing `fallback_config_options`. If its "Last updated" date is >2 weeks old, re-run `cd scripts/agent-configs && npx tsx dump.ts` and update the doc to match. Source data: `scripts/agent-configs/resources/*.json` and hardcoded entries in `server/packages/sandbox-agent/src/router/support.rs` (`fallback_config_options`).
-- Some agent models are gated by subscription (e.g. Claude `opus`). The live report only shows models available to the current credentials. The static doc and JSON resource files should list all known models regardless of subscription tier.
 - TypeScript SDK tests should run against a real running server/runtime over real `/v1` HTTP APIs, typically using the real `mock` agent for deterministic behavior.
 - Do not use Vitest fetch/transport mocks to simulate server functionality in TypeScript SDK tests.
 
@@ -109,7 +107,6 @@
   - `docs/cli.mdx`
   - `docs/quickstart.mdx`
   - `docs/sdk-overview.mdx`
-  - `docs/react-components.mdx`
   - `docs/session-persistence.mdx`
   - `docs/deploy/local.mdx`
   - `docs/deploy/cloudflare.mdx`

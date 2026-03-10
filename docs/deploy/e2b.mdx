@@ -21,7 +21,7 @@ if (process.env.OPENAI_API_KEY) envs.OPENAI_API_KEY = process.env.OPENAI_API_KEY
 const sandbox = await Sandbox.create({ allowInternetAccess: true, envs });
 
 await sandbox.commands.run(
-  "curl -fsSL https://releases.rivet.dev/sandbox-agent/0.3.x/install.sh | sh"
+  "curl -fsSL https://releases.rivet.dev/sandbox-agent/0.2.x/install.sh | sh"
 );
 
 await sandbox.commands.run("sandbox-agent install-agent claude");

@@ -15,9 +15,6 @@ yarn.lock
 .astro/
 *.tsbuildinfo
 .turbo/
-**/.turbo/
-.pnpm-store/
-coverage/
 
 # Environment
 .env
@@ -51,7 +48,6 @@ Cargo.lock
 # Example temp files
 .tmp-upload/
 *.db
-.openhandoff/
 
 # CLI binaries (downloaded during npm publish)
 sdks/cli/platforms/*/bin/

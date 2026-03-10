@@ -16,10 +16,16 @@ docker run --rm -p 3000:3000 \
   -e ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
   -e OPENAI_API_KEY="$OPENAI_API_KEY" \
   alpine:latest sh -c "\
-    apk add --no-cache curl ca-certificates libstdc++ libgcc bash nodejs npm && \
-    curl -fsSL https://releases.rivet.dev/sandbox-agent/0.3.x/install.sh | sh && \
+    apk add --no-cache curl ca-certificates libstdc++ libgcc bash && \
+    curl -fsSL https://releases.rivet.dev/sandbox-agent/0.2.x/install.sh | sh && \
+    sandbox-agent install-agent claude && \
+    sandbox-agent install-agent codex && \
     sandbox-agent server --no-token --host 0.0.0.0 --port 3000"
 ```
+
+<Note>
+Alpine is required for some agent binaries that target musl libc.
+</Note>
 
 ## TypeScript with dockerode
 
@@ -31,18 +37,17 @@ const docker = new Docker();
 const PORT = 3000;
 
 const container = await docker.createContainer({
-  Image: "node:22-bookworm-slim",
+  Image: "alpine:latest",
   Cmd: ["sh", "-c", [
-    "apt-get update",
-    "DEBIAN_FRONTEND=noninteractive apt-get install -y curl ca-certificates bash libstdc++6",
-    "rm -rf /var/lib/apt/lists/*",
-    "curl -fsSL https://releases.rivet.dev/sandbox-agent/0.3.x/install.sh | sh",
+    "apk add --no-cache curl ca-certificates libstdc++ libgcc bash",
+    "curl -fsSL https://releases.rivet.dev/sandbox-agent/0.2.x/install.sh | sh",
+    "sandbox-agent install-agent claude",
+    "sandbox-agent install-agent codex",
     `sandbox-agent server --no-token --host 0.0.0.0 --port ${PORT}`,
   ].join(" && ")],
   Env: [
     `ANTHROPIC_API_KEY=${process.env.ANTHROPIC_API_KEY}`,
     `OPENAI_API_KEY=${process.env.OPENAI_API_KEY}`,
-    `CODEX_API_KEY=${process.env.CODEX_API_KEY}`,
   ].filter(Boolean),
   ExposedPorts: { [`${PORT}/tcp`]: {} },
   HostConfig: {
@@ -56,7 +61,7 @@ await container.start();
 const baseUrl = `http://127.0.0.1:${PORT}`;
 const sdk = await SandboxAgent.connect({ baseUrl });
 
-const session = await sdk.createSession({ agent: "codex" });
+const session = await sdk.createSession({ agent: "claude" });
 await session.prompt([{ type: "text", text: "Summarize this repository." }]);
 ```
 

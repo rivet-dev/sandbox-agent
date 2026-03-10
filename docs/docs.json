@@ -51,7 +51,6 @@
 						"pages": [
 							"quickstart",
 							"sdk-overview",
-							"react-components",
 							{
 								"group": "Deploy",
 								"icon": "server",
@@ -80,7 +79,7 @@
 					},
 					{
 						"group": "System",
-						"pages": ["file-system", "processes"]
+						"pages": ["file-system"]
 					},
 					{
 						"group": "Orchestration",
@@ -95,7 +94,6 @@
 					{
 						"group": "Reference",
 						"pages": [
-							"agent-capabilities",
 							"cli",
 							"inspector",
 							"opencode-compatibility",

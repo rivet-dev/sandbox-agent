@@ -11,7 +11,7 @@ use futures::Stream;
 use sandbox_agent_agent_management::agents::{AgentId, AgentManager, InstallOptions};
 use sandbox_agent_error::SandboxError;
 use sandbox_agent_opencode_adapter::{AcpDispatch, AcpDispatchResult, AcpPayloadStream};
-use serde_json::Value;
+use serde_json::{Number, Value};
 use tokio::sync::{Mutex, RwLock};
 
 const DEFAULT_REQUEST_TIMEOUT_MS: u64 = 120_000;
@@ -134,6 +134,8 @@ impl AcpProxyRuntime {
             "acp_proxy: instance resolved"
         );
 
+        let payload = normalize_payload_for_agent(instance.agent, payload);
+
         match instance.runtime.post(payload).await {
             Ok(PostOutcome::Response(value)) => {
                 let total_ms = start.elapsed().as_millis() as u64;
@@ -165,7 +167,7 @@ impl AcpProxyRuntime {
                     error = %err,
                     "acp_proxy: POST → error"
                 );
-                Err(map_adapter_error(err, Some(instance.agent)))
+                Err(map_adapter_error(err))
             }
         }
     }
@@ -277,28 +279,27 @@ impl AcpProxyRuntime {
         server_id: &str,
         agent: AgentId,
     ) -> Result<Arc<ProxyInstance>, SandboxError> {
-        let total_started = std::time::Instant::now();
+        let start = std::time::Instant::now();
         tracing::info!(
             server_id = server_id,
             agent = agent.as_str(),
             "create_instance: starting"
         );
 
-        let install_started = std::time::Instant::now();
         self.ensure_installed(agent).await?;
+        let install_elapsed = start.elapsed();
         tracing::info!(
             server_id = server_id,
             agent = agent.as_str(),
-            install_ms = install_started.elapsed().as_millis() as u64,
+            install_ms = install_elapsed.as_millis() as u64,
             "create_instance: agent installed/verified"
         );
 
-        let resolve_started = std::time::Instant::now();
         let manager = self.inner.agent_manager.clone();
         let launch = tokio::task::spawn_blocking(move || manager.resolve_agent_process(agent))
             .await
             .map_err(|err| SandboxError::StreamError {
-                message: format!("failed to resolve agent process launch spec: {err}"),
+                message: format!("failed to resolve ACP agent process launch spec: {err}"),
             })?
             .map_err(|err| SandboxError::StreamError {
                 message: err.to_string(),
@@ -309,11 +310,10 @@ impl AcpProxyRuntime {
             agent = agent.as_str(),
             program = ?launch.program,
             args = ?launch.args,
-            resolve_ms = resolve_started.elapsed().as_millis() as u64,
+            resolve_ms = start.elapsed().as_millis() as u64,
             "create_instance: launch spec resolved, spawning"
         );
 
-        let spawn_started = std::time::Instant::now();
         let runtime = AdapterRuntime::start(
             LaunchSpec {
                 program: launch.program,
@@ -323,13 +323,12 @@ impl AcpProxyRuntime {
             self.inner.request_timeout,
         )
         .await
-        .map_err(|err| map_adapter_error(err, Some(agent)))?;
+        .map_err(map_adapter_error)?;
 
-        let total_ms = total_started.elapsed().as_millis() as u64;
+        let total_ms = start.elapsed().as_millis() as u64;
         tracing::info!(
             server_id = server_id,
             agent = agent.as_str(),
-            spawn_ms = spawn_started.elapsed().as_millis() as u64,
             total_ms = total_ms,
             "create_instance: ready"
         );
@@ -343,27 +342,16 @@ impl AcpProxyRuntime {
     }
 
     async fn ensure_installed(&self, agent: AgentId) -> Result<(), SandboxError> {
-        let started = std::time::Instant::now();
         if self.inner.require_preinstall {
             if !self.is_ready(agent).await {
                 return Err(SandboxError::AgentNotInstalled {
                     agent: agent.as_str().to_string(),
                 });
             }
-            tracing::info!(
-                agent = agent.as_str(),
-                total_ms = started.elapsed().as_millis() as u64,
-                "ensure_installed: preinstall requirement satisfied"
-            );
             return Ok(());
         }
 
         if self.is_ready(agent).await {
-            tracing::info!(
-                agent = agent.as_str(),
-                total_ms = started.elapsed().as_millis() as u64,
-                "ensure_installed: already ready"
-            );
             return Ok(());
         }
 
@@ -377,19 +365,9 @@ impl AcpProxyRuntime {
         let _guard = lock.lock().await;
 
         if self.is_ready(agent).await {
-            tracing::info!(
-                agent = agent.as_str(),
-                total_ms = started.elapsed().as_millis() as u64,
-                "ensure_installed: became ready while waiting for lock"
-            );
             return Ok(());
         }
 
-        tracing::info!(
-            agent = agent.as_str(),
-            "ensure_installed: installing missing artifacts"
-        );
-        let install_started = std::time::Instant::now();
         let manager = self.inner.agent_manager.clone();
         tokio::task::spawn_blocking(move || manager.install(agent, InstallOptions::default()))
             .await
@@ -402,12 +380,6 @@ impl AcpProxyRuntime {
                 stderr: Some(err.to_string()),
             })?;
 
-        tracing::info!(
-            agent = agent.as_str(),
-            install_ms = install_started.elapsed().as_millis() as u64,
-            total_ms = started.elapsed().as_millis() as u64,
-            "ensure_installed: install complete"
-        );
         Ok(())
     }
 
@@ -462,7 +434,7 @@ impl AcpDispatch for AcpProxyRuntime {
     }
 }
 
-fn map_adapter_error(err: AdapterError, agent: Option<AgentId>) -> SandboxError {
+fn map_adapter_error(err: AdapterError) -> SandboxError {
     match err {
         AdapterError::InvalidEnvelope => SandboxError::InvalidRequest {
             message: "request body must be a JSON-RPC object".to_string(),
@@ -476,29 +448,6 @@ fn map_adapter_error(err: AdapterError, agent: Option<AgentId>) -> SandboxError 
         AdapterError::Write(error) => SandboxError::StreamError {
             message: format!("failed writing to agent stdin: {error}"),
         },
-        AdapterError::Exited { exit_code, stderr } => {
-            if let Some(agent) = agent {
-                SandboxError::AgentProcessExited {
-                    agent: agent.as_str().to_string(),
-                    exit_code,
-                    stderr,
-                }
-            } else {
-                SandboxError::StreamError {
-                    message: if let Some(stderr) = stderr {
-                        format!(
-                            "agent process exited before responding (exit_code: {:?}, stderr: {})",
-                            exit_code, stderr
-                        )
-                    } else {
-                        format!(
-                            "agent process exited before responding (exit_code: {:?})",
-                            exit_code
-                        )
-                    },
-                }
-            }
-        }
         AdapterError::Spawn(error) => SandboxError::StreamError {
             message: format!("failed to start agent process: {error}"),
         },
@@ -508,6 +457,57 @@ fn map_adapter_error(err: AdapterError, agent: Option<AgentId>) -> SandboxError 
             }
         }
     }
+}
+
+fn normalize_payload_for_agent(agent: AgentId, payload: Value) -> Value {
+    if agent != AgentId::Pi {
+        return payload;
+    }
+
+    normalize_pi_payload(payload)
+}
+
+fn normalize_pi_payload(mut payload: Value) -> Value {
+    let method = payload
+        .get("method")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+
+    match method {
+        "initialize" => {
+            if let Some(protocol) = payload.pointer_mut("/params/protocolVersion") {
+                if let Some(raw) = protocol.as_str() {
+                    if let Some(number) = parse_json_number(raw) {
+                        *protocol = Value::Number(number);
+                    }
+                }
+            }
+        }
+        "session/new" => {
+            if let Some(params) = payload.get_mut("params").and_then(Value::as_object_mut) {
+                params
+                    .entry("mcpServers".to_string())
+                    .or_insert_with(|| Value::Array(Vec::new()));
+            }
+        }
+        _ => {}
+    }
+
+    payload
+}
+
+fn parse_json_number(raw: &str) -> Option<Number> {
+    let trimmed = raw.trim();
+
+    if let Ok(unsigned) = trimmed.parse::<u64>() {
+        return Some(Number::from(unsigned));
+    }
+
+    if let Ok(signed) = trimmed.parse::<i64>() {
+        return Some(Number::from(signed));
+    }
+
+    trimmed.parse::<f64>().ok().and_then(Number::from_f64)
 }
 
 /// Inspect JSON-RPC error responses from agent processes and add helpful hints
