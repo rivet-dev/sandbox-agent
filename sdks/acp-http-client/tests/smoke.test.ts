@@ -140,4 +140,54 @@ describe("AcpHttpClient integration", () => {
 
     await client.disconnect();
   });
+
+  it("answers session/request_permission while session/prompt is still in flight", async () => {
+    const permissionRequests: Array<{ sessionId: string; title?: string | null }> = [];
+    const serverId = `acp-http-client-permissions-${Date.now().toString(36)}`;
+
+    const client = new AcpHttpClient({
+      baseUrl,
+      token,
+      transport: {
+        path: `/v1/acp/${encodeURIComponent(serverId)}`,
+        bootstrapQuery: { agent: "mock" },
+      },
+      client: {
+        requestPermission: async (request) => {
+          permissionRequests.push({
+            sessionId: request.sessionId,
+            title: request.toolCall.title,
+          });
+          return {
+            outcome: {
+              outcome: "selected",
+              optionId: "reject-once",
+            },
+          };
+        },
+      },
+    });
+
+    await client.initialize();
+
+    const session = await client.newSession({
+      cwd: process.cwd(),
+      mcpServers: [],
+    });
+
+    const prompt = await client.prompt({
+      sessionId: session.sessionId,
+      prompt: [{ type: "text", text: "please trigger permission" }],
+    });
+
+    expect(prompt.stopReason).toBe("end_turn");
+    expect(permissionRequests).toEqual([
+      {
+        sessionId: session.sessionId,
+        title: "Write mock.txt",
+      },
+    ]);
+
+    await client.disconnect();
+  });
 });

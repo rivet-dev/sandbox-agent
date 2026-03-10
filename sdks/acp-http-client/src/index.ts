@@ -378,31 +378,39 @@ class StreamableHttpAcpTransport {
     });
 
     const url = this.buildUrl(this.bootstrapQueryIfNeeded());
-    const response = await this.fetcher(url, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(message),
-    });
-
     this.postedOnce = true;
-
-    if (!response.ok) {
-      throw new AcpHttpError(response.status, await readProblem(response), response);
-    }
-
     this.ensureSseLoop();
+    void this.postMessage(url, headers, message);
+  }
 
-    if (response.status === 200) {
-      const text = await response.text();
-      if (text.trim()) {
-        const envelope = JSON.parse(text) as AnyMessage;
-        this.pushInbound(envelope);
+  private async postMessage(url: string, headers: Headers, message: AnyMessage): Promise<void> {
+    try {
+      const response = await this.fetcher(url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(message),
+      });
+
+      if (!response.ok) {
+        throw new AcpHttpError(response.status, await readProblem(response), response);
       }
-    } else {
+
+      if (response.status === 200) {
+        const text = await response.text();
+        if (text.trim()) {
+          const envelope = JSON.parse(text) as AnyMessage;
+          this.pushInbound(envelope);
+        }
+        return;
+      }
+
       // Drain response body so the underlying connection is released back to
-      // the pool.  Without this, Node.js undici keeps the socket occupied and
+      // the pool. Without this, Node.js undici keeps the socket occupied and
       // may stall subsequent requests to the same origin.
       await response.text().catch(() => {});
+    } catch (error) {
+      console.error("ACP write error:", error);
+      this.failReadable(error);
     }
   }
 

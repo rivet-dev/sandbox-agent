@@ -138,6 +138,19 @@ const options = await session.getConfigOptions();
 const modes = await session.getModes();
 ```
 
+Claude permission modes use the same surface:
+
+```ts
+const claude = await sdk.createSession({
+  agent: "claude",
+  permissionMode: "default",
+});
+
+claude.onPermissionRequest((request) => {
+  void claude.replyPermission(request.id, "once");
+});
+```
+
 See [Agent Sessions](/agent-sessions) for full details on config options and error handling.
 
 ## Events

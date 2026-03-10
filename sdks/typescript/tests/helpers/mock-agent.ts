@@ -25,10 +25,12 @@ export function prepareMockAgentDataHome(dataHome: string): Record<string, strin
     runtimeEnv.XDG_DATA_HOME = dataHome;
   }
 
-  const nodeScript = String.raw`#!/usr/bin/env node
+const nodeScript = String.raw`#!/usr/bin/env node
 const { createInterface } = require("node:readline");
 
 let nextSession = 0;
+let nextPermission = 0;
+const pendingPermissions = new Map();
 
 function emit(value) {
   process.stdout.write(JSON.stringify(value) + "\n");
@@ -65,6 +67,38 @@ rl.on("line", (line) => {
   const hasId = Object.prototype.hasOwnProperty.call(msg, "id");
   const method = hasMethod ? msg.method : undefined;
 
+  if (!hasMethod && hasId) {
+    const pending = pendingPermissions.get(String(msg.id));
+    if (pending) {
+      pendingPermissions.delete(String(msg.id));
+      const outcome = msg?.result?.outcome;
+      const optionId = outcome?.outcome === "selected" ? outcome.optionId : "cancelled";
+      const suffix = optionId === "reject-once" ? "rejected" : "approved";
+      emit({
+        jsonrpc: "2.0",
+        method: "session/update",
+        params: {
+          sessionId: pending.sessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: {
+              type: "text",
+              text: "mock permission " + suffix + ": " + optionId,
+            },
+          },
+        },
+      });
+      emit({
+        jsonrpc: "2.0",
+        id: pending.promptId,
+        result: {
+          stopReason: "end_turn",
+        },
+      });
+    }
+    return;
+  }
+
   if (method === "session/prompt") {
     const sessionId = typeof msg?.params?.sessionId === "string" ? msg.params.sessionId : "";
     const text = firstText(msg?.params?.prompt);
@@ -82,6 +116,51 @@ rl.on("line", (line) => {
         },
       },
     });
+
+    if (text.includes("permission")) {
+      nextPermission += 1;
+      const permissionId = "permission-" + nextPermission;
+      pendingPermissions.set(permissionId, {
+        promptId: msg.id,
+        sessionId,
+      });
+      emit({
+        jsonrpc: "2.0",
+        id: permissionId,
+        method: "session/request_permission",
+        params: {
+          sessionId,
+          toolCall: {
+            toolCallId: "tool-call-" + nextPermission,
+            title: "Write mock.txt",
+            kind: "edit",
+            status: "pending",
+            locations: [{ path: "/tmp/mock.txt" }],
+            rawInput: {
+              path: "/tmp/mock.txt",
+              content: "hello",
+            },
+          },
+          options: [
+            {
+              kind: "allow_once",
+              name: "Allow once",
+              optionId: "allow-once",
+            },
+            {
+              kind: "allow_always",
+              name: "Always allow",
+              optionId: "allow-always",
+            },
+            {
+              kind: "reject_once",
+              name: "Reject",
+              optionId: "reject-once",
+            },
+          ],
+        },
+      });
+    }
   }
 
   if (!hasMethod || !hasId) {
@@ -117,6 +196,10 @@ rl.on("line", (line) => {
   }
 
   if (method === "session/prompt") {
+    const text = firstText(msg?.params?.prompt);
+    if (text.includes("permission")) {
+      return;
+    }
     emit({
       jsonrpc: "2.0",
       id: msg.id,

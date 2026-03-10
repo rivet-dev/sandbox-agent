@@ -578,6 +578,42 @@ describe("Integration: TypeScript SDK flat session API", () => {
     await sdk.dispose();
   });
 
+  it("supports permissionMode as a first-class session helper", async () => {
+    const sdk = await SandboxAgent.connect({
+      baseUrl,
+      token,
+    });
+
+    const session = await sdk.createSession({
+      agent: "mock",
+      permissionMode: "plan",
+    });
+
+    expect((await session.getModes())?.currentModeId).toBe("plan");
+
+    await session.setPermissionMode("normal");
+    expect((await session.getModes())?.currentModeId).toBe("normal");
+
+    await sdk.dispose();
+  });
+
+  it("rejects conflicting mode and permissionMode values", async () => {
+    const sdk = await SandboxAgent.connect({
+      baseUrl,
+      token,
+    });
+
+    await expect(
+      sdk.createSession({
+        agent: "mock",
+        mode: "normal",
+        permissionMode: "plan",
+      }),
+    ).rejects.toThrow("conflicting values");
+
+    await sdk.dispose();
+  });
+
   it("setThoughtLevel happy path switches to a valid thought level", async () => {
     const sdk = await SandboxAgent.connect({
       baseUrl,
@@ -622,6 +658,43 @@ describe("Integration: TypeScript SDK flat session API", () => {
     await session.setThoughtLevel("low");
     expect((await session.getConfigOptions()).find((o) => o.category === "thought_level")?.currentValue).toBe("low");
 
+    await sdk.dispose();
+  });
+
+  it("surfaces ACP permission requests and maps approve/reject replies", async () => {
+    const sdk = await SandboxAgent.connect({
+      baseUrl,
+      token,
+    });
+
+    const session = await sdk.createSession({ agent: "mock" });
+    const permissionIds: string[] = [];
+    const permissionTexts: string[] = [];
+
+    const offPermissions = session.onPermissionRequest((request) => {
+      permissionIds.push(request.id);
+      const reply = permissionIds.length === 1 ? "reject" : "always";
+      void session.replyPermission(request.id, reply);
+    });
+
+    const offEvents = session.onEvent((event) => {
+      const text = (event.payload as any)?.params?.update?.content?.text;
+      if (typeof text === "string" && text.startsWith("mock permission ")) {
+        permissionTexts.push(text);
+      }
+    });
+
+    await session.prompt([{ type: "text", text: "trigger permission request one" }]);
+    await session.prompt([{ type: "text", text: "trigger permission request two" }]);
+
+    await waitFor(() => (permissionIds.length === 2 ? permissionIds : undefined));
+    await waitFor(() => (permissionTexts.length === 2 ? permissionTexts : undefined));
+
+    expect(permissionTexts[0]).toContain("rejected");
+    expect(permissionTexts[1]).toContain("approved");
+
+    offEvents();
+    offPermissions();
     await sdk.dispose();
   });
 

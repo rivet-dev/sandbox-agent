@@ -97,10 +97,22 @@ const session = await sdk.createSession({
 ```
 
 ```ts
+// Claude permission modes are exposed as a first-class helper.
+const claude = await sdk.createSession({
+  agent: "claude",
+  permissionMode: "default",
+});
+```
+
+```ts
 // After creation
 await session.setModel("gpt-5.2-codex");
 await session.setMode("full-access");
 await session.setThoughtLevel("medium");
+```
+
+```ts
+await claude.setPermissionMode("acceptEdits");
 ```
 
 Query available modes:
@@ -125,9 +137,30 @@ for (const opt of options) {
 await session.setConfigOption("some-agent-option", "value");
 ```
 
+## Handle permission requests
+
+For agents that use ACP `session/request_permission` (for example Claude in `default` mode), register a permission listener and reply with `once`, `always`, or `reject`:
+
+```ts
+const claude = await sdk.createSession({
+  agent: "claude",
+  permissionMode: "default",
+});
+
+claude.onPermissionRequest((request) => {
+  console.log(request.toolCall.title, request.availableReplies);
+  void claude.replyPermission(request.id, "once");
+});
+
+await claude.prompt([
+  { type: "text", text: "Create ./permission-example.txt with the text hello." },
+]);
+```
+
+See `examples/claude-permissions/src/index.ts` for a complete Claude example with interactive approve/reject handling.
+
 ## Destroy a session
 
 ```ts
 await sdk.destroySession(session.id);
 ```
-

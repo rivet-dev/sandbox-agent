@@ -4,6 +4,7 @@ export {
   SandboxAgent,
   SandboxAgentError,
   Session,
+  UnsupportedPermissionReplyError,
   UnsupportedSessionCategoryError,
   UnsupportedSessionConfigOptionError,
   UnsupportedSessionValueError,
@@ -28,6 +29,10 @@ export type {
   SessionResumeOrCreateRequest,
   SessionSendOptions,
   SessionEventListener,
+  PermissionReply,
+  PermissionRequestListener,
+  SessionPermissionRequest,
+  SessionPermissionRequestOption,
 } from "./client.ts";
 
 export type { InspectorUrlOptions } from "./inspector.ts";
