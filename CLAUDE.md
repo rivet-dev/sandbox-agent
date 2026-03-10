@@ -58,6 +58,13 @@
 - `Session` helpers are `prompt(...)`, `send(...)`, `onEvent(...)`, `setMode(...)`, `setModel(...)`, `setThoughtLevel(...)`, `setConfigOption(...)`, `getConfigOptions()`, and `getModes()`.
 - Cleanup is `sdk.dispose()`.
 
+### React Component Methodology
+
+- Shared React UI belongs in `sdks/react` only when it is reusable outside the Inspector.
+- Keep shared components unstyled by default: behavior in the package, styling in the consumer via `className`, slot-level `classNames`, render overrides, and `data-*` hooks.
+- Prefer extracting reusable pieces such as transcript, composer, and conversation surfaces. Keep Inspector-specific shells such as session selection, session headers, and control-plane actions in `frontend/packages/inspector/`.
+- Keep `docs/react-components.mdx` aligned with the exported surface in `sdks/react/src/index.ts`.
+
 ### Docs Source Of Truth
 
 - For TypeScript docs/examples, source of truth is implementation in:

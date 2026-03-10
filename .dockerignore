@@ -9,15 +9,11 @@ build/
 # Cache
 .cache/
 .turbo/
-**/.turbo/
 *.tsbuildinfo
-.pnpm-store/
-coverage/
 
 # Environment
 .env
 .env.*
-.openhandoff/
 
 # IDE
 .idea/
@@ -28,7 +24,3 @@ coverage/
 
 # Git
 .git/
-
-# Tests
-**/test/
-**/tests/

@@ -1,3 +1,4 @@
+import type { TranscriptEntry } from "@sandbox-agent/react";
 import { BookOpen } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -23,7 +24,6 @@ type AgentModeInfo = { id: string; name: string; description: string };
 type AgentModelInfo = { id: string; name?: string };
 import { IndexedDbSessionPersistDriver } from "@sandbox-agent/persist-indexeddb";
 import ChatPanel from "./components/chat/ChatPanel";
-import type { TimelineEntry } from "./components/chat/types";
 import ConnectScreen from "./components/ConnectScreen";
 import DebugPanel, { type DebugTab } from "./components/debug/DebugPanel";
 import SessionSidebar from "./components/SessionSidebar";
@@ -921,7 +921,7 @@ export default function App() {
 
   // Build transcript entries from raw SessionEvents
   const transcriptEntries = useMemo(() => {
-    const entries: TimelineEntry[] = [];
+    const entries: TranscriptEntry[] = [];
 
     // Accumulators for streaming chunks
     let assistantAccumId: string | null = null;
@@ -954,7 +954,7 @@ export default function App() {
     };
 
     // Track tool calls by ID for updates
-    const toolEntryMap = new Map<string, TimelineEntry>();
+    const toolEntryMap = new Map<string, TranscriptEntry>();
 
     for (const event of events) {
       const payload = event.payload as Record<string, unknown>;
@@ -1068,7 +1068,7 @@ export default function App() {
               if (update.title) existing.toolName = update.title as string;
               existing.time = time;
             } else {
-              const entry: TimelineEntry = {
+              const entry: TranscriptEntry = {
                 id: `tool-${toolCallId}`,
                 eventId: event.id,
                 kind: "tool",

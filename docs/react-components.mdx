@@ -6,6 +6,13 @@ icon: "react"
 
 `@sandbox-agent/react` exposes small React components built on top of the `sandbox-agent` SDK.
 
+Current exports:
+
+- `AgentConversation` for a combined transcript + composer surface
+- `ProcessTerminal` for attaching to a running tty process
+- `AgentTranscript` for rendering session/message timelines without bundling any styles
+- `ChatComposer` for a reusable prompt input/send surface
+
 ## Install
 
 ```bash
@@ -101,3 +108,121 @@ export default function TerminalPane() {
 - `onExit`, `onError`: optional lifecycle callbacks
 
 See [Processes](/processes) for the lower-level terminal APIs.
+
+## Headless transcript
+
+`AgentTranscript` is intentionally unstyled. It follows the common headless React pattern used by libraries like Radix, Headless UI, and React Aria: behavior lives in the component, while styling stays in your app through `className`, slot-level `classNames`, and `data-*` state attributes on the rendered DOM.
+
+```tsx TranscriptPane.tsx
+import {
+  AgentTranscript,
+  type AgentTranscriptClassNames,
+  type TranscriptEntry,
+} from "@sandbox-agent/react";
+
+const transcriptClasses: Partial<AgentTranscriptClassNames> = {
+  root: "transcript",
+  message: "transcript-message",
+  messageContent: "transcript-message-content",
+  toolGroupContainer: "transcript-tools",
+  toolGroupHeader: "transcript-tools-header",
+  toolItem: "transcript-tool-item",
+  toolItemHeader: "transcript-tool-item-header",
+  toolItemBody: "transcript-tool-item-body",
+  divider: "transcript-divider",
+  dividerText: "transcript-divider-text",
+  error: "transcript-error",
+};
+
+export function TranscriptPane({ entries }: { entries: TranscriptEntry[] }) {
+  return (
+    <AgentTranscript
+      entries={entries}
+      classNames={transcriptClasses}
+      renderMessageText={(entry) => <div>{entry.text}</div>}
+      renderInlinePendingIndicator={() => <span>...</span>}
+      renderToolGroupIcon={() => <span>Events</span>}
+      renderChevron={(expanded) => <span>{expanded ? "Hide" : "Show"}</span>}
+    />
+  );
+}
+```
+
+```css
+.transcript {
+  display: grid;
+  gap: 12px;
+}
+
+.transcript [data-slot="message"][data-variant="user"] .transcript-message-content {
+  background: #161616;
+  color: white;
+}
+
+.transcript [data-slot="message"][data-variant="assistant"] .transcript-message-content {
+  background: #f4f4f0;
+  color: #161616;
+}
+
+.transcript [data-slot="tool-item"][data-failed="true"] {
+  border-color: #d33;
+}
+
+.transcript [data-slot="tool-item-header"][data-expanded="true"] {
+  background: rgba(0, 0, 0, 0.06);
+}
+```
+
+`AgentTranscript` accepts `TranscriptEntry[]`, which matches the Inspector timeline shape:
+
+- `message` entries render user/assistant text
+- `tool` entries render expandable tool input/output sections
+- `reasoning` entries render expandable reasoning blocks
+- `meta` entries render status rows or expandable metadata details
+
+Useful props:
+
+- `className`: root class hook
+- `classNames`: slot-level class hooks for styling from outside the package
+- `renderMessageText`: custom text or markdown renderer
+- `renderToolItemIcon`, `renderToolGroupIcon`, `renderChevron`, `renderEventLinkContent`: presentation overrides
+- `renderInlinePendingIndicator`, `renderThinkingState`: loading/thinking UI overrides
+- `isDividerEntry`, `canOpenEvent`, `getToolGroupSummary`: behavior overrides for grouping and labels
+
+## Composer and conversation
+
+`ChatComposer` is the headless message input. `AgentConversation` composes `AgentTranscript` and `ChatComposer` so apps can reuse the transcript/composer pairing without pulling in Inspector session chrome.
+
+```tsx ConversationPane.tsx
+import { AgentConversation, type TranscriptEntry } from "@sandbox-agent/react";
+
+export function ConversationPane({
+  entries,
+  message,
+  onMessageChange,
+  onSubmit,
+}: {
+  entries: TranscriptEntry[];
+  message: string;
+  onMessageChange: (value: string) => void;
+  onSubmit: () => void;
+}) {
+  return (
+    <AgentConversation
+      entries={entries}
+      emptyState={<div>Start the conversation.</div>}
+      transcriptProps={{
+        renderMessageText: (entry) => <div>{entry.text}</div>,
+      }}
+      composerProps={{
+        message,
+        onMessageChange,
+        onSubmit,
+        placeholder: "Send a message...",
+      }}
+    />
+  );
+}
+```
+
+Use `transcriptProps` and `composerProps` when you want the shared composition but still need custom rendering or behavior. Use `transcriptClassNames` and `composerClassNames` when you want styling hooks for each subcomponent.

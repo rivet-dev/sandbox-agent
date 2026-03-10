@@ -1,3 +1,4 @@
+import type { TranscriptEntry } from "@sandbox-agent/react";
 import { AlertTriangle, Archive, CheckSquare, MessageSquare, Plus, Square, Terminal } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { AgentInfo } from "sandbox-agent";
@@ -6,9 +7,7 @@ import { formatShortId } from "../../utils/format";
 type AgentModeInfo = { id: string; name: string; description: string };
 type AgentModelInfo = { id: string; name?: string };
 import SessionCreateMenu, { type SessionConfig } from "../SessionCreateMenu";
-import ChatInput from "./ChatInput";
-import ChatMessages from "./ChatMessages";
-import type { TimelineEntry } from "./types";
+import InspectorConversation from "./InspectorConversation";
 
 const HistoryLoadingSkeleton = () => (
   <div className="chat-loading-skeleton" aria-hidden>
@@ -59,7 +58,7 @@ const ChatPanel = ({
   tokenUsage,
 }: {
   sessionId: string;
-  transcriptEntries: TimelineEntry[];
+  transcriptEntries: TranscriptEntry[];
   isLoadingHistory?: boolean;
   sessionError: string | null;
   message: string;
@@ -212,8 +211,8 @@ const ChatPanel = ({
         </div>
       )}
 
-      <div className="messages-container">
-        {!sessionId ? (
+      {!sessionId ? (
+        <div className="messages-container">
           <div className="empty-state">
             <div className="empty-state-title">No Session Selected</div>
             <p className="empty-state-text no-session-subtext">Create a new session to start chatting with an agent.</p>
@@ -239,37 +238,35 @@ const ChatPanel = ({
               />
             </div>
           </div>
-        ) : transcriptEntries.length === 0 && !sessionError ? (
-          isLoadingHistory ? (
-            <HistoryLoadingSkeleton />
-          ) : (
-            <div className="empty-state">
-              <Terminal className="empty-state-icon" />
-              <div className="empty-state-title">Ready to Chat</div>
-              <p className="empty-state-text">Send a message to start a conversation with the agent.</p>
-            </div>
-          )
-        ) : (
-          <ChatMessages
-            entries={transcriptEntries}
-            sessionError={sessionError}
-            eventError={null}
-            messagesEndRef={messagesEndRef}
-            onEventClick={onEventClick}
-            isThinking={isThinking}
-            agentId={agentId}
-          />
-        )}
-      </div>
-
-      <ChatInput
-        message={message}
-        onMessageChange={onMessageChange}
-        onSendMessage={onSendMessage}
-        onKeyDown={onKeyDown}
-        placeholder={sessionEnded ? "Session ended" : sessionId ? "Send a message..." : "Select or create a session first"}
-        disabled={!sessionId || sessionEnded}
-      />
+        </div>
+      ) : (
+        <InspectorConversation
+          entries={transcriptEntries}
+          sessionError={sessionError}
+          eventError={null}
+          messagesEndRef={messagesEndRef}
+          onEventClick={onEventClick}
+          isThinking={isThinking}
+          agentId={agentId}
+          emptyState={
+            isLoadingHistory ? (
+              <HistoryLoadingSkeleton />
+            ) : (
+              <div className="empty-state">
+                <Terminal className="empty-state-icon" />
+                <div className="empty-state-title">Ready to Chat</div>
+                <p className="empty-state-text">Send a message to start a conversation with the agent.</p>
+              </div>
+            )
+          }
+          message={message}
+          onMessageChange={onMessageChange}
+          onSendMessage={onSendMessage}
+          onKeyDown={onKeyDown}
+          placeholder={sessionEnded ? "Session ended" : "Send a message..."}
+          disabled={sessionEnded}
+        />
+      )}
     </div>
   );
 };

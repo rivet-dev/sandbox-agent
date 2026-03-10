@@ -35,8 +35,7 @@
 
   body {
     @apply bg-black text-white antialiased;
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-weight: 500;
+    font-family: 'Open Sans', system-ui, sans-serif;
   }
 
   /* Text selection - matches rivet.dev */
