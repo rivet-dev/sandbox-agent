@@ -26,6 +26,7 @@ struct AcpProxyRuntimeInner {
     agent_manager: Arc<AgentManager>,
     require_preinstall: bool,
     request_timeout: Duration,
+    server_url: Option<String>,
     instances: RwLock<HashMap<String, Arc<ProxyInstance>>>,
     instance_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
     install_locks: Mutex<HashMap<AgentId, Arc<Mutex<()>>>>,
@@ -56,7 +57,7 @@ pub type PinBoxSseStream =
     std::pin::Pin<Box<dyn Stream<Item = Result<Event, std::convert::Infallible>> + Send>>;
 
 impl AcpProxyRuntime {
-    pub fn new(agent_manager: Arc<AgentManager>) -> Self {
+    pub fn new(agent_manager: Arc<AgentManager>, server_url: Option<String>) -> Self {
         let require_preinstall = std::env::var("SANDBOX_AGENT_REQUIRE_PREINSTALL")
             .ok()
             .is_some_and(|value| {
@@ -76,6 +77,7 @@ impl AcpProxyRuntime {
                 agent_manager,
                 require_preinstall,
                 request_timeout,
+                server_url,
                 instances: RwLock::new(HashMap::new()),
                 instance_locks: Mutex::new(HashMap::new()),
                 install_locks: Mutex::new(HashMap::new()),
@@ -313,12 +315,17 @@ impl AcpProxyRuntime {
             "create_instance: launch spec resolved, spawning"
         );
 
+        let mut env = launch.env;
+        if let Some(url) = &self.inner.server_url {
+            env.insert("SANDBOX_AGENT_URL".to_string(), url.clone());
+        }
+
         let spawn_started = std::time::Instant::now();
         let runtime = AdapterRuntime::start(
             LaunchSpec {
                 program: launch.program,
                 args: launch.args,
-                env: launch.env,
+                env,
             },
             self.inner.request_timeout,
         )

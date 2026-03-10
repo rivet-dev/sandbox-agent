@@ -79,6 +79,11 @@
 - `research/acp/friction.md`
 - `research/acp/todo.md`
 
+## Built-in Agent Skills
+
+- When adding or changing `/v1/processes/*` endpoints, request/response shapes, query parameters, or error codes, update `server/packages/sandbox-agent/builtin-skills/sandbox-agent-processes/SKILL.md` before merging.
+- The `builtin-skills/CLAUDE.md` is injected into agents' `~/.claude/CLAUDE.md` at startup — update it when adding new mandatory behavioral directives for agents.
+
 ## Change Tracking
 
 - Keep CLI subcommands and HTTP endpoints in sync.

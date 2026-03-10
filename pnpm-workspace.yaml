@@ -1,7 +1,5 @@
 packages:
   - "frontend/packages/*"
-  - "factory/packages/*"
-  - "!factory/packages/cli"
   - "sdks/*"
   - "sdks/cli"
   - "sdks/cli/platforms/*"

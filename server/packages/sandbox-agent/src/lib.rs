@@ -1,6 +1,7 @@
 //! Sandbox agent core utilities.
 
 mod acp_proxy_runtime;
+pub mod builtin_skills;
 pub mod cli;
 pub mod daemon;
 mod process_runtime;

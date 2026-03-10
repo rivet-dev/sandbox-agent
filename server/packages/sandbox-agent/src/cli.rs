@@ -421,7 +421,9 @@ fn run_server(cli: &CliConfig, server: &ServerArgs) -> Result<(), CliError> {
 
     let agent_manager = AgentManager::new(default_install_dir())
         .map_err(|err| CliError::Server(err.to_string()))?;
-    let state = Arc::new(AppState::with_branding(auth, agent_manager, branding));
+    let server_url = format!("http://{}:{}", server.host, server.port);
+    crate::builtin_skills::write_builtin_skills(Some(&server_url));
+    let state = Arc::new(AppState::with_branding(auth, agent_manager, branding, Some(server_url)));
     let (mut router, state) = build_router_with_state(state);
 
     let cors = build_cors_layer(server)?;

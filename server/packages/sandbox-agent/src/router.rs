@@ -93,16 +93,17 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(auth: AuthConfig, agent_manager: AgentManager) -> Self {
-        Self::with_branding(auth, agent_manager, BrandingMode::SandboxAgent)
+        Self::with_branding(auth, agent_manager, BrandingMode::SandboxAgent, None)
     }
 
     pub fn with_branding(
         auth: AuthConfig,
         agent_manager: AgentManager,
         branding: BrandingMode,
+        server_url: Option<String>,
     ) -> Self {
         let agent_manager = Arc::new(agent_manager);
-        let acp_proxy = Arc::new(AcpProxyRuntime::new(agent_manager.clone()));
+        let acp_proxy = Arc::new(AcpProxyRuntime::new(agent_manager.clone(), server_url));
         let opencode_server_manager = Arc::new(OpenCodeServerManager::new(
             agent_manager.clone(),
             OpenCodeServerManagerConfig {
