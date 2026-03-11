@@ -1008,19 +1008,11 @@ export function MockLayout({ workspaceId, selectedHandoffId, selectedSessionId }
         throw new Error("Cannot create a task without an available repo");
       }
 
-      const task = window.prompt("Describe the task", "Investigate and implement the requested change");
-      if (!task) {
-        return;
-      }
-
-      const title = window.prompt("Optional task title", "")?.trim() || undefined;
-      const branch = window.prompt("Optional branch name", "")?.trim() || undefined;
       const { handoffId, tabId } = await handoffWorkbenchClient.createHandoff({
         repoId,
-        task,
+        task: "New task",
         model: "gpt-4o",
-        ...(title ? { title } : {}),
-        ...(branch ? { branch } : {}),
+        title: "New task",
       });
       await navigate({
         to: "/workspaces/$workspaceId/handoffs/$handoffId",
