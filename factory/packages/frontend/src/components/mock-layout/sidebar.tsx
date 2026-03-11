@@ -60,15 +60,19 @@ export const Sidebar = memo(function Sidebar({
       <PanelHeaderBar $style={{ backgroundColor: "transparent", borderBottom: "none" }}>
         <LabelSmall
           color={theme.colors.contentPrimary}
-          $style={{ fontWeight: 500, flex: 1, fontSize: "13px", display: "flex", alignItems: "center", gap: "6px" }}
+          $style={{ fontWeight: 500, flex: 1, fontSize: "13px", display: "flex", alignItems: "center", gap: "6px", lineHeight: 1 }}
         >
           <ListChecks size={14} />
           Tasks
         </LabelSmall>
-        <button
+        <div
+          role="button"
+          tabIndex={0}
           onClick={onCreate}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") onCreate();
+          }}
           className={css({
-            all: "unset",
             width: "26px",
             height: "26px",
             borderRadius: "8px",
@@ -79,11 +83,12 @@ export const Sidebar = memo(function Sidebar({
             alignItems: "center",
             justifyContent: "center",
             transition: "background 200ms ease",
+            flexShrink: 0,
             ":hover": { backgroundColor: "rgba(255, 255, 255, 0.20)" },
           })}
         >
-          <Plus size={14} />
-        </button>
+          <Plus size={14} style={{ display: "block" }} />
+        </div>
       </PanelHeaderBar>
       <ScrollBody>
         <div className={css({ padding: "8px", display: "flex", flexDirection: "column", gap: "4px" })}>
@@ -191,97 +196,93 @@ export const Sidebar = memo(function Sidebar({
                       {project.label}
                     </LabelSmall>
                   </div>
-                  {isCollapsed ? (
-                    <LabelXSmall color={theme.colors.contentTertiary}>
-                      {formatRelativeAge(project.updatedAtMs)}
-                    </LabelXSmall>
-                  ) : null}
+                  {isCollapsed ? <LabelXSmall color={theme.colors.contentTertiary}>{formatRelativeAge(project.updatedAtMs)}</LabelXSmall> : null}
                 </div>
 
-                {!isCollapsed && project.handoffs.map((handoff) => {
-                  const isActive = handoff.id === activeId;
-                  const isDim = handoff.status === "archived";
-                  const isRunning = handoff.tabs.some((tab) => tab.status === "running");
-                  const hasUnread = handoff.tabs.some((tab) => tab.unread);
-                  const isDraft = handoff.pullRequest == null || handoff.pullRequest.status === "draft";
-                  const totalAdded = handoff.fileChanges.reduce((sum, file) => sum + file.added, 0);
-                  const totalRemoved = handoff.fileChanges.reduce((sum, file) => sum + file.removed, 0);
-                  const hasDiffs = totalAdded > 0 || totalRemoved > 0;
+                {!isCollapsed &&
+                  project.handoffs.map((handoff) => {
+                    const isActive = handoff.id === activeId;
+                    const isDim = handoff.status === "archived";
+                    const isRunning = handoff.tabs.some((tab) => tab.status === "running");
+                    const hasUnread = handoff.tabs.some((tab) => tab.unread);
+                    const isDraft = handoff.pullRequest == null || handoff.pullRequest.status === "draft";
+                    const totalAdded = handoff.fileChanges.reduce((sum, file) => sum + file.added, 0);
+                    const totalRemoved = handoff.fileChanges.reduce((sum, file) => sum + file.removed, 0);
+                    const hasDiffs = totalAdded > 0 || totalRemoved > 0;
 
-                  return (
-                    <div
-                      key={handoff.id}
-                      onClick={() => onSelect(handoff.id)}
-                      onContextMenu={(event) =>
-                        contextMenu.open(event, [
-                          { label: "Rename task", onClick: () => onRenameHandoff(handoff.id) },
-                          { label: "Rename branch", onClick: () => onRenameBranch(handoff.id) },
-                          { label: "Mark as unread", onClick: () => onMarkUnread(handoff.id) },
-                        ])
-                      }
-                      className={css({
-                        padding: "8px 12px",
-                        borderRadius: "8px",
-                        border: "1px solid transparent",
-                        backgroundColor: isActive ? "rgba(255, 255, 255, 0.06)" : "transparent",
-                        cursor: "pointer",
-                        transition: "all 200ms ease",
-                        ":hover": {
-                          backgroundColor: "rgba(255, 255, 255, 0.06)",
-                        },
-                      })}
-                    >
-                      <div className={css({ display: "flex", alignItems: "center", gap: "8px" })}>
-                        <div
-                          className={css({
-                            width: "14px",
-                            minWidth: "14px",
-                            height: "14px",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            flexShrink: 0,
-                          })}
-                        >
-                          <HandoffIndicator isRunning={isRunning} hasUnread={hasUnread} isDraft={isDraft} />
-                        </div>
-                        <LabelSmall
-                          $style={{
-                            fontWeight: hasUnread ? 600 : 400,
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
-                            minWidth: 0,
-                            flexShrink: 1,
-                          }}
-                          color={hasUnread ? "#ffffff" : theme.colors.contentSecondary}
-                        >
-                          {handoff.title}
-                        </LabelSmall>
-                        {handoff.pullRequest != null ? (
-                          <span className={css({ display: "inline-flex", alignItems: "center", gap: "4px", flexShrink: 0 })}>
-                            <LabelXSmall color={theme.colors.contentSecondary} $style={{ fontWeight: 600 }}>
-                              #{handoff.pullRequest.number}
-                            </LabelXSmall>
-                            {handoff.pullRequest.status === "draft" ? <CloudUpload size={11} color="#ff4f00" /> : null}
-                          </span>
-                        ) : (
-                          <GitPullRequestDraft size={11} color={theme.colors.contentTertiary} />
-                        )}
-                        {hasDiffs ? (
-                          <div className={css({ display: "flex", gap: "4px", flexShrink: 0, marginLeft: "auto" })}>
-                            <span className={css({ fontSize: "11px", color: "#7ee787" })}>+{totalAdded}</span>
-                            <span className={css({ fontSize: "11px", color: "#ffa198" })}>-{totalRemoved}</span>
+                    return (
+                      <div
+                        key={handoff.id}
+                        onClick={() => onSelect(handoff.id)}
+                        onContextMenu={(event) =>
+                          contextMenu.open(event, [
+                            { label: "Rename task", onClick: () => onRenameHandoff(handoff.id) },
+                            { label: "Rename branch", onClick: () => onRenameBranch(handoff.id) },
+                            { label: "Mark as unread", onClick: () => onMarkUnread(handoff.id) },
+                          ])
+                        }
+                        className={css({
+                          padding: "8px 12px",
+                          borderRadius: "8px",
+                          border: "1px solid transparent",
+                          backgroundColor: isActive ? "rgba(255, 255, 255, 0.06)" : "transparent",
+                          cursor: "pointer",
+                          transition: "all 200ms ease",
+                          ":hover": {
+                            backgroundColor: "rgba(255, 255, 255, 0.06)",
+                          },
+                        })}
+                      >
+                        <div className={css({ display: "flex", alignItems: "center", gap: "8px" })}>
+                          <div
+                            className={css({
+                              width: "14px",
+                              minWidth: "14px",
+                              height: "14px",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              flexShrink: 0,
+                            })}
+                          >
+                            <HandoffIndicator isRunning={isRunning} hasUnread={hasUnread} isDraft={isDraft} />
                           </div>
-                        ) : null}
-                        <LabelXSmall color={theme.colors.contentTertiary} $style={{ flexShrink: 0, marginLeft: hasDiffs ? undefined : "auto" }}>
-                          {formatRelativeAge(handoff.updatedAtMs)}
-                        </LabelXSmall>
+                          <LabelSmall
+                            $style={{
+                              fontWeight: hasUnread ? 600 : 400,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                              minWidth: 0,
+                              flexShrink: 1,
+                            }}
+                            color={hasUnread ? "#ffffff" : theme.colors.contentSecondary}
+                          >
+                            {handoff.title}
+                          </LabelSmall>
+                          {handoff.pullRequest != null ? (
+                            <span className={css({ display: "inline-flex", alignItems: "center", gap: "4px", flexShrink: 0 })}>
+                              <LabelXSmall color={theme.colors.contentSecondary} $style={{ fontWeight: 600 }}>
+                                #{handoff.pullRequest.number}
+                              </LabelXSmall>
+                              {handoff.pullRequest.status === "draft" ? <CloudUpload size={11} color="#ff4f00" /> : null}
+                            </span>
+                          ) : (
+                            <GitPullRequestDraft size={11} color={theme.colors.contentTertiary} />
+                          )}
+                          {hasDiffs ? (
+                            <div className={css({ display: "flex", gap: "4px", flexShrink: 0, marginLeft: "auto" })}>
+                              <span className={css({ fontSize: "11px", color: "#7ee787" })}>+{totalAdded}</span>
+                              <span className={css({ fontSize: "11px", color: "#ffa198" })}>-{totalRemoved}</span>
+                            </div>
+                          ) : null}
+                          <LabelXSmall color={theme.colors.contentTertiary} $style={{ flexShrink: 0, marginLeft: hasDiffs ? undefined : "auto" }}>
+                            {formatRelativeAge(handoff.updatedAtMs)}
+                          </LabelXSmall>
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
-
+                    );
+                  })}
               </div>
             );
           })}

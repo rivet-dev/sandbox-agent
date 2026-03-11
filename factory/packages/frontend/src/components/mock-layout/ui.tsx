@@ -175,16 +175,15 @@ export const TabAvatar = memo(function TabAvatar({ tab }: { tab: AgentTab }) {
 });
 
 export const Shell = styled("div", ({ $theme }) => ({
-  display: "grid",
-  gap: "1px",
+  display: "flex",
   height: "100dvh",
   backgroundColor: $theme.colors.backgroundSecondary,
-  gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.5fr) 380px",
   overflow: "hidden",
 }));
 
 export const SPanel = styled("section", ({ $theme }) => ({
   minHeight: 0,
+  flex: 1,
   display: "flex",
   flexDirection: "column" as const,
   backgroundColor: $theme.colors.backgroundSecondary,

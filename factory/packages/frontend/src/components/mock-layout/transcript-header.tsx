@@ -115,7 +115,7 @@ export const TranscriptHeader = memo(function TranscriptHeader({
       <div className={css({ flex: 1 })} />
       <div
         className={css({
-          display: "flex",
+          display: "inline-flex",
           alignItems: "center",
           gap: "5px",
           padding: "3px 10px",
@@ -124,11 +124,12 @@ export const TranscriptHeader = memo(function TranscriptHeader({
           border: "1px solid rgba(255, 255, 255, 0.08)",
           fontSize: "11px",
           fontWeight: 500,
+          lineHeight: 1,
           color: theme.colors.contentSecondary,
           whiteSpace: "nowrap",
         })}
       >
-        <Clock size={11} />
+        <Clock size={11} style={{ flexShrink: 0 }} />
         <span>847 min used</span>
       </div>
       {activeTab ? (
@@ -136,20 +137,22 @@ export const TranscriptHeader = memo(function TranscriptHeader({
           onClick={() => onSetActiveTabUnread(!activeTab.unread)}
           className={css({
             all: "unset",
-            display: "flex",
+            boxSizing: "border-box",
+            display: "inline-flex",
             alignItems: "center",
             gap: "5px",
             padding: "4px 10px",
             borderRadius: "6px",
             fontSize: "11px",
             fontWeight: 500,
+            lineHeight: 1,
             color: theme.colors.contentSecondary,
             cursor: "pointer",
             transition: "all 200ms ease",
             ":hover": { backgroundColor: "rgba(255, 255, 255, 0.06)", color: theme.colors.contentPrimary },
           })}
         >
-          <MailOpen size={12} /> {activeTab.unread ? "Mark read" : "Mark unread"}
+          <MailOpen size={12} style={{ flexShrink: 0 }} /> {activeTab.unread ? "Mark read" : "Mark unread"}
         </button>
       ) : null}
     </PanelHeaderBar>

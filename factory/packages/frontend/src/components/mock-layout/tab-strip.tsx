@@ -216,6 +216,7 @@ export const TabStrip = memo(function TabStrip({
             padding: "0 10px",
             cursor: "pointer",
             opacity: 0.4,
+            lineHeight: 0,
             ":hover": { opacity: 0.7 },
             flexShrink: 0,
           })}

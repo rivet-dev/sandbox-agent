@@ -69,9 +69,14 @@ export const PromptComposer = memo(function PromptComposer({
       "::placeholder": { color: theme.colors.contentSecondary },
     }),
     submit: css({
-      all: "unset",
+      appearance: "none",
+      WebkitAppearance: "none",
+      boxSizing: "border-box",
       width: "32px",
       height: "32px",
+      padding: "0",
+      margin: "0",
+      border: "none",
       borderRadius: "6px",
       cursor: "pointer",
       position: "absolute",
@@ -80,6 +85,8 @@ export const PromptComposer = memo(function PromptComposer({
       display: "flex",
       alignItems: "center",
       justifyContent: "center",
+      lineHeight: 0,
+      fontSize: 0,
       color: theme.colors.contentPrimary,
       transition: "background 200ms ease",
       backgroundColor: isRunning ? "rgba(255, 255, 255, 0.06)" : "rgba(255, 255, 255, 0.12)",
@@ -92,9 +99,12 @@ export const PromptComposer = memo(function PromptComposer({
       },
     }),
     submitContent: css({
-      display: "inline-flex",
+      display: "flex",
       alignItems: "center",
       justifyContent: "center",
+      width: "100%",
+      height: "100%",
+      lineHeight: 0,
       color: isRunning ? theme.colors.contentPrimary : "#ffffff",
     }),
   };
@@ -157,15 +167,10 @@ export const PromptComposer = memo(function PromptComposer({
         allowEmptySubmit={isRunning}
         submitLabel={isRunning ? "Stop" : "Send"}
         classNames={composerClassNames}
-        renderSubmitContent={() => (isRunning ? <Square size={16} /> : <SendHorizonal size={16} />)}
+        renderSubmitContent={() => (isRunning ? <Square size={16} style={{ display: "block" }} /> : <SendHorizonal size={16} style={{ display: "block" }} />)}
         renderFooter={() => (
           <div className={css({ padding: "0 10px 8px" })}>
-            <ModelPicker
-              value={model}
-              defaultModel={defaultModel}
-              onChange={onChangeModel}
-              onSetDefault={onSetDefaultModel}
-            />
+            <ModelPicker value={model} defaultModel={defaultModel} onChange={onChangeModel} onSetDefault={onSetDefaultModel} />
           </div>
         )}
       />

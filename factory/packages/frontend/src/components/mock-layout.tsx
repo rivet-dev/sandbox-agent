@@ -1,14 +1,4 @@
-import {
-  memo,
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-  type PointerEvent as ReactPointerEvent,
-} from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useStyletron } from "baseui";
 
@@ -455,108 +445,186 @@ const TranscriptPanel = memo(function TranscriptPanel({
           }
         }}
       />
-      <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", backgroundColor: "#09090b", borderTopLeftRadius: "12px", borderLeft: "1px solid rgba(255, 255, 255, 0.10)", borderTop: "1px solid rgba(255, 255, 255, 0.10)", overflow: "hidden" }}>
-      <TabStrip
-        handoff={handoff}
-        activeTabId={activeTabId}
-        openDiffs={openDiffs}
-        editingSessionTabId={editingSessionTabId}
-        editingSessionName={editingSessionName}
-        onEditingSessionNameChange={setEditingSessionName}
-        onSwitchTab={switchTab}
-        onStartRenamingTab={startRenamingTab}
-        onCommitSessionRename={commitTabRename}
-        onCancelSessionRename={cancelTabRename}
-        onSetTabUnread={setTabUnread}
-        onCloseTab={closeTab}
-        onCloseDiffTab={closeDiffTab}
-        onAddTab={addTab}
-      />
-      {activeDiff ? (
-        <DiffContent
-          filePath={activeDiff}
-          file={handoff.fileChanges.find((file) => file.path === activeDiff)}
-          diff={handoff.diffs[activeDiff]}
-          onAddAttachment={addAttachment}
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          display: "flex",
+          flexDirection: "column",
+          backgroundColor: "#09090b",
+          overflow: "hidden",
+          borderTopLeftRadius: "12px",
+          borderLeft: "1px solid rgba(255, 255, 255, 0.10)",
+          borderTop: "1px solid rgba(255, 255, 255, 0.10)",
+        }}
+      >
+        <TabStrip
+          handoff={handoff}
+          activeTabId={activeTabId}
+          openDiffs={openDiffs}
+          editingSessionTabId={editingSessionTabId}
+          editingSessionName={editingSessionName}
+          onEditingSessionNameChange={setEditingSessionName}
+          onSwitchTab={switchTab}
+          onStartRenamingTab={startRenamingTab}
+          onCommitSessionRename={commitTabRename}
+          onCancelSessionRename={cancelTabRename}
+          onSetTabUnread={setTabUnread}
+          onCloseTab={closeTab}
+          onCloseDiffTab={closeDiffTab}
+          onAddTab={addTab}
         />
-      ) : handoff.tabs.length === 0 ? (
-        <ScrollBody>
-          <div
-            style={{
-              minHeight: "100%",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              padding: "32px",
-            }}
-          >
+        {activeDiff ? (
+          <DiffContent
+            filePath={activeDiff}
+            file={handoff.fileChanges.find((file) => file.path === activeDiff)}
+            diff={handoff.diffs[activeDiff]}
+            onAddAttachment={addAttachment}
+          />
+        ) : handoff.tabs.length === 0 ? (
+          <ScrollBody>
             <div
               style={{
-                maxWidth: "420px",
-                textAlign: "center",
+                minHeight: "100%",
                 display: "flex",
-                flexDirection: "column",
-                gap: "12px",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: "32px",
               }}
             >
-              <h2 style={{ margin: 0, fontSize: "20px", fontWeight: 600 }}>Create the first session</h2>
-              <p style={{ margin: 0, opacity: 0.75 }}>
-                Sessions are where you chat with the agent. Start one now to send the first prompt on this task.
-              </p>
-              <button
-                type="button"
-                onClick={addTab}
+              <div
                 style={{
-                  alignSelf: "center",
-                  border: 0,
-                  borderRadius: "999px",
-                  padding: "10px 18px",
-                  background: "rgba(255, 255, 255, 0.12)",
-                  color: "#e4e4e7",
-                  cursor: "pointer",
-                  fontWeight: 600,
+                  maxWidth: "420px",
+                  textAlign: "center",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "12px",
                 }}
               >
-                New session
-              </button>
+                <h2 style={{ margin: 0, fontSize: "20px", fontWeight: 600 }}>Create the first session</h2>
+                <p style={{ margin: 0, opacity: 0.75 }}>Sessions are where you chat with the agent. Start one now to send the first prompt on this task.</p>
+                <button
+                  type="button"
+                  onClick={addTab}
+                  style={{
+                    alignSelf: "center",
+                    border: 0,
+                    borderRadius: "999px",
+                    padding: "10px 18px",
+                    background: "rgba(255, 255, 255, 0.12)",
+                    color: "#e4e4e7",
+                    cursor: "pointer",
+                    fontWeight: 600,
+                  }}
+                >
+                  New session
+                </button>
+              </div>
             </div>
-          </div>
-        </ScrollBody>
-      ) : (
-        <ScrollBody>
-          <MessageList
-            tab={activeAgentTab}
-            scrollRef={scrollRef}
-            messageRefs={messageRefs}
-            historyEvents={historyEvents}
-            onSelectHistoryEvent={jumpToHistoryEvent}
-            copiedMessageId={copiedMessageId}
-            onCopyMessage={(message) => {
-              void copyMessage(message);
-            }}
-            thinkingTimerLabel={thinkingTimerLabel}
+          </ScrollBody>
+        ) : (
+          <ScrollBody>
+            <MessageList
+              tab={activeAgentTab}
+              scrollRef={scrollRef}
+              messageRefs={messageRefs}
+              historyEvents={historyEvents}
+              onSelectHistoryEvent={jumpToHistoryEvent}
+              copiedMessageId={copiedMessageId}
+              onCopyMessage={(message) => {
+                void copyMessage(message);
+              }}
+              thinkingTimerLabel={thinkingTimerLabel}
+            />
+          </ScrollBody>
+        )}
+        {!isTerminal && promptTab ? (
+          <PromptComposer
+            draft={draft}
+            textareaRef={textareaRef}
+            placeholder={!promptTab.created ? "Describe your task..." : "Send a message..."}
+            attachments={attachments}
+            defaultModel={defaultModel}
+            model={promptTab.model}
+            isRunning={promptTab.status === "running"}
+            onDraftChange={(value) => updateDraft(value, attachments)}
+            onSend={sendMessage}
+            onStop={stopAgent}
+            onRemoveAttachment={removeAttachment}
+            onChangeModel={changeModel}
+            onSetDefaultModel={setDefaultModel}
           />
-        </ScrollBody>
-      )}
-      {!isTerminal && promptTab ? (
-        <PromptComposer
-          draft={draft}
-          textareaRef={textareaRef}
-          placeholder={!promptTab.created ? "Describe your task..." : "Send a message..."}
-          attachments={attachments}
-          defaultModel={defaultModel}
-          model={promptTab.model}
-          isRunning={promptTab.status === "running"}
-          onDraftChange={(value) => updateDraft(value, attachments)}
-          onSend={sendMessage}
-          onStop={stopAgent}
-          onRemoveAttachment={removeAttachment}
-          onChangeModel={changeModel}
-          onSetDefaultModel={setDefaultModel}
-        />
-      ) : null}
+        ) : null}
       </div>
     </SPanel>
+  );
+});
+
+const LEFT_SIDEBAR_DEFAULT_WIDTH = 340;
+const RIGHT_SIDEBAR_DEFAULT_WIDTH = 380;
+const SIDEBAR_MIN_WIDTH = 220;
+const SIDEBAR_MAX_WIDTH = 600;
+const RESIZE_HANDLE_WIDTH = 1;
+const LEFT_WIDTH_STORAGE_KEY = "openhandoff:foundry-left-sidebar-width";
+const RIGHT_WIDTH_STORAGE_KEY = "openhandoff:foundry-right-sidebar-width";
+
+function readStoredWidth(key: string, fallback: number): number {
+  if (typeof window === "undefined") return fallback;
+  const stored = window.localStorage.getItem(key);
+  const parsed = stored ? Number.parseInt(stored, 10) : Number.NaN;
+  return Number.isFinite(parsed) ? Math.min(Math.max(parsed, SIDEBAR_MIN_WIDTH), SIDEBAR_MAX_WIDTH) : fallback;
+}
+
+const PanelResizeHandle = memo(function PanelResizeHandle({ onResizeStart, onResize }: { onResizeStart: () => void; onResize: (deltaX: number) => void }) {
+  const handlePointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      const startX = event.clientX;
+      onResizeStart();
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+
+      const handlePointerMove = (moveEvent: PointerEvent) => {
+        onResize(moveEvent.clientX - startX);
+      };
+
+      const stopResize = () => {
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+        window.removeEventListener("pointermove", handlePointerMove);
+        window.removeEventListener("pointerup", stopResize);
+      };
+
+      window.addEventListener("pointermove", handlePointerMove);
+      window.addEventListener("pointerup", stopResize, { once: true });
+    },
+    [onResize, onResizeStart],
+  );
+
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      onPointerDown={handlePointerDown}
+      style={{
+        width: `${RESIZE_HANDLE_WIDTH}px`,
+        flexShrink: 0,
+        cursor: "col-resize",
+        backgroundColor: "transparent",
+        position: "relative",
+        zIndex: 1,
+      }}
+    >
+      <div
+        style={{
+          position: "absolute",
+          top: 0,
+          bottom: 0,
+          left: "-3px",
+          right: "-3px",
+        }}
+      />
+    </div>
   );
 });
 
@@ -596,10 +664,7 @@ const RightRail = memo(function RightRail({
 
   const clampTerminalHeight = useCallback((nextHeight: number) => {
     const railHeight = railRef.current?.getBoundingClientRect().height ?? 0;
-    const maxHeight = Math.max(
-      RIGHT_RAIL_MIN_SECTION_HEIGHT,
-      railHeight - RIGHT_RAIL_MIN_SECTION_HEIGHT - RIGHT_RAIL_SPLITTER_HEIGHT,
-    );
+    const maxHeight = Math.max(RIGHT_RAIL_MIN_SECTION_HEIGHT, railHeight - RIGHT_RAIL_MIN_SECTION_HEIGHT - RIGHT_RAIL_SPLITTER_HEIGHT);
 
     return Math.min(Math.max(nextHeight, RIGHT_RAIL_MIN_SECTION_HEIGHT), maxHeight);
   }, []);
@@ -652,6 +717,7 @@ const RightRail = memo(function RightRail({
       ref={railRef}
       className={css({
         minHeight: 0,
+        flex: 1,
         display: "flex",
         flexDirection: "column",
         backgroundColor: "#090607",
@@ -736,18 +802,54 @@ export function MockLayout({ workspaceId, selectedHandoffId, selectedSessionId }
     }
     return ordered;
   }, [rawProjects, projectOrder]);
-  const reorderProjects = useCallback((fromIndex: number, toIndex: number) => {
-    const ids = projects.map((p) => p.id);
-    const [moved] = ids.splice(fromIndex, 1);
-    ids.splice(toIndex, 0, moved!);
-    setProjectOrder(ids);
-  }, [projects]);
+  const reorderProjects = useCallback(
+    (fromIndex: number, toIndex: number) => {
+      const ids = projects.map((p) => p.id);
+      const [moved] = ids.splice(fromIndex, 1);
+      ids.splice(toIndex, 0, moved!);
+      setProjectOrder(ids);
+    },
+    [projects],
+  );
   const [activeTabIdByHandoff, setActiveTabIdByHandoff] = useState<Record<string, string | null>>({});
   const [lastAgentTabIdByHandoff, setLastAgentTabIdByHandoff] = useState<Record<string, string | null>>({});
   const [openDiffsByHandoff, setOpenDiffsByHandoff] = useState<Record<string, string[]>>({});
   const [starRepoPromptOpen, setStarRepoPromptOpen] = useState(false);
   const [starRepoPending, setStarRepoPending] = useState(false);
   const [starRepoError, setStarRepoError] = useState<string | null>(null);
+  const [leftWidth, setLeftWidth] = useState(() => readStoredWidth(LEFT_WIDTH_STORAGE_KEY, LEFT_SIDEBAR_DEFAULT_WIDTH));
+  const [rightWidth, setRightWidth] = useState(() => readStoredWidth(RIGHT_WIDTH_STORAGE_KEY, RIGHT_SIDEBAR_DEFAULT_WIDTH));
+  const leftWidthRef = useRef(leftWidth);
+  const rightWidthRef = useRef(rightWidth);
+
+  useEffect(() => {
+    leftWidthRef.current = leftWidth;
+    window.localStorage.setItem(LEFT_WIDTH_STORAGE_KEY, String(leftWidth));
+  }, [leftWidth]);
+
+  useEffect(() => {
+    rightWidthRef.current = rightWidth;
+    window.localStorage.setItem(RIGHT_WIDTH_STORAGE_KEY, String(rightWidth));
+  }, [rightWidth]);
+
+  const startLeftRef = useRef(leftWidth);
+  const startRightRef = useRef(rightWidth);
+
+  const onLeftResize = useCallback((deltaX: number) => {
+    setLeftWidth(Math.min(Math.max(startLeftRef.current + deltaX, SIDEBAR_MIN_WIDTH), SIDEBAR_MAX_WIDTH));
+  }, []);
+
+  const onLeftResizeStart = useCallback(() => {
+    startLeftRef.current = leftWidthRef.current;
+  }, []);
+
+  const onRightResize = useCallback((deltaX: number) => {
+    setRightWidth(Math.min(Math.max(startRightRef.current - deltaX, SIDEBAR_MIN_WIDTH), SIDEBAR_MAX_WIDTH));
+  }, []);
+
+  const onRightResizeStart = useCallback(() => {
+    startRightRef.current = rightWidthRef.current;
+  }, []);
 
   const activeHandoff = useMemo(() => handoffs.find((handoff) => handoff.id === selectedHandoffId) ?? handoffs[0] ?? null, [handoffs, selectedHandoffId]);
 
@@ -1058,7 +1160,9 @@ export function MockLayout({ workspaceId, selectedHandoffId, selectedSessionId }
         }}
       >
         <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-          <div style={{ fontSize: "11px", letterSpacing: "0.06em", textTransform: "uppercase", fontWeight: 600, color: "rgba(255, 255, 255, 0.4)" }}>Welcome to Foundry</div>
+          <div style={{ fontSize: "11px", letterSpacing: "0.06em", textTransform: "uppercase", fontWeight: 600, color: "rgba(255, 255, 255, 0.4)" }}>
+            Welcome to Foundry
+          </div>
           <h2 style={{ margin: 0, fontSize: "18px", fontWeight: 500, lineHeight: 1.3 }}>Support Sandbox Agent</h2>
           <p style={{ margin: 0, color: "rgba(255, 255, 255, 0.55)", fontSize: "13px", lineHeight: 1.6 }}>
             Star the repo to help us grow and stay up to date with new releases.
@@ -1127,17 +1231,20 @@ export function MockLayout({ workspaceId, selectedHandoffId, selectedSessionId }
     return (
       <>
         <Shell>
-          <Sidebar
-            projects={projects}
-            activeId=""
-            onSelect={selectHandoff}
-            onCreate={createHandoff}
-            onMarkUnread={markHandoffUnread}
-            onRenameHandoff={renameHandoff}
-            onRenameBranch={renameBranch}
-            onReorderProjects={reorderProjects}
-          />
-          <SPanel $style={{ backgroundColor: "#09090b" }}>
+          <div style={{ width: `${leftWidth}px`, flexShrink: 0, minWidth: 0, display: "flex", flexDirection: "column" }}>
+            <Sidebar
+              projects={projects}
+              activeId=""
+              onSelect={selectHandoff}
+              onCreate={createHandoff}
+              onMarkUnread={markHandoffUnread}
+              onRenameHandoff={renameHandoff}
+              onRenameBranch={renameBranch}
+              onReorderProjects={reorderProjects}
+            />
+          </div>
+          <PanelResizeHandle onResizeStart={onLeftResizeStart} onResize={onLeftResize} />
+          <SPanel $style={{ backgroundColor: "#09090b", flex: 1, minWidth: 0 }}>
             <ScrollBody>
               <div
                 style={{
@@ -1184,7 +1291,10 @@ export function MockLayout({ workspaceId, selectedHandoffId, selectedSessionId }
               </div>
             </ScrollBody>
           </SPanel>
-          <SPanel />
+          <PanelResizeHandle onResizeStart={onRightResizeStart} onResize={onRightResize} />
+          <div style={{ width: `${rightWidth}px`, flexShrink: 0, minWidth: 0, display: "flex", flexDirection: "column" }}>
+            <SPanel />
+          </div>
         </Shell>
         {starRepoPrompt}
       </>
@@ -1194,41 +1304,49 @@ export function MockLayout({ workspaceId, selectedHandoffId, selectedSessionId }
   return (
     <>
       <Shell>
-        <Sidebar
-          projects={projects}
-          activeId={activeHandoff.id}
-          onSelect={selectHandoff}
-          onCreate={createHandoff}
-          onMarkUnread={markHandoffUnread}
-          onRenameHandoff={renameHandoff}
-          onRenameBranch={renameBranch}
-          onReorderProjects={reorderProjects}
-        />
-        <TranscriptPanel
-          handoff={activeHandoff}
-          activeTabId={activeTabId}
-          lastAgentTabId={lastAgentTabId}
-          openDiffs={openDiffs}
-          onSyncRouteSession={syncRouteSession}
-          onSetActiveTabId={(tabId) => {
-            setActiveTabIdByHandoff((current) => ({ ...current, [activeHandoff.id]: tabId }));
-          }}
-          onSetLastAgentTabId={(tabId) => {
-            setLastAgentTabIdByHandoff((current) => ({ ...current, [activeHandoff.id]: tabId }));
-          }}
-          onSetOpenDiffs={(paths) => {
-            setOpenDiffsByHandoff((current) => ({ ...current, [activeHandoff.id]: paths }));
-          }}
-        />
-        <RightRail
-          workspaceId={workspaceId}
-          handoff={activeHandoff}
-          activeTabId={activeTabId}
-          onOpenDiff={openDiffTab}
-          onArchive={archiveHandoff}
-          onRevertFile={revertFile}
-          onPublishPr={publishPr}
-        />
+        <div style={{ width: `${leftWidth}px`, flexShrink: 0, minWidth: 0, display: "flex", flexDirection: "column" }}>
+          <Sidebar
+            projects={projects}
+            activeId={activeHandoff.id}
+            onSelect={selectHandoff}
+            onCreate={createHandoff}
+            onMarkUnread={markHandoffUnread}
+            onRenameHandoff={renameHandoff}
+            onRenameBranch={renameBranch}
+            onReorderProjects={reorderProjects}
+          />
+        </div>
+        <PanelResizeHandle onResizeStart={onLeftResizeStart} onResize={onLeftResize} />
+        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
+          <TranscriptPanel
+            handoff={activeHandoff}
+            activeTabId={activeTabId}
+            lastAgentTabId={lastAgentTabId}
+            openDiffs={openDiffs}
+            onSyncRouteSession={syncRouteSession}
+            onSetActiveTabId={(tabId) => {
+              setActiveTabIdByHandoff((current) => ({ ...current, [activeHandoff.id]: tabId }));
+            }}
+            onSetLastAgentTabId={(tabId) => {
+              setLastAgentTabIdByHandoff((current) => ({ ...current, [activeHandoff.id]: tabId }));
+            }}
+            onSetOpenDiffs={(paths) => {
+              setOpenDiffsByHandoff((current) => ({ ...current, [activeHandoff.id]: paths }));
+            }}
+          />
+        </div>
+        <PanelResizeHandle onResizeStart={onRightResizeStart} onResize={onRightResize} />
+        <div style={{ width: `${rightWidth}px`, flexShrink: 0, minWidth: 0, display: "flex", flexDirection: "column" }}>
+          <RightRail
+            workspaceId={workspaceId}
+            handoff={activeHandoff}
+            activeTabId={activeTabId}
+            onOpenDiff={openDiffTab}
+            onArchive={archiveHandoff}
+            onRevertFile={revertFile}
+            onPublishPr={publishPr}
+          />
+        </div>
       </Shell>
       {starRepoPrompt}
     </>
