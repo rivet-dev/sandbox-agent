@@ -24,10 +24,8 @@ import {
   type Message,
   type ModelId,
 } from "./mock-layout/view-model";
-import { backendClient } from "../lib/backend";
+import { activeMockOrganization, useMockAppSnapshot } from "../lib/mock-app";
 import { handoffWorkbenchClient } from "../lib/workbench";
-
-const STAR_SANDBOX_AGENT_REPO_STORAGE_KEY = "hf.onboarding.starSandboxAgentRepo";
 
 function firstAgentTabId(handoff: Handoff): string | null {
   return handoff.tabs[0]?.id ?? null;
@@ -783,6 +781,81 @@ interface MockLayoutProps {
   selectedSessionId?: string | null;
 }
 
+function MockWorkspaceOrgBar() {
+  const navigate = useNavigate();
+  const snapshot = useMockAppSnapshot();
+  const organization = activeMockOrganization(snapshot);
+
+  if (!organization) {
+    return null;
+  }
+
+  const buttonStyle = {
+    border: "1px solid rgba(255,255,255,0.12)",
+    borderRadius: "999px",
+    padding: "8px 12px",
+    background: "rgba(255,255,255,0.03)",
+    color: "rgba(255,255,255,0.86)",
+    cursor: "pointer",
+    fontSize: "13px",
+    fontWeight: 600,
+  } satisfies React.CSSProperties;
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: "16px",
+        padding: "12px 20px",
+        borderBottom: "1px solid rgba(255,255,255,0.08)",
+        background: "#101010",
+      }}
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+        <strong style={{ fontSize: "14px", fontWeight: 600 }}>{organization.settings.displayName}</strong>
+        <span style={{ fontSize: "12px", color: "rgba(255,255,255,0.6)" }}>{organization.settings.primaryDomain}</span>
+      </div>
+      <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+        <button
+          type="button"
+          style={buttonStyle}
+          onClick={() => {
+            void navigate({ to: "/organizations" });
+          }}
+        >
+          Switch org
+        </button>
+        <button
+          type="button"
+          style={buttonStyle}
+          onClick={() => {
+            void navigate({
+              to: "/organizations/$organizationId/settings",
+              params: { organizationId: organization.id },
+            });
+          }}
+        >
+          Settings
+        </button>
+        <button
+          type="button"
+          style={buttonStyle}
+          onClick={() => {
+            void navigate({
+              to: "/organizations/$organizationId/billing",
+              params: { organizationId: organization.id },
+            });
+          }}
+        >
+          Billing
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function MockLayout({ workspaceId, selectedHandoffId, selectedSessionId }: MockLayoutProps) {
   const navigate = useNavigate();
   const viewModel = useSyncExternalStore(
@@ -814,9 +887,6 @@ export function MockLayout({ workspaceId, selectedHandoffId, selectedSessionId }
   const [activeTabIdByHandoff, setActiveTabIdByHandoff] = useState<Record<string, string | null>>({});
   const [lastAgentTabIdByHandoff, setLastAgentTabIdByHandoff] = useState<Record<string, string | null>>({});
   const [openDiffsByHandoff, setOpenDiffsByHandoff] = useState<Record<string, string[]>>({});
-  const [starRepoPromptOpen, setStarRepoPromptOpen] = useState(false);
-  const [starRepoPending, setStarRepoPending] = useState(false);
-  const [starRepoError, setStarRepoError] = useState<string | null>(null);
   const [leftWidth, setLeftWidth] = useState(() => readStoredWidth(LEFT_WIDTH_STORAGE_KEY, LEFT_SIDEBAR_DEFAULT_WIDTH));
   const [rightWidth, setRightWidth] = useState(() => readStoredWidth(RIGHT_WIDTH_STORAGE_KEY, RIGHT_SIDEBAR_DEFAULT_WIDTH));
   const leftWidthRef = useRef(leftWidth);
@@ -852,17 +922,6 @@ export function MockLayout({ workspaceId, selectedHandoffId, selectedSessionId }
   }, []);
 
   const activeHandoff = useMemo(() => handoffs.find((handoff) => handoff.id === selectedHandoffId) ?? handoffs[0] ?? null, [handoffs, selectedHandoffId]);
-
-  useEffect(() => {
-    try {
-      const status = globalThis.localStorage?.getItem(STAR_SANDBOX_AGENT_REPO_STORAGE_KEY);
-      if (status !== "completed" && status !== "dismissed") {
-        setStarRepoPromptOpen(true);
-      }
-    } catch {
-      setStarRepoPromptOpen(true);
-    }
-  }, []);
 
   useEffect(() => {
     if (activeHandoff) {
@@ -1093,137 +1152,10 @@ export function MockLayout({ workspaceId, selectedHandoffId, selectedSessionId }
     },
     [activeHandoff, lastAgentTabIdByHandoff],
   );
-
-  const dismissStarRepoPrompt = useCallback(() => {
-    setStarRepoError(null);
-    try {
-      globalThis.localStorage?.setItem(STAR_SANDBOX_AGENT_REPO_STORAGE_KEY, "dismissed");
-    } catch {
-      // ignore storage failures
-    }
-    setStarRepoPromptOpen(false);
-  }, []);
-
-  const starSandboxAgentRepo = useCallback(() => {
-    setStarRepoPending(true);
-    setStarRepoError(null);
-    void backendClient
-      .starSandboxAgentRepo(workspaceId)
-      .then(() => {
-        try {
-          globalThis.localStorage?.setItem(STAR_SANDBOX_AGENT_REPO_STORAGE_KEY, "completed");
-        } catch {
-          // ignore storage failures
-        }
-        setStarRepoPromptOpen(false);
-      })
-      .catch((error) => {
-        setStarRepoError(error instanceof Error ? error.message : String(error));
-      })
-      .finally(() => {
-        setStarRepoPending(false);
-      });
-  }, [workspaceId]);
-
-  const starRepoPrompt = starRepoPromptOpen ? (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 10000,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: "24px",
-        background: "rgba(0, 0, 0, 0.68)",
-      }}
-      data-testid="onboarding-star-repo-modal"
-    >
-      <div
-        style={{
-          width: "min(440px, 100%)",
-          border: "1px solid rgba(255, 255, 255, 0.10)",
-          borderRadius: "12px",
-          background: "rgba(24, 24, 27, 0.98)",
-          backdropFilter: "blur(16px)",
-          boxShadow: "0 24px 64px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.04)",
-          padding: "28px",
-          display: "flex",
-          flexDirection: "column",
-          gap: "20px",
-        }}
-      >
-        <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-          <div style={{ fontSize: "11px", letterSpacing: "0.06em", textTransform: "uppercase", fontWeight: 600, color: "rgba(255, 255, 255, 0.4)" }}>
-            Welcome to Foundry
-          </div>
-          <h2 style={{ margin: 0, fontSize: "18px", fontWeight: 500, lineHeight: 1.3 }}>Support Sandbox Agent</h2>
-          <p style={{ margin: 0, color: "rgba(255, 255, 255, 0.55)", fontSize: "13px", lineHeight: 1.6 }}>
-            Star the repo to help us grow and stay up to date with new releases.
-          </p>
-        </div>
-
-        {starRepoError ? (
-          <div
-            style={{
-              borderRadius: "8px",
-              border: "1px solid rgba(255, 110, 110, 0.24)",
-              background: "rgba(255, 110, 110, 0.06)",
-              padding: "10px 12px",
-              color: "#ff9b9b",
-              fontSize: "12px",
-            }}
-            data-testid="onboarding-star-repo-error"
-          >
-            {starRepoError}
-          </div>
-        ) : null}
-
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
-          <button
-            type="button"
-            onClick={dismissStarRepoPrompt}
-            style={{
-              border: "1px solid rgba(255, 255, 255, 0.10)",
-              borderRadius: "6px",
-              padding: "8px 14px",
-              background: "rgba(255, 255, 255, 0.05)",
-              color: "rgba(255, 255, 255, 0.7)",
-              cursor: "pointer",
-              fontSize: "12px",
-              fontWeight: 500,
-              transition: "all 160ms ease",
-            }}
-          >
-            Maybe later
-          </button>
-          <button
-            type="button"
-            onClick={starSandboxAgentRepo}
-            disabled={starRepoPending}
-            style={{
-              border: 0,
-              borderRadius: "6px",
-              padding: "8px 14px",
-              background: starRepoPending ? "rgba(255, 255, 255, 0.06)" : "rgba(255, 255, 255, 0.12)",
-              color: "#e4e4e7",
-              cursor: starRepoPending ? "progress" : "pointer",
-              fontSize: "12px",
-              fontWeight: 600,
-              transition: "all 160ms ease",
-            }}
-            data-testid="onboarding-star-repo-submit"
-          >
-            {starRepoPending ? "Starring..." : "Star the repo"}
-          </button>
-        </div>
-      </div>
-    </div>
-  ) : null;
-
   if (!activeHandoff) {
     return (
       <>
+        <MockWorkspaceOrgBar />
         <Shell>
           <div style={{ width: `${leftWidth}px`, flexShrink: 0, minWidth: 0, display: "flex", flexDirection: "column" }}>
             <Sidebar
@@ -1290,13 +1222,13 @@ export function MockLayout({ workspaceId, selectedHandoffId, selectedSessionId }
             <SPanel />
           </div>
         </Shell>
-        {starRepoPrompt}
       </>
     );
   }
 
   return (
     <>
+      <MockWorkspaceOrgBar />
       <Shell>
         <div style={{ width: `${leftWidth}px`, flexShrink: 0, minWidth: 0, display: "flex", flexDirection: "column" }}>
           <Sidebar
@@ -1342,7 +1274,6 @@ export function MockLayout({ workspaceId, selectedHandoffId, selectedSessionId }
           />
         </div>
       </Shell>
-      {starRepoPrompt}
     </>
   );
 }

@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "target": "ES2023",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2023", "DOM"],
+    "strict": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "declaration": true,
+    "sourceMap": true,
+    "paths": {
+      "@sandbox-agent/foundry-client": ["packages/client/src/index.ts"],
+      "@sandbox-agent/foundry-shared": ["packages/shared/src/index.ts"],
+      "@sandbox-agent/foundry-backend": ["packages/backend/src/index.ts"],
+      "@sandbox-agent/foundry-frontend-errors": ["packages/frontend-errors/src/index.ts"],
+      "@sandbox-agent/foundry-frontend-errors/*": ["packages/frontend-errors/src/*"]
+    },
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true
+  }
+}

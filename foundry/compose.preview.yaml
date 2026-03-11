@@ -1,0 +1,44 @@
+name: sandbox-agent-foundry-preview
+
+services:
+  backend:
+    build:
+      context: ..
+      dockerfile: quebec/docker/backend.preview.Dockerfile
+    image: sandbox-agent-foundry-backend-preview
+    environment:
+      HF_BACKEND_HOST: "0.0.0.0"
+      HF_BACKEND_PORT: "7841"
+      HF_RIVET_MANAGER_PORT: "8850"
+      RIVETKIT_STORAGE_PATH: "/root/.local/share/sandbox-agent-foundry/rivetkit"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      CLAUDE_API_KEY: "${CLAUDE_API_KEY:-${ANTHROPIC_API_KEY:-}}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      CODEX_API_KEY: "${CODEX_API_KEY:-${OPENAI_API_KEY:-}}"
+      GITHUB_TOKEN: "${GITHUB_TOKEN:-${GITHUB_PAT:-}}"
+      GH_TOKEN: "${GH_TOKEN:-${GITHUB_TOKEN:-${GITHUB_PAT:-}}}"
+      DAYTONA_ENDPOINT: "${DAYTONA_ENDPOINT:-}"
+      DAYTONA_API_KEY: "${DAYTONA_API_KEY:-}"
+      HF_DAYTONA_ENDPOINT: "${HF_DAYTONA_ENDPOINT:-}"
+      HF_DAYTONA_API_KEY: "${HF_DAYTONA_API_KEY:-}"
+    ports:
+      - "7841:7841"
+      - "8850:8850"
+    volumes:
+      - "${HOME}/.codex:/root/.codex"
+      - "sandbox-agent-foundry_preview_git_repos:/root/.local/share/sandbox-agent-foundry/repos"
+      - "sandbox-agent-foundry_preview_rivetkit_storage:/root/.local/share/sandbox-agent-foundry/rivetkit"
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: quebec/docker/frontend.preview.Dockerfile
+    image: sandbox-agent-foundry-frontend-preview
+    depends_on:
+      - backend
+    ports:
+      - "4273:4273"
+
+volumes:
+  sandbox-agent-foundry_preview_git_repos: {}
+  sandbox-agent-foundry_preview_rivetkit_storage: {}

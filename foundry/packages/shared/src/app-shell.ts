@@ -1,0 +1,88 @@
+export type FoundryBillingPlanId = "free" | "team";
+export type FoundryBillingStatus = "active" | "trialing" | "past_due" | "scheduled_cancel";
+export type FoundryGithubInstallationStatus = "connected" | "install_required" | "reconnect_required";
+export type FoundryGithubSyncStatus = "pending" | "syncing" | "synced" | "error";
+export type FoundryOrganizationKind = "personal" | "organization";
+
+export interface FoundryUser {
+  id: string;
+  name: string;
+  email: string;
+  githubLogin: string;
+  roleLabel: string;
+  eligibleOrganizationIds: string[];
+}
+
+export interface FoundryOrganizationMember {
+  id: string;
+  name: string;
+  email: string;
+  role: "owner" | "admin" | "member";
+  state: "active" | "invited";
+}
+
+export interface FoundryInvoice {
+  id: string;
+  label: string;
+  issuedAt: string;
+  amountUsd: number;
+  status: "paid" | "open";
+}
+
+export interface FoundryBillingState {
+  planId: FoundryBillingPlanId;
+  status: FoundryBillingStatus;
+  seatsIncluded: number;
+  trialEndsAt: string | null;
+  renewalAt: string | null;
+  stripeCustomerId: string;
+  paymentMethodLabel: string;
+  invoices: FoundryInvoice[];
+}
+
+export interface FoundryGithubState {
+  connectedAccount: string;
+  installationStatus: FoundryGithubInstallationStatus;
+  syncStatus: FoundryGithubSyncStatus;
+  importedRepoCount: number;
+  lastSyncLabel: string;
+  lastSyncAt: number | null;
+}
+
+export interface FoundryOrganizationSettings {
+  displayName: string;
+  slug: string;
+  primaryDomain: string;
+  seatAccrualMode: "first_prompt";
+  defaultModel: "claude-sonnet-4" | "claude-opus-4" | "gpt-4o" | "o3";
+  autoImportRepos: boolean;
+}
+
+export interface FoundryOrganization {
+  id: string;
+  workspaceId: string;
+  kind: FoundryOrganizationKind;
+  settings: FoundryOrganizationSettings;
+  github: FoundryGithubState;
+  billing: FoundryBillingState;
+  members: FoundryOrganizationMember[];
+  seatAssignments: string[];
+  repoCatalog: string[];
+}
+
+export interface FoundryAppSnapshot {
+  auth: {
+    status: "signed_out" | "signed_in";
+    currentUserId: string | null;
+  };
+  activeOrganizationId: string | null;
+  users: FoundryUser[];
+  organizations: FoundryOrganization[];
+}
+
+export interface UpdateFoundryOrganizationProfileInput {
+  organizationId: string;
+  displayName: string;
+  slug: string;
+  primaryDomain: string;
+}

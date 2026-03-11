@@ -1,0 +1,54 @@
+{
+  "name": "@sandbox-agent/foundry-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./backend": {
+      "types": "./dist/backend.d.ts",
+      "import": "./dist/backend.js"
+    },
+    "./workbench": {
+      "types": "./dist/workbench.d.ts",
+      "import": "./dist/workbench.js"
+    },
+    "./view-model": {
+      "types": "./dist/view-model.d.ts",
+      "import": "./dist/view-model.js"
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "backend": [
+        "dist/backend.d.ts"
+      ],
+      "view-model": [
+        "dist/view-model.d.ts"
+      ],
+      "workbench": [
+        "dist/workbench.d.ts"
+      ]
+    }
+  },
+  "scripts": {
+    "build": "tsup src/index.ts src/backend.ts src/workbench.ts src/view-model.ts --format esm --dts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:e2e:full": "HF_ENABLE_DAEMON_FULL_E2E=1 vitest run test/e2e/full-integration-e2e.test.ts",
+    "test:e2e:workbench": "HF_ENABLE_DAEMON_WORKBENCH_E2E=1 vitest run test/e2e/workbench-e2e.test.ts",
+    "test:e2e:workbench-load": "HF_ENABLE_DAEMON_WORKBENCH_LOAD_E2E=1 vitest run test/e2e/workbench-load-e2e.test.ts"
+  },
+  "dependencies": {
+    "@sandbox-agent/foundry-shared": "workspace:*",
+    "rivetkit": "2.1.6"
+  },
+  "devDependencies": {
+    "tsup": "^8.5.0"
+  }
+}

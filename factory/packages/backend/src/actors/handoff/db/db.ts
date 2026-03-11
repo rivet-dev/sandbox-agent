@@ -1,10 +1,5 @@
-import { actorSqliteDb } from "../../../db/actor-sqlite.js";
+import { db } from "rivetkit/db/drizzle";
 import * as schema from "./schema.js";
 import migrations from "./migrations.js";
 
-export const handoffDb = actorSqliteDb({
-  actorName: "handoff",
-  schema,
-  migrations,
-  migrationsFolderUrl: new URL("./drizzle/", import.meta.url),
-});
+export const handoffDb = db({ schema, migrations });

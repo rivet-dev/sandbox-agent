@@ -6,7 +6,7 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsup src/index.ts --format esm --external bun:sqlite",
+    "build": "tsup src/index.ts --format esm",
     "db:generate": "find src/actors -name drizzle.config.ts -exec pnpm exec drizzle-kit generate --config {} \\; && \"$HOME/.bun/bin/bun\" src/actors/_scripts/generate-actor-migrations.ts",
     "typecheck": "tsc --noEmit",
     "test": "$HOME/.bun/bin/bun x vitest run",

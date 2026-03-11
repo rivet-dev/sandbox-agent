@@ -7,7 +7,7 @@
     "build": "turbo run build",
     "dev": "turbo run dev --parallel",
     "generate": "turbo run generate",
-    "prepare": "lefthook install",
+    "prepare": "git rev-parse --git-dir >/dev/null 2>&1 && lefthook install || true",
     "typecheck": "turbo run typecheck"
   },
   "devDependencies": {
