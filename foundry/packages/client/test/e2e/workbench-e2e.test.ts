@@ -1,15 +1,7 @@
 import { execFile } from "node:child_process";
-import { mkdir, writeFile } from "node:fs/promises";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
-import type {
-  TaskRecord,
-  TaskWorkbenchSnapshot,
-  WorkbenchAgentTab,
-  WorkbenchTask,
-  WorkbenchModelId,
-  WorkbenchTranscriptEvent,
-} from "@sandbox-agent/foundry-shared";
+import type { HandoffWorkbenchSnapshot, WorkbenchAgentTab, WorkbenchHandoff, WorkbenchModelId, WorkbenchTranscriptEvent } from "@sandbox-agent/foundry-shared";
 import { createBackendClient } from "../../src/backend-client.js";
 
 const RUN_WORKBENCH_E2E = process.env.HF_ENABLE_DAEMON_WORKBENCH_E2E === "1";
@@ -21,10 +13,6 @@ function requiredEnv(name: string): string {
     throw new Error(`Missing required env var: ${name}`);
   }
   return value;
-}
-
-function requiredRepoRemote(): string {
-  return process.env.HF_E2E_REPO_REMOTE?.trim() || requiredEnv("HF_E2E_GITHUB_REPO");
 }
 
 function workbenchModelEnv(name: string, fallback: WorkbenchModelId): WorkbenchModelId {
@@ -44,59 +32,14 @@ async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function backendPortFromEndpoint(endpoint: string): string {
-  const url = new URL(endpoint);
-  if (url.port) {
-    return url.port;
-  }
-  return url.protocol === "https:" ? "443" : "80";
-}
-
-async function resolveBackendContainerName(endpoint: string): Promise<string | null> {
-  const explicit = process.env.HF_E2E_BACKEND_CONTAINER?.trim();
-  if (explicit) {
-    if (explicit.toLowerCase() === "host") {
-      return null;
-    }
-    return explicit;
-  }
-
-  const { stdout } = await execFileAsync("docker", ["ps", "--filter", `publish=${backendPortFromEndpoint(endpoint)}`, "--format", "{{.Names}}"]);
-  const containerName = stdout
-    .split("\n")
-    .map((line) => line.trim())
-    .find(Boolean);
-
-  return containerName ?? null;
-}
-
-function sandboxRepoPath(record: TaskRecord): string {
-  const activeSandbox =
-    record.sandboxes.find((sandbox) => sandbox.sandboxId === record.activeSandboxId) ??
-    record.sandboxes.find((sandbox) => typeof sandbox.cwd === "string" && sandbox.cwd.length > 0);
-  const cwd = activeSandbox?.cwd?.trim();
-  if (!cwd) {
-    throw new Error(`No sandbox cwd is available for task ${record.taskId}`);
-  }
-  return cwd;
-}
-
-async function seedSandboxFile(endpoint: string, record: TaskRecord, filePath: string, content: string): Promise<void> {
-  const repoPath = sandboxRepoPath(record);
-  const containerName = await resolveBackendContainerName(endpoint);
-  if (!containerName) {
-    const directory = filePath.includes("/") ? `${repoPath}/${filePath.slice(0, filePath.lastIndexOf("/"))}` : repoPath;
-    await mkdir(directory, { recursive: true });
-    await writeFile(`${repoPath}/${filePath}`, `${content}\n`, "utf8");
-    return;
-  }
-
+async function seedSandboxFile(workspaceId: string, handoffId: string, filePath: string, content: string): Promise<void> {
+  const repoPath = `/root/.local/share/foundry/local-sandboxes/${workspaceId}/${handoffId}/repo`;
   const script = [
     `cd ${JSON.stringify(repoPath)}`,
     `mkdir -p ${JSON.stringify(filePath.includes("/") ? filePath.slice(0, filePath.lastIndexOf("/")) : ".")}`,
     `printf '%s\\n' ${JSON.stringify(content)} > ${JSON.stringify(filePath)}`,
   ].join(" && ");
-  await execFileAsync("docker", ["exec", containerName, "bash", "-lc", script]);
+  await execFileAsync("docker", ["exec", "foundry-backend-1", "bash", "-lc", script]);
 }
 
 async function poll<T>(label: string, timeoutMs: number, intervalMs: number, fn: () => Promise<T>, isDone: (value: T) => boolean): Promise<T> {
@@ -115,18 +58,18 @@ async function poll<T>(label: string, timeoutMs: number, intervalMs: number, fn:
   }
 }
 
-function findTask(snapshot: TaskWorkbenchSnapshot, taskId: string): WorkbenchTask {
-  const task = snapshot.tasks.find((candidate) => candidate.id === taskId);
-  if (!task) {
-    throw new Error(`task ${taskId} missing from snapshot`);
+function findHandoff(snapshot: HandoffWorkbenchSnapshot, handoffId: string): WorkbenchHandoff {
+  const handoff = snapshot.handoffs.find((candidate) => candidate.id === handoffId);
+  if (!handoff) {
+    throw new Error(`handoff ${handoffId} missing from snapshot`);
   }
-  return task;
+  return handoff;
 }
 
-function findTab(task: WorkbenchTask, tabId: string): WorkbenchAgentTab {
-  const tab = task.tabs.find((candidate) => candidate.id === tabId);
+function findTab(handoff: WorkbenchHandoff, tabId: string): WorkbenchAgentTab {
+  const tab = handoff.tabs.find((candidate) => candidate.id === tabId);
   if (!tab) {
-    throw new Error(`tab ${tabId} missing from task ${task.id}`);
+    throw new Error(`tab ${tabId} missing from handoff ${handoff.id}`);
   }
   return tab;
 }
@@ -201,10 +144,10 @@ function transcriptIncludesAgentText(transcript: WorkbenchTranscriptEvent[], exp
 }
 
 describe("e2e(client): workbench flows", () => {
-  it.skipIf(!RUN_WORKBENCH_E2E)("creates a task, adds sessions, exchanges messages, and manages workbench state", { timeout: 20 * 60_000 }, async () => {
+  it.skipIf(!RUN_WORKBENCH_E2E)("creates a handoff, adds sessions, exchanges messages, and manages workbench state", { timeout: 20 * 60_000 }, async () => {
     const endpoint = process.env.HF_E2E_BACKEND_ENDPOINT?.trim() || "http://127.0.0.1:7741/api/rivet";
     const workspaceId = process.env.HF_E2E_WORKSPACE?.trim() || "default";
-    const repoRemote = requiredRepoRemote();
+    const repoRemote = requiredEnv("HF_E2E_GITHUB_REPO");
     const model = workbenchModelEnv("HF_E2E_MODEL", "gpt-4o");
     const runId = `wb-${Date.now().toString(36)}`;
     const expectedFile = `${runId}.txt`;
@@ -217,7 +160,7 @@ describe("e2e(client): workbench flows", () => {
     });
 
     const repo = await client.addRepo(workspaceId, repoRemote);
-    const created = await client.createWorkbenchTask(workspaceId, {
+    const created = await client.createWorkbenchHandoff(workspaceId, {
       repoId: repo.repoId,
       title: `Workbench E2E ${runId}`,
       branch: `e2e/${runId}`,
@@ -226,11 +169,11 @@ describe("e2e(client): workbench flows", () => {
     });
 
     const provisioned = await poll(
-      "task provisioning",
+      "handoff provisioning",
       12 * 60_000,
       2_000,
-      async () => findTask(await client.getWorkbench(workspaceId), created.taskId),
-      (task) => task.branch === `e2e/${runId}` && task.tabs.length > 0,
+      async () => findHandoff(await client.getWorkbench(workspaceId), created.handoffId),
+      (handoff) => handoff.branch === `e2e/${runId}` && handoff.tabs.length > 0,
     );
 
     const primaryTab = provisioned.tabs[0]!;
@@ -239,51 +182,50 @@ describe("e2e(client): workbench flows", () => {
       "initial agent response",
       12 * 60_000,
       2_000,
-      async () => findTask(await client.getWorkbench(workspaceId), created.taskId),
-      (task) => {
-        const tab = findTab(task, primaryTab.id);
-        return task.status === "idle" && tab.status === "idle" && transcriptIncludesAgentText(tab.transcript, expectedInitialReply);
+      async () => findHandoff(await client.getWorkbench(workspaceId), created.handoffId),
+      (handoff) => {
+        const tab = findTab(handoff, primaryTab.id);
+        return handoff.status === "idle" && tab.status === "idle" && transcriptIncludesAgentText(tab.transcript, expectedInitialReply);
       },
     );
 
     expect(findTab(initialCompleted, primaryTab.id).sessionId).toBeTruthy();
     expect(transcriptIncludesAgentText(findTab(initialCompleted, primaryTab.id).transcript, expectedInitialReply)).toBe(true);
 
-    const detail = await client.getTask(workspaceId, created.taskId);
-    await seedSandboxFile(endpoint, detail, expectedFile, runId);
+    await seedSandboxFile(workspaceId, created.handoffId, expectedFile, runId);
 
     const fileSeeded = await poll(
       "seeded sandbox file reflected in workbench",
       30_000,
       1_000,
-      async () => findTask(await client.getWorkbench(workspaceId), created.taskId),
-      (task) => task.fileChanges.some((file) => file.path === expectedFile),
+      async () => findHandoff(await client.getWorkbench(workspaceId), created.handoffId),
+      (handoff) => handoff.fileChanges.some((file) => file.path === expectedFile),
     );
     expect(fileSeeded.fileChanges.some((file) => file.path === expectedFile)).toBe(true);
 
-    await client.renameWorkbenchTask(workspaceId, {
-      taskId: created.taskId,
+    await client.renameWorkbenchHandoff(workspaceId, {
+      handoffId: created.handoffId,
       value: `Workbench E2E ${runId} Renamed`,
     });
     await client.renameWorkbenchSession(workspaceId, {
-      taskId: created.taskId,
+      handoffId: created.handoffId,
       tabId: primaryTab.id,
       title: "Primary Session",
     });
 
     const secondTab = await client.createWorkbenchSession(workspaceId, {
-      taskId: created.taskId,
+      handoffId: created.handoffId,
       model,
     });
 
     await client.renameWorkbenchSession(workspaceId, {
-      taskId: created.taskId,
+      handoffId: created.handoffId,
       tabId: secondTab.tabId,
       title: "Follow-up Session",
     });
 
     await client.updateWorkbenchDraft(workspaceId, {
-      taskId: created.taskId,
+      handoffId: created.handoffId,
       tabId: secondTab.tabId,
       text: `Reply with exactly: ${expectedReply}`,
       attachments: [
@@ -296,12 +238,12 @@ describe("e2e(client): workbench flows", () => {
       ],
     });
 
-    const drafted = findTask(await client.getWorkbench(workspaceId), created.taskId);
+    const drafted = findHandoff(await client.getWorkbench(workspaceId), created.handoffId);
     expect(findTab(drafted, secondTab.tabId).draft.text).toContain(expectedReply);
     expect(findTab(drafted, secondTab.tabId).draft.attachments).toHaveLength(1);
 
     await client.sendWorkbenchMessage(workspaceId, {
-      taskId: created.taskId,
+      handoffId: created.handoffId,
       tabId: secondTab.tabId,
       text: `Reply with exactly: ${expectedReply}`,
       attachments: [],
@@ -311,9 +253,9 @@ describe("e2e(client): workbench flows", () => {
       "follow-up session response",
       10 * 60_000,
       2_000,
-      async () => findTask(await client.getWorkbench(workspaceId), created.taskId),
-      (task) => {
-        const tab = findTab(task, secondTab.tabId);
+      async () => findHandoff(await client.getWorkbench(workspaceId), created.handoffId),
+      (handoff) => {
+        const tab = findTab(handoff, secondTab.tabId);
         return tab.status === "idle" && transcriptIncludesAgentText(tab.transcript, expectedReply);
       },
     );
@@ -322,17 +264,17 @@ describe("e2e(client): workbench flows", () => {
     expect(transcriptIncludesAgentText(secondTranscript, expectedReply)).toBe(true);
 
     await client.setWorkbenchSessionUnread(workspaceId, {
-      taskId: created.taskId,
+      handoffId: created.handoffId,
       tabId: secondTab.tabId,
       unread: false,
     });
-    await client.markWorkbenchUnread(workspaceId, { taskId: created.taskId });
+    await client.markWorkbenchUnread(workspaceId, { handoffId: created.handoffId });
 
-    const unreadSnapshot = findTask(await client.getWorkbench(workspaceId), created.taskId);
+    const unreadSnapshot = findHandoff(await client.getWorkbench(workspaceId), created.handoffId);
     expect(unreadSnapshot.tabs.some((tab) => tab.unread)).toBe(true);
 
     await client.closeWorkbenchSession(workspaceId, {
-      taskId: created.taskId,
+      handoffId: created.handoffId,
       tabId: secondTab.tabId,
     });
 
@@ -340,13 +282,13 @@ describe("e2e(client): workbench flows", () => {
       "secondary session closed",
       30_000,
       1_000,
-      async () => findTask(await client.getWorkbench(workspaceId), created.taskId),
-      (task) => !task.tabs.some((tab) => tab.id === secondTab.tabId),
+      async () => findHandoff(await client.getWorkbench(workspaceId), created.handoffId),
+      (handoff) => !handoff.tabs.some((tab) => tab.id === secondTab.tabId),
     );
     expect(closedSnapshot.tabs).toHaveLength(1);
 
     await client.revertWorkbenchFile(workspaceId, {
-      taskId: created.taskId,
+      handoffId: created.handoffId,
       path: expectedFile,
     });
 
@@ -354,8 +296,8 @@ describe("e2e(client): workbench flows", () => {
       "file revert reflected in workbench",
       30_000,
       1_000,
-      async () => findTask(await client.getWorkbench(workspaceId), created.taskId),
-      (task) => !task.fileChanges.some((file) => file.path === expectedFile),
+      async () => findHandoff(await client.getWorkbench(workspaceId), created.handoffId),
+      (handoff) => !handoff.fileChanges.some((file) => file.path === expectedFile),
     );
 
     expect(revertedSnapshot.fileChanges.some((file) => file.path === expectedFile)).toBe(false);

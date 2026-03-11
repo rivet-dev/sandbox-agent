@@ -101,7 +101,7 @@ Fixing Daytona `hf create` failures where `handoff.attach` would exhaust retries
 
 ### Friction / Issue
 
-Sandbox Agent Foundry was using RivetKit's KV-backed durable SQLite VFS via `rivetkit/db/drizzle`, which opens the SQLite DB keyed by `ctx.actorId`. Since actor instances can be rescheduled (new `actorId`) between requests, DB writes from initialization were not visible to later actions (e.g. `attach`), causing “Handoff not found” and action timeouts.
+Foundry was using RivetKit's KV-backed durable SQLite VFS via `rivetkit/db/drizzle`, which opens the SQLite DB keyed by `ctx.actorId`. Since actor instances can be rescheduled (new `actorId`) between requests, DB writes from initialization were not visible to later actions (e.g. `attach`), causing “Handoff not found” errors and action timeouts.
 
 Separately, importing `bun:sqlite` directly broke:
 

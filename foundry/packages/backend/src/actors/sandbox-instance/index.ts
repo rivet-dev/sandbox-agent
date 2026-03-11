@@ -3,7 +3,15 @@ import { eq } from "drizzle-orm";
 import { actor, queue } from "rivetkit";
 import { Loop, workflow } from "rivetkit/workflow";
 import type { ProviderId } from "@sandbox-agent/foundry-shared";
-import type { SessionEvent, SessionRecord } from "sandbox-agent";
+import type {
+  ProcessCreateRequest,
+  ProcessInfo,
+  ProcessLogFollowQuery,
+  ProcessLogsResponse,
+  ProcessSignalQuery,
+  SessionEvent,
+  SessionRecord,
+} from "sandbox-agent";
 import { sandboxInstanceDb } from "./db/db.js";
 import { sandboxInstance as sandboxInstanceTable } from "./db/schema.js";
 import { SandboxInstancePersistDriver } from "./persist.js";
@@ -16,6 +24,11 @@ export interface SandboxInstanceInput {
   workspaceId: string;
   providerId: ProviderId;
   sandboxId: string;
+}
+
+interface SandboxAgentConnection {
+  endpoint: string;
+  token?: string;
 }
 
 const SANDBOX_ROW_ID = 1;
@@ -73,7 +86,7 @@ function parseMetadata(metadataJson: string): Record<string, unknown> {
   }
 }
 
-async function loadPersistedAgentConfig(c: any): Promise<{ endpoint: string; token?: string } | null> {
+async function loadPersistedAgentConfig(c: any): Promise<SandboxAgentConnection | null> {
   try {
     const row = await c.db
       .select({ metadataJson: sandboxInstanceTable.metadataJson })
@@ -95,7 +108,7 @@ async function loadPersistedAgentConfig(c: any): Promise<{ endpoint: string; tok
   return null;
 }
 
-async function loadFreshDaytonaAgentConfig(c: any): Promise<{ endpoint: string; token?: string }> {
+async function loadFreshDaytonaAgentConfig(c: any): Promise<SandboxAgentConnection> {
   const { config, driver } = getActorRuntimeContext();
   const daytona = driver.daytona.createClient({
     apiUrl: config.providers.daytona.endpoint,
@@ -110,7 +123,7 @@ async function loadFreshDaytonaAgentConfig(c: any): Promise<{ endpoint: string; 
   return preview.token ? { endpoint: preview.url, token: preview.token } : { endpoint: preview.url };
 }
 
-async function loadFreshProviderAgentConfig(c: any): Promise<{ endpoint: string; token?: string }> {
+async function loadFreshProviderAgentConfig(c: any): Promise<SandboxAgentConnection> {
   const { providers } = getActorRuntimeContext();
   const provider = providers.get(c.state.providerId);
   return await provider.ensureSandboxAgent({
@@ -119,7 +132,7 @@ async function loadFreshProviderAgentConfig(c: any): Promise<{ endpoint: string;
   });
 }
 
-async function loadAgentConfig(c: any): Promise<{ endpoint: string; token?: string }> {
+async function loadAgentConfig(c: any): Promise<SandboxAgentConnection> {
   const persisted = await loadPersistedAgentConfig(c);
   if (c.state.providerId === "daytona") {
     // Keep one stable signed preview endpoint per sandbox-instance actor.
@@ -262,6 +275,13 @@ async function getSandboxAgentClient(c: any) {
     endpoint,
     token,
     persist,
+  });
+}
+
+function broadcastProcessesUpdated(c: any): void {
+  c.broadcast("processesUpdated", {
+    sandboxId: c.state.sandboxId,
+    at: Date.now(),
   });
 }
 
@@ -446,6 +466,47 @@ export const sandboxInstance = actor({
     sandboxId: input.sandboxId,
   }),
   actions: {
+    async sandboxAgentConnection(c: any): Promise<SandboxAgentConnection> {
+      return await loadAgentConfig(c);
+    },
+
+    async createProcess(c: any, request: ProcessCreateRequest): Promise<ProcessInfo> {
+      const client = await getSandboxAgentClient(c);
+      const created = await client.createProcess(request);
+      broadcastProcessesUpdated(c);
+      return created;
+    },
+
+    async listProcesses(c: any): Promise<{ processes: ProcessInfo[] }> {
+      const client = await getSandboxAgentClient(c);
+      return await client.listProcesses();
+    },
+
+    async getProcessLogs(c: any, request: { processId: string; query?: ProcessLogFollowQuery }): Promise<ProcessLogsResponse> {
+      const client = await getSandboxAgentClient(c);
+      return await client.getProcessLogs(request.processId, request.query);
+    },
+
+    async stopProcess(c: any, request: { processId: string; query?: ProcessSignalQuery }): Promise<ProcessInfo> {
+      const client = await getSandboxAgentClient(c);
+      const stopped = await client.stopProcess(request.processId, request.query);
+      broadcastProcessesUpdated(c);
+      return stopped;
+    },
+
+    async killProcess(c: any, request: { processId: string; query?: ProcessSignalQuery }): Promise<ProcessInfo> {
+      const client = await getSandboxAgentClient(c);
+      const killed = await client.killProcess(request.processId, request.query);
+      broadcastProcessesUpdated(c);
+      return killed;
+    },
+
+    async deleteProcess(c: any, request: { processId: string }): Promise<void> {
+      const client = await getSandboxAgentClient(c);
+      await client.deleteProcess(request.processId);
+      broadcastProcessesUpdated(c);
+    },
+
     async providerState(c: any): Promise<{ providerId: ProviderId; sandboxId: string; state: string; at: number }> {
       const at = Date.now();
       const { config, driver } = getActorRuntimeContext();

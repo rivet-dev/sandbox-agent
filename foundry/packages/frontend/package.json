@@ -10,6 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@sandbox-agent/react": "workspace:*",
     "@sandbox-agent/foundry-client": "workspace:*",
     "@sandbox-agent/foundry-frontend-errors": "workspace:*",
     "@sandbox-agent/foundry-shared": "workspace:*",
@@ -19,6 +20,7 @@
     "lucide-react": "^0.542.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
+    "sandbox-agent": "workspace:*",
     "styletron-engine-atomic": "^1.6.2",
     "styletron-react": "^6.1.1"
   },

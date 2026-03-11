@@ -64,6 +64,12 @@ const journal = {
       tag: "0009_github_sync_status",
       breakpoints: true,
     },
+    {
+      idx: 10,
+      when: 1772928000000,
+      tag: "0010_app_session_starter_repo",
+      breakpoints: true,
+    },
   ],
 } as const;
 
@@ -83,8 +89,8 @@ export default {
 	\`updated_at\` integer NOT NULL
 );
 `,
-    m0002: `CREATE TABLE \`task_lookup\` (
-	\`task_id\` text PRIMARY KEY NOT NULL,
+    m0002: `CREATE TABLE \`handoff_lookup\` (
+	\`handoff_id\` text PRIMARY KEY NOT NULL,
 	\`repo_id\` text NOT NULL
 );
 `,
@@ -151,6 +157,9 @@ export default {
 	\`active_organization_id\` text,
 	\`github_access_token\` text,
 	\`github_scope\` text NOT NULL,
+	\`starter_repo_status\` text NOT NULL,
+	\`starter_repo_starred_at\` integer,
+	\`starter_repo_skipped_at\` integer,
 	\`oauth_state\` text,
 	\`oauth_state_expires_at\` integer,
 	\`created_at\` integer NOT NULL,
@@ -171,6 +180,10 @@ SET \`github_sync_status\` = CASE
   WHEN \`repo_import_status\` = 'importing' THEN 'syncing'
   ELSE 'pending'
 END;
+`,
+    m0010: `ALTER TABLE \`app_sessions\` ADD COLUMN \`starter_repo_status\` text NOT NULL DEFAULT 'pending';
+ALTER TABLE \`app_sessions\` ADD COLUMN \`starter_repo_starred_at\` integer;
+ALTER TABLE \`app_sessions\` ADD COLUMN \`starter_repo_skipped_at\` integer;
 `,
   } as const,
 };

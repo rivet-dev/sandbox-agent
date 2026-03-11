@@ -1,10 +1,10 @@
-import type { TaskRecord, TaskStatus } from "@sandbox-agent/foundry-shared";
+import type { HandoffRecord, HandoffStatus } from "@sandbox-agent/foundry-shared";
 
 export const HANDOFF_STATUS_GROUPS = ["queued", "running", "idle", "archived", "killed", "error"] as const;
 
-export type TaskStatusGroup = (typeof HANDOFF_STATUS_GROUPS)[number];
+export type HandoffStatusGroup = (typeof HANDOFF_STATUS_GROUPS)[number];
 
-const QUEUED_STATUSES = new Set<TaskStatus>([
+const QUEUED_STATUSES = new Set<HandoffStatus>([
   "init_bootstrap_db",
   "init_enqueue_provision",
   "init_ensure_name",
@@ -23,7 +23,7 @@ const QUEUED_STATUSES = new Set<TaskStatus>([
   "kill_finalize",
 ]);
 
-export function groupTaskStatus(status: TaskStatus): TaskStatusGroup {
+export function groupHandoffStatus(status: HandoffStatus): HandoffStatusGroup {
   if (status === "running") return "running";
   if (status === "idle") return "idle";
   if (status === "archived") return "archived";
@@ -33,7 +33,7 @@ export function groupTaskStatus(status: TaskStatus): TaskStatusGroup {
   return "queued";
 }
 
-function emptyStatusCounts(): Record<TaskStatusGroup, number> {
+function emptyStatusCounts(): Record<HandoffStatusGroup, number> {
   return {
     queued: 0,
     running: 0,
@@ -44,9 +44,9 @@ function emptyStatusCounts(): Record<TaskStatusGroup, number> {
   };
 }
 
-export interface TaskSummary {
+export interface HandoffSummary {
   total: number;
-  byStatus: Record<TaskStatusGroup, number>;
+  byStatus: Record<HandoffStatusGroup, number>;
   byProvider: Record<string, number>;
 }
 
@@ -64,14 +64,14 @@ export function fuzzyMatch(target: string, query: string): boolean {
   return true;
 }
 
-export function filterTasks(rows: TaskRecord[], query: string): TaskRecord[] {
+export function filterHandoffs(rows: HandoffRecord[], query: string): HandoffRecord[] {
   const q = query.trim();
   if (!q) {
     return rows;
   }
 
   return rows.filter((row) => {
-    const fields = [row.branchName ?? "", row.title ?? "", row.taskId, row.task, row.prAuthor ?? "", row.reviewer ?? ""];
+    const fields = [row.branchName ?? "", row.title ?? "", row.handoffId, row.task, row.prAuthor ?? "", row.reviewer ?? ""];
     return fields.some((field) => fuzzyMatch(field, q));
   });
 }
@@ -87,12 +87,12 @@ export function formatRelativeAge(updatedAt: number, now = Date.now()): string {
   return `${days}d`;
 }
 
-export function summarizeTasks(rows: TaskRecord[]): TaskSummary {
+export function summarizeHandoffs(rows: HandoffRecord[]): HandoffSummary {
   const byStatus = emptyStatusCounts();
   const byProvider: Record<string, number> = {};
 
   for (const row of rows) {
-    byStatus[groupTaskStatus(row.status)] += 1;
+    byStatus[groupHandoffStatus(row.status)] += 1;
     byProvider[row.providerId] = (byProvider[row.providerId] ?? 0) + 1;
   }
 

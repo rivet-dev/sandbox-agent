@@ -4,7 +4,6 @@ import { initActorRuntimeContext } from "./actors/context.js";
 import { registry, resolveManagerPort } from "./actors/index.js";
 import { workspaceKey } from "./actors/keys.js";
 import { loadConfig } from "./config/backend.js";
-import { applyDevelopmentEnvDefaults, loadDevelopmentEnvFiles } from "./config/env.js";
 import { createBackends, createNotificationService } from "./notifications/index.js";
 import { createDefaultDriver } from "./driver.js";
 import { createProviderRegistry } from "./providers/index.js";
@@ -19,10 +18,6 @@ export interface BackendStartOptions {
 }
 
 export async function startBackend(options: BackendStartOptions = {}): Promise<void> {
-  process.env.NODE_ENV ||= "development";
-  loadDevelopmentEnvFiles();
-  applyDevelopmentEnvDefaults();
-
   // sandbox-agent agent plugins vary on which env var they read for OpenAI/Codex auth.
   // Normalize to keep local dev + docker-compose simple.
   if (!process.env.CODEX_API_KEY && process.env.OPENAI_API_KEY) {
@@ -58,8 +53,6 @@ export async function startBackend(options: BackendStartOptions = {}): Promise<v
     endpoint: `http://127.0.0.1:${resolveManagerPort()}`,
     disableMetadataLookup: true,
   }) as any;
-
-  const managerOrigin = `http://127.0.0.1:${resolveManagerPort()}`;
 
   // Wrap in a Hono app mounted at /api/rivet to serve on the backend port.
   // Uses Bun.serve — cannot use @hono/node-server because it conflicts with
@@ -103,6 +96,18 @@ export async function startBackend(options: BackendStartOptions = {}): Promise<v
       exposeHeaders,
     }),
   );
+  const forward = async (c: any) => {
+    try {
+      // RivetKit serverless handler is configured with basePath `/api/rivet` by default.
+      return await inner.fetch(c.req.raw);
+    } catch (err) {
+      if (err instanceof URIError) {
+        return c.text("Bad Request: Malformed URI", 400);
+      }
+      throw err;
+    }
+  };
+
   const appWorkspace = async () =>
     await actorClient.workspace.getOrCreate(workspaceKey(APP_SHELL_WORKSPACE_ID), {
       createWithInput: APP_SHELL_WORKSPACE_ID,
@@ -142,6 +147,21 @@ export async function startBackend(options: BackendStartOptions = {}): Promise<v
   app.post("/api/rivet/app/sign-out", async (c) => {
     const sessionId = await resolveSessionId(c);
     return c.json(await (await appWorkspace()).signOutApp({ sessionId }));
+  });
+
+  app.post("/api/rivet/app/onboarding/starter-repo/skip", async (c) => {
+    const sessionId = await resolveSessionId(c);
+    return c.json(await (await appWorkspace()).skipAppStarterRepo({ sessionId }));
+  });
+
+  app.post("/api/rivet/app/organizations/:organizationId/starter-repo/star", async (c) => {
+    const sessionId = await resolveSessionId(c);
+    return c.json(
+      await (await appWorkspace()).starAppStarterRepo({
+        sessionId,
+        organizationId: c.req.param("organizationId"),
+      }),
+    );
   });
 
   app.post("/api/rivet/app/organizations/:organizationId/select", async (c) => {
@@ -246,6 +266,16 @@ export async function startBackend(options: BackendStartOptions = {}): Promise<v
     );
   });
 
+  app.post("/api/rivet/app/workspaces/:workspaceId/seat-usage", async (c) => {
+    const sessionId = await resolveSessionId(c);
+    return c.json(
+      await (await appWorkspace()).recordAppSeatUsage({
+        sessionId,
+        workspaceId: c.req.param("workspaceId"),
+      }),
+    );
+  });
+
   const handleStripeWebhook = async (c: any) => {
     const payload = await c.req.text();
     await (await appWorkspace()).handleAppStripeWebhook({
@@ -258,64 +288,6 @@ export async function startBackend(options: BackendStartOptions = {}): Promise<v
   app.post("/api/rivet/app/webhooks/stripe", handleStripeWebhook);
   app.post("/api/rivet/app/stripe/webhook", handleStripeWebhook);
 
-  const handleGithubWebhook = async (c: any) => {
-    const payload = await c.req.text();
-    await (await appWorkspace()).handleAppGithubWebhook({
-      payload,
-      signatureHeader: c.req.header("x-hub-signature-256") ?? null,
-      eventHeader: c.req.header("x-github-event") ?? null,
-    });
-    return c.json({ ok: true });
-  };
-
-  app.post("/api/rivet/app/webhooks/github", handleGithubWebhook);
-
-  app.post("/api/rivet/app/workspaces/:workspaceId/seat-usage", async (c) => {
-    const sessionId = await resolveSessionId(c);
-    const workspaceId = c.req.param("workspaceId");
-    return c.json(
-      await (await appWorkspace()).recordAppSeatUsage({
-        sessionId,
-        workspaceId,
-      }),
-    );
-  });
-
-  const proxyManagerRequest = async (c: any) => {
-    const source = new URL(c.req.url);
-    const target = new URL(source.pathname.replace(/^\/api\/rivet/, "") + source.search, managerOrigin);
-    return await fetch(new Request(target.toString(), c.req.raw));
-  };
-
-  const forward = async (c: any) => {
-    try {
-      const pathname = new URL(c.req.url).pathname;
-      if (pathname === "/api/rivet/app/webhooks/stripe" || pathname === "/api/rivet/app/stripe/webhook") {
-        return await handleStripeWebhook(c);
-      }
-      if (pathname === "/api/rivet/app/webhooks/github") {
-        return await handleGithubWebhook(c);
-      }
-      if (pathname.startsWith("/api/rivet/app/")) {
-        return c.text("Not Found", 404);
-      }
-      if (
-        pathname === "/api/rivet/metadata" ||
-        pathname === "/api/rivet/actors" ||
-        pathname.startsWith("/api/rivet/actors/") ||
-        pathname.startsWith("/api/rivet/gateway/")
-      ) {
-        return await proxyManagerRequest(c);
-      }
-      // RivetKit serverless handler is configured with basePath `/api/rivet` by default.
-      return await inner.fetch(c.req.raw);
-    } catch (err) {
-      if (err instanceof URIError) {
-        return c.text("Bad Request: Malformed URI", 400);
-      }
-      throw err;
-    }
-  };
   app.all("/api/rivet", forward);
   app.all("/api/rivet/*", forward);
 

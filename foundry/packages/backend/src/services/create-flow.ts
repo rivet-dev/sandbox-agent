@@ -3,7 +3,7 @@ export interface ResolveCreateFlowDecisionInput {
   explicitTitle?: string;
   explicitBranchName?: string;
   localBranches: string[];
-  taskBranches: string[];
+  handoffBranches: string[];
 }
 
 export interface ResolveCreateFlowDecisionResult {
@@ -20,7 +20,7 @@ function firstNonEmptyLine(input: string): string {
 }
 
 export function deriveFallbackTitle(task: string, explicitTitle?: string): string {
-  const source = (explicitTitle && explicitTitle.trim()) || firstNonEmptyLine(task) || "update task";
+  const source = (explicitTitle && explicitTitle.trim()) || firstNonEmptyLine(task) || "update handoff";
   const explicitPrefixMatch = source.match(/^\s*(feat|fix|docs|refactor):\s+(.+)$/i);
   if (explicitPrefixMatch) {
     const explicitTypePrefix = explicitPrefixMatch[1]!.toLowerCase();
@@ -34,7 +34,7 @@ export function deriveFallbackTitle(task: string, explicitTitle?: string): strin
       .slice(0, 62)
       .trim();
 
-    return `${explicitTypePrefix}: ${explicitSummary || "update task"}`;
+    return `${explicitTypePrefix}: ${explicitSummary || "update handoff"}`;
   }
 
   const lowered = source.toLowerCase();
@@ -56,7 +56,7 @@ export function deriveFallbackTitle(task: string, explicitTitle?: string): strin
     .filter((token) => token.length > 0)
     .join(" ");
 
-  const summary = (cleaned || "update task").slice(0, 62).trim();
+  const summary = (cleaned || "update handoff").slice(0, 62).trim();
   return `${typePrefix}: ${summary}`.trim();
 }
 
@@ -92,13 +92,13 @@ export function sanitizeBranchName(input: string): string {
 export function resolveCreateFlowDecision(input: ResolveCreateFlowDecisionInput): ResolveCreateFlowDecisionResult {
   const explicitBranch = input.explicitBranchName?.trim();
   const title = deriveFallbackTitle(input.task, input.explicitTitle);
-  const generatedBase = sanitizeBranchName(title) || "task";
+  const generatedBase = sanitizeBranchName(title) || "handoff";
 
   const branchBase = explicitBranch && explicitBranch.length > 0 ? explicitBranch : generatedBase;
 
   const existingBranches = new Set(input.localBranches.map((value) => value.trim()).filter((value) => value.length > 0));
-  const existingTaskBranches = new Set(input.taskBranches.map((value) => value.trim()).filter((value) => value.length > 0));
-  const conflicts = (name: string): boolean => existingBranches.has(name) || existingTaskBranches.has(name);
+  const existingHandoffBranches = new Set(input.handoffBranches.map((value) => value.trim()).filter((value) => value.length > 0));
+  const conflicts = (name: string): boolean => existingBranches.has(name) || existingHandoffBranches.has(name);
 
   if (explicitBranch && conflicts(branchBase)) {
     throw new Error(`Branch '${branchBase}' already exists. Choose a different --name/--branch value.`);

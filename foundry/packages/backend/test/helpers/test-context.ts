@@ -4,7 +4,7 @@ import { ConfigSchema, type AppConfig } from "@sandbox-agent/foundry-shared";
 import type { BackendDriver } from "../../src/driver.js";
 import { initActorRuntimeContext } from "../../src/actors/context.js";
 import { createProviderRegistry } from "../../src/providers/index.js";
-import { createDefaultAppShellServices, type AppShellServices } from "../../src/services/app-shell-runtime.js";
+import { createDefaultAppShellServices } from "../../src/services/app-shell-runtime.js";
 
 export function createTestConfig(overrides?: Partial<AppConfig>): AppConfig {
   return ConfigSchema.parse({
@@ -27,23 +27,9 @@ export function createTestConfig(overrides?: Partial<AppConfig>): AppConfig {
   });
 }
 
-export function createTestRuntimeContext(
-  driver: BackendDriver,
-  configOverrides?: Partial<AppConfig>,
-  appShellOverrides?: Partial<AppShellServices>,
-): { config: AppConfig } {
+export function createTestRuntimeContext(driver: BackendDriver, configOverrides?: Partial<AppConfig>): { config: AppConfig } {
   const config = createTestConfig(configOverrides);
   const providers = createProviderRegistry(config, driver);
-  initActorRuntimeContext(
-    config,
-    providers,
-    undefined,
-    driver,
-    createDefaultAppShellServices({
-      appUrl: appShellOverrides?.appUrl,
-      github: appShellOverrides?.github,
-      stripe: appShellOverrides?.stripe,
-    }),
-  );
+  initActorRuntimeContext(config, providers, undefined, driver, createDefaultAppShellServices());
   return { config };
 }

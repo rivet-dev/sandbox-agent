@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { TaskRecord } from "@sandbox-agent/foundry-shared";
-import { filterTasks, formatRelativeAge, fuzzyMatch, summarizeTasks } from "../src/view-model.js";
+import type { HandoffRecord } from "@sandbox-agent/foundry-shared";
+import { filterHandoffs, formatRelativeAge, fuzzyMatch, summarizeHandoffs } from "../src/view-model.js";
 
-const sample: TaskRecord = {
+const sample: HandoffRecord = {
   workspaceId: "default",
   repoId: "repo-a",
   repoRemote: "https://example.com/repo-a.git",
-  taskId: "task-1",
+  handoffId: "handoff-1",
   branchName: "feature/test",
   title: "Test Title",
   task: "Do test",
@@ -48,19 +48,19 @@ describe("search helpers", () => {
   });
 
   it("filters rows across branch and title", () => {
-    const rows: TaskRecord[] = [
+    const rows: HandoffRecord[] = [
       sample,
       {
         ...sample,
-        taskId: "h2",
+        handoffId: "handoff-2",
         branchName: "docs/update-intro",
         title: "Docs Intro Refresh",
         status: "idle",
       },
     ];
-    expect(filterTasks(rows, "doc")).toHaveLength(1);
-    expect(filterTasks(rows, "h2")).toHaveLength(1);
-    expect(filterTasks(rows, "test")).toHaveLength(2);
+    expect(filterHandoffs(rows, "doc")).toHaveLength(1);
+    expect(filterHandoffs(rows, "h2")).toHaveLength(1);
+    expect(filterHandoffs(rows, "test")).toHaveLength(2);
   });
 });
 
@@ -71,13 +71,13 @@ describe("summary helpers", () => {
   });
 
   it("summarizes by status and provider", () => {
-    const rows: TaskRecord[] = [
+    const rows: HandoffRecord[] = [
       sample,
-      { ...sample, taskId: "task-2", status: "idle", providerId: "daytona" },
-      { ...sample, taskId: "task-3", status: "error", providerId: "daytona" },
+      { ...sample, handoffId: "handoff-2", status: "idle", providerId: "daytona" },
+      { ...sample, handoffId: "handoff-3", status: "error", providerId: "daytona" },
     ];
 
-    const summary = summarizeTasks(rows);
+    const summary = summarizeHandoffs(rows);
     expect(summary.total).toBe(3);
     expect(summary.byStatus.running).toBe(1);
     expect(summary.byStatus.idle).toBe(1);

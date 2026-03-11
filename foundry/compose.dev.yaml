@@ -1,17 +1,17 @@
-name: sandbox-agent-foundry
+name: foundry
 
 services:
   backend:
     build:
       context: ..
       dockerfile: foundry/docker/backend.dev.Dockerfile
-    image: sandbox-agent-foundry-backend-dev
+    image: foundry-backend-dev
     working_dir: /app
     environment:
       HF_BACKEND_HOST: "0.0.0.0"
       HF_BACKEND_PORT: "7741"
       HF_RIVET_MANAGER_PORT: "8750"
-      RIVETKIT_STORAGE_PATH: "/root/.local/share/sandbox-agent-foundry/rivetkit"
+      RIVETKIT_STORAGE_PATH: "/root/.local/share/foundry/rivetkit"
       # Pass through credentials needed for agent execution + PR creation in dev/e2e.
       # Do not hardcode secrets; set these in your environment when starting compose.
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
@@ -27,24 +27,26 @@ services:
       HF_DAYTONA_ENDPOINT: "${HF_DAYTONA_ENDPOINT:-}"
       HF_DAYTONA_API_KEY: "${HF_DAYTONA_API_KEY:-}"
     ports:
-      - "${FOUNDRY_BACKEND_HOST_PORT:-7741}:7741"
+      - "7741:7741"
       # RivetKit manager (used by browser clients after /api/rivet metadata redirect in dev)
-      - "${FOUNDRY_RIVET_MANAGER_HOST_PORT:-8750}:8750"
+      - "8750:8750"
     volumes:
       - "..:/app"
+      # The linked RivetKit checkout resolves from Foundry packages to /handoff/rivet-checkout in-container.
+      - "../../../handoff/rivet-checkout:/handoff/rivet-checkout:ro"
       # Reuse the host Codex auth profile for local sandbox-agent Codex sessions in dev.
       - "${HOME}/.codex:/root/.codex"
       # Keep backend dependency installs Linux-native instead of using host node_modules.
-      - "sandbox-agent-foundry_backend_root_node_modules:/app/node_modules"
-      - "sandbox-agent-foundry_backend_backend_node_modules:/app/foundry/packages/backend/node_modules"
-      - "sandbox-agent-foundry_backend_shared_node_modules:/app/foundry/packages/shared/node_modules"
-      - "sandbox-agent-foundry_backend_persist_rivet_node_modules:/app/sdks/persist-rivet/node_modules"
-      - "sandbox-agent-foundry_backend_typescript_node_modules:/app/sdks/typescript/node_modules"
-      - "sandbox-agent-foundry_backend_pnpm_store:/root/.local/share/pnpm/store"
+      - "foundry_backend_root_node_modules:/app/node_modules"
+      - "foundry_backend_backend_node_modules:/app/foundry/packages/backend/node_modules"
+      - "foundry_backend_shared_node_modules:/app/foundry/packages/shared/node_modules"
+      - "foundry_backend_persist_rivet_node_modules:/app/sdks/persist-rivet/node_modules"
+      - "foundry_backend_typescript_node_modules:/app/sdks/typescript/node_modules"
+      - "foundry_backend_pnpm_store:/root/.local/share/pnpm/store"
       # Persist backend-managed local git clones across container restarts.
-      - "sandbox-agent-foundry_git_repos:/root/.local/share/sandbox-agent-foundry/repos"
+      - "foundry_git_repos:/root/.local/share/foundry/repos"
       # Persist RivetKit local storage across container restarts.
-      - "sandbox-agent-foundry_rivetkit_storage:/root/.local/share/sandbox-agent-foundry/rivetkit"
+      - "foundry_rivetkit_storage:/root/.local/share/foundry/rivetkit"
 
   frontend:
     build:
@@ -57,31 +59,32 @@ services:
       HOME: "/tmp"
       HF_BACKEND_HTTP: "http://backend:7741"
     ports:
-      - "${FOUNDRY_FRONTEND_HOST_PORT:-4173}:4173"
+      - "4173:4173"
     volumes:
       - "..:/app"
-      # Ensure logs in .sandbox-agent-foundry/ persist on the host even if we change source mounts later.
-      - "./.sandbox-agent-foundry:/app/foundry/.sandbox-agent-foundry"
+      # Ensure logs in .foundry/ persist on the host even if we change source mounts later.
+      - "./.foundry:/app/foundry/.foundry"
+      - "../../../handoff/rivet-checkout:/handoff/rivet-checkout:ro"
       # Use Linux-native workspace dependencies inside the container instead of host node_modules.
-      - "sandbox-agent-foundry_node_modules:/app/node_modules"
-      - "sandbox-agent-foundry_client_node_modules:/app/foundry/packages/client/node_modules"
-      - "sandbox-agent-foundry_frontend_errors_node_modules:/app/foundry/packages/frontend-errors/node_modules"
-      - "sandbox-agent-foundry_frontend_node_modules:/app/foundry/packages/frontend/node_modules"
-      - "sandbox-agent-foundry_shared_node_modules:/app/foundry/packages/shared/node_modules"
-      - "sandbox-agent-foundry_pnpm_store:/tmp/.local/share/pnpm/store"
+      - "foundry_node_modules:/app/node_modules"
+      - "foundry_client_node_modules:/app/foundry/packages/client/node_modules"
+      - "foundry_frontend_errors_node_modules:/app/foundry/packages/frontend-errors/node_modules"
+      - "foundry_frontend_node_modules:/app/foundry/packages/frontend/node_modules"
+      - "foundry_shared_node_modules:/app/foundry/packages/shared/node_modules"
+      - "foundry_pnpm_store:/tmp/.local/share/pnpm/store"
 
 volumes:
-  sandbox-agent-foundry_backend_root_node_modules: {}
-  sandbox-agent-foundry_backend_backend_node_modules: {}
-  sandbox-agent-foundry_backend_shared_node_modules: {}
-  sandbox-agent-foundry_backend_persist_rivet_node_modules: {}
-  sandbox-agent-foundry_backend_typescript_node_modules: {}
-  sandbox-agent-foundry_backend_pnpm_store: {}
-  sandbox-agent-foundry_git_repos: {}
-  sandbox-agent-foundry_rivetkit_storage: {}
-  sandbox-agent-foundry_node_modules: {}
-  sandbox-agent-foundry_client_node_modules: {}
-  sandbox-agent-foundry_frontend_errors_node_modules: {}
-  sandbox-agent-foundry_frontend_node_modules: {}
-  sandbox-agent-foundry_shared_node_modules: {}
-  sandbox-agent-foundry_pnpm_store: {}
+  foundry_backend_root_node_modules: {}
+  foundry_backend_backend_node_modules: {}
+  foundry_backend_shared_node_modules: {}
+  foundry_backend_persist_rivet_node_modules: {}
+  foundry_backend_typescript_node_modules: {}
+  foundry_backend_pnpm_store: {}
+  foundry_git_repos: {}
+  foundry_rivetkit_storage: {}
+  foundry_node_modules: {}
+  foundry_client_node_modules: {}
+  foundry_frontend_errors_node_modules: {}
+  foundry_frontend_node_modules: {}
+  foundry_shared_node_modules: {}
+  foundry_pnpm_store: {}

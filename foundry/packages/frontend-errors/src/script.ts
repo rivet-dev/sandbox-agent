@@ -1,6 +1,6 @@
 import type { FrontendErrorCollectorScriptOptions } from "./types.js";
 
-const DEFAULT_REPORTER = "sandbox-agent-foundry";
+const DEFAULT_REPORTER = "foundry-frontend";
 
 export function createFrontendErrorCollectorScript(options: FrontendErrorCollectorScriptOptions): string {
   const config = {

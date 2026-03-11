@@ -4,42 +4,7 @@ import { LabelSmall } from "baseui/typography";
 import { Archive, ArrowUpFromLine, ChevronRight, FileCode, FilePlus, FileX, FolderOpen, GitPullRequest } from "lucide-react";
 
 import { type ContextMenuItem, ContextMenuOverlay, PanelHeaderBar, SPanel, ScrollBody, useContextMenu } from "./ui";
-import { type FileTreeNode, type Task, diffTabId } from "./view-model";
-
-const StatusCard = memo(function StatusCard({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
-  const [css, theme] = useStyletron();
-
-  return (
-    <div
-      className={css({
-        padding: "10px 12px",
-        borderRadius: "8px",
-        backgroundColor: theme.colors.backgroundSecondary,
-        border: `1px solid ${theme.colors.borderOpaque}`,
-        display: "flex",
-        flexDirection: "column",
-        gap: "4px",
-      })}
-    >
-      <LabelSmall color={theme.colors.contentTertiary} $style={{ fontSize: "10px", fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase" }}>
-        {label}
-      </LabelSmall>
-      <div
-        className={css({
-          color: theme.colors.contentPrimary,
-          fontSize: "12px",
-          fontWeight: 600,
-          fontFamily: mono ? '"IBM Plex Mono", monospace' : undefined,
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-        })}
-      >
-        {value}
-      </div>
-    </div>
-  );
-});
+import { type FileTreeNode, type Handoff, diffTabId } from "./view-model";
 
 const FileTree = memo(function FileTree({
   nodes,
@@ -122,31 +87,26 @@ const FileTree = memo(function FileTree({
 });
 
 export const RightSidebar = memo(function RightSidebar({
-  task,
+  handoff,
   activeTabId,
   onOpenDiff,
   onArchive,
-  onPush,
   onRevertFile,
   onPublishPr,
 }: {
-  task: Task;
+  handoff: Handoff;
   activeTabId: string | null;
   onOpenDiff: (path: string) => void;
   onArchive: () => void;
-  onPush: () => void;
   onRevertFile: (path: string) => void;
   onPublishPr: () => void;
 }) {
   const [css, theme] = useStyletron();
   const [rightTab, setRightTab] = useState<"changes" | "files">("changes");
   const contextMenu = useContextMenu();
-  const changedPaths = useMemo(() => new Set(task.fileChanges.map((file) => file.path)), [task.fileChanges]);
-  const isTerminal = task.status === "archived";
-  const canPush = !isTerminal && Boolean(task.branch);
-  const pullRequestUrl = task.pullRequest != null ? `https://github.com/${task.repoName}/pull/${task.pullRequest.number}` : null;
-  const pullRequestStatus =
-    task.pullRequest == null ? "Not published" : `#${task.pullRequest.number} ${task.pullRequest.status === "draft" ? "Draft" : "Ready"}`;
+  const changedPaths = useMemo(() => new Set(handoff.fileChanges.map((file) => file.path)), [handoff.fileChanges]);
+  const isTerminal = handoff.status === "archived";
+  const pullRequestUrl = handoff.pullRequest != null ? `https://github.com/${handoff.repoName}/pull/${handoff.pullRequest.number}` : null;
 
   const copyFilePath = useCallback(async (path: string) => {
     try {
@@ -175,8 +135,8 @@ export const RightSidebar = memo(function RightSidebar({
   );
 
   return (
-    <SPanel>
-      <PanelHeaderBar>
+    <SPanel $style={{ backgroundColor: "#09090b" }}>
+      <PanelHeaderBar $style={{ backgroundColor: "#0f0f11", borderBottom: "none" }}>
         <div className={css({ flex: 1 })} />
         {!isTerminal ? (
           <div className={css({ display: "flex", alignItems: "center", gap: "4px" })}>
@@ -190,222 +150,252 @@ export const RightSidebar = memo(function RightSidebar({
                 onPublishPr();
               }}
               className={css({
-                all: "unset",
-                display: "flex",
+                appearance: "none",
+                WebkitAppearance: "none",
+                background: "none",
+                border: "none",
+                margin: "0",
+                boxSizing: "border-box",
+                display: "inline-flex",
                 alignItems: "center",
                 gap: "6px",
                 padding: "6px 12px",
                 borderRadius: "8px",
                 fontSize: "12px",
                 fontWeight: 500,
+                lineHeight: 1,
                 color: "#e4e4e7",
                 cursor: "pointer",
                 transition: "all 200ms ease",
                 ":hover": { backgroundColor: "rgba(255, 255, 255, 0.06)", color: "#ffffff" },
               })}
             >
-              <GitPullRequest size={12} />
+              <GitPullRequest size={12} style={{ flexShrink: 0 }} />
               {pullRequestUrl ? "Open PR" : "Publish PR"}
             </button>
             <button
-              onClick={canPush ? onPush : undefined}
               className={css({
-                all: "unset",
-                display: "flex",
+                appearance: "none",
+                WebkitAppearance: "none",
+                background: "none",
+                border: "none",
+                margin: "0",
+                boxSizing: "border-box",
+                display: "inline-flex",
                 alignItems: "center",
                 gap: "6px",
                 padding: "6px 12px",
                 borderRadius: "8px",
                 fontSize: "12px",
                 fontWeight: 500,
-                color: canPush ? "#e4e4e7" : theme.colors.contentTertiary,
-                cursor: canPush ? "pointer" : "not-allowed",
-                opacity: canPush ? 1 : 0.5,
+                lineHeight: 1,
+                color: "#e4e4e7",
+                cursor: "pointer",
                 transition: "all 200ms ease",
                 ":hover": { backgroundColor: "rgba(255, 255, 255, 0.06)", color: "#ffffff" },
               })}
             >
-              <ArrowUpFromLine size={12} /> Push
+              <ArrowUpFromLine size={12} style={{ flexShrink: 0 }} /> Push
             </button>
             <button
               onClick={onArchive}
               className={css({
-                all: "unset",
-                display: "flex",
+                appearance: "none",
+                WebkitAppearance: "none",
+                background: "none",
+                border: "none",
+                margin: "0",
+                boxSizing: "border-box",
+                display: "inline-flex",
                 alignItems: "center",
                 gap: "6px",
                 padding: "6px 12px",
                 borderRadius: "8px",
                 fontSize: "12px",
                 fontWeight: 500,
+                lineHeight: 1,
                 color: "#e4e4e7",
                 cursor: "pointer",
                 transition: "all 200ms ease",
                 ":hover": { backgroundColor: "rgba(255, 255, 255, 0.06)", color: "#ffffff" },
               })}
             >
-              <Archive size={12} /> Archive
+              <Archive size={12} style={{ flexShrink: 0 }} /> Archive
             </button>
           </div>
         ) : null}
       </PanelHeaderBar>
 
-      <div
-        className={css({
-          display: "flex",
-          alignItems: "stretch",
-          borderBottom: `1px solid ${theme.colors.borderOpaque}`,
-          backgroundColor: theme.colors.backgroundSecondary,
-          height: "41px",
-          minHeight: "41px",
-          flexShrink: 0,
-        })}
-      >
-        <button
-          onClick={() => setRightTab("changes")}
+      <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", borderTop: "1px solid rgba(255, 255, 255, 0.10)" }}>
+        <div
           className={css({
-            all: "unset",
             display: "flex",
-            alignItems: "center",
-            gap: "6px",
-            height: "100%",
-            padding: "0 16px",
-            cursor: "pointer",
-            fontSize: "12px",
-            fontWeight: 600,
-            whiteSpace: "nowrap",
-            color: rightTab === "changes" ? theme.colors.contentPrimary : theme.colors.contentSecondary,
-            borderBottom: `2px solid ${rightTab === "changes" ? "#ff4f00" : "transparent"}`,
-            marginBottom: "-1px",
-            transitionProperty: "color, border-color",
-            transitionDuration: "200ms",
-            transitionTimingFunction: "ease",
-            ":hover": { color: "#e4e4e7" },
+            alignItems: "stretch",
+            gap: "4px",
+            borderBottom: `1px solid ${theme.colors.borderOpaque}`,
+            backgroundColor: "#09090b",
+            height: "41px",
+            minHeight: "41px",
+            flexShrink: 0,
           })}
         >
-          Changes
-          {task.fileChanges.length > 0 ? (
-            <span
-              className={css({
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                minWidth: "16px",
-                height: "16px",
-                padding: "0 5px",
-                background: "#3f3f46",
-                color: "#a1a1aa",
-                fontSize: "9px",
-                fontWeight: 700,
-                borderRadius: "8px",
-              })}
-            >
-              {task.fileChanges.length}
-            </span>
-          ) : null}
-        </button>
-        <button
-          onClick={() => setRightTab("files")}
-          className={css({
-            all: "unset",
-            display: "flex",
-            alignItems: "center",
-            height: "100%",
-            padding: "0 16px",
-            cursor: "pointer",
-            fontSize: "12px",
-            fontWeight: 600,
-            whiteSpace: "nowrap",
-            color: rightTab === "files" ? theme.colors.contentPrimary : theme.colors.contentSecondary,
-            borderBottom: `2px solid ${rightTab === "files" ? "#ff4f00" : "transparent"}`,
-            marginBottom: "-1px",
-            transitionProperty: "color, border-color",
-            transitionDuration: "200ms",
-            transitionTimingFunction: "ease",
-            ":hover": { color: "#e4e4e7" },
-          })}
-        >
-          All Files
-        </button>
-      </div>
-
-      <ScrollBody>
-        <div className={css({ padding: "12px 14px 0", display: "grid", gap: "8px" })}>
-          <StatusCard label="Branch" value={task.branch ?? "Not created"} mono />
-          <StatusCard label="Pull Request" value={pullRequestStatus} />
-        </div>
-        {rightTab === "changes" ? (
-          <div className={css({ padding: "10px 14px", display: "flex", flexDirection: "column", gap: "2px" })}>
-            {task.fileChanges.length === 0 ? (
-              <div className={css({ padding: "20px 0", textAlign: "center" })}>
-                <LabelSmall color={theme.colors.contentTertiary}>No changes yet</LabelSmall>
-              </div>
+          <button
+            onClick={() => setRightTab("changes")}
+            className={css({
+              appearance: "none",
+              WebkitAppearance: "none",
+              background: "none",
+              border: "none",
+              margin: "0",
+              boxSizing: "border-box",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
+              padding: "4px 12px",
+              marginTop: "6px",
+              marginBottom: "6px",
+              marginLeft: "6px",
+              borderRadius: "8px",
+              cursor: "pointer",
+              fontSize: "12px",
+              fontWeight: 500,
+              lineHeight: 1,
+              whiteSpace: "nowrap",
+              color: rightTab === "changes" ? theme.colors.contentPrimary : theme.colors.contentSecondary,
+              backgroundColor: rightTab === "changes" ? "rgba(255, 255, 255, 0.06)" : "transparent",
+              transitionProperty: "color, background-color",
+              transitionDuration: "200ms",
+              transitionTimingFunction: "ease",
+              ":hover": { color: "#e4e4e7", backgroundColor: rightTab === "changes" ? "rgba(255, 255, 255, 0.06)" : "rgba(255, 255, 255, 0.04)" },
+            })}
+          >
+            Changes
+            {handoff.fileChanges.length > 0 ? (
+              <span
+                className={css({
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  minWidth: "16px",
+                  height: "16px",
+                  padding: "0 5px",
+                  background: "#3f3f46",
+                  color: "#a1a1aa",
+                  fontSize: "9px",
+                  fontWeight: 700,
+                  borderRadius: "8px",
+                })}
+              >
+                {handoff.fileChanges.length}
+              </span>
             ) : null}
-            {task.fileChanges.map((file) => {
-              const isActive = activeTabId === diffTabId(file.path);
-              const TypeIcon = file.type === "A" ? FilePlus : file.type === "D" ? FileX : FileCode;
-              const iconColor = file.type === "A" ? "#7ee787" : file.type === "D" ? "#ffa198" : theme.colors.contentTertiary;
-              return (
-                <div
-                  key={file.path}
-                  onClick={() => onOpenDiff(file.path)}
-                  onContextMenu={(event) => openFileMenu(event, file.path)}
-                  className={css({
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "8px",
-                    padding: "6px 10px",
-                    borderRadius: "6px",
-                    backgroundColor: isActive ? "rgba(255, 255, 255, 0.06)" : "transparent",
-                    cursor: "pointer",
-                    ":hover": { backgroundColor: "rgba(255, 255, 255, 0.06)" },
-                  })}
-                >
-                  <TypeIcon size={14} color={iconColor} style={{ flexShrink: 0 }} />
+          </button>
+          <button
+            onClick={() => setRightTab("files")}
+            className={css({
+              appearance: "none",
+              WebkitAppearance: "none",
+              background: "none",
+              border: "none",
+              margin: "0",
+              boxSizing: "border-box",
+              display: "inline-flex",
+              alignItems: "center",
+              padding: "4px 12px",
+              marginTop: "6px",
+              marginBottom: "6px",
+              borderRadius: "8px",
+              cursor: "pointer",
+              fontSize: "12px",
+              fontWeight: 500,
+              lineHeight: 1,
+              whiteSpace: "nowrap",
+              color: rightTab === "files" ? theme.colors.contentPrimary : theme.colors.contentSecondary,
+              backgroundColor: rightTab === "files" ? "rgba(255, 255, 255, 0.06)" : "transparent",
+              transitionProperty: "color, background-color",
+              transitionDuration: "200ms",
+              transitionTimingFunction: "ease",
+              ":hover": { color: "#e4e4e7", backgroundColor: rightTab === "files" ? "rgba(255, 255, 255, 0.06)" : "rgba(255, 255, 255, 0.04)" },
+            })}
+          >
+            All Files
+          </button>
+        </div>
+
+        <ScrollBody>
+          {rightTab === "changes" ? (
+            <div className={css({ padding: "10px 14px", display: "flex", flexDirection: "column", gap: "2px" })}>
+              {handoff.fileChanges.length === 0 ? (
+                <div className={css({ padding: "20px 0", textAlign: "center" })}>
+                  <LabelSmall color={theme.colors.contentTertiary}>No changes yet</LabelSmall>
+                </div>
+              ) : null}
+              {handoff.fileChanges.map((file) => {
+                const isActive = activeTabId === diffTabId(file.path);
+                const TypeIcon = file.type === "A" ? FilePlus : file.type === "D" ? FileX : FileCode;
+                const iconColor = file.type === "A" ? "#7ee787" : file.type === "D" ? "#ffa198" : theme.colors.contentTertiary;
+                return (
                   <div
-                    className={css({
-                      flex: 1,
-                      minWidth: 0,
-                      fontFamily: '"IBM Plex Mono", monospace',
-                      fontSize: "12px",
-                      color: isActive ? theme.colors.contentPrimary : theme.colors.contentSecondary,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    })}
-                  >
-                    {file.path}
-                  </div>
-                  <div
+                    key={file.path}
+                    onClick={() => onOpenDiff(file.path)}
+                    onContextMenu={(event) => openFileMenu(event, file.path)}
                     className={css({
                       display: "flex",
                       alignItems: "center",
-                      gap: "6px",
-                      flexShrink: 0,
-                      fontSize: "11px",
-                      fontFamily: '"IBM Plex Mono", monospace',
+                      gap: "8px",
+                      padding: "6px 10px",
+                      borderRadius: "6px",
+                      backgroundColor: isActive ? "rgba(255, 255, 255, 0.06)" : "transparent",
+                      cursor: "pointer",
+                      ":hover": { backgroundColor: "rgba(255, 255, 255, 0.06)" },
                     })}
                   >
-                    <span className={css({ color: "#7ee787" })}>+{file.added}</span>
-                    <span className={css({ color: "#ffa198" })}>-{file.removed}</span>
-                    <span className={css({ color: iconColor, fontWeight: 600, width: "10px", textAlign: "center" })}>{file.type}</span>
+                    <TypeIcon size={14} color={iconColor} style={{ flexShrink: 0 }} />
+                    <div
+                      className={css({
+                        flex: 1,
+                        minWidth: 0,
+                        fontFamily: '"IBM Plex Mono", monospace',
+                        fontSize: "12px",
+                        color: isActive ? theme.colors.contentPrimary : theme.colors.contentSecondary,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      })}
+                    >
+                      {file.path}
+                    </div>
+                    <div
+                      className={css({
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "6px",
+                        flexShrink: 0,
+                        fontSize: "11px",
+                        fontFamily: '"IBM Plex Mono", monospace',
+                      })}
+                    >
+                      <span className={css({ color: "#7ee787" })}>+{file.added}</span>
+                      <span className={css({ color: "#ffa198" })}>-{file.removed}</span>
+                      <span className={css({ color: iconColor, fontWeight: 600, width: "10px", textAlign: "center" })}>{file.type}</span>
+                    </div>
                   </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className={css({ padding: "6px 0" })}>
+              {handoff.fileTree.length > 0 ? (
+                <FileTree nodes={handoff.fileTree} depth={0} onSelectFile={onOpenDiff} onFileContextMenu={openFileMenu} changedPaths={changedPaths} />
+              ) : (
+                <div className={css({ padding: "20px 0", textAlign: "center" })}>
+                  <LabelSmall color={theme.colors.contentTertiary}>No files yet</LabelSmall>
                 </div>
-              );
-            })}
-          </div>
-        ) : (
-          <div className={css({ padding: "6px 0" })}>
-            {task.fileTree.length > 0 ? (
-              <FileTree nodes={task.fileTree} depth={0} onSelectFile={onOpenDiff} onFileContextMenu={openFileMenu} changedPaths={changedPaths} />
-            ) : (
-              <div className={css({ padding: "20px 0", textAlign: "center" })}>
-                <LabelSmall color={theme.colors.contentTertiary}>No files yet</LabelSmall>
-              </div>
-            )}
-          </div>
-        )}
-      </ScrollBody>
+              )}
+            </div>
+          )}
+        </ScrollBody>
+      </div>
       {contextMenu.menu ? <ContextMenuOverlay menu={contextMenu.menu} onClose={contextMenu.close} /> : null}
     </SPanel>
   );

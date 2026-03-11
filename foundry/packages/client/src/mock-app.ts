@@ -5,6 +5,7 @@ export type MockBillingStatus = "active" | "trialing" | "past_due" | "scheduled_
 export type MockGithubInstallationStatus = "connected" | "install_required" | "reconnect_required";
 export type MockGithubSyncStatus = "pending" | "syncing" | "synced" | "error";
 export type MockOrganizationKind = "personal" | "organization";
+export type MockStarterRepoStatus = "pending" | "starred" | "skipped";
 
 export interface MockFoundryUser {
   id: string;
@@ -78,6 +79,15 @@ export interface MockFoundryAppSnapshot {
     currentUserId: string | null;
   };
   activeOrganizationId: string | null;
+  onboarding: {
+    starterRepo: {
+      repoFullName: string;
+      repoUrl: string;
+      status: MockStarterRepoStatus;
+      starredAt: number | null;
+      skippedAt: number | null;
+    };
+  };
   users: MockFoundryUser[];
   organizations: MockFoundryOrganization[];
 }
@@ -94,6 +104,8 @@ export interface MockFoundryAppClient {
   subscribe(listener: () => void): () => void;
   signInWithGithub(userId: string): Promise<void>;
   signOut(): Promise<void>;
+  skipStarterRepo(): Promise<void>;
+  starStarterRepo(organizationId: string): Promise<void>;
   selectOrganization(organizationId: string): Promise<void>;
   updateOrganizationProfile(input: UpdateMockOrganizationProfileInput): Promise<void>;
   triggerGithubSync(organizationId: string): Promise<void>;
@@ -135,6 +147,15 @@ function buildDefaultSnapshot(): MockFoundryAppSnapshot {
       currentUserId: null,
     },
     activeOrganizationId: null,
+    onboarding: {
+      starterRepo: {
+        repoFullName: "rivet-dev/sandbox-agent",
+        repoUrl: "https://github.com/rivet-dev/sandbox-agent",
+        status: "pending",
+        starredAt: null,
+        skippedAt: null,
+      },
+    },
     users: [
       {
         id: "user-nathan",
@@ -333,6 +354,15 @@ function parseStoredSnapshot(): MockFoundryAppSnapshot | null {
     }
     return {
       ...parsed,
+      onboarding: {
+        starterRepo: {
+          repoFullName: parsed.onboarding?.starterRepo?.repoFullName ?? "rivet-dev/sandbox-agent",
+          repoUrl: parsed.onboarding?.starterRepo?.repoUrl ?? "https://github.com/rivet-dev/sandbox-agent",
+          status: parsed.onboarding?.starterRepo?.status ?? "pending",
+          starredAt: parsed.onboarding?.starterRepo?.starredAt ?? null,
+          skippedAt: parsed.onboarding?.starterRepo?.skippedAt ?? null,
+        },
+      },
       organizations: (parsed.organizations ?? []).map((organization: MockFoundryOrganization & { repoImportStatus?: string }) => ({
         ...organization,
         github: {
@@ -413,6 +443,45 @@ class MockFoundryAppStore implements MockFoundryAppClient {
         currentUserId: null,
       },
       activeOrganizationId: null,
+      onboarding: {
+        starterRepo: {
+          ...current.onboarding.starterRepo,
+          status: "pending",
+          starredAt: null,
+          skippedAt: null,
+        },
+      },
+    }));
+  }
+
+  async skipStarterRepo(): Promise<void> {
+    await this.injectAsyncLatency();
+    this.updateSnapshot((current) => ({
+      ...current,
+      onboarding: {
+        starterRepo: {
+          ...current.onboarding.starterRepo,
+          status: "skipped",
+          skippedAt: Date.now(),
+          starredAt: null,
+        },
+      },
+    }));
+  }
+
+  async starStarterRepo(organizationId: string): Promise<void> {
+    await this.injectAsyncLatency();
+    this.requireOrganization(organizationId);
+    this.updateSnapshot((current) => ({
+      ...current,
+      onboarding: {
+        starterRepo: {
+          ...current.onboarding.starterRepo,
+          status: "starred",
+          starredAt: Date.now(),
+          skippedAt: null,
+        },
+      },
     }));
   }
 

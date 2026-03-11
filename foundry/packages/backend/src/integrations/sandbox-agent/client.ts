@@ -1,8 +1,20 @@
 import type { AgentType } from "@sandbox-agent/foundry-shared";
-import type { ListEventsRequest, ListPage, ListPageRequest, SessionEvent, SessionPersistDriver, SessionRecord } from "sandbox-agent";
+import type {
+  ListEventsRequest,
+  ListPage,
+  ListPageRequest,
+  ProcessCreateRequest,
+  ProcessInfo,
+  ProcessLogFollowQuery,
+  ProcessLogsResponse,
+  ProcessSignalQuery,
+  SessionEvent,
+  SessionPersistDriver,
+  SessionRecord,
+} from "sandbox-agent";
 import { SandboxAgent } from "sandbox-agent";
 
-export type AgentId = AgentType | "opencode" | "mock";
+export type AgentId = AgentType | "opencode";
 
 export interface SandboxSession {
   id: string;
@@ -29,24 +41,6 @@ export interface SandboxAgentClientOptions {
 }
 
 const DEFAULT_AGENT: AgentId = "codex";
-
-function hasClaudeCredentials(): boolean {
-  return Boolean(process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY);
-}
-
-function hasCodexCredentials(): boolean {
-  return Boolean(process.env.CODEX_API_KEY || process.env.OPENAI_API_KEY);
-}
-
-function resolveAvailableAgent(requested: AgentId): AgentId {
-  if (requested === "claude") {
-    return hasClaudeCredentials() ? requested : "mock";
-  }
-  if (requested === "codex") {
-    return hasCodexCredentials() ? requested : "mock";
-  }
-  return requested;
-}
 
 function modeIdForAgent(agent: AgentId): string | null {
   switch (agent) {
@@ -134,28 +128,27 @@ export class SandboxAgentClient {
 
   async createSession(request: string | SandboxSessionCreateRequest): Promise<SandboxSession> {
     const normalized: SandboxSessionCreateRequest = typeof request === "string" ? { prompt: request } : request;
-    const resolvedAgent = resolveAvailableAgent(normalized.agent ?? this.agent);
     const sdk = await this.sdk();
     // Do not wrap createSession in a local Promise.race timeout. The underlying SDK
     // call is not abortable, so local timeout races create overlapping ACP requests and
     // can produce duplicate/orphaned sessions while the original request is still running.
     const session = await sdk.createSession({
-      agent: resolvedAgent,
+      agent: normalized.agent ?? this.agent,
       sessionInit: {
         cwd: normalized.cwd ?? "/",
         mcpServers: [],
       },
     });
-    const modeId = modeIdForAgent(resolvedAgent);
+    const modeId = modeIdForAgent(normalized.agent ?? this.agent);
 
     // Codex defaults to a restrictive "read-only" preset in some environments.
-    // For Sandbox Agent Foundry automation we need to allow edits + command execution + network
+    // Foundry automation needs edits, command execution, and network access.
     // access (git push / PR creation). Use full-access where supported.
     //
     // If the agent doesn't support session modes, ignore.
     //
     // Do this in the background: ACP mode updates can occasionally time out (504),
-    // and waiting here can stall session creation long enough to trip task init
+    // and waiting here can stall session creation long enough to trip handoff init
     // step timeouts even though the session itself was created.
     if (modeId) {
       void session.rawSend("session/set_mode", { modeId }).catch(() => {
@@ -216,6 +209,36 @@ export class SandboxAgentClient {
   async listEvents(request: ListEventsRequest): Promise<ListPage<SessionEvent>> {
     const sdk = await this.sdk();
     return sdk.getEvents(request);
+  }
+
+  async createProcess(request: ProcessCreateRequest): Promise<ProcessInfo> {
+    const sdk = await this.sdk();
+    return await sdk.createProcess(request);
+  }
+
+  async listProcesses(): Promise<{ processes: ProcessInfo[] }> {
+    const sdk = await this.sdk();
+    return await sdk.listProcesses();
+  }
+
+  async getProcessLogs(processId: string, query: ProcessLogFollowQuery = {}): Promise<ProcessLogsResponse> {
+    const sdk = await this.sdk();
+    return await sdk.getProcessLogs(processId, query);
+  }
+
+  async stopProcess(processId: string, query?: ProcessSignalQuery): Promise<ProcessInfo> {
+    const sdk = await this.sdk();
+    return await sdk.stopProcess(processId, query);
+  }
+
+  async killProcess(processId: string, query?: ProcessSignalQuery): Promise<ProcessInfo> {
+    const sdk = await this.sdk();
+    return await sdk.killProcess(processId, query);
+  }
+
+  async deleteProcess(processId: string): Promise<void> {
+    const sdk = await this.sdk();
+    await sdk.deleteProcess(processId);
   }
 
   async sendPrompt(request: SandboxSessionPromptRequest): Promise<void> {
@@ -360,7 +383,7 @@ export class SandboxAgentClient {
 
     const sdk = await this.sdk();
     const session = await sdk.createSession({
-      agent: resolveAvailableAgent(this.agent),
+      agent: this.agent,
       sessionInit: {
         cwd: dir,
         mcpServers: [],

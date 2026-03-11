@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { type FoundryBillingPlanId, type FoundryOrganization, type FoundryOrganizationMember, type FoundryUser } from "@sandbox-agent/foundry-shared";
 import { useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, BadgeCheck, Building2, CreditCard, Github, ShieldCheck, Users } from "lucide-react";
+import { ArrowLeft, BadgeCheck, Building2, CreditCard, Github, ShieldCheck, Star, Users } from "lucide-react";
 import { activeMockUser, eligibleOrganizations, useMockAppClient, useMockAppSnapshot } from "../lib/mock-app";
 import { isMockFrontendClient } from "../lib/env";
 
@@ -407,6 +407,8 @@ export function MockOrganizationSelectorPage() {
   const user = activeMockUser(snapshot);
   const organizations: FoundryOrganization[] = eligibleOrganizations(snapshot);
   const navigate = useNavigate();
+  const starterRepo = snapshot.onboarding.starterRepo;
+  const starterRepoTarget = organizations.find((organization) => organization.kind === "organization") ?? organizations[0] ?? null;
 
   return (
     <PageShell
@@ -421,6 +423,53 @@ export function MockOrganizationSelectorPage() {
         })();
       }}
     >
+      <div
+        style={{
+          ...cardStyle(),
+          padding: "22px",
+          display: "grid",
+          gap: "16px",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "16px", flexWrap: "wrap" }}>
+          <div style={{ display: "grid", gap: "8px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+              <Star size={18} />
+              <div style={{ fontSize: "20px", fontWeight: 800 }}>Starter repo</div>
+            </div>
+            <div style={{ color: "#d4d4d8", lineHeight: 1.55, maxWidth: "72ch" }}>
+              Star <strong>{starterRepo.repoFullName}</strong> before entering the main app, or skip it and continue onboarding. This keeps the starter-repo ask
+              inside the funnel instead of interrupting the workspace later.
+            </div>
+          </div>
+          {starterRepo.status === "starred" ? (
+            <span style={badgeStyle("rgba(46, 160, 67, 0.16)", "#b7f0c3")}>Starred</span>
+          ) : starterRepo.status === "skipped" ? (
+            <span style={badgeStyle("rgba(255, 255, 255, 0.08)")}>Skipped for now</span>
+          ) : (
+            <span style={badgeStyle("rgba(255, 193, 7, 0.18)", "#ffe6a6")}>Optional</span>
+          )}
+        </div>
+        <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+          <button
+            type="button"
+            onClick={() => {
+              if (!starterRepoTarget) {
+                return;
+              }
+              void client.starStarterRepo(starterRepoTarget.id);
+            }}
+            style={primaryButtonStyle()}
+            disabled={!starterRepoTarget || starterRepo.status === "starred"}
+          >
+            <Star size={15} />
+            {starterRepo.status === "starred" ? "Repo starred" : "Star the Sandbox Agent repo"}
+          </button>
+          <button type="button" onClick={() => void client.skipStarterRepo()} style={secondaryButtonStyle()} disabled={starterRepo.status === "skipped"}>
+            {starterRepo.status === "skipped" ? "Skipped" : "Maybe later"}
+          </button>
+        </div>
+      </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "18px" }}>
         {organizations.map((organization) => (
           <div
@@ -520,7 +569,11 @@ export function MockOrganizationSettingsPage({ organization }: { organization: F
       user={user}
       title={`${organization.settings.displayName} settings`}
       eyebrow="Organization"
-      description="This mock settings surface covers the org profile, GitHub installation state, background repository sync controls, and the seat-accrual rule from the spec. It is intentionally product-shaped even though the real backend is not wired yet."
+      description={
+        isMockFrontendClient
+          ? "This mock settings surface covers the org profile, GitHub installation state, background repository sync controls, and the seat-accrual rule from the spec."
+          : "This settings surface is backed by the app-shell actor and covers organization profile, GitHub installation state, repository sync controls, and seat accrual."
+      }
       actions={
         <>
           <button type="button" onClick={() => void navigate({ to: "/organizations" })} style={secondaryButtonStyle()}>
@@ -548,7 +601,9 @@ export function MockOrganizationSettingsPage({ organization }: { organization: F
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "16px" }}>
               <div>
                 <div style={{ fontSize: "20px", fontWeight: 800 }}>Organization profile</div>
-                <div style={{ color: "#a1a1aa", fontSize: "14px" }}>Mock Better Auth org state persisted in the client package.</div>
+                <div style={{ color: "#a1a1aa", fontSize: "14px" }}>
+                  {isMockFrontendClient ? "Mock org state persisted in the client package." : "Organization profile persisted in the app-shell backend."}
+                </div>
               </div>
               {statusBadge(organization)}
             </div>
@@ -614,7 +669,11 @@ export function MockOrganizationSettingsPage({ organization }: { organization: F
               <Users size={18} />
               <div style={{ fontSize: "20px", fontWeight: 800 }}>Members and roles</div>
             </div>
-            <div style={{ color: "#a1a1aa", fontSize: "14px", marginBottom: "8px" }}>Mock org membership feeds seat accrual and billing previews.</div>
+            <div style={{ color: "#a1a1aa", fontSize: "14px", marginBottom: "8px" }}>
+              {isMockFrontendClient
+                ? "Mock org membership feeds seat accrual and billing previews."
+                : "Organization membership feeds seat accrual and billing state."}
+            </div>
             {organization.members.map((member) => (
               <MemberRow key={member.id} member={member} />
             ))}

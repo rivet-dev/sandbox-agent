@@ -3,37 +3,39 @@ import { desc, eq } from "drizzle-orm";
 import { Loop } from "rivetkit/workflow";
 import type {
   AddRepoInput,
-  CreateTaskInput,
+  CreateHandoffInput,
+  HandoffRecord,
+  HandoffSummary,
+  HandoffWorkbenchChangeModelInput,
+  HandoffWorkbenchCreateHandoffInput,
+  HandoffWorkbenchDiffInput,
+  HandoffWorkbenchRenameInput,
+  HandoffWorkbenchRenameSessionInput,
+  HandoffWorkbenchSelectInput,
+  HandoffWorkbenchSetSessionUnreadInput,
+  HandoffWorkbenchSendMessageInput,
+  HandoffWorkbenchSnapshot,
+  HandoffWorkbenchTabInput,
+  HandoffWorkbenchUpdateDraftInput,
   HistoryEvent,
   HistoryQueryInput,
-  ListTasksInput,
+  ListHandoffsInput,
   ProviderId,
   RepoOverview,
-  RepoRecord,
   RepoStackActionInput,
   RepoStackActionResult,
+  RepoRecord,
+  StarSandboxAgentRepoInput,
+  StarSandboxAgentRepoResult,
   SwitchResult,
-  TaskRecord,
-  TaskSummary,
-  TaskWorkbenchChangeModelInput,
-  TaskWorkbenchCreateTaskInput,
-  TaskWorkbenchDiffInput,
-  TaskWorkbenchRenameInput,
-  TaskWorkbenchRenameSessionInput,
-  TaskWorkbenchSelectInput,
-  TaskWorkbenchSetSessionUnreadInput,
-  TaskWorkbenchSendMessageInput,
-  TaskWorkbenchSnapshot,
-  TaskWorkbenchTabInput,
-  TaskWorkbenchUpdateDraftInput,
   WorkspaceUseInput,
 } from "@sandbox-agent/foundry-shared";
 import { getActorRuntimeContext } from "../context.js";
-import { getTask, getOrCreateHistory, getOrCreateRepo, selfWorkspace } from "../handles.js";
+import { getHandoff, getOrCreateHistory, getOrCreateProject, selfWorkspace } from "../handles.js";
 import { logActorWarning, resolveErrorMessage } from "../logging.js";
-import { normalizeRemoteUrl, repoIdFromRemote, repoLabelFromRemote } from "../../services/repo.js";
-import { taskLookup, repos, providerProfiles } from "./db/schema.js";
-import { agentTypeForModel } from "../task/workbench.js";
+import { normalizeRemoteUrl, repoIdFromRemote } from "../../services/repo.js";
+import { handoffLookup, repos, providerProfiles } from "./db/schema.js";
+import { agentTypeForModel } from "../handoff/workbench.js";
 import { expectQueueResponse } from "../../services/queue.js";
 import { workspaceAppActions } from "./app-shell.js";
 
@@ -45,12 +47,12 @@ interface RefreshProviderProfilesCommand {
   providerId?: ProviderId;
 }
 
-interface GetTaskInput {
+interface GetHandoffInput {
   workspaceId: string;
-  taskId: string;
+  handoffId: string;
 }
 
-interface TaskProxyActionInput extends GetTaskInput {
+interface HandoffProxyActionInput extends GetHandoffInput {
   reason?: string;
 }
 
@@ -59,7 +61,8 @@ interface RepoOverviewInput {
   repoId: string;
 }
 
-const WORKSPACE_QUEUE_NAMES = ["workspace.command.addRepo", "workspace.command.createTask", "workspace.command.refreshProviderProfiles"] as const;
+const WORKSPACE_QUEUE_NAMES = ["workspace.command.addRepo", "workspace.command.createHandoff", "workspace.command.refreshProviderProfiles"] as const;
+const SANDBOX_AGENT_REPO = "rivet-dev/sandbox-agent";
 
 type WorkspaceQueueName = (typeof WORKSPACE_QUEUE_NAMES)[number];
 
@@ -75,46 +78,41 @@ function assertWorkspace(c: { state: WorkspaceState }, workspaceId: string): voi
   }
 }
 
-async function resolveRepoId(c: any, taskId: string): Promise<string> {
-  const row = await c.db.select({ repoId: taskLookup.repoId }).from(taskLookup).where(eq(taskLookup.taskId, taskId)).get();
+async function resolveRepoId(c: any, handoffId: string): Promise<string> {
+  const row = await c.db.select({ repoId: handoffLookup.repoId }).from(handoffLookup).where(eq(handoffLookup.handoffId, handoffId)).get();
 
   if (!row) {
-    throw new Error(`Unknown task: ${taskId} (not in lookup)`);
+    throw new Error(`Unknown handoff: ${handoffId} (not in lookup)`);
   }
 
   return row.repoId;
 }
 
-async function upsertTaskLookupRow(c: any, taskId: string, repoId: string): Promise<void> {
+async function upsertHandoffLookupRow(c: any, handoffId: string, repoId: string): Promise<void> {
   await c.db
-    .insert(taskLookup)
+    .insert(handoffLookup)
     .values({
-      taskId,
+      handoffId,
       repoId,
     })
     .onConflictDoUpdate({
-      target: taskLookup.taskId,
+      target: handoffLookup.handoffId,
       set: { repoId },
     })
     .run();
 }
 
-async function collectAllTaskSummaries(c: any): Promise<TaskSummary[]> {
+async function collectAllHandoffSummaries(c: any): Promise<HandoffSummary[]> {
   const repoRows = await c.db.select({ repoId: repos.repoId, remoteUrl: repos.remoteUrl }).from(repos).orderBy(desc(repos.updatedAt)).all();
 
-  const all = new Map<string, TaskSummary>();
+  const all: HandoffSummary[] = [];
   for (const row of repoRows) {
     try {
-      const repo = await getOrCreateRepo(c, c.state.workspaceId, row.repoId, row.remoteUrl);
-      const snapshot = await repo.listTaskSummaries({ includeArchived: true });
-      for (const summary of snapshot) {
-        const existing = all.get(summary.taskId);
-        if (!existing || summary.updatedAt > existing.updatedAt) {
-          all.set(summary.taskId, summary);
-        }
-      }
+      const project = await getOrCreateProject(c, c.state.workspaceId, row.repoId, row.remoteUrl);
+      const snapshot = await project.listHandoffSummaries({ includeArchived: true });
+      all.push(...snapshot);
     } catch (error) {
-      logActorWarning("workspace", "failed collecting tasks for repo", {
+      logActorWarning("workspace", "failed collecting handoffs for repo", {
         workspaceId: c.state.workspaceId,
         repoId: row.repoId,
         error: resolveErrorMessage(error),
@@ -122,39 +120,62 @@ async function collectAllTaskSummaries(c: any): Promise<TaskSummary[]> {
     }
   }
 
-  return [...all.values()].sort((a, b) => b.updatedAt - a.updatedAt);
+  all.sort((a, b) => b.updatedAt - a.updatedAt);
+  return all;
 }
 
-async function buildWorkbenchSnapshot(c: any): Promise<TaskWorkbenchSnapshot> {
+function repoLabelFromRemote(remoteUrl: string): string {
+  try {
+    const url = new URL(remoteUrl.startsWith("http") ? remoteUrl : `https://${remoteUrl}`);
+    const parts = url.pathname.replace(/\/+$/, "").split("/").filter(Boolean);
+    if (parts.length >= 2) {
+      return `${parts[0]}/${(parts[1] ?? "").replace(/\.git$/, "")}`;
+    }
+  } catch {
+    // ignore
+  }
+
+  return remoteUrl;
+}
+
+async function buildWorkbenchSnapshot(c: any): Promise<HandoffWorkbenchSnapshot> {
   const repoRows = await c.db
     .select({ repoId: repos.repoId, remoteUrl: repos.remoteUrl, updatedAt: repos.updatedAt })
     .from(repos)
     .orderBy(desc(repos.updatedAt))
     .all();
 
-  const tasksById = new Map<string, any>();
-  const repoSections: Array<any> = [];
+  const handoffs: Array<any> = [];
+  const projects: Array<any> = [];
   for (const row of repoRows) {
-    const repoTasks: Array<any> = [];
+    const projectHandoffs: Array<any> = [];
     try {
-      const repo = await getOrCreateRepo(c, c.state.workspaceId, row.repoId, row.remoteUrl);
-      const summaries = await repo.listTaskSummaries({ includeArchived: true });
+      const project = await getOrCreateProject(c, c.state.workspaceId, row.repoId, row.remoteUrl);
+      const summaries = await project.listHandoffSummaries({ includeArchived: true });
       for (const summary of summaries) {
         try {
-          const task = getTask(c, c.state.workspaceId, row.repoId, summary.taskId);
-          const snapshot = await task.getWorkbench({});
-          if (!tasksById.has(snapshot.id)) {
-            tasksById.set(snapshot.id, snapshot);
-          }
-          repoTasks.push(snapshot);
+          await upsertHandoffLookupRow(c, summary.handoffId, row.repoId);
+          const handoff = getHandoff(c, c.state.workspaceId, row.repoId, summary.handoffId);
+          const snapshot = await handoff.getWorkbench({});
+          handoffs.push(snapshot);
+          projectHandoffs.push(snapshot);
         } catch (error) {
-          logActorWarning("workspace", "failed collecting workbench task", {
+          logActorWarning("workspace", "failed collecting workbench handoff", {
             workspaceId: c.state.workspaceId,
             repoId: row.repoId,
-            taskId: summary.taskId,
+            handoffId: summary.handoffId,
             error: resolveErrorMessage(error),
           });
         }
+      }
+
+      if (projectHandoffs.length > 0) {
+        projects.push({
+          id: row.repoId,
+          label: repoLabelFromRemote(row.remoteUrl),
+          updatedAtMs: projectHandoffs[0]?.updatedAtMs ?? row.updatedAt,
+          handoffs: projectHandoffs.sort((left, right) => right.updatedAtMs - left.updatedAtMs),
+        });
       }
     } catch (error) {
       logActorWarning("workspace", "failed collecting workbench repo snapshot", {
@@ -163,33 +184,24 @@ async function buildWorkbenchSnapshot(c: any): Promise<TaskWorkbenchSnapshot> {
         error: resolveErrorMessage(error),
       });
     }
-
-    const sortedRepoTasks = repoTasks.sort((left, right) => right.updatedAtMs - left.updatedAtMs);
-    repoSections.push({
-      id: row.repoId,
-      label: repoLabelFromRemote(row.remoteUrl),
-      updatedAtMs: sortedRepoTasks[0]?.updatedAtMs ?? row.updatedAt,
-      tasks: sortedRepoTasks,
-    });
   }
 
-  const tasks = [...tasksById.values()].sort((left, right) => right.updatedAtMs - left.updatedAtMs);
-  repoSections.sort((left, right) => right.updatedAtMs - left.updatedAtMs);
+  handoffs.sort((left, right) => right.updatedAtMs - left.updatedAtMs);
+  projects.sort((left, right) => right.updatedAtMs - left.updatedAtMs);
   return {
     workspaceId: c.state.workspaceId,
     repos: repoRows.map((row) => ({
       id: row.repoId,
       label: repoLabelFromRemote(row.remoteUrl),
     })),
-    repoSections,
-    tasks,
+    projects,
+    handoffs,
   };
 }
 
-async function requireWorkbenchTask(c: any, taskId: string) {
-  const repoId = await resolveRepoId(c, taskId);
-  void repoId;
-  return getTask(c, c.state.workspaceId, taskId);
+async function requireWorkbenchHandoff(c: any, handoffId: string) {
+  const repoId = await resolveRepoId(c, handoffId);
+  return getHandoff(c, c.state.workspaceId, repoId, handoffId);
 }
 
 async function addRepoMutation(c: any, input: AddRepoInput): Promise<RepoRecord> {
@@ -233,7 +245,7 @@ async function addRepoMutation(c: any, input: AddRepoInput): Promise<RepoRecord>
   };
 }
 
-async function createTaskMutation(c: any, input: CreateTaskInput): Promise<TaskRecord> {
+async function createHandoffMutation(c: any, input: CreateHandoffInput): Promise<HandoffRecord> {
   assertWorkspace(c, input.workspaceId);
 
   const { providers } = getActorRuntimeContext();
@@ -262,11 +274,10 @@ async function createTaskMutation(c: any, input: CreateTaskInput): Promise<TaskR
     })
     .run();
 
-  const repo = await getOrCreateRepo(c, c.state.workspaceId, repoId, remoteUrl);
-  await repo.ensure({ remoteUrl });
+  const project = await getOrCreateProject(c, c.state.workspaceId, repoId, remoteUrl);
+  await project.ensure({ remoteUrl });
 
-  const created = await repo.createTask({
-    repoIds: input.repoIds,
+  const created = await project.createHandoff({
     task: input.task,
     providerId,
     agentType: input.agentType ?? null,
@@ -276,37 +287,19 @@ async function createTaskMutation(c: any, input: CreateTaskInput): Promise<TaskR
   });
 
   await c.db
-    .insert(taskLookup)
+    .insert(handoffLookup)
     .values({
-      taskId: created.taskId,
+      handoffId: created.handoffId,
       repoId,
     })
     .onConflictDoUpdate({
-      target: taskLookup.taskId,
+      target: handoffLookup.handoffId,
       set: { repoId },
     })
     .run();
 
-  const task = getTask(c, c.state.workspaceId, repoId, created.taskId);
-  await task.provision({ providerId });
-
-  for (const linkedRepoId of input.repoIds ?? []) {
-    if (linkedRepoId === repoId) {
-      continue;
-    }
-
-    const linkedRepoRow = await c.db.select({ remoteUrl: repos.remoteUrl }).from(repos).where(eq(repos.repoId, linkedRepoId)).get();
-    if (!linkedRepoRow) {
-      throw new Error(`Unknown linked repo: ${linkedRepoId}`);
-    }
-
-    const linkedRepo = await getOrCreateRepo(c, c.state.workspaceId, linkedRepoId, linkedRepoRow.remoteUrl);
-    await linkedRepo.ensure({ remoteUrl: linkedRepoRow.remoteUrl });
-    await linkedRepo.linkTask({
-      taskId: created.taskId,
-      branchName: null,
-    });
-  }
+  const handoff = getHandoff(c, c.state.workspaceId, repoId, created.handoffId);
+  await handoff.provision({ providerId });
 
   await workspaceActions.notifyWorkbenchUpdated(c);
   return created;
@@ -356,11 +349,11 @@ export async function runWorkspaceWorkflow(ctx: any): Promise<void> {
       return Loop.continue(undefined);
     }
 
-    if (msg.name === "workspace.command.createTask") {
+    if (msg.name === "workspace.command.createHandoff") {
       const result = await loopCtx.step({
-        name: "workspace-create-task",
+        name: "workspace-create-handoff",
         timeout: 12 * 60_000,
-        run: async () => createTaskMutation(loopCtx, msg.body as CreateTaskInput),
+        run: async () => createHandoffMutation(loopCtx, msg.body as CreateHandoffInput),
       });
       await msg.complete(result);
       return Loop.continue(undefined);
@@ -379,7 +372,6 @@ export async function runWorkspaceWorkflow(ctx: any): Promise<void> {
 
 export const workspaceActions = {
   ...workspaceAppActions,
-
   async useWorkspace(c: any, input: WorkspaceUseInput): Promise<{ workspaceId: string }> {
     assertWorkspace(c, input.workspaceId);
     return { workspaceId: c.state.workspaceId };
@@ -418,17 +410,27 @@ export const workspaceActions = {
     }));
   },
 
-  async createTask(c: any, input: CreateTaskInput): Promise<TaskRecord> {
+  async createHandoff(c: any, input: CreateHandoffInput): Promise<HandoffRecord> {
     const self = selfWorkspace(c);
-    return expectQueueResponse<TaskRecord>(
-      await self.send(workspaceWorkflowQueueName("workspace.command.createTask"), input, {
+    return expectQueueResponse<HandoffRecord>(
+      await self.send(workspaceWorkflowQueueName("workspace.command.createHandoff"), input, {
         wait: true,
         timeout: 12 * 60_000,
       }),
     );
   },
 
-  async getWorkbench(c: any, input: WorkspaceUseInput): Promise<TaskWorkbenchSnapshot> {
+  async starSandboxAgentRepo(c: any, input: StarSandboxAgentRepoInput): Promise<StarSandboxAgentRepoResult> {
+    assertWorkspace(c, input.workspaceId);
+    const { driver } = getActorRuntimeContext();
+    await driver.github.starRepository(SANDBOX_AGENT_REPO);
+    return {
+      repo: SANDBOX_AGENT_REPO,
+      starredAt: Date.now(),
+    };
+  },
+
+  async getWorkbench(c: any, input: WorkspaceUseInput): Promise<HandoffWorkbenchSnapshot> {
     assertWorkspace(c, input.workspaceId);
     return await buildWorkbenchSnapshot(c);
   },
@@ -437,85 +439,84 @@ export const workspaceActions = {
     c.broadcast("workbenchUpdated", { at: Date.now() });
   },
 
-  async createWorkbenchTask(c: any, input: TaskWorkbenchCreateTaskInput): Promise<{ taskId: string }> {
-    const created = await workspaceActions.createTask(c, {
+  async createWorkbenchHandoff(c: any, input: HandoffWorkbenchCreateHandoffInput): Promise<{ handoffId: string }> {
+    const created = await workspaceActions.createHandoff(c, {
       workspaceId: c.state.workspaceId,
       repoId: input.repoId,
-      ...(input.repoIds?.length ? { repoIds: input.repoIds } : {}),
       task: input.task,
       ...(input.title ? { explicitTitle: input.title } : {}),
       ...(input.branch ? { explicitBranchName: input.branch } : {}),
       ...(input.model ? { agentType: agentTypeForModel(input.model) } : {}),
     });
-    return { taskId: created.taskId };
+    return { handoffId: created.handoffId };
   },
 
-  async markWorkbenchUnread(c: any, input: TaskWorkbenchSelectInput): Promise<void> {
-    const task = await requireWorkbenchTask(c, input.taskId);
-    await task.markWorkbenchUnread({});
+  async markWorkbenchUnread(c: any, input: HandoffWorkbenchSelectInput): Promise<void> {
+    const handoff = await requireWorkbenchHandoff(c, input.handoffId);
+    await handoff.markWorkbenchUnread({});
   },
 
-  async renameWorkbenchTask(c: any, input: TaskWorkbenchRenameInput): Promise<void> {
-    const task = await requireWorkbenchTask(c, input.taskId);
-    await task.renameWorkbenchTask(input);
+  async renameWorkbenchHandoff(c: any, input: HandoffWorkbenchRenameInput): Promise<void> {
+    const handoff = await requireWorkbenchHandoff(c, input.handoffId);
+    await handoff.renameWorkbenchHandoff(input);
   },
 
-  async renameWorkbenchBranch(c: any, input: TaskWorkbenchRenameInput): Promise<void> {
-    const task = await requireWorkbenchTask(c, input.taskId);
-    await task.renameWorkbenchBranch(input);
+  async renameWorkbenchBranch(c: any, input: HandoffWorkbenchRenameInput): Promise<void> {
+    const handoff = await requireWorkbenchHandoff(c, input.handoffId);
+    await handoff.renameWorkbenchBranch(input);
   },
 
-  async createWorkbenchSession(c: any, input: TaskWorkbenchSelectInput & { model?: string }): Promise<{ tabId: string }> {
-    const task = await requireWorkbenchTask(c, input.taskId);
-    return await task.createWorkbenchSession({ ...(input.model ? { model: input.model } : {}) });
+  async createWorkbenchSession(c: any, input: HandoffWorkbenchSelectInput & { model?: string }): Promise<{ tabId: string }> {
+    const handoff = await requireWorkbenchHandoff(c, input.handoffId);
+    return await handoff.createWorkbenchSession({ ...(input.model ? { model: input.model } : {}) });
   },
 
-  async renameWorkbenchSession(c: any, input: TaskWorkbenchRenameSessionInput): Promise<void> {
-    const task = await requireWorkbenchTask(c, input.taskId);
-    await task.renameWorkbenchSession(input);
+  async renameWorkbenchSession(c: any, input: HandoffWorkbenchRenameSessionInput): Promise<void> {
+    const handoff = await requireWorkbenchHandoff(c, input.handoffId);
+    await handoff.renameWorkbenchSession(input);
   },
 
-  async setWorkbenchSessionUnread(c: any, input: TaskWorkbenchSetSessionUnreadInput): Promise<void> {
-    const task = await requireWorkbenchTask(c, input.taskId);
-    await task.setWorkbenchSessionUnread(input);
+  async setWorkbenchSessionUnread(c: any, input: HandoffWorkbenchSetSessionUnreadInput): Promise<void> {
+    const handoff = await requireWorkbenchHandoff(c, input.handoffId);
+    await handoff.setWorkbenchSessionUnread(input);
   },
 
-  async updateWorkbenchDraft(c: any, input: TaskWorkbenchUpdateDraftInput): Promise<void> {
-    const task = await requireWorkbenchTask(c, input.taskId);
-    await task.updateWorkbenchDraft(input);
+  async updateWorkbenchDraft(c: any, input: HandoffWorkbenchUpdateDraftInput): Promise<void> {
+    const handoff = await requireWorkbenchHandoff(c, input.handoffId);
+    await handoff.updateWorkbenchDraft(input);
   },
 
-  async changeWorkbenchModel(c: any, input: TaskWorkbenchChangeModelInput): Promise<void> {
-    const task = await requireWorkbenchTask(c, input.taskId);
-    await task.changeWorkbenchModel(input);
+  async changeWorkbenchModel(c: any, input: HandoffWorkbenchChangeModelInput): Promise<void> {
+    const handoff = await requireWorkbenchHandoff(c, input.handoffId);
+    await handoff.changeWorkbenchModel(input);
   },
 
-  async sendWorkbenchMessage(c: any, input: TaskWorkbenchSendMessageInput): Promise<void> {
-    const task = await requireWorkbenchTask(c, input.taskId);
-    await task.sendWorkbenchMessage(input);
+  async sendWorkbenchMessage(c: any, input: HandoffWorkbenchSendMessageInput): Promise<void> {
+    const handoff = await requireWorkbenchHandoff(c, input.handoffId);
+    await handoff.sendWorkbenchMessage(input);
   },
 
-  async stopWorkbenchSession(c: any, input: TaskWorkbenchTabInput): Promise<void> {
-    const task = await requireWorkbenchTask(c, input.taskId);
-    await task.stopWorkbenchSession(input);
+  async stopWorkbenchSession(c: any, input: HandoffWorkbenchTabInput): Promise<void> {
+    const handoff = await requireWorkbenchHandoff(c, input.handoffId);
+    await handoff.stopWorkbenchSession(input);
   },
 
-  async closeWorkbenchSession(c: any, input: TaskWorkbenchTabInput): Promise<void> {
-    const task = await requireWorkbenchTask(c, input.taskId);
-    await task.closeWorkbenchSession(input);
+  async closeWorkbenchSession(c: any, input: HandoffWorkbenchTabInput): Promise<void> {
+    const handoff = await requireWorkbenchHandoff(c, input.handoffId);
+    await handoff.closeWorkbenchSession(input);
   },
 
-  async publishWorkbenchPr(c: any, input: TaskWorkbenchSelectInput): Promise<void> {
-    const task = await requireWorkbenchTask(c, input.taskId);
-    await task.publishWorkbenchPr({});
+  async publishWorkbenchPr(c: any, input: HandoffWorkbenchSelectInput): Promise<void> {
+    const handoff = await requireWorkbenchHandoff(c, input.handoffId);
+    await handoff.publishWorkbenchPr({});
   },
 
-  async revertWorkbenchFile(c: any, input: TaskWorkbenchDiffInput): Promise<void> {
-    const task = await requireWorkbenchTask(c, input.taskId);
-    await task.revertWorkbenchFile(input);
+  async revertWorkbenchFile(c: any, input: HandoffWorkbenchDiffInput): Promise<void> {
+    const handoff = await requireWorkbenchHandoff(c, input.handoffId);
+    await handoff.revertWorkbenchFile(input);
   },
 
-  async listTasks(c: any, input: ListTasksInput): Promise<TaskSummary[]> {
+  async listHandoffs(c: any, input: ListHandoffsInput): Promise<HandoffSummary[]> {
     assertWorkspace(c, input.workspaceId);
 
     if (input.repoId) {
@@ -524,11 +525,11 @@ export const workspaceActions = {
         throw new Error(`Unknown repo: ${input.repoId}`);
       }
 
-      const repo = await getOrCreateRepo(c, c.state.workspaceId, input.repoId, repoRow.remoteUrl);
-      return await repo.listTaskSummaries({ includeArchived: true });
+      const project = await getOrCreateProject(c, c.state.workspaceId, input.repoId, repoRow.remoteUrl);
+      return await project.listHandoffSummaries({ includeArchived: true });
     }
 
-    return await collectAllTaskSummaries(c);
+    return await collectAllHandoffSummaries(c);
   },
 
   async getRepoOverview(c: any, input: RepoOverviewInput): Promise<RepoOverview> {
@@ -539,9 +540,9 @@ export const workspaceActions = {
       throw new Error(`Unknown repo: ${input.repoId}`);
     }
 
-    const repo = await getOrCreateRepo(c, c.state.workspaceId, input.repoId, repoRow.remoteUrl);
-    await repo.ensure({ remoteUrl: repoRow.remoteUrl });
-    return await repo.getRepoOverview({});
+    const project = await getOrCreateProject(c, c.state.workspaceId, input.repoId, repoRow.remoteUrl);
+    await project.ensure({ remoteUrl: repoRow.remoteUrl });
+    return await project.getRepoOverview({});
   },
 
   async runRepoStackAction(c: any, input: RepoStackActionInput): Promise<RepoStackActionResult> {
@@ -552,25 +553,24 @@ export const workspaceActions = {
       throw new Error(`Unknown repo: ${input.repoId}`);
     }
 
-    const repo = await getOrCreateRepo(c, c.state.workspaceId, input.repoId, repoRow.remoteUrl);
-    await repo.ensure({ remoteUrl: repoRow.remoteUrl });
-    return await repo.runRepoStackAction({
+    const project = await getOrCreateProject(c, c.state.workspaceId, input.repoId, repoRow.remoteUrl);
+    await project.ensure({ remoteUrl: repoRow.remoteUrl });
+    return await project.runRepoStackAction({
       action: input.action,
       branchName: input.branchName,
       parentBranch: input.parentBranch,
     });
   },
 
-  async switchTask(c: any, taskId: string): Promise<SwitchResult> {
-    const repoId = await resolveRepoId(c, taskId);
-    void repoId;
-    const h = getTask(c, c.state.workspaceId, taskId);
+  async switchHandoff(c: any, handoffId: string): Promise<SwitchResult> {
+    const repoId = await resolveRepoId(c, handoffId);
+    const h = getHandoff(c, c.state.workspaceId, repoId, handoffId);
     const record = await h.get();
     const switched = await h.switch();
 
     return {
       workspaceId: c.state.workspaceId,
-      taskId,
+      handoffId,
       providerId: record.providerId,
       switchTarget: switched.switchTarget,
     };
@@ -597,7 +597,7 @@ export const workspaceActions = {
         const hist = await getOrCreateHistory(c, c.state.workspaceId, row.repoId);
         const items = await hist.list({
           branch: input.branch,
-          taskId: input.taskId,
+          handoffId: input.handoffId,
           limit,
         });
         allEvents.push(...items);
@@ -614,65 +614,59 @@ export const workspaceActions = {
     return allEvents.slice(0, limit);
   },
 
-  async getTask(c: any, input: GetTaskInput): Promise<TaskRecord> {
+  async getHandoff(c: any, input: GetHandoffInput): Promise<HandoffRecord> {
     assertWorkspace(c, input.workspaceId);
 
-    const repoId = await resolveRepoId(c, input.taskId);
+    const repoId = await resolveRepoId(c, input.handoffId);
 
     const repoRow = await c.db.select({ remoteUrl: repos.remoteUrl }).from(repos).where(eq(repos.repoId, repoId)).get();
     if (!repoRow) {
       throw new Error(`Unknown repo: ${repoId}`);
     }
 
-    const repo = await getOrCreateRepo(c, c.state.workspaceId, repoId, repoRow.remoteUrl);
-    return await repo.getTaskEnriched({ taskId: input.taskId });
+    const project = await getOrCreateProject(c, c.state.workspaceId, repoId, repoRow.remoteUrl);
+    return await project.getHandoffEnriched({ handoffId: input.handoffId });
   },
 
-  async attachTask(c: any, input: TaskProxyActionInput): Promise<{ target: string; sessionId: string | null }> {
+  async attachHandoff(c: any, input: HandoffProxyActionInput): Promise<{ target: string; sessionId: string | null }> {
     assertWorkspace(c, input.workspaceId);
-    const repoId = await resolveRepoId(c, input.taskId);
-    void repoId;
-    const h = getTask(c, c.state.workspaceId, input.taskId);
+    const repoId = await resolveRepoId(c, input.handoffId);
+    const h = getHandoff(c, c.state.workspaceId, repoId, input.handoffId);
     return await h.attach({ reason: input.reason });
   },
 
-  async pushTask(c: any, input: TaskProxyActionInput): Promise<void> {
+  async pushHandoff(c: any, input: HandoffProxyActionInput): Promise<void> {
     assertWorkspace(c, input.workspaceId);
-    const repoId = await resolveRepoId(c, input.taskId);
-    void repoId;
-    const h = getTask(c, c.state.workspaceId, input.taskId);
+    const repoId = await resolveRepoId(c, input.handoffId);
+    const h = getHandoff(c, c.state.workspaceId, repoId, input.handoffId);
     await h.push({ reason: input.reason });
   },
 
-  async syncTask(c: any, input: TaskProxyActionInput): Promise<void> {
+  async syncHandoff(c: any, input: HandoffProxyActionInput): Promise<void> {
     assertWorkspace(c, input.workspaceId);
-    const repoId = await resolveRepoId(c, input.taskId);
-    void repoId;
-    const h = getTask(c, c.state.workspaceId, input.taskId);
+    const repoId = await resolveRepoId(c, input.handoffId);
+    const h = getHandoff(c, c.state.workspaceId, repoId, input.handoffId);
     await h.sync({ reason: input.reason });
   },
 
-  async mergeTask(c: any, input: TaskProxyActionInput): Promise<void> {
+  async mergeHandoff(c: any, input: HandoffProxyActionInput): Promise<void> {
     assertWorkspace(c, input.workspaceId);
-    const repoId = await resolveRepoId(c, input.taskId);
-    void repoId;
-    const h = getTask(c, c.state.workspaceId, input.taskId);
+    const repoId = await resolveRepoId(c, input.handoffId);
+    const h = getHandoff(c, c.state.workspaceId, repoId, input.handoffId);
     await h.merge({ reason: input.reason });
   },
 
-  async archiveTask(c: any, input: TaskProxyActionInput): Promise<void> {
+  async archiveHandoff(c: any, input: HandoffProxyActionInput): Promise<void> {
     assertWorkspace(c, input.workspaceId);
-    const repoId = await resolveRepoId(c, input.taskId);
-    void repoId;
-    const h = getTask(c, c.state.workspaceId, input.taskId);
+    const repoId = await resolveRepoId(c, input.handoffId);
+    const h = getHandoff(c, c.state.workspaceId, repoId, input.handoffId);
     await h.archive({ reason: input.reason });
   },
 
-  async killTask(c: any, input: TaskProxyActionInput): Promise<void> {
+  async killHandoff(c: any, input: HandoffProxyActionInput): Promise<void> {
     assertWorkspace(c, input.workspaceId);
-    const repoId = await resolveRepoId(c, input.taskId);
-    void repoId;
-    const h = getTask(c, c.state.workspaceId, input.taskId);
+    const repoId = await resolveRepoId(c, input.handoffId);
+    const h = getHandoff(c, c.state.workspaceId, repoId, input.handoffId);
     await h.kill({ reason: input.reason });
   },
 };

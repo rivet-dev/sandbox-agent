@@ -1,7 +1,5 @@
 packages:
   - "frontend/packages/*"
-  - "factory/packages/*"
-  - "!factory/packages/cli"
   - "foundry/packages/*"
   - "!foundry/packages/cli"
   - "sdks/*"

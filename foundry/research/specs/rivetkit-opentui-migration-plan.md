@@ -16,7 +16,7 @@ Date: 2026-02-08
 9. Every actor key is prefixed by workspace.
 10. `--workspace` is optional; commands resolve workspace via flag -> config default -> `default`.
 11. RivetKit local dependency wiring is `link:`-based.
-12. Keep the existing config file path (`~/.config/sandbox-agent-foundry/config.toml`) and evolve keys in place.
+12. Keep the existing config file path (`~/.config/foundry/config.toml`) and evolve keys in place.
 13. `.agents` and skill files are in scope for migration updates.
 14. Parent orchestration actors (`workspace`, `project`, `handoff`) use command-only loops with no timeout.
 15. Periodic syncing/polling runs in dedicated child actors, each with a single timeout cadence.

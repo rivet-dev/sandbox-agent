@@ -167,6 +167,18 @@ export async function createPr(repoPath: string, headBranch: string, title: stri
   return { number, url };
 }
 
+export async function starRepository(repoFullName: string): Promise<void> {
+  try {
+    await execFileAsync("gh", ["api", "--method", "PUT", `user/starred/${repoFullName}`], {
+      maxBuffer: 1024 * 1024,
+    });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : `Failed to star GitHub repository ${repoFullName}. Ensure GitHub auth is configured for the backend.`;
+    throw new Error(message);
+  }
+}
+
 export async function getAllowedMergeMethod(repoPath: string): Promise<"squash" | "rebase" | "merge"> {
   try {
     // Get the repo owner/name from gh

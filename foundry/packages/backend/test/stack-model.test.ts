@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeParentBranch, parentLookupFromStack, sortBranchesForOverview } from "../src/actors/repo/stack-model.js";
+import { normalizeParentBranch, parentLookupFromStack, sortBranchesForOverview } from "../src/actors/project/stack-model.js";
 
 describe("stack-model", () => {
   it("normalizes self-parent references to null", () => {

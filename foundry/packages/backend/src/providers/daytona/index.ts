@@ -186,7 +186,7 @@ export class DaytonaProvider implements SandboxProvider {
     emitDebug("daytona.createSandbox.start", {
       workspaceId: req.workspaceId,
       repoId: req.repoId,
-      taskId: req.taskId,
+      handoffId: req.handoffId,
       branchName: req.branchName,
     });
 
@@ -197,7 +197,7 @@ export class DaytonaProvider implements SandboxProvider {
         envVars: this.buildEnvVars(),
         labels: {
           "foundry.workspace": req.workspaceId,
-          "foundry.task": req.taskId,
+          "foundry.handoff": req.handoffId,
           "foundry.repo_id": req.repoId,
           "foundry.repo_remote": req.repoRemote,
           "foundry.branch": req.branchName,
@@ -211,9 +211,9 @@ export class DaytonaProvider implements SandboxProvider {
       state: sandbox.state ?? null,
     });
 
-    const repoDir = `/home/daytona/sandbox-agent-foundry/${req.workspaceId}/${req.repoId}/${req.taskId}/repo`;
+    const repoDir = `/home/daytona/foundry/${req.workspaceId}/${req.repoId}/${req.handoffId}/repo`;
 
-    // Prepare a working directory for the agent. This must succeed for the task to work.
+    // Prepare a working directory for the agent. This must succeed for the handoff to work.
     const installStartedAt = Date.now();
     await this.runCheckedCommand(
       sandbox.id,
@@ -247,10 +247,10 @@ export class DaytonaProvider implements SandboxProvider {
             `git clone "${req.repoRemote}" "${repoDir}"`,
             `cd "${repoDir}"`,
             `git fetch origin --prune`,
-            // The task branch may not exist remotely yet (agent push creates it). Base off current branch (default branch).
+            // The handoff branch may not exist remotely yet (agent push creates it). Base off current branch (default branch).
             `if git show-ref --verify --quiet "refs/remotes/origin/${req.branchName}"; then git checkout -B "${req.branchName}" "origin/${req.branchName}"; else git checkout -B "${req.branchName}" "$(git branch --show-current 2>/dev/null || echo main)"; fi`,
             `git config user.email "foundry@local" >/dev/null 2>&1 || true`,
-            `git config user.name "Sandbox Agent Foundry" >/dev/null 2>&1 || true`,
+            `git config user.name "Foundry" >/dev/null 2>&1 || true`,
           ].join("; "),
         )}`,
       ].join(" "),
@@ -285,8 +285,8 @@ export class DaytonaProvider implements SandboxProvider {
     const labels = info.labels ?? {};
     const workspaceId = labels["foundry.workspace"] ?? req.workspaceId;
     const repoId = labels["foundry.repo_id"] ?? "";
-    const taskId = labels["foundry.task"] ?? "";
-    const cwd = repoId && taskId ? `/home/daytona/sandbox-agent-foundry/${workspaceId}/${repoId}/${taskId}/repo` : null;
+    const handoffId = labels["foundry.handoff"] ?? "";
+    const cwd = repoId && handoffId ? `/home/daytona/foundry/${workspaceId}/${repoId}/${handoffId}/repo` : null;
 
     return {
       sandboxId: req.sandboxId,

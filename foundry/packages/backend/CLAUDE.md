@@ -34,5 +34,3 @@ WorkspaceActor
 
 - Keep this file up to date whenever actor ownership, hierarchy, or lifecycle responsibilities change.
 - If the real actor tree diverges from this document, update this document in the same change.
-- Backend actor persistence must use RivetKit-managed actor DBs only.
-- Do not add `bun:sqlite`, `node:sqlite`, `better-sqlite3`, `drizzle-orm/bun-sqlite`, or custom file-backed SQLite providers for actor data.

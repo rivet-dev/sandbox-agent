@@ -58,7 +58,11 @@ export const HistoryMinimap = memo(function HistoryMinimap({ events, onSelect }:
                   onFocus={() => setActiveEventId(event.id)}
                   onClick={() => onSelect(event)}
                   className={css({
-                    all: "unset",
+                    appearance: "none",
+                    WebkitAppearance: "none",
+                    background: "none",
+                    border: "none",
+                    margin: "0",
                     display: "grid",
                     gridTemplateColumns: "1fr auto",
                     gap: "10px",

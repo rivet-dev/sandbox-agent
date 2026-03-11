@@ -1,4 +1,4 @@
-export type WorkbenchTaskStatus = "running" | "idle" | "new" | "archived";
+export type WorkbenchHandoffStatus = "running" | "idle" | "new" | "archived";
 export type WorkbenchAgentKind = "Claude" | "Codex" | "Cursor";
 export type WorkbenchModelId = "claude-sonnet-4" | "claude-opus-4" | "gpt-4o" | "o3";
 
@@ -76,12 +76,11 @@ export interface WorkbenchPullRequestSummary {
   status: "draft" | "ready";
 }
 
-export interface WorkbenchTask {
+export interface WorkbenchHandoff {
   id: string;
   repoId: string;
-  repoIds?: string[];
   title: string;
-  status: WorkbenchTaskStatus;
+  status: WorkbenchHandoffStatus;
   repoName: string;
   updatedAtMs: number;
   branch: string | null;
@@ -97,18 +96,18 @@ export interface WorkbenchRepo {
   label: string;
 }
 
-export interface WorkbenchRepoSection {
+export interface WorkbenchProjectSection {
   id: string;
   label: string;
   updatedAtMs: number;
-  tasks: WorkbenchTask[];
+  handoffs: WorkbenchHandoff[];
 }
 
-export interface TaskWorkbenchSnapshot {
+export interface HandoffWorkbenchSnapshot {
   workspaceId: string;
   repos: WorkbenchRepo[];
-  repoSections: WorkbenchRepoSection[];
-  tasks: WorkbenchTask[];
+  projects: WorkbenchProjectSection[];
+  handoffs: WorkbenchHandoff[];
 }
 
 export interface WorkbenchModelOption {
@@ -121,67 +120,62 @@ export interface WorkbenchModelGroup {
   models: WorkbenchModelOption[];
 }
 
-export interface TaskWorkbenchSelectInput {
-  taskId: string;
+export interface HandoffWorkbenchSelectInput {
+  handoffId: string;
 }
 
-export interface TaskWorkbenchCreateTaskInput {
+export interface HandoffWorkbenchCreateHandoffInput {
   repoId: string;
-  repoIds?: string[];
   task: string;
   title?: string;
   branch?: string;
   model?: WorkbenchModelId;
 }
 
-export type TaskWorkbenchCreateInput = TaskWorkbenchCreateTaskInput;
-
-export interface TaskWorkbenchRenameInput {
-  taskId: string;
+export interface HandoffWorkbenchRenameInput {
+  handoffId: string;
   value: string;
 }
 
-export interface TaskWorkbenchSendMessageInput {
-  taskId: string;
+export interface HandoffWorkbenchSendMessageInput {
+  handoffId: string;
   tabId: string;
   text: string;
   attachments: WorkbenchLineAttachment[];
 }
 
-export interface TaskWorkbenchTabInput {
-  taskId: string;
+export interface HandoffWorkbenchTabInput {
+  handoffId: string;
   tabId: string;
 }
 
-export interface TaskWorkbenchRenameSessionInput extends TaskWorkbenchTabInput {
+export interface HandoffWorkbenchRenameSessionInput extends HandoffWorkbenchTabInput {
   title: string;
 }
 
-export interface TaskWorkbenchChangeModelInput extends TaskWorkbenchTabInput {
+export interface HandoffWorkbenchChangeModelInput extends HandoffWorkbenchTabInput {
   model: WorkbenchModelId;
 }
 
-export interface TaskWorkbenchUpdateDraftInput extends TaskWorkbenchTabInput {
+export interface HandoffWorkbenchUpdateDraftInput extends HandoffWorkbenchTabInput {
   text: string;
   attachments: WorkbenchLineAttachment[];
 }
 
-export interface TaskWorkbenchSetSessionUnreadInput extends TaskWorkbenchTabInput {
+export interface HandoffWorkbenchSetSessionUnreadInput extends HandoffWorkbenchTabInput {
   unread: boolean;
 }
 
-export interface TaskWorkbenchDiffInput {
-  taskId: string;
+export interface HandoffWorkbenchDiffInput {
+  handoffId: string;
   path: string;
 }
 
-export interface TaskWorkbenchCreateTaskResponse {
-  taskId: string;
+export interface HandoffWorkbenchCreateHandoffResponse {
+  handoffId: string;
   tabId?: string;
 }
 
-export type TaskWorkbenchCreateResponse = TaskWorkbenchCreateTaskResponse;
-
-export interface TaskWorkbenchAddTabResponse {
+export interface HandoffWorkbenchAddTabResponse {
   tabId: string;
 }

@@ -39,4 +39,4 @@ ENV SANDBOX_AGENT_BIN="/root/.local/bin/sandbox-agent"
 
 WORKDIR /app
 
-CMD ["bash", "-lc", "git config --global --add safe.directory /app >/dev/null 2>&1 || true; LEFTHOOK=0 pnpm install --force --frozen-lockfile --filter @sandbox-agent/foundry-backend... && exec bun foundry/packages/backend/src/index.ts start --host 0.0.0.0 --port 7741"]
+CMD ["bash", "-lc", "git config --global --add safe.directory /app >/dev/null 2>&1 || true; pnpm install --force --frozen-lockfile --filter @sandbox-agent/foundry-backend... && exec bun foundry/packages/backend/src/index.ts start --host 0.0.0.0 --port 7741"]

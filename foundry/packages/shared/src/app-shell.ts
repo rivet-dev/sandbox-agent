@@ -3,6 +3,7 @@ export type FoundryBillingStatus = "active" | "trialing" | "past_due" | "schedul
 export type FoundryGithubInstallationStatus = "connected" | "install_required" | "reconnect_required";
 export type FoundryGithubSyncStatus = "pending" | "syncing" | "synced" | "error";
 export type FoundryOrganizationKind = "personal" | "organization";
+export type FoundryStarterRepoStatus = "pending" | "starred" | "skipped";
 
 export interface FoundryUser {
   id: string;
@@ -76,6 +77,15 @@ export interface FoundryAppSnapshot {
     currentUserId: string | null;
   };
   activeOrganizationId: string | null;
+  onboarding: {
+    starterRepo: {
+      repoFullName: string;
+      repoUrl: string;
+      status: FoundryStarterRepoStatus;
+      starredAt: number | null;
+      skippedAt: number | null;
+    };
+  };
   users: FoundryUser[];
   organizations: FoundryOrganization[];
 }

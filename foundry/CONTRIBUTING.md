@@ -5,8 +5,8 @@
 1. Clone:
 
 ```bash
-git clone https://github.com/rivet-dev/sandbox-agent-foundry.git
-cd sandbox-agent-foundry
+git clone https://github.com/rivet-dev/sandbox-agent.git
+cd sandbox-agent/foundry
 ```
 
 2. Install dependencies:
@@ -25,7 +25,7 @@ pnpm -w build
 
 - `packages/shared`: contracts/schemas
 - `packages/backend`: RivetKit actors + DB + providers + integrations
-- `packages/frontend`: primary UI surface
+- `packages/cli`: `hf` and `hf tui` (OpenTUI)
 
 ## Local RivetKit Dependency
 
@@ -35,7 +35,7 @@ Build local RivetKit before backend changes that depend on Rivet internals:
 cd ../rivet
 pnpm build -F rivetkit
 
-cd /path/to/sandbox-agent-foundry
+cd /path/to/sandbox-agent/foundry
 just sync-rivetkit
 ```
 

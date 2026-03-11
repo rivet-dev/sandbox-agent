@@ -111,7 +111,15 @@ export const UnreadDot = memo(function UnreadDot() {
   );
 });
 
-export const TaskIndicator = memo(function TaskIndicator({ isRunning, hasUnread, isDraft }: { isRunning: boolean; hasUnread: boolean; isDraft: boolean }) {
+export const HandoffIndicator = memo(function HandoffIndicator({
+  isRunning,
+  hasUnread,
+  isDraft,
+}: {
+  isRunning: boolean;
+  hasUnread: boolean;
+  isDraft: boolean;
+}) {
   if (isRunning) return <SpinnerDot size={8} />;
   if (hasUnread) return <UnreadDot />;
   if (isDraft) return <GitPullRequestDraft size={12} color="#a1a1aa" />;
@@ -167,16 +175,15 @@ export const TabAvatar = memo(function TabAvatar({ tab }: { tab: AgentTab }) {
 });
 
 export const Shell = styled("div", ({ $theme }) => ({
-  display: "grid",
-  gap: "1px",
+  display: "flex",
   height: "100dvh",
-  backgroundColor: $theme.colors.borderOpaque,
-  gridTemplateColumns: "280px minmax(0, 1fr) 380px",
+  backgroundColor: $theme.colors.backgroundSecondary,
   overflow: "hidden",
 }));
 
 export const SPanel = styled("section", ({ $theme }) => ({
   minHeight: 0,
+  flex: 1,
   display: "flex",
   flexDirection: "column" as const,
   backgroundColor: $theme.colors.backgroundSecondary,

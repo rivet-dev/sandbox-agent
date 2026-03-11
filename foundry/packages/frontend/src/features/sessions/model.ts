@@ -105,7 +105,7 @@ export function buildTranscript(events: SandboxSessionEventRecord[]): Array<{
   }));
 }
 
-export function resolveSessionSelection(input: { explicitSessionId: string | null; taskSessionId: string | null; sessions: SandboxSessionRecord[] }): {
+export function resolveSessionSelection(input: { explicitSessionId: string | null; handoffSessionId: string | null; sessions: SandboxSessionRecord[] }): {
   sessionId: string | null;
   staleSessionId: string | null;
 } {
@@ -116,8 +116,8 @@ export function resolveSessionSelection(input: { explicitSessionId: string | nul
     return { sessionId: input.explicitSessionId, staleSessionId: null };
   }
 
-  if (hasSession(input.taskSessionId)) {
-    return { sessionId: input.taskSessionId, staleSessionId: null };
+  if (hasSession(input.handoffSessionId)) {
+    return { sessionId: input.handoffSessionId, staleSessionId: null };
   }
 
   const fallbackSessionId = input.sessions[0]?.id ?? null;
@@ -129,8 +129,8 @@ export function resolveSessionSelection(input: { explicitSessionId: string | nul
     return { sessionId: null, staleSessionId: input.explicitSessionId };
   }
 
-  if (input.taskSessionId) {
-    return { sessionId: null, staleSessionId: input.taskSessionId };
+  if (input.handoffSessionId) {
+    return { sessionId: null, staleSessionId: input.handoffSessionId };
   }
 
   return { sessionId: null, staleSessionId: null };

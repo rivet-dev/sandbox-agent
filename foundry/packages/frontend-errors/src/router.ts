@@ -4,8 +4,8 @@ import { dirname, join, resolve } from "node:path";
 import { Hono } from "hono";
 import type { FrontendErrorContext, FrontendErrorKind, FrontendErrorLogEvent } from "./types.js";
 
-const DEFAULT_RELATIVE_LOG_PATH = ".sandbox-agent-foundry/logs/frontend-errors.ndjson";
-const DEFAULT_REPORTER = "sandbox-agent-foundry";
+const DEFAULT_RELATIVE_LOG_PATH = ".foundry/logs/frontend-errors.ndjson";
+const DEFAULT_REPORTER = "foundry-frontend";
 const MAX_FIELD_LENGTH = 12_000;
 
 export interface FrontendErrorCollectorRouterOptions {

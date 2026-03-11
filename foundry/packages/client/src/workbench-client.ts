@@ -1,61 +1,60 @@
 import type {
-  TaskWorkbenchAddTabResponse,
-  TaskWorkbenchChangeModelInput,
-  TaskWorkbenchCreateTaskInput,
-  TaskWorkbenchCreateTaskResponse,
-  TaskWorkbenchDiffInput,
-  TaskWorkbenchRenameInput,
-  TaskWorkbenchRenameSessionInput,
-  TaskWorkbenchSelectInput,
-  TaskWorkbenchSetSessionUnreadInput,
-  TaskWorkbenchSendMessageInput,
-  TaskWorkbenchSnapshot,
-  TaskWorkbenchTabInput,
-  TaskWorkbenchUpdateDraftInput,
+  HandoffWorkbenchAddTabResponse,
+  HandoffWorkbenchChangeModelInput,
+  HandoffWorkbenchCreateHandoffInput,
+  HandoffWorkbenchCreateHandoffResponse,
+  HandoffWorkbenchDiffInput,
+  HandoffWorkbenchRenameInput,
+  HandoffWorkbenchRenameSessionInput,
+  HandoffWorkbenchSelectInput,
+  HandoffWorkbenchSetSessionUnreadInput,
+  HandoffWorkbenchSendMessageInput,
+  HandoffWorkbenchSnapshot,
+  HandoffWorkbenchTabInput,
+  HandoffWorkbenchUpdateDraftInput,
 } from "@sandbox-agent/foundry-shared";
 import type { BackendClient } from "./backend-client.js";
-import { getMockWorkbenchClient } from "./mock/workbench-client.js";
+import { getSharedMockWorkbenchClient } from "./mock/workbench-client.js";
 import { createRemoteWorkbenchClient } from "./remote/workbench-client.js";
 
-export type TaskWorkbenchClientMode = "mock" | "remote";
+export type HandoffWorkbenchClientMode = "mock" | "remote";
 
-export interface CreateTaskWorkbenchClientOptions {
-  mode: TaskWorkbenchClientMode;
+export interface CreateHandoffWorkbenchClientOptions {
+  mode: HandoffWorkbenchClientMode;
   backend?: BackendClient;
   workspaceId?: string;
 }
 
-export interface TaskWorkbenchClient {
-  getSnapshot(): TaskWorkbenchSnapshot;
+export interface HandoffWorkbenchClient {
+  getSnapshot(): HandoffWorkbenchSnapshot;
   subscribe(listener: () => void): () => void;
-  createTask(input: TaskWorkbenchCreateTaskInput): Promise<TaskWorkbenchCreateTaskResponse>;
-  markTaskUnread(input: TaskWorkbenchSelectInput): Promise<void>;
-  renameTask(input: TaskWorkbenchRenameInput): Promise<void>;
-  renameBranch(input: TaskWorkbenchRenameInput): Promise<void>;
-  archiveTask(input: TaskWorkbenchSelectInput): Promise<void>;
-  publishPr(input: TaskWorkbenchSelectInput): Promise<void>;
-  pushTask(input: TaskWorkbenchSelectInput): Promise<void>;
-  revertFile(input: TaskWorkbenchDiffInput): Promise<void>;
-  updateDraft(input: TaskWorkbenchUpdateDraftInput): Promise<void>;
-  sendMessage(input: TaskWorkbenchSendMessageInput): Promise<void>;
-  stopAgent(input: TaskWorkbenchTabInput): Promise<void>;
-  setSessionUnread(input: TaskWorkbenchSetSessionUnreadInput): Promise<void>;
-  renameSession(input: TaskWorkbenchRenameSessionInput): Promise<void>;
-  closeTab(input: TaskWorkbenchTabInput): Promise<void>;
-  addTab(input: TaskWorkbenchSelectInput): Promise<TaskWorkbenchAddTabResponse>;
-  changeModel(input: TaskWorkbenchChangeModelInput): Promise<void>;
+  createHandoff(input: HandoffWorkbenchCreateHandoffInput): Promise<HandoffWorkbenchCreateHandoffResponse>;
+  markHandoffUnread(input: HandoffWorkbenchSelectInput): Promise<void>;
+  renameHandoff(input: HandoffWorkbenchRenameInput): Promise<void>;
+  renameBranch(input: HandoffWorkbenchRenameInput): Promise<void>;
+  archiveHandoff(input: HandoffWorkbenchSelectInput): Promise<void>;
+  publishPr(input: HandoffWorkbenchSelectInput): Promise<void>;
+  revertFile(input: HandoffWorkbenchDiffInput): Promise<void>;
+  updateDraft(input: HandoffWorkbenchUpdateDraftInput): Promise<void>;
+  sendMessage(input: HandoffWorkbenchSendMessageInput): Promise<void>;
+  stopAgent(input: HandoffWorkbenchTabInput): Promise<void>;
+  setSessionUnread(input: HandoffWorkbenchSetSessionUnreadInput): Promise<void>;
+  renameSession(input: HandoffWorkbenchRenameSessionInput): Promise<void>;
+  closeTab(input: HandoffWorkbenchTabInput): Promise<void>;
+  addTab(input: HandoffWorkbenchSelectInput): Promise<HandoffWorkbenchAddTabResponse>;
+  changeModel(input: HandoffWorkbenchChangeModelInput): Promise<void>;
 }
 
-export function createTaskWorkbenchClient(options: CreateTaskWorkbenchClientOptions): TaskWorkbenchClient {
+export function createHandoffWorkbenchClient(options: CreateHandoffWorkbenchClientOptions): HandoffWorkbenchClient {
   if (options.mode === "mock") {
-    return getMockWorkbenchClient(options.workspaceId);
+    return getSharedMockWorkbenchClient();
   }
 
   if (!options.backend) {
-    throw new Error("Remote task workbench client requires a backend client");
+    throw new Error("Remote handoff workbench client requires a backend client");
   }
   if (!options.workspaceId) {
-    throw new Error("Remote task workbench client requires a workspace id");
+    throw new Error("Remote handoff workbench client requires a workspace id");
   }
 
   return createRemoteWorkbenchClient({

@@ -39,8 +39,9 @@ ENV SANDBOX_AGENT_BIN="/root/.local/bin/sandbox-agent"
 WORKDIR /workspace/quebec
 
 COPY quebec /workspace/quebec
+COPY rivet-checkout /workspace/rivet-checkout
 
-RUN LEFTHOOK=0 pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile
 RUN pnpm --filter @sandbox-agent/foundry-shared build
 RUN pnpm --filter @sandbox-agent/foundry-client build
 RUN pnpm --filter @sandbox-agent/foundry-backend build

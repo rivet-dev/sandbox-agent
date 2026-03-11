@@ -68,7 +68,7 @@ export class LocalProvider implements SandboxProvider {
   ) {}
 
   private rootDir(): string {
-    return expandHome(this.config.rootDir?.trim() || "~/.local/share/sandbox-agent-foundry/local-sandboxes");
+    return expandHome(this.config.rootDir?.trim() || "~/.local/share/foundry/local-sandboxes");
   }
 
   private sandboxRoot(workspaceId: string, sandboxId: string): string {
@@ -146,7 +146,7 @@ export class LocalProvider implements SandboxProvider {
   }
 
   async createSandbox(req: CreateSandboxRequest): Promise<SandboxHandle> {
-    const sandboxId = req.taskId || `local-${randomUUID()}`;
+    const sandboxId = req.handoffId || `local-${randomUUID()}`;
     const repoDir = this.repoDir(req.workspaceId, sandboxId);
     mkdirSync(dirname(repoDir), { recursive: true });
     await this.git.ensureCloned(req.repoRemote, repoDir);

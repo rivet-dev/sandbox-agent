@@ -1,8 +1,7 @@
 import { execFile } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -10,7 +9,6 @@ const execFileAsync = promisify(execFile);
 const DEFAULT_GIT_VALIDATE_REMOTE_TIMEOUT_MS = 15_000;
 const DEFAULT_GIT_FETCH_TIMEOUT_MS = 2 * 60_000;
 const DEFAULT_GIT_CLONE_TIMEOUT_MS = 5 * 60_000;
-const MOCK_GITHUB_PROTOCOL = "mockgithub:";
 
 function resolveGithubToken(): string | null {
   const token = process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN ?? process.env.HF_GITHUB_TOKEN ?? process.env.HF_GH_TOKEN ?? null;
@@ -69,119 +67,6 @@ export interface BranchSnapshot {
   commitSha: string;
 }
 
-interface MockRemoteDescriptor {
-  owner: string;
-  repo: string;
-  barePath: string;
-  bareFileUrl: string;
-}
-
-function resolveMockRemote(remoteUrl: string): MockRemoteDescriptor | null {
-  try {
-    const url = new URL(remoteUrl);
-    if (url.protocol !== MOCK_GITHUB_PROTOCOL) {
-      return null;
-    }
-
-    const owner = url.hostname.trim();
-    const repo = url.pathname
-      .replace(/^\/+/, "")
-      .replace(/\.git$/i, "")
-      .trim();
-    if (!owner || !repo) {
-      return null;
-    }
-
-    const barePath = resolve(homedir(), ".local", "share", "sandbox-agent-foundry", "mock-remotes", owner, `${repo}.git`);
-    return {
-      owner,
-      repo,
-      barePath,
-      bareFileUrl: pathToFileURL(barePath).toString(),
-    };
-  } catch {
-    return null;
-  }
-}
-
-async function ensureMockRemote(remoteUrl: string): Promise<MockRemoteDescriptor | null> {
-  const descriptor = resolveMockRemote(remoteUrl);
-  if (!descriptor) {
-    return null;
-  }
-
-  if (existsSync(descriptor.barePath)) {
-    return descriptor;
-  }
-
-  mkdirSync(dirname(descriptor.barePath), { recursive: true });
-
-  const tempRepoPath = mkdtempSync(resolve(tmpdir(), `foundry-mock-${descriptor.owner}-${descriptor.repo}-`));
-  try {
-    await execFileAsync("git", ["init", "--bare", descriptor.barePath], {
-      maxBuffer: 1024 * 1024,
-      timeout: DEFAULT_GIT_CLONE_TIMEOUT_MS,
-      env: gitEnv(),
-    });
-    await execFileAsync("git", ["init", "-b", "main", tempRepoPath], {
-      maxBuffer: 1024 * 1024,
-      timeout: DEFAULT_GIT_CLONE_TIMEOUT_MS,
-      env: gitEnv(),
-    });
-
-    mkdirSync(resolve(tempRepoPath, "src"), { recursive: true });
-    writeFileSync(
-      resolve(tempRepoPath, "README.md"),
-      [`# ${descriptor.owner}/${descriptor.repo}`, "", "Mock imported repository for Foundry onboarding flows."].join("\n"),
-      "utf8",
-    );
-    writeFileSync(
-      resolve(tempRepoPath, "src", "index.ts"),
-      [
-        `export const repositoryId = ${JSON.stringify(`${descriptor.owner}/${descriptor.repo}`)};`,
-        "",
-        "export function boot() {",
-        `  return ${JSON.stringify(`hello from ${descriptor.owner}/${descriptor.repo}`)};`,
-        "}",
-        "",
-      ].join("\n"),
-      "utf8",
-    );
-
-    await execFileAsync("git", ["-C", tempRepoPath, "add", "."], {
-      maxBuffer: 1024 * 1024,
-      timeout: DEFAULT_GIT_CLONE_TIMEOUT_MS,
-      env: gitEnv(),
-    });
-    await execFileAsync(
-      "git",
-      ["-C", tempRepoPath, "-c", "user.name=Sandbox Agent Foundry", "-c", "user.email=foundry-mock@sandboxagent.dev", "commit", "-m", "Initial commit"],
-      {
-        maxBuffer: 1024 * 1024,
-        timeout: DEFAULT_GIT_CLONE_TIMEOUT_MS,
-        env: gitEnv(),
-      },
-    );
-    await execFileAsync("git", ["-C", tempRepoPath, "remote", "add", "origin", descriptor.barePath], {
-      maxBuffer: 1024 * 1024,
-      timeout: DEFAULT_GIT_CLONE_TIMEOUT_MS,
-      env: gitEnv(),
-    });
-    await execFileAsync("git", ["-C", tempRepoPath, "push", "-u", "origin", "main"], {
-      maxBuffer: 1024 * 1024,
-      timeout: DEFAULT_GIT_CLONE_TIMEOUT_MS,
-      env: gitEnv(),
-    });
-  } catch (error) {
-    rmSync(descriptor.barePath, { force: true, recursive: true });
-    throw error;
-  } finally {
-    rmSync(tempRepoPath, { force: true, recursive: true });
-  }
-
-  return descriptor;
-}
-
 export async function fetch(repoPath: string): Promise<void> {
   await execFileAsync("git", ["-C", repoPath, "fetch", "--prune"], {
     timeout: DEFAULT_GIT_FETCH_TIMEOUT_MS,
@@ -198,9 +83,6 @@ export async function validateRemote(remoteUrl: string): Promise<void> {
   const remote = remoteUrl.trim();
   if (!remote) {
     throw new Error("remoteUrl is required");
-  }
-  if (await ensureMockRemote(remote)) {
-    return;
   }
   try {
     await execFileAsync("git", ["ls-remote", "--exit-code", remote, "HEAD"], {
@@ -226,8 +108,6 @@ export async function ensureCloned(remoteUrl: string, targetPath: string): Promi
   if (!remote) {
     throw new Error("remoteUrl is required");
   }
-  const mockRemote = await ensureMockRemote(remote);
-  const cloneRemote = mockRemote?.bareFileUrl ?? remote;
 
   if (existsSync(targetPath)) {
     if (!isGitRepo(targetPath)) {
@@ -235,7 +115,7 @@ export async function ensureCloned(remoteUrl: string, targetPath: string): Promi
     }
 
     // Keep origin aligned with the configured remote URL.
-    await execFileAsync("git", ["-C", targetPath, "remote", "set-url", "origin", cloneRemote], {
+    await execFileAsync("git", ["-C", targetPath, "remote", "set-url", "origin", remote], {
       maxBuffer: 1024 * 1024,
       timeout: DEFAULT_GIT_FETCH_TIMEOUT_MS,
       env: gitEnv(),
@@ -245,7 +125,7 @@ export async function ensureCloned(remoteUrl: string, targetPath: string): Promi
   }
 
   mkdirSync(dirname(targetPath), { recursive: true });
-  await execFileAsync("git", ["clone", cloneRemote, targetPath], {
+  await execFileAsync("git", ["clone", remote, targetPath], {
     maxBuffer: 1024 * 1024 * 8,
     timeout: DEFAULT_GIT_CLONE_TIMEOUT_MS,
     env: gitEnv(),

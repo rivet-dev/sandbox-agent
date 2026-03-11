@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import * as toml from "@iarna/toml";
 import { ConfigSchema, type AppConfig } from "@sandbox-agent/foundry-shared";
 
-export const CONFIG_PATH = `${homedir()}/.config/sandbox-agent-foundry/config.toml`;
+export const CONFIG_PATH = `${homedir()}/.config/foundry/config.toml`;
 
 export function loadConfig(path = CONFIG_PATH): AppConfig {
   if (!existsSync(path)) {

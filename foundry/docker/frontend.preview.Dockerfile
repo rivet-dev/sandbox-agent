@@ -2,17 +2,14 @@
 
 FROM node:22-bookworm-slim AS build
 
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends git \
-  && rm -rf /var/lib/apt/lists/*
-
 RUN npm install -g pnpm@10.28.2
 
 WORKDIR /workspace/quebec
 
 COPY quebec /workspace/quebec
+COPY rivet-checkout /workspace/rivet-checkout
 
-RUN LEFTHOOK=0 pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile
 RUN pnpm --filter @sandbox-agent/foundry-shared build
 RUN pnpm --filter @sandbox-agent/foundry-client build
 RUN pnpm --filter @sandbox-agent/foundry-frontend-errors build

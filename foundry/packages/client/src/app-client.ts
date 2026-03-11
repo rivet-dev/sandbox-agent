@@ -14,6 +14,8 @@ export interface FoundryAppClient {
   subscribe(listener: () => void): () => void;
   signInWithGithub(userId?: string): Promise<void>;
   signOut(): Promise<void>;
+  skipStarterRepo(): Promise<void>;
+  starStarterRepo(organizationId: string): Promise<void>;
   selectOrganization(organizationId: string): Promise<void>;
   updateOrganizationProfile(input: UpdateFoundryOrganizationProfileInput): Promise<void>;
   triggerGithubSync(organizationId: string): Promise<void>;

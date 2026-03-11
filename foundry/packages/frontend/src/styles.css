@@ -39,12 +39,9 @@ a {
 }
 
 @keyframes hf-spin {
-  to { transform: rotate(360deg); }
-}
-
-@keyframes hf-shimmer {
-  0% { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 button,
@@ -107,7 +104,7 @@ pre {
 }
 
 .mock-diff-row[data-kind="remove"] {
-  background: rgba(248, 81, 73, 0.10);
+  background: rgba(248, 81, 73, 0.1);
 }
 
 .mock-diff-row[data-kind="hunk"] {

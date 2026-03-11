@@ -19,68 +19,43 @@ Use `pnpm` workspaces and Turborepo.
 - Workspace root uses `pnpm-workspace.yaml` and `turbo.json`.
 - Packages live in `packages/*`.
 - `core` is renamed to `shared`.
+- `packages/cli` is disabled and excluded from active workspace validation.
 - Integrations and providers live under `packages/backend/src/{integrations,providers}`.
 
-## Product Surface
+## CLI Status
 
-- The old CLI package has been removed.
+- `packages/cli` is fully disabled for active development.
+- Do not implement new behavior in `packages/cli` unless explicitly requested.
 - Frontend is the primary product surface; prioritize `packages/frontend` + supporting `packages/client`/`packages/backend`.
-
-## Dev Server Policy
-
-**Always use Docker Compose to run dev servers.** Do not start the backend, frontend, or any other long-running service directly via `bun`, `pnpm dev`, Vite, or tmux. All dev services must run through the Compose stack so that networking, environment variables, and service dependencies are consistent.
-
-- Start the full dev stack (real backend): `just foundry-dev`
-- Stop the dev stack: `just foundry-dev-down`
-- Tail dev logs: `just foundry-dev-logs`
-- Start the mock dev stack (frontend-only, no backend): `just foundry-dev-mock`
-- Stop the mock stack: `just foundry-dev-mock-down`
-- Tail mock logs: `just foundry-dev-mock-logs`
-- Start the production-build preview stack: `just foundry-preview`
-- Stop the preview stack: `just foundry-preview-down`
-- Tail preview logs: `just foundry-preview-logs`
-
-The real dev server runs on port 4173 (frontend) + 7741 (backend). The mock dev server runs on port 4174 (frontend only). Both can run simultaneously.
-
-When making code changes, restart or recreate the relevant Compose services so the running app reflects the latest code (e.g. `docker compose -f foundry/compose.dev.yaml up -d --build backend`).
-
-## Mock vs Real Backend — UI Change Policy
-
-**When a user asks to make a UI change, always ask whether they are testing against the real backend or the mock backend before proceeding.**
-
-- **Mock backend** (`compose.mock.yaml`, port 4174):
-  - Only modify `packages/frontend`, `packages/client/src/mock/` (mock client implementation), and `packages/shared` (shared types/contracts).
-  - Ignore typecheck/build errors in the real client (`packages/client/src/remote/`) and backend (`packages/backend`).
-  - The assumption is that the mock server is the only test target; real backend compatibility is out of scope for that change.
-- **Real backend** (`compose.dev.yaml`, port 4173):
-  - All layers must be kept in sync: `packages/frontend`, `packages/client` (both mock and remote), `packages/shared`, and `packages/backend`.
-  - All typecheck, build, and test errors must be resolved across the full stack.
+- Workspace `build`, `typecheck`, and `test` intentionally exclude `@sandbox-agent/foundry-cli`.
+- `pnpm-workspace.yaml` excludes `packages/cli` from workspace package resolution.
 
 ## Common Commands
 
+- Foundry is the canonical name for this product tree. Do not introduce or preserve `factory` or `openhandoff` naming in code, docs, commands, or runtime paths.
 - Install deps: `pnpm install`
 - Full active-workspace validation: `pnpm -w typecheck`, `pnpm -w build`, `pnpm -w test`
-- Start the frontend against the mock workbench client (no backend needed): `FOUNDRY_FRONTEND_CLIENT_MODE=mock pnpm --filter @sandbox-agent/foundry-frontend dev`
-
-## Loading & Skeleton UI Policy
-
-- Never show a blank or hanging screen while data loads. Every view transition must render an immediate skeleton placeholder.
-- When the workspace loads for the first time (remote client starts with an empty snapshot), show a full-page skeleton: sidebar skeletons, transcript skeleton, and right sidebar skeleton.
-- When switching handoffs, show skeleton placeholders in the transcript and right sidebar while the new handoff data resolves.
-- When adding a new agent tab, show a skeleton message area immediately instead of an empty void.
-- Use the shared `SkeletonLine` / `SkeletonBlock` / `SkeletonCircle` primitives from `components/mock-layout/skeleton.tsx`.
-- Skeleton styles use CSS `@keyframes hf-shimmer` (a left-to-right gradient sweep) on a neutral background.
-- Do not use spinner-only loading indicators for layout transitions. Spinners are reserved for inline status (e.g. "agent is thinking").
+- Start the full dev stack: `just foundry-dev`
+- Start the local production-build preview stack: `just foundry-preview`
+- Start only the backend locally: `just foundry-backend-start`
+- Start only the frontend locally: `pnpm --filter @sandbox-agent/foundry-frontend dev`
+- Start the frontend against the mock workbench client: `FOUNDRY_FRONTEND_CLIENT_MODE=mock pnpm --filter @sandbox-agent/foundry-frontend dev`
+- Stop the compose dev stack: `just foundry-dev-down`
+- Tail compose logs: `just foundry-dev-logs`
+- Stop the preview stack: `just foundry-preview-down`
+- Tail preview logs: `just foundry-preview-logs`
 
 ## Frontend + Client Boundary
 
 - Keep a browser-friendly GUI implementation aligned with the TUI interaction model wherever possible.
-- Do not import `rivetkit` directly in UI packages. RivetKit client access must stay isolated inside `packages/client`.
+- Do not import `rivetkit` directly in CLI or GUI packages. RivetKit client access must stay isolated inside `packages/client`.
 - All backend interaction (actor calls, metadata/health checks, backend HTTP endpoint access) must go through the dedicated client library in `packages/client`.
 - Outside `packages/client`, do not call backend endpoints directly (for example `fetch(.../api/rivet...)`), except in black-box E2E tests that intentionally exercise raw transport behavior.
 - GUI state should update in realtime (no manual refresh buttons). Prefer RivetKit push reactivity and actor-driven events; do not add polling/refetch for normal product flows.
 - Keep the mock workbench types and mock client in `packages/shared` + `packages/client` up to date with the frontend contract. The mock is the UI testing reference implementation while backend functionality catches up.
 - Keep frontend route/state coverage current in code and tests; there is no separate page-inventory doc to maintain.
+- If Foundry uses a shared component from `@sandbox-agent/react`, make changes in `sdks/react` instead of copying or forking that component into Foundry.
+- When changing shared React components in `sdks/react` for Foundry, verify they still work in the Sandbox Agent Inspector before finishing.
 - When making UI changes, verify the live flow with `agent-browser`, take screenshots of the updated UI, and offer to open those screenshots in Preview when you finish.
 - When asked for screenshots, capture all relevant affected screens and modal states, not just a single viewport. Include empty, populated, success, and blocked/error states when they are part of the changed flow.
 - If a screenshot catches a transition frame, blank modal, or otherwise misleading state, retake it before reporting it.
@@ -88,8 +63,8 @@ When making code changes, restart or recreate the relevant Compose services so t
 ## Runtime Policy
 
 - Runtime is Bun-native.
-- Use Bun for backend execution paths and process spawning.
-- Do not add Node compatibility fallbacks for removed CLI/OpenTUI paths.
+- Use Bun for CLI/backend execution paths and process spawning.
+- Do not add Node compatibility fallbacks for OpenTUI/runtime execution.
 
 ## Defensive Error Handling
 
@@ -109,15 +84,17 @@ For all Rivet/RivetKit implementation:
    - Do not add `workspaceId`/`repoId`/`handoffId` columns just to "namespace" rows for a given actor instance; use actor state and/or the actor key instead.
    - Example: the `handoff` actor instance already represents `(workspaceId, repoId, handoffId)`, so its SQLite tables should not need those columns for primary keys.
 3. Do not use backend-global SQLite singletons; database access must go through actor `db` providers (`c.db`).
-4. Use RivetKit's actor-managed SQLite only. Do not implement custom SQLite providers or direct SQLite bindings for Foundry actor persistence.
-   - Never use `bun:sqlite`, `node:sqlite`, `better-sqlite3`, `drizzle-orm/bun-sqlite`, or any custom file-backed SQLite adapter for actor state.
-   - Foundry must not create host-visible actor DB files such as `.sandbox-agent-foundry/backend/sqlite/**/*.sqlite`.
-   - If an actor needs relational persistence, wire it through RivetKit's `db`/`c.db` path only.
-5. Use published RivetKit npm packages (`"rivetkit": "2.1.6"` by default). Do not use `link:` dependencies pointing outside the workspace unless you are doing a temporary local RivetKit debugging pass.
-6. Temporary local relink is allowed only when actively debugging RivetKit against the local checkout at `/Users/nathan/conductor/workspaces/handoff/rivet-checkout`.
-   - Preferred link target: `../rivet-checkout/rivetkit-typescript/packages/rivetkit`
-   - Before using the local checkout, build RivetKit from that repo so the linked package has fresh output.
-   - After the debugging pass, switch dependencies back to the published package version.
+4. The default dependency source for RivetKit is the published `rivetkit` package so workspace installs and CI remain self-contained.
+5. When working on coordinated RivetKit changes, you may temporarily relink to a local checkout instead of the published package.
+   - Dedicated local checkout for this workspace: `/Users/nathan/conductor/workspaces/handoff/rivet-checkout`
+   - Preferred local link target: `../rivet-checkout/rivetkit-typescript/packages/rivetkit`
+   - Sub-packages (`@rivetkit/sqlite-vfs`, etc.) resolve transitively from the RivetKit workspace when using the local checkout.
+6. Before using a local checkout, build RivetKit in the rivet repo:
+   ```bash
+   cd ../rivet-checkout/rivetkit-typescript
+   pnpm install
+   pnpm build -F rivetkit
+   ```
 
 ## Inspector HTTP API (Workflow Debugging)
 
@@ -156,15 +133,10 @@ For all Rivet/RivetKit implementation:
 ## Workspace + Actor Rules
 
 - Everything is scoped to a workspace.
-- All durable Foundry data must live inside actors.
-- App-shell/auth/session/org/billing data is actor-owned data too; do not introduce backend-global stores for it.
-- Do not add standalone SQLite files, JSON stores, in-memory singleton stores, or any other non-actor persistence for Foundry product state.
-- Do not add custom Bun/Node SQLite storage layers for actor data. Actor SQL persistence must stay inside RivetKit-managed actor DBs only.
-- If data needs durable persistence, store it in actor `c.state` or the owning actor's SQLite DB via `c.db`.
 - Workspace resolution order: `--workspace` flag -> config default -> `"default"`.
 - `ControlPlaneActor` is replaced by `WorkspaceActor` (workspace coordinator).
 - Every actor key must be prefixed with workspace namespace (`["ws", workspaceId, ...]`).
-- Product surfaces must use `@sandbox-agent/foundry-client` (`packages/client`) for backend access; `rivetkit/client` imports are only allowed inside `packages/client`.
+- CLI/TUI/GUI must use `@sandbox-agent/foundry-client` (`packages/client`) for backend access; `rivetkit/client` imports are only allowed inside `packages/client`.
 - Do not add custom backend REST endpoints (no `/v1/*` shim layer).
 - We own the sandbox-agent project; treat sandbox-agent defects as first-party bugs and fix them instead of working around them.
 - Keep strict single-writer ownership: each table/row has exactly one actor writer.
@@ -176,7 +148,7 @@ For all Rivet/RivetKit implementation:
 - Use create semantics only on explicit provisioning/create paths where creating a new actor instance is intended.
 - `getOrCreate` is a last resort for create paths when an explicit create API is unavailable; never use it in read/command paths.
 - For long-lived cross-actor links (for example sandbox/session runtime access), persist actor identity (`actorId`) and keep a fallback lookup path by actor id.
-- Docker dev: `compose.dev.yaml` mounts a named volume at `/root/.local/share/sandbox-agent-foundry/repos` to persist backend-managed git clones across restarts. Code must still work if this volume is not present (create directories as needed).
+- Docker dev: `compose.dev.yaml` mounts a named volume at `/root/.local/share/foundry/repos` to persist backend-managed git clones across restarts. Code must still work if this volume is not present (create directories as needed).
 - RivetKit actor `c.state` is durable, but in Docker it is stored under `/root/.local/share/rivetkit`. If that path is not persisted, actor state-derived indexes (for example, in `project` actor state) can be lost after container recreation even when other data still exists.
 - Workflow history divergence policy:
 - Production: never auto-delete actor state to resolve `HistoryDivergedError`; ship explicit workflow migrations (`ctx.removed(...)`, step compatibility).
@@ -199,7 +171,7 @@ For all Rivet/RivetKit implementation:
 
 ## Config
 
-- Keep config path at `~/.config/sandbox-agent-foundry/config.toml`.
+- Keep config path at `~/.config/foundry/config.toml`.
 - Evolve properties in place; do not move config location.
 
 ## Project Guidance
@@ -259,4 +231,4 @@ pnpm -w build
 pnpm -w test
 ```
 
-After making code changes, always update the dev server before declaring the work complete. Restart or recreate the relevant Docker Compose services so the running app reflects the latest code. Do not run dev servers outside of Docker Compose.
+After making code changes, always update the dev server before declaring the work complete. If the dev stack is running through Docker Compose, restart or recreate the relevant dev services so the running app reflects the latest code.

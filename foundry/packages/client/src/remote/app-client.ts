@@ -11,6 +11,15 @@ class RemoteFoundryAppStore implements FoundryAppClient {
   private snapshot: FoundryAppSnapshot = {
     auth: { status: "signed_out", currentUserId: null },
     activeOrganizationId: null,
+    onboarding: {
+      starterRepo: {
+        repoFullName: "rivet-dev/sandbox-agent",
+        repoUrl: "https://github.com/rivet-dev/sandbox-agent",
+        status: "pending",
+        starredAt: null,
+        skippedAt: null,
+      },
+    },
     users: [],
     organizations: [],
   };
@@ -41,6 +50,16 @@ class RemoteFoundryAppStore implements FoundryAppClient {
 
   async signOut(): Promise<void> {
     this.snapshot = await this.backend.signOutApp();
+    this.notify();
+  }
+
+  async skipStarterRepo(): Promise<void> {
+    this.snapshot = await this.backend.skipAppStarterRepo();
+    this.notify();
+  }
+
+  async starStarterRepo(organizationId: string): Promise<void> {
+    this.snapshot = await this.backend.starAppStarterRepo(organizationId);
     this.notify();
   }
 

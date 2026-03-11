@@ -4,19 +4,18 @@ import type {
   WorkbenchDiffLineKind as DiffLineKind,
   WorkbenchFileChange as FileChange,
   WorkbenchFileTreeNode as FileTreeNode,
-  WorkbenchTask as WorkbenchTask,
+  WorkbenchHandoff as Handoff,
   WorkbenchHistoryEvent as HistoryEvent,
   WorkbenchLineAttachment as LineAttachment,
   WorkbenchModelGroup as ModelGroup,
   WorkbenchModelId as ModelId,
   WorkbenchParsedDiffLine as ParsedDiffLine,
-  WorkbenchRepoSection as WorkbenchRepoSection,
+  WorkbenchProjectSection as ProjectSection,
   WorkbenchTranscriptEvent as TranscriptEvent,
 } from "@sandbox-agent/foundry-shared";
 import { extractEventText } from "../../features/sessions/model";
 
-export type Task = WorkbenchTask;
-export type RepoSection = WorkbenchRepoSection;
+export type { ProjectSection };
 
 export const MODEL_GROUPS: ModelGroup[] = [
   {
@@ -324,4 +323,17 @@ export function parseDiffLines(diff: string): ParsedDiffLine[] {
   });
 }
 
-export type { AgentKind, AgentTab, DiffLineKind, FileChange, FileTreeNode, HistoryEvent, LineAttachment, ModelGroup, ModelId, ParsedDiffLine, TranscriptEvent };
+export type {
+  AgentKind,
+  AgentTab,
+  DiffLineKind,
+  FileChange,
+  FileTreeNode,
+  Handoff,
+  HistoryEvent,
+  LineAttachment,
+  ModelGroup,
+  ModelId,
+  ParsedDiffLine,
+  TranscriptEvent,
+};

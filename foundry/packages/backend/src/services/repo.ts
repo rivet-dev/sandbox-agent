@@ -59,13 +59,6 @@ export function repoLabelFromRemote(remoteUrl: string): string {
   try {
     if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) || trimmed.startsWith("file:")) {
       const url = new URL(trimmed);
-      if (url.protocol === "mockgithub:") {
-        const repo = url.pathname.replace(/^\/+/, "").replace(/\.git$/i, "");
-        if (url.hostname && repo) {
-          return `${url.hostname}/${repo}`;
-        }
-      }
-
       const parts = url.pathname.replace(/\/+$/, "").split("/").filter(Boolean);
       if (parts.length >= 2) {
         return `${parts[parts.length - 2]}/${(parts[parts.length - 1] ?? "").replace(/\.git$/i, "")}`;
@@ -78,7 +71,7 @@ export function repoLabelFromRemote(remoteUrl: string): string {
       }
     }
   } catch {
-    // ignore and fall through to path-based parsing
+    // Fall through to path-based parsing.
   }
 
   const normalizedPath = trimmed.replace(/\\/g, sep);

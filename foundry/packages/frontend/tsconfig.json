@@ -6,11 +6,7 @@
     "moduleResolution": "Bundler",
     "jsx": "react-jsx",
     "declaration": false,
-    "types": ["vite/client", "vitest/globals"],
-    "baseUrl": ".",
-    "paths": {
-      "@workbench-runtime": ["./src/lib/workbench-runtime.remote.ts"]
-    }
+    "types": ["vite/client", "vitest/globals"]
   },
   "include": ["src", "vite.config.ts", "vitest.config.ts"]
 }

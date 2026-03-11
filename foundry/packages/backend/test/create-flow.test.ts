@@ -21,7 +21,7 @@ describe("create flow decision", () => {
     const resolved = resolveCreateFlowDecision({
       task: "Add auth",
       localBranches: ["feat-add-auth"],
-      taskBranches: ["feat-add-auth-2"],
+      handoffBranches: ["feat-add-auth-2"],
     });
 
     expect(resolved.title).toBe("feat: Add auth");
@@ -34,7 +34,7 @@ describe("create flow decision", () => {
         task: "new task",
         explicitBranchName: "existing-branch",
         localBranches: ["existing-branch"],
-        taskBranches: [],
+        handoffBranches: [],
       }),
     ).toThrow("already exists");
   });

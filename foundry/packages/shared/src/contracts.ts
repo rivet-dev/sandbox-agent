@@ -19,7 +19,7 @@ export type RepoId = z.infer<typeof RepoIdSchema>;
 export const RepoRemoteSchema = z.string().min(1).max(2048);
 export type RepoRemote = z.infer<typeof RepoRemoteSchema>;
 
-export const TaskStatusSchema = z.enum([
+export const HandoffStatusSchema = z.enum([
   "init_bootstrap_db",
   "init_enqueue_provision",
   "init_ensure_name",
@@ -42,7 +42,7 @@ export const TaskStatusSchema = z.enum([
   "killed",
   "error",
 ]);
-export type TaskStatus = z.infer<typeof TaskStatusSchema>;
+export type HandoffStatus = z.infer<typeof HandoffStatusSchema>;
 
 export const RepoRecordSchema = z.object({
   workspaceId: WorkspaceIdSchema,
@@ -59,10 +59,9 @@ export const AddRepoInputSchema = z.object({
 });
 export type AddRepoInput = z.infer<typeof AddRepoInputSchema>;
 
-export const CreateTaskInputSchema = z.object({
+export const CreateHandoffInputSchema = z.object({
   workspaceId: WorkspaceIdSchema,
   repoId: RepoIdSchema,
-  repoIds: z.array(RepoIdSchema).min(1).optional(),
   task: z.string().min(1),
   explicitTitle: z.string().trim().min(1).optional(),
   explicitBranchName: z.string().trim().min(1).optional(),
@@ -70,19 +69,18 @@ export const CreateTaskInputSchema = z.object({
   agentType: AgentTypeSchema.optional(),
   onBranch: z.string().trim().min(1).optional(),
 });
-export type CreateTaskInput = z.infer<typeof CreateTaskInputSchema>;
+export type CreateHandoffInput = z.infer<typeof CreateHandoffInputSchema>;
 
-export const TaskRecordSchema = z.object({
+export const HandoffRecordSchema = z.object({
   workspaceId: WorkspaceIdSchema,
-  repoId: RepoIdSchema,
-  repoIds: z.array(RepoIdSchema).min(1).optional(),
+  repoId: z.string().min(1),
   repoRemote: RepoRemoteSchema,
-  taskId: z.string().min(1),
+  handoffId: z.string().min(1),
   branchName: z.string().min(1).nullable(),
   title: z.string().min(1).nullable(),
   task: z.string().min(1),
   providerId: ProviderIdSchema,
-  status: TaskStatusSchema,
+  status: HandoffStatusSchema,
   statusMessage: z.string().nullable(),
   activeSandboxId: z.string().nullable(),
   activeSessionId: z.string().nullable(),
@@ -111,39 +109,38 @@ export const TaskRecordSchema = z.object({
   createdAt: z.number().int(),
   updatedAt: z.number().int(),
 });
-export type TaskRecord = z.infer<typeof TaskRecordSchema>;
+export type HandoffRecord = z.infer<typeof HandoffRecordSchema>;
 
-export const TaskSummarySchema = z.object({
+export const HandoffSummarySchema = z.object({
   workspaceId: WorkspaceIdSchema,
-  repoId: RepoIdSchema,
-  repoIds: z.array(RepoIdSchema).min(1).optional(),
-  taskId: z.string().min(1),
+  repoId: z.string().min(1),
+  handoffId: z.string().min(1),
   branchName: z.string().min(1).nullable(),
   title: z.string().min(1).nullable(),
-  status: TaskStatusSchema,
+  status: HandoffStatusSchema,
   updatedAt: z.number().int(),
 });
-export type TaskSummary = z.infer<typeof TaskSummarySchema>;
+export type HandoffSummary = z.infer<typeof HandoffSummarySchema>;
 
-export const TaskActionInputSchema = z.object({
+export const HandoffActionInputSchema = z.object({
   workspaceId: WorkspaceIdSchema,
-  taskId: z.string().min(1),
+  handoffId: z.string().min(1),
 });
-export type TaskActionInput = z.infer<typeof TaskActionInputSchema>;
+export type HandoffActionInput = z.infer<typeof HandoffActionInputSchema>;
 
 export const SwitchResultSchema = z.object({
   workspaceId: WorkspaceIdSchema,
-  taskId: z.string().min(1),
+  handoffId: z.string().min(1),
   providerId: ProviderIdSchema,
   switchTarget: z.string().min(1),
 });
 export type SwitchResult = z.infer<typeof SwitchResultSchema>;
 
-export const ListTasksInputSchema = z.object({
+export const ListHandoffsInputSchema = z.object({
   workspaceId: WorkspaceIdSchema,
   repoId: RepoIdSchema.optional(),
 });
-export type ListTasksInput = z.infer<typeof ListTasksInputSchema>;
+export type ListHandoffsInput = z.infer<typeof ListHandoffsInputSchema>;
 
 export const RepoBranchRecordSchema = z.object({
   branchName: z.string().min(1),
@@ -153,9 +150,9 @@ export const RepoBranchRecordSchema = z.object({
   diffStat: z.string().nullable(),
   hasUnpushed: z.boolean(),
   conflictsWithMain: z.boolean(),
-  taskId: z.string().nullable(),
-  taskTitle: z.string().nullable(),
-  taskStatus: TaskStatusSchema.nullable(),
+  handoffId: z.string().nullable(),
+  handoffTitle: z.string().nullable(),
+  handoffStatus: HandoffStatusSchema.nullable(),
   prNumber: z.number().int().nullable(),
   prState: z.string().nullable(),
   prUrl: z.string().nullable(),
@@ -204,11 +201,22 @@ export const WorkspaceUseInputSchema = z.object({
 });
 export type WorkspaceUseInput = z.infer<typeof WorkspaceUseInputSchema>;
 
+export const StarSandboxAgentRepoInputSchema = z.object({
+  workspaceId: WorkspaceIdSchema,
+});
+export type StarSandboxAgentRepoInput = z.infer<typeof StarSandboxAgentRepoInputSchema>;
+
+export const StarSandboxAgentRepoResultSchema = z.object({
+  repo: z.string().min(1),
+  starredAt: z.number().int(),
+});
+export type StarSandboxAgentRepoResult = z.infer<typeof StarSandboxAgentRepoResultSchema>;
+
 export const HistoryQueryInputSchema = z.object({
   workspaceId: WorkspaceIdSchema,
   limit: z.number().int().positive().max(500).optional(),
   branch: z.string().min(1).optional(),
-  taskId: z.string().min(1).optional(),
+  handoffId: z.string().min(1).optional(),
 });
 export type HistoryQueryInput = z.infer<typeof HistoryQueryInputSchema>;
 
@@ -216,7 +224,7 @@ export const HistoryEventSchema = z.object({
   id: z.number().int(),
   workspaceId: WorkspaceIdSchema,
   repoId: z.string().nullable(),
-  taskId: z.string().nullable(),
+  handoffId: z.string().nullable(),
   branchName: z.string().nullable(),
   kind: z.string().min(1),
   payloadJson: z.string().min(1),
@@ -233,7 +241,7 @@ export type PruneInput = z.infer<typeof PruneInputSchema>;
 
 export const KillInputSchema = z.object({
   workspaceId: WorkspaceIdSchema,
-  taskId: z.string().min(1),
+  handoffId: z.string().min(1),
   deleteBranch: z.boolean(),
   abandon: z.boolean(),
 });

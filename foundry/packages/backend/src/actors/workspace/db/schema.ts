@@ -14,8 +14,8 @@ export const repos = sqliteTable("repos", {
   updatedAt: integer("updated_at").notNull(),
 });
 
-export const taskLookup = sqliteTable("task_lookup", {
-  taskId: text("task_id").notNull().primaryKey(),
+export const handoffLookup = sqliteTable("handoff_lookup", {
+  handoffId: text("handoff_id").notNull().primaryKey(),
   repoId: text("repo_id").notNull(),
 });
 
@@ -84,6 +84,9 @@ export const appSessions = sqliteTable("app_sessions", {
   activeOrganizationId: text("active_organization_id"),
   githubAccessToken: text("github_access_token"),
   githubScope: text("github_scope").notNull(),
+  starterRepoStatus: text("starter_repo_status").notNull(),
+  starterRepoStarredAt: integer("starter_repo_starred_at"),
+  starterRepoSkippedAt: integer("starter_repo_skipped_at"),
   oauthState: text("oauth_state"),
   oauthStateExpiresAt: integer("oauth_state_expires_at"),
   createdAt: integer("created_at").notNull(),

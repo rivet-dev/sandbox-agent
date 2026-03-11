@@ -1,4 +1,4 @@
-import { historyKey, repoBranchSyncKey, repoKey, repoPrSyncKey, sandboxInstanceKey, taskKey, taskStatusSyncKey, workspaceKey } from "./keys.js";
+import { handoffKey, handoffStatusSyncKey, historyKey, projectBranchSyncKey, projectKey, projectPrSyncKey, sandboxInstanceKey, workspaceKey } from "./keys.js";
 import type { ProviderId } from "@sandbox-agent/foundry-shared";
 
 export function actorClient(c: any) {
@@ -11,8 +11,8 @@ export async function getOrCreateWorkspace(c: any, workspaceId: string) {
   });
 }
 
-export async function getOrCreateRepo(c: any, workspaceId: string, repoId: string, remoteUrl: string) {
-  return await actorClient(c).repo.getOrCreate(repoKey(workspaceId, repoId), {
+export async function getOrCreateProject(c: any, workspaceId: string, repoId: string, remoteUrl: string) {
+  return await actorClient(c).project.getOrCreate(projectKey(workspaceId, repoId), {
     createWithInput: {
       workspaceId,
       repoId,
@@ -21,16 +21,16 @@ export async function getOrCreateRepo(c: any, workspaceId: string, repoId: strin
   });
 }
 
-export function getRepo(c: any, workspaceId: string, repoId: string) {
-  return actorClient(c).repo.get(repoKey(workspaceId, repoId));
+export function getProject(c: any, workspaceId: string, repoId: string) {
+  return actorClient(c).project.get(projectKey(workspaceId, repoId));
 }
 
-export function getTask(c: any, workspaceId: string, taskId: string) {
-  return actorClient(c).task.get(taskKey(workspaceId, taskId));
+export function getHandoff(c: any, workspaceId: string, repoId: string, handoffId: string) {
+  return actorClient(c).handoff.get(handoffKey(workspaceId, repoId, handoffId));
 }
 
-export async function getOrCreateTask(c: any, workspaceId: string, taskId: string, createWithInput: Record<string, unknown>) {
-  return await actorClient(c).task.getOrCreate(taskKey(workspaceId, taskId), {
+export async function getOrCreateHandoff(c: any, workspaceId: string, repoId: string, handoffId: string, createWithInput: Record<string, unknown>) {
+  return await actorClient(c).handoff.getOrCreate(handoffKey(workspaceId, repoId, handoffId), {
     createWithInput,
   });
 }
@@ -44,8 +44,8 @@ export async function getOrCreateHistory(c: any, workspaceId: string, repoId: st
   });
 }
 
-export async function getOrCreateRepoPrSync(c: any, workspaceId: string, repoId: string, repoPath: string, intervalMs: number) {
-  return await actorClient(c).repoPrSync.getOrCreate(repoPrSyncKey(workspaceId, repoId), {
+export async function getOrCreateProjectPrSync(c: any, workspaceId: string, repoId: string, repoPath: string, intervalMs: number) {
+  return await actorClient(c).projectPrSync.getOrCreate(projectPrSyncKey(workspaceId, repoId), {
     createWithInput: {
       workspaceId,
       repoId,
@@ -55,8 +55,8 @@ export async function getOrCreateRepoPrSync(c: any, workspaceId: string, repoId:
   });
 }
 
-export async function getOrCreateRepoBranchSync(c: any, workspaceId: string, repoId: string, repoPath: string, intervalMs: number) {
-  return await actorClient(c).repoBranchSync.getOrCreate(repoBranchSyncKey(workspaceId, repoId), {
+export async function getOrCreateProjectBranchSync(c: any, workspaceId: string, repoId: string, repoPath: string, intervalMs: number) {
+  return await actorClient(c).projectBranchSync.getOrCreate(projectBranchSyncKey(workspaceId, repoId), {
     createWithInput: {
       workspaceId,
       repoId,
@@ -80,46 +80,46 @@ export async function getOrCreateSandboxInstance(
   return await actorClient(c).sandboxInstance.getOrCreate(sandboxInstanceKey(workspaceId, providerId, sandboxId), { createWithInput });
 }
 
-export async function getOrCreateTaskStatusSync(
+export async function getOrCreateHandoffStatusSync(
   c: any,
   workspaceId: string,
   repoId: string,
-  taskId: string,
+  handoffId: string,
   sandboxId: string,
   sessionId: string,
   createWithInput: Record<string, unknown>,
 ) {
-  return await actorClient(c).taskStatusSync.getOrCreate(taskStatusSyncKey(workspaceId, repoId, taskId, sandboxId, sessionId), {
+  return await actorClient(c).handoffStatusSync.getOrCreate(handoffStatusSyncKey(workspaceId, repoId, handoffId, sandboxId, sessionId), {
     createWithInput,
   });
 }
 
-export function selfRepoPrSync(c: any) {
-  return actorClient(c).repoPrSync.getForId(c.actorId);
+export function selfProjectPrSync(c: any) {
+  return actorClient(c).projectPrSync.getForId(c.actorId);
 }
 
-export function selfRepoBranchSync(c: any) {
-  return actorClient(c).repoBranchSync.getForId(c.actorId);
+export function selfProjectBranchSync(c: any) {
+  return actorClient(c).projectBranchSync.getForId(c.actorId);
 }
 
-export function selfTaskStatusSync(c: any) {
-  return actorClient(c).taskStatusSync.getForId(c.actorId);
+export function selfHandoffStatusSync(c: any) {
+  return actorClient(c).handoffStatusSync.getForId(c.actorId);
 }
 
 export function selfHistory(c: any) {
   return actorClient(c).history.getForId(c.actorId);
 }
 
-export function selfTask(c: any) {
-  return actorClient(c).task.getForId(c.actorId);
+export function selfHandoff(c: any) {
+  return actorClient(c).handoff.getForId(c.actorId);
 }
 
 export function selfWorkspace(c: any) {
   return actorClient(c).workspace.getForId(c.actorId);
 }
 
-export function selfRepo(c: any) {
-  return actorClient(c).repo.getForId(c.actorId);
+export function selfProject(c: any) {
+  return actorClient(c).project.getForId(c.actorId);
 }
 
 export function selfSandboxInstance(c: any) {

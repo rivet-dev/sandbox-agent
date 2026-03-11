@@ -1,7 +1,7 @@
-import { useEffect, useSyncExternalStore } from "react";
+import { type ReactNode, useEffect } from "react";
 import { setFrontendErrorContext } from "@sandbox-agent/foundry-frontend-errors/client";
-import { type MockBillingPlanId } from "@sandbox-agent/foundry-client";
-import { Navigate, Outlet, createRootRoute, createRoute, createRouter, useNavigate, useRouterState } from "@tanstack/react-router";
+import type { FoundryBillingPlanId } from "@sandbox-agent/foundry-shared";
+import { Navigate, Outlet, createRootRoute, createRoute, createRouter, useRouterState } from "@tanstack/react-router";
 import { MockLayout } from "../components/mock-layout";
 import {
   MockHostedCheckoutPage,
@@ -10,17 +10,9 @@ import {
   MockOrganizationSettingsPage,
   MockSignInPage,
 } from "../components/mock-onboarding";
-import { defaultWorkspaceId } from "../lib/env";
-import {
-  activeMockOrganization,
-  activeMockUser,
-  getMockOrganizationById,
-  isAppSnapshotBootstrapping,
-  eligibleOrganizations,
-  useMockAppClient,
-  useMockAppSnapshot,
-} from "../lib/mock-app";
-import { getTaskWorkbenchClient, resolveRepoRouteTaskId } from "../lib/workbench";
+import { defaultWorkspaceId, isMockFrontendClient } from "../lib/env";
+import { activeMockOrganization, getMockOrganizationById, isAppSnapshotBootstrapping, useMockAppClient, useMockAppSnapshot } from "../lib/mock-app";
+import { handoffWorkbenchClient } from "../lib/workbench";
 
 const rootRoute = createRootRoute({
   component: RootLayout,
@@ -74,13 +66,13 @@ const workspaceIndexRoute = createRoute({
   component: WorkspaceRoute,
 });
 
-const taskRoute = createRoute({
+const handoffRoute = createRoute({
   getParentRoute: () => workspaceRoute,
-  path: "tasks/$taskId",
+  path: "handoffs/$handoffId",
   validateSearch: (search: Record<string, unknown>) => ({
     sessionId: typeof search.sessionId === "string" && search.sessionId.trim().length > 0 ? search.sessionId : undefined,
   }),
-  component: TaskRoute,
+  component: HandoffRoute,
 });
 
 const repoRoute = createRoute({
@@ -96,7 +88,7 @@ const routeTree = rootRoute.addChildren([
   organizationSettingsRoute,
   organizationBillingRoute,
   organizationCheckoutRoute,
-  workspaceRoute.addChildren([workspaceIndexRoute, taskRoute, repoRoute]),
+  workspaceRoute.addChildren([workspaceIndexRoute, handoffRoute, repoRoute]),
 ]);
 
 export const router = createRouter({ routeTree });
@@ -111,19 +103,50 @@ function WorkspaceLayoutRoute() {
   return <Outlet />;
 }
 
+function AppLoadingScreen({ label }: { label: string }) {
+  return (
+    <div
+      style={{
+        minHeight: "100dvh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background:
+          "radial-gradient(circle at top left, rgba(255, 79, 0, 0.16), transparent 28%), radial-gradient(circle at top right, rgba(24, 140, 255, 0.18), transparent 32%), #050505",
+        color: "#ffffff",
+        fontSize: "16px",
+        fontWeight: 700,
+      }}
+    >
+      {label}
+    </div>
+  );
+}
+
 function IndexRoute() {
   const snapshot = useMockAppSnapshot();
-  return <NavigateToMockHome snapshot={snapshot} replace />;
+  if (!isMockFrontendClient && isAppSnapshotBootstrapping(snapshot)) {
+    return <AppLoadingScreen label="Restoring Foundry session..." />;
+  }
+  if (snapshot.auth.status === "signed_out") {
+    return <Navigate to="/signin" replace />;
+  }
+
+  const activeOrganization = activeMockOrganization(snapshot);
+  if (activeOrganization) {
+    return <Navigate to="/workspaces/$workspaceId" params={{ workspaceId: activeOrganization.workspaceId }} replace />;
+  }
+
+  return <Navigate to="/organizations" replace />;
 }
 
 function SignInRoute() {
   const snapshot = useMockAppSnapshot();
-  if (isAppSnapshotBootstrapping(snapshot)) {
-    return <AppBootstrapPending />;
+  if (!isMockFrontendClient && isAppSnapshotBootstrapping(snapshot)) {
+    return <AppLoadingScreen label="Restoring Foundry session..." />;
   }
-
   if (snapshot.auth.status === "signed_in") {
-    return <NavigateToMockHome snapshot={snapshot} replace />;
+    return <IndexRoute />;
   }
 
   return <MockSignInPage />;
@@ -131,10 +154,9 @@ function SignInRoute() {
 
 function OrganizationsRoute() {
   const snapshot = useMockAppSnapshot();
-  if (isAppSnapshotBootstrapping(snapshot)) {
-    return <AppBootstrapPending />;
+  if (!isMockFrontendClient && isAppSnapshotBootstrapping(snapshot)) {
+    return <AppLoadingScreen label="Loading organizations..." />;
   }
-
   if (snapshot.auth.status === "signed_out") {
     return <Navigate to="/signin" replace />;
   }
@@ -144,15 +166,15 @@ function OrganizationsRoute() {
 
 function OrganizationSettingsRoute() {
   const snapshot = useMockAppSnapshot();
-  const organization = useGuardedMockOrganization(organizationSettingsRoute.useParams().organizationId);
-  if (isAppSnapshotBootstrapping(snapshot)) {
-    return <AppBootstrapPending />;
+  if (!isMockFrontendClient && isAppSnapshotBootstrapping(snapshot)) {
+    return <AppLoadingScreen label="Loading organization settings..." />;
   }
-
   if (snapshot.auth.status === "signed_out") {
     return <Navigate to="/signin" replace />;
   }
 
+  const { organizationId } = organizationSettingsRoute.useParams();
+  const organization = getMockOrganizationById(snapshot, organizationId);
   if (!organization) {
     return <Navigate to="/organizations" replace />;
   }
@@ -162,15 +184,15 @@ function OrganizationSettingsRoute() {
 
 function OrganizationBillingRoute() {
   const snapshot = useMockAppSnapshot();
-  const organization = useGuardedMockOrganization(organizationBillingRoute.useParams().organizationId);
-  if (isAppSnapshotBootstrapping(snapshot)) {
-    return <AppBootstrapPending />;
+  if (!isMockFrontendClient && isAppSnapshotBootstrapping(snapshot)) {
+    return <AppLoadingScreen label="Loading billing..." />;
   }
-
   if (snapshot.auth.status === "signed_out") {
     return <Navigate to="/signin" replace />;
   }
 
+  const { organizationId } = organizationBillingRoute.useParams();
+  const organization = getMockOrganizationById(snapshot, organizationId);
   if (!organization) {
     return <Navigate to="/organizations" replace />;
   }
@@ -179,220 +201,128 @@ function OrganizationBillingRoute() {
 }
 
 function OrganizationCheckoutRoute() {
-  const { organizationId, planId } = organizationCheckoutRoute.useParams();
   const snapshot = useMockAppSnapshot();
-  const organization = useGuardedMockOrganization(organizationId);
-  if (isAppSnapshotBootstrapping(snapshot)) {
-    return <AppBootstrapPending />;
+  if (!isMockFrontendClient && isAppSnapshotBootstrapping(snapshot)) {
+    return <AppLoadingScreen label="Loading checkout..." />;
   }
-
   if (snapshot.auth.status === "signed_out") {
     return <Navigate to="/signin" replace />;
   }
 
+  const { organizationId, planId } = organizationCheckoutRoute.useParams();
+  const organization = getMockOrganizationById(snapshot, organizationId);
   if (!organization) {
     return <Navigate to="/organizations" replace />;
   }
 
-  if (!isMockBillingPlanId(planId)) {
-    return <Navigate to="/organizations/$organizationId/billing" params={{ organizationId }} replace />;
-  }
-
-  return <MockHostedCheckoutPage organization={organization} planId={planId} />;
+  return <MockHostedCheckoutPage organization={organization} planId={planId as FoundryBillingPlanId} />;
 }
 
 function WorkspaceRoute() {
   const { workspaceId } = workspaceRoute.useParams();
-
   return (
-    <MockWorkspaceGate workspaceId={workspaceId}>
-      <WorkspaceView workspaceId={workspaceId} selectedTaskId={null} selectedSessionId={null} />
-    </MockWorkspaceGate>
-  );
-}
-
-function TaskRoute() {
-  const { workspaceId, taskId } = taskRoute.useParams();
-  const { sessionId } = taskRoute.useSearch();
-
-  return (
-    <MockWorkspaceGate workspaceId={workspaceId}>
-      <WorkspaceView workspaceId={workspaceId} selectedTaskId={taskId} selectedSessionId={sessionId ?? null} />
-    </MockWorkspaceGate>
-  );
-}
-
-function RepoRoute() {
-  const { workspaceId, repoId } = repoRoute.useParams();
-
-  return (
-    <MockWorkspaceGate workspaceId={workspaceId}>
-      <RepoRouteInner workspaceId={workspaceId} repoId={repoId} />
-    </MockWorkspaceGate>
-  );
-}
-
-function RepoRouteInner({ workspaceId, repoId }: { workspaceId: string; repoId: string }) {
-  const client = getTaskWorkbenchClient(workspaceId);
-  const snapshot = useSyncExternalStore(client.subscribe.bind(client), client.getSnapshot.bind(client), client.getSnapshot.bind(client));
-
-  useEffect(() => {
-    setFrontendErrorContext({
-      workspaceId,
-      taskId: undefined,
-      repoId,
-    });
-  }, [repoId, workspaceId]);
-
-  const activeTaskId = resolveRepoRouteTaskId(snapshot, repoId);
-  if (!activeTaskId) {
-    return <Navigate to="/workspaces/$workspaceId" params={{ workspaceId }} replace />;
-  }
-  return (
-    <Navigate
-      to="/workspaces/$workspaceId/tasks/$taskId"
-      params={{
-        workspaceId,
-        taskId: activeTaskId,
-      }}
-      search={{ sessionId: undefined }}
-      replace
-    />
+    <AppWorkspaceGate workspaceId={workspaceId}>
+      <WorkspaceView workspaceId={workspaceId} selectedHandoffId={null} selectedSessionId={null} />
+    </AppWorkspaceGate>
   );
 }
 
 function WorkspaceView({
   workspaceId,
-  selectedTaskId,
+  selectedHandoffId,
   selectedSessionId,
 }: {
   workspaceId: string;
-  selectedTaskId: string | null;
+  selectedHandoffId: string | null;
   selectedSessionId: string | null;
 }) {
-  const appClient = useMockAppClient();
-  const client = getTaskWorkbenchClient(workspaceId);
-  const navigate = useNavigate();
-  const snapshot = useMockAppSnapshot();
-  const organization = eligibleOrganizations(snapshot).find((candidate) => candidate.workspaceId === workspaceId) ?? null;
-
   useEffect(() => {
     setFrontendErrorContext({
       workspaceId,
-      taskId: selectedTaskId ?? undefined,
-      repoId: undefined,
+      handoffId: undefined,
     });
-  }, [selectedTaskId, workspaceId]);
+  }, [workspaceId]);
 
+  return <MockLayout workspaceId={workspaceId} selectedHandoffId={selectedHandoffId} selectedSessionId={selectedSessionId} />;
+}
+
+function HandoffRoute() {
+  const { workspaceId, handoffId } = handoffRoute.useParams();
+  const { sessionId } = handoffRoute.useSearch();
   return (
-    <MockLayout
-      client={client}
-      workspaceId={workspaceId}
-      selectedTaskId={selectedTaskId}
-      selectedSessionId={selectedSessionId}
-      sidebarTitle={organization?.settings.displayName}
-      sidebarSubtitle={
-        organization ? `${organization.billing.planId} plan · ${organization.seatAssignments.length}/${organization.billing.seatsIncluded} seats` : undefined
-      }
-      organizationGithub={organization?.github}
-      onRetryGithubSync={organization ? () => void appClient.triggerGithubSync(organization.id) : undefined}
-      onReconnectGithub={organization ? () => void appClient.reconnectGithub(organization.id) : undefined}
-      sidebarActions={
-        organization
-          ? [
-              {
-                label: "Switch org",
-                onClick: () => void navigate({ to: "/organizations" }),
-              },
-              {
-                label: "Settings",
-                onClick: () =>
-                  void navigate({
-                    to: "/organizations/$organizationId/settings",
-                    params: { organizationId: organization.id },
-                  }),
-              },
-              {
-                label: "Billing",
-                onClick: () =>
-                  void navigate({
-                    to: "/organizations/$organizationId/billing",
-                    params: { organizationId: organization.id },
-                  }),
-              },
-            ]
-          : undefined
-      }
-    />
+    <AppWorkspaceGate workspaceId={workspaceId}>
+      <HandoffView workspaceId={workspaceId} handoffId={handoffId} sessionId={sessionId ?? null} />
+    </AppWorkspaceGate>
   );
 }
 
-function MockWorkspaceGate({ workspaceId, children }: { workspaceId: string; children: React.ReactNode }) {
+function HandoffView({ workspaceId, handoffId, sessionId }: { workspaceId: string; handoffId: string; sessionId: string | null }) {
+  useEffect(() => {
+    setFrontendErrorContext({
+      workspaceId,
+      handoffId,
+      repoId: undefined,
+    });
+  }, [handoffId, workspaceId]);
+
+  return <MockLayout workspaceId={workspaceId} selectedHandoffId={handoffId} selectedSessionId={sessionId} />;
+}
+
+function RepoRoute() {
+  const { workspaceId, repoId } = repoRoute.useParams();
+  return (
+    <AppWorkspaceGate workspaceId={workspaceId}>
+      <RepoRouteInner workspaceId={workspaceId} repoId={repoId} />
+    </AppWorkspaceGate>
+  );
+}
+
+function AppWorkspaceGate({ workspaceId, children }: { workspaceId: string; children: ReactNode }) {
+  const client = useMockAppClient();
   const snapshot = useMockAppSnapshot();
-  if (isAppSnapshotBootstrapping(snapshot)) {
-    return <AppBootstrapPending />;
+  const organization = snapshot.organizations.find((candidate) => candidate.workspaceId === workspaceId) ?? null;
+
+  useEffect(() => {
+    if (organization && snapshot.activeOrganizationId !== organization.id) {
+      void client.selectOrganization(organization.id);
+    }
+  }, [client, organization, snapshot.activeOrganizationId]);
+
+  if (!isMockFrontendClient && isAppSnapshotBootstrapping(snapshot)) {
+    return <AppLoadingScreen label="Loading workspace..." />;
   }
 
   if (snapshot.auth.status === "signed_out") {
     return <Navigate to="/signin" replace />;
   }
 
-  const activeOrganization = activeMockOrganization(snapshot);
-  const workspaceOrganization = eligibleOrganizations(snapshot).find((candidate) => candidate.workspaceId === workspaceId) ?? null;
-
-  if (!workspaceOrganization) {
-    return <NavigateToMockHome snapshot={snapshot} replace />;
-  }
-
-  if (!activeOrganization || activeOrganization.id !== workspaceOrganization.id) {
-    return <Navigate to="/organizations" replace />;
+  if (!organization) {
+    return isMockFrontendClient ? <Navigate to="/organizations" replace /> : <Navigate to="/" replace />;
   }
 
   return <>{children}</>;
 }
 
-function NavigateToMockHome({ snapshot, replace = false }: { snapshot: ReturnType<typeof useMockAppSnapshot>; replace?: boolean }) {
-  if (isAppSnapshotBootstrapping(snapshot)) {
-    return <AppBootstrapPending />;
+function RepoRouteInner({ workspaceId, repoId }: { workspaceId: string; repoId: string }) {
+  useEffect(() => {
+    setFrontendErrorContext({
+      workspaceId,
+      handoffId: undefined,
+      repoId,
+    });
+  }, [repoId, workspaceId]);
+  const activeHandoffId = handoffWorkbenchClient.getSnapshot().handoffs.find((handoff) => handoff.repoId === repoId)?.id;
+  if (!activeHandoffId) {
+    return <Navigate to="/workspaces/$workspaceId" params={{ workspaceId }} replace />;
   }
-
-  const activeOrganization = activeMockOrganization(snapshot);
-  const organizations = eligibleOrganizations(snapshot);
-  const targetOrganization = activeOrganization ?? (organizations.length === 1 ? (organizations[0] ?? null) : null);
-
-  if (snapshot.auth.status === "signed_out" || !activeMockUser(snapshot)) {
-    return <Navigate to="/signin" replace={replace} />;
-  }
-
-  if (!targetOrganization) {
-    return snapshot.users.length === 0 ? (
-      <Navigate to="/workspaces/$workspaceId" params={{ workspaceId: defaultWorkspaceId }} replace={replace} />
-    ) : (
-      <Navigate to="/organizations" replace={replace} />
-    );
-  }
-
-  return <Navigate to="/workspaces/$workspaceId" params={{ workspaceId: targetOrganization.workspaceId }} replace={replace} />;
-}
-
-function useGuardedMockOrganization(organizationId: string) {
-  const snapshot = useMockAppSnapshot();
-  const user = activeMockUser(snapshot);
-
-  if (!user) {
-    return null;
-  }
-
-  const organization = getMockOrganizationById(snapshot, organizationId);
-  if (!organization) {
-    return null;
-  }
-
-  return user.eligibleOrganizationIds.includes(organization.id) ? organization : null;
-}
-
-function isMockBillingPlanId(planId: string): planId is MockBillingPlanId {
-  return planId === "free" || planId === "team";
+  return (
+    <Navigate
+      to="/workspaces/$workspaceId/handoffs/$handoffId"
+      params={{ workspaceId, handoffId: activeHandoffId }}
+      search={{ sessionId: undefined }}
+      replace
+    />
+  );
 }
 
 function RootLayout() {
@@ -401,38 +331,6 @@ function RootLayout() {
       <RouteContextSync />
       <Outlet />
     </>
-  );
-}
-
-function AppBootstrapPending() {
-  return (
-    <div
-      style={{
-        minHeight: "100dvh",
-        display: "grid",
-        placeItems: "center",
-        background:
-          "radial-gradient(circle at top left, rgba(255, 79, 0, 0.16), transparent 28%), radial-gradient(circle at top right, rgba(24, 140, 255, 0.18), transparent 32%), #050505",
-        color: "#ffffff",
-      }}
-    >
-      <div
-        style={{
-          width: "min(520px, calc(100vw - 40px))",
-          padding: "32px",
-          borderRadius: "28px",
-          border: "1px solid rgba(255, 255, 255, 0.1)",
-          background: "linear-gradient(180deg, rgba(21, 21, 24, 0.96), rgba(10, 10, 11, 0.98))",
-          boxShadow: "0 18px 40px rgba(0, 0, 0, 0.36)",
-        }}
-      >
-        <div style={{ fontSize: "12px", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#a1a1aa" }}>Restoring session</div>
-        <div style={{ marginTop: "8px", fontSize: "28px", fontWeight: 800 }}>Loading Foundry state</div>
-        <div style={{ marginTop: "12px", color: "#d4d4d8", lineHeight: 1.6 }}>
-          Applying the returned app session and loading your organizations before routing deeper into Foundry.
-        </div>
-      </div>
-    </div>
   );
 }
 

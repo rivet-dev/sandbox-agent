@@ -1,7 +1,18 @@
 import type { BranchSnapshot } from "./integrations/git/index.js";
 import type { PullRequestSnapshot } from "./integrations/github/index.js";
 import type { SandboxSession, SandboxAgentClientOptions, SandboxSessionCreateRequest } from "./integrations/sandbox-agent/client.js";
-import type { ListEventsRequest, ListPage, ListPageRequest, SessionEvent, SessionRecord } from "sandbox-agent";
+import type {
+  ListEventsRequest,
+  ListPage,
+  ListPageRequest,
+  ProcessCreateRequest,
+  ProcessInfo,
+  ProcessLogFollowQuery,
+  ProcessLogsResponse,
+  ProcessSignalQuery,
+  SessionEvent,
+  SessionRecord,
+} from "sandbox-agent";
 import type { DaytonaClientOptions, DaytonaCreateSandboxOptions, DaytonaPreviewEndpoint, DaytonaSandbox } from "./integrations/daytona/client.js";
 import {
   validateRemote,
@@ -24,7 +35,7 @@ import {
   gitSpiceSyncRepo,
   gitSpiceTrackBranch,
 } from "./integrations/git-spice/index.js";
-import { listPullRequests, createPr } from "./integrations/github/index.js";
+import { listPullRequests, createPr, starRepository } from "./integrations/github/index.js";
 import { SandboxAgentClient } from "./integrations/sandbox-agent/client.js";
 import { DaytonaClient } from "./integrations/daytona/client.js";
 
@@ -59,6 +70,7 @@ export interface StackDriver {
 export interface GithubDriver {
   listPullRequests(repoPath: string): Promise<PullRequestSnapshot[]>;
   createPr(repoPath: string, headBranch: string, title: string, body?: string): Promise<{ number: number; url: string }>;
+  starRepository(repoFullName: string): Promise<void>;
 }
 
 export interface SandboxAgentClientLike {
@@ -66,6 +78,12 @@ export interface SandboxAgentClientLike {
   sessionStatus(sessionId: string): Promise<SandboxSession>;
   listSessions(request?: ListPageRequest): Promise<ListPage<SessionRecord>>;
   listEvents(request: ListEventsRequest): Promise<ListPage<SessionEvent>>;
+  createProcess(request: ProcessCreateRequest): Promise<ProcessInfo>;
+  listProcesses(): Promise<{ processes: ProcessInfo[] }>;
+  getProcessLogs(processId: string, query?: ProcessLogFollowQuery): Promise<ProcessLogsResponse>;
+  stopProcess(processId: string, query?: ProcessSignalQuery): Promise<ProcessInfo>;
+  killProcess(processId: string, query?: ProcessSignalQuery): Promise<ProcessInfo>;
+  deleteProcess(processId: string): Promise<void>;
   sendPrompt(request: { sessionId: string; prompt: string; notification?: boolean }): Promise<void>;
   cancelSession(sessionId: string): Promise<void>;
   destroySession(sessionId: string): Promise<void>;
@@ -131,6 +149,7 @@ export function createDefaultDriver(): BackendDriver {
     github: {
       listPullRequests,
       createPr,
+      starRepository,
     },
     sandboxAgent: {
       createClient: (opts) => {

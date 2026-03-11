@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { TaskRecord, HistoryEvent } from "@sandbox-agent/foundry-shared";
+import type { HandoffRecord, HistoryEvent } from "@sandbox-agent/foundry-shared";
 import { createBackendClient } from "../../src/backend-client.js";
 
 const RUN_E2E = process.env.HF_ENABLE_DAEMON_E2E === "1";
@@ -79,20 +79,20 @@ function parseHistoryPayload(event: HistoryEvent): Record<string, unknown> {
   }
 }
 
-async function debugDump(client: ReturnType<typeof createBackendClient>, workspaceId: string, taskId: string): Promise<string> {
+async function debugDump(client: ReturnType<typeof createBackendClient>, workspaceId: string, handoffId: string): Promise<string> {
   try {
-    const task = await client.getTask(workspaceId, taskId);
-    const history = await client.listHistory({ workspaceId, taskId, limit: 80 }).catch(() => []);
+    const handoff = await client.getHandoff(workspaceId, handoffId);
+    const history = await client.listHistory({ workspaceId, handoffId, limit: 80 }).catch(() => []);
     const historySummary = history
       .slice(0, 20)
       .map((e) => `${new Date(e.createdAt).toISOString()} ${e.kind}`)
       .join("\n");
 
     let sessionEventsSummary = "";
-    if (task.activeSandboxId && task.activeSessionId) {
+    if (handoff.activeSandboxId && handoff.activeSessionId) {
       const events = await client
-        .listSandboxSessionEvents(workspaceId, task.providerId, task.activeSandboxId, {
-          sessionId: task.activeSessionId,
+        .listSandboxSessionEvents(workspaceId, handoff.providerId, handoff.activeSandboxId, {
+          sessionId: handoff.activeSessionId,
           limit: 50,
         })
         .then((r) => r.items)
@@ -104,17 +104,17 @@ async function debugDump(client: ReturnType<typeof createBackendClient>, workspa
     }
 
     return [
-      "=== task ===",
+      "=== handoff ===",
       JSON.stringify(
         {
-          status: task.status,
-          statusMessage: task.statusMessage,
-          title: task.title,
-          branchName: task.branchName,
-          activeSandboxId: task.activeSandboxId,
-          activeSessionId: task.activeSessionId,
-          prUrl: task.prUrl,
-          prSubmitted: task.prSubmitted,
+          status: handoff.status,
+          statusMessage: handoff.statusMessage,
+          title: handoff.title,
+          branchName: handoff.branchName,
+          activeSandboxId: handoff.activeSandboxId,
+          activeSessionId: handoff.activeSessionId,
+          prUrl: handoff.prUrl,
+          prSubmitted: handoff.prSubmitted,
         },
         null,
         2,
@@ -143,7 +143,7 @@ async function githubApi(token: string, path: string, init?: RequestInit): Promi
 }
 
 describe("e2e: backend -> sandbox-agent -> git -> PR", () => {
-  it.skipIf(!RUN_E2E)("creates a task, waits for agent to implement, and opens a PR", { timeout: 15 * 60_000 }, async () => {
+  it.skipIf(!RUN_E2E)("creates a handoff, waits for agent to implement, and opens a PR", { timeout: 15 * 60_000 }, async () => {
     const endpoint = process.env.HF_E2E_BACKEND_ENDPOINT?.trim() || "http://127.0.0.1:7741/api/rivet";
     const workspaceId = process.env.HF_E2E_WORKSPACE?.trim() || "default";
     const repoRemote = requiredEnv("HF_E2E_GITHUB_REPO");
@@ -160,7 +160,7 @@ describe("e2e: backend -> sandbox-agent -> git -> PR", () => {
 
     const repo = await client.addRepo(workspaceId, repoRemote);
 
-    const created = await client.createTask({
+    const created = await client.createHandoff({
       workspaceId,
       repoId: repo.repoId,
       task: [
@@ -183,42 +183,42 @@ describe("e2e: backend -> sandbox-agent -> git -> PR", () => {
     let lastStatus: string | null = null;
 
     try {
-      const namedAndProvisioned = await poll<TaskRecord>(
-        "task naming + sandbox provisioning",
+      const namedAndProvisioned = await poll<HandoffRecord>(
+        "handoff naming + sandbox provisioning",
         // Cold Daytona snapshot/image preparation can exceed 5 minutes on first run.
         8 * 60_000,
         1_000,
-        async () => client.getTask(workspaceId, created.taskId),
+        async () => client.getHandoff(workspaceId, created.handoffId),
         (h) => Boolean(h.title && h.branchName && h.activeSandboxId),
         (h) => {
           if (h.status !== lastStatus) {
             lastStatus = h.status;
           }
           if (h.status === "error") {
-            throw new Error("task entered error state during provisioning");
+            throw new Error("handoff entered error state during provisioning");
           }
         },
       ).catch(async (err) => {
-        const dump = await debugDump(client, workspaceId, created.taskId);
+        const dump = await debugDump(client, workspaceId, created.handoffId);
         throw new Error(`${err instanceof Error ? err.message : String(err)}\n${dump}`);
       });
 
       branchName = namedAndProvisioned.branchName!;
       sandboxId = namedAndProvisioned.activeSandboxId!;
 
-      const withSession = await poll<TaskRecord>(
-        "task to create active session",
+      const withSession = await poll<HandoffRecord>(
+        "handoff to create active session",
         3 * 60_000,
         1_500,
-        async () => client.getTask(workspaceId, created.taskId),
+        async () => client.getHandoff(workspaceId, created.handoffId),
         (h) => Boolean(h.activeSessionId),
         (h) => {
           if (h.status === "error") {
-            throw new Error("task entered error state while waiting for active session");
+            throw new Error("handoff entered error state while waiting for active session");
           }
         },
       ).catch(async (err) => {
-        const dump = await debugDump(client, workspaceId, created.taskId);
+        const dump = await debugDump(client, workspaceId, created.handoffId);
         throw new Error(`${err instanceof Error ? err.message : String(err)}\n${dump}`);
       });
 
@@ -237,23 +237,23 @@ describe("e2e: backend -> sandbox-agent -> git -> PR", () => {
           ).items,
         (events) => events.length > 0,
       ).catch(async (err) => {
-        const dump = await debugDump(client, workspaceId, created.taskId);
+        const dump = await debugDump(client, workspaceId, created.handoffId);
         throw new Error(`${err instanceof Error ? err.message : String(err)}\n${dump}`);
       });
 
-      await poll<TaskRecord>(
-        "task to reach idle state",
+      await poll<HandoffRecord>(
+        "handoff to reach idle state",
         8 * 60_000,
         2_000,
-        async () => client.getTask(workspaceId, created.taskId),
+        async () => client.getHandoff(workspaceId, created.handoffId),
         (h) => h.status === "idle",
         (h) => {
           if (h.status === "error") {
-            throw new Error("task entered error state while waiting for idle");
+            throw new Error("handoff entered error state while waiting for idle");
           }
         },
       ).catch(async (err) => {
-        const dump = await debugDump(client, workspaceId, created.taskId);
+        const dump = await debugDump(client, workspaceId, created.handoffId);
         throw new Error(`${err instanceof Error ? err.message : String(err)}\n${dump}`);
       });
 
@@ -261,14 +261,14 @@ describe("e2e: backend -> sandbox-agent -> git -> PR", () => {
         "PR creation history event",
         3 * 60_000,
         2_000,
-        async () => client.listHistory({ workspaceId, taskId: created.taskId, limit: 200 }),
-        (events) => events.some((e) => e.kind === "task.pr_created"),
+        async () => client.listHistory({ workspaceId, handoffId: created.handoffId, limit: 200 }),
+        (events) => events.some((e) => e.kind === "handoff.pr_created"),
       )
         .catch(async (err) => {
-          const dump = await debugDump(client, workspaceId, created.taskId);
+          const dump = await debugDump(client, workspaceId, created.handoffId);
           throw new Error(`${err instanceof Error ? err.message : String(err)}\n${dump}`);
         })
-        .then((events) => events.find((e) => e.kind === "task.pr_created")!);
+        .then((events) => events.find((e) => e.kind === "handoff.pr_created")!);
 
       const payload = parseHistoryPayload(prCreatedEvent);
       prNumber = Number(payload.prNumber);
@@ -285,17 +285,17 @@ describe("e2e: backend -> sandbox-agent -> git -> PR", () => {
       const prFiles = (await prFilesRes.json()) as Array<{ filename: string }>;
       expect(prFiles.some((f) => f.filename === expectedFile)).toBe(true);
 
-      // Close the task and assert the sandbox is released (stopped).
-      await client.runAction(workspaceId, created.taskId, "archive");
+      // Close the handoff and assert the sandbox is released (stopped).
+      await client.runAction(workspaceId, created.handoffId, "archive");
 
-      await poll<TaskRecord>(
-        "task to become archived (session released)",
+      await poll<HandoffRecord>(
+        "handoff to become archived (session released)",
         60_000,
         1_000,
-        async () => client.getTask(workspaceId, created.taskId),
+        async () => client.getHandoff(workspaceId, created.handoffId),
         (h) => h.status === "archived" && h.activeSessionId === null,
       ).catch(async (err) => {
-        const dump = await debugDump(client, workspaceId, created.taskId);
+        const dump = await debugDump(client, workspaceId, created.handoffId);
         throw new Error(`${err instanceof Error ? err.message : String(err)}\n${dump}`);
       });
 
@@ -310,7 +310,7 @@ describe("e2e: backend -> sandbox-agent -> git -> PR", () => {
             return st.includes("stopped") || st.includes("suspended") || st.includes("paused");
           },
         ).catch(async (err) => {
-          const dump = await debugDump(client, workspaceId, created.taskId);
+          const dump = await debugDump(client, workspaceId, created.handoffId);
           const state = await client.sandboxProviderState(workspaceId, "daytona", sandboxId!).catch(() => null);
           throw new Error(`${err instanceof Error ? err.message : String(err)}\n` + `sandbox state: ${state ? state.state : "unknown"}\n` + `${dump}`);
         });

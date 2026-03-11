@@ -187,6 +187,9 @@ async function ensureAppSession(c: any, requestedSessionId?: string | null): Pro
       activeOrganizationId: null,
       githubAccessToken: null,
       githubScope: "",
+      starterRepoStatus: "pending",
+      starterRepoStarredAt: null,
+      starterRepoSkippedAt: null,
       oauthState: null,
       oauthStateExpiresAt: null,
       createdAt: now,
@@ -256,6 +259,15 @@ async function buildAppSnapshot(c: any, sessionId: string): Promise<FoundryAppSn
       currentUserId: currentUser?.id ?? null,
     },
     activeOrganizationId,
+    onboarding: {
+      starterRepo: {
+        repoFullName: "rivet-dev/sandbox-agent",
+        repoUrl: "https://github.com/rivet-dev/sandbox-agent",
+        status: session.starterRepoStatus ?? "pending",
+        starredAt: session.starterRepoStarredAt ?? null,
+        skippedAt: session.starterRepoSkippedAt ?? null,
+      },
+    },
     users: currentUser ? [currentUser] : [],
     organizations,
   };
@@ -608,10 +620,40 @@ export const workspaceAppActions = {
       activeOrganizationId: null,
       githubAccessToken: null,
       githubScope: "",
+      starterRepoStatus: "pending",
+      starterRepoStarredAt: null,
+      starterRepoSkippedAt: null,
       oauthState: null,
       oauthStateExpiresAt: null,
     });
     return await buildAppSnapshot(c, sessionId);
+  },
+
+  async skipAppStarterRepo(c: any, input: { sessionId: string }): Promise<FoundryAppSnapshot> {
+    assertAppWorkspace(c);
+    await requireSignedInSession(c, input.sessionId);
+    await updateAppSession(c, input.sessionId, {
+      starterRepoStatus: "skipped",
+      starterRepoSkippedAt: Date.now(),
+      starterRepoStarredAt: null,
+    });
+    return await buildAppSnapshot(c, input.sessionId);
+  },
+
+  async starAppStarterRepo(c: any, input: { sessionId: string; organizationId: string }): Promise<FoundryAppSnapshot> {
+    assertAppWorkspace(c);
+    const session = await requireSignedInSession(c, input.sessionId);
+    requireEligibleOrganization(session, input.organizationId);
+    const workspace = await getOrCreateWorkspace(c, input.organizationId);
+    await workspace.starSandboxAgentRepo({
+      workspaceId: input.organizationId,
+    });
+    await updateAppSession(c, input.sessionId, {
+      starterRepoStatus: "starred",
+      starterRepoStarredAt: Date.now(),
+      starterRepoSkippedAt: null,
+    });
+    return await buildAppSnapshot(c, input.sessionId);
   },
 
   async selectAppOrganization(c: any, input: { sessionId: string; organizationId: string }): Promise<FoundryAppSnapshot> {
