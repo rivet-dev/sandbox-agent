@@ -9,7 +9,7 @@ import { backendClient } from "../../lib/backend";
 
 interface TerminalPaneProps {
   workspaceId: string;
-  handoffId: string | null;
+  taskId: string | null;
 }
 
 interface ProcessTab {
@@ -60,7 +60,7 @@ function formatProcessTabTitle(process: Pick<SandboxProcessRecord, "command" | "
   return label && label.length > 0 ? label : `Terminal ${fallbackIndex}`;
 }
 
-export function TerminalPane({ workspaceId, handoffId }: TerminalPaneProps) {
+export function TerminalPane({ workspaceId, taskId }: TerminalPaneProps) {
   const [css] = useStyletron();
   const [activeTabId, setActiveTabId] = useState<string>(PROCESSES_TAB_ID);
   const [processTabs, setProcessTabs] = useState<ProcessTab[]>([]);
@@ -78,28 +78,28 @@ export function TerminalPane({ workspaceId, handoffId }: TerminalPaneProps) {
   const [logsError, setLogsError] = useState<string | null>(null);
   const [terminalClient, setTerminalClient] = useState<SandboxAgent | null>(null);
 
-  const handoffQuery = useQuery({
-    queryKey: ["mock-layout", "handoff", workspaceId, handoffId],
-    enabled: Boolean(handoffId),
+  const taskQuery = useQuery({
+    queryKey: ["mock-layout", "task", workspaceId, taskId],
+    enabled: Boolean(taskId),
     staleTime: 1_000,
     refetchOnWindowFocus: true,
     refetchInterval: (query) => (query.state.data?.activeSandboxId ? false : 2_000),
     queryFn: async () => {
-      if (!handoffId) {
-        throw new Error("Cannot load terminal state without a handoff.");
+      if (!taskId) {
+        throw new Error("Cannot load terminal state without a task.");
       }
-      return await backendClient.getHandoff(workspaceId, handoffId);
+      return await backendClient.getTask(workspaceId, taskId);
     },
   });
 
   const activeSandbox = useMemo(() => {
-    const handoff = handoffQuery.data;
-    if (!handoff?.activeSandboxId) {
+    const task = taskQuery.data;
+    if (!task?.activeSandboxId) {
       return null;
     }
 
-    return handoff.sandboxes.find((sandbox) => sandbox.sandboxId === handoff.activeSandboxId) ?? null;
-  }, [handoffQuery.data]);
+    return task.sandboxes.find((sandbox) => sandbox.sandboxId === task.activeSandboxId) ?? null;
+  }, [taskQuery.data]);
 
   const connectionQuery = useQuery({
     queryKey: ["mock-layout", "sandbox-agent-connection", workspaceId, activeSandbox?.providerId ?? "", activeSandbox?.sandboxId ?? ""],
@@ -210,7 +210,7 @@ export function TerminalPane({ workspaceId, handoffId }: TerminalPaneProps) {
     setSelectedProcessId(null);
     setLogsText("");
     setLogsError(null);
-  }, [handoffId]);
+  }, [taskId]);
 
   const processes = processesQuery.data?.processes ?? [];
   const selectedProcess = useMemo(() => processes.find((process) => process.id === selectedProcessId) ?? null, [processes, selectedProcessId]);
@@ -432,7 +432,7 @@ export function TerminalPane({ workspaceId, handoffId }: TerminalPaneProps) {
         <div className={emptyBodyClassName}>
           <div className={emptyCopyClassName}>
             <strong>Processes will appear when the sandbox is ready.</strong>
-            <span>The active handoff does not have a sandbox runtime yet.</span>
+            <span>The active task does not have a sandbox runtime yet.</span>
           </div>
         </div>
       );
@@ -870,17 +870,17 @@ export function TerminalPane({ workspaceId, handoffId }: TerminalPaneProps) {
   };
 
   const renderBody = () => {
-    if (!handoffId) {
+    if (!taskId) {
       return (
         <div className={emptyBodyClassName}>
           <div className={emptyCopyClassName}>
-            <strong>Select a handoff to inspect its processes.</strong>
+            <strong>Select a task to inspect its processes.</strong>
           </div>
         </div>
       );
     }
 
-    if (handoffQuery.isLoading) {
+    if (taskQuery.isLoading) {
       return (
         <div className={emptyBodyClassName}>
           <div className={emptyCopyClassName}>
@@ -890,12 +890,12 @@ export function TerminalPane({ workspaceId, handoffId }: TerminalPaneProps) {
       );
     }
 
-    if (handoffQuery.error) {
+    if (taskQuery.error) {
       return (
         <div className={emptyBodyClassName}>
           <div className={emptyCopyClassName}>
-            <strong>Could not load handoff state.</strong>
-            <span>{handoffQuery.error.message}</span>
+            <strong>Could not load task state.</strong>
+            <span>{taskQuery.error.message}</span>
           </div>
         </div>
       );

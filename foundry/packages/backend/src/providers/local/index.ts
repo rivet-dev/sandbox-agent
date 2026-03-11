@@ -146,7 +146,7 @@ export class LocalProvider implements SandboxProvider {
   }
 
   async createSandbox(req: CreateSandboxRequest): Promise<SandboxHandle> {
-    const sandboxId = req.handoffId || `local-${randomUUID()}`;
+    const sandboxId = req.taskId || `local-${randomUUID()}`;
     const repoDir = this.repoDir(req.workspaceId, sandboxId);
     mkdirSync(dirname(repoDir), { recursive: true });
     await this.git.ensureCloned(req.repoRemote, repoDir);

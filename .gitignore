@@ -51,7 +51,7 @@ Cargo.lock
 # Example temp files
 .tmp-upload/
 *.db
-.openhandoff/
+.foundry/
 
 # CLI binaries (downloaded during npm publish)
 sdks/cli/platforms/*/bin/

@@ -4,10 +4,10 @@ import { LabelSmall } from "baseui/typography";
 import { Clock, MailOpen } from "lucide-react";
 
 import { PanelHeaderBar } from "./ui";
-import { type AgentTab, type Handoff } from "./view-model";
+import { type AgentTab, type Task } from "./view-model";
 
 export const TranscriptHeader = memo(function TranscriptHeader({
-  handoff,
+  task,
   activeTab,
   editingField,
   editValue,
@@ -17,7 +17,7 @@ export const TranscriptHeader = memo(function TranscriptHeader({
   onCancelEditingField,
   onSetActiveTabUnread,
 }: {
-  handoff: Handoff;
+  task: Task;
   activeTab: AgentTab | null | undefined;
   editingField: "title" | "branch" | null;
   editValue: string;
@@ -65,12 +65,12 @@ export const TranscriptHeader = memo(function TranscriptHeader({
           title="Rename"
           color={theme.colors.contentPrimary}
           $style={{ fontWeight: 400, whiteSpace: "nowrap", cursor: "pointer", ":hover": { textDecoration: "underline" } }}
-          onClick={() => onStartEditingField("title", handoff.title)}
+          onClick={() => onStartEditingField("title", task.title)}
         >
-          {handoff.title}
+          {task.title}
         </LabelSmall>
       )}
-      {handoff.branch ? (
+      {task.branch ? (
         editingField === "branch" ? (
           <input
             autoFocus
@@ -104,7 +104,7 @@ export const TranscriptHeader = memo(function TranscriptHeader({
         ) : (
           <span
             title="Rename"
-            onClick={() => onStartEditingField("branch", handoff.branch ?? "")}
+            onClick={() => onStartEditingField("branch", task.branch ?? "")}
             className={css({
               padding: "2px 8px",
               borderRadius: "999px",
@@ -118,7 +118,7 @@ export const TranscriptHeader = memo(function TranscriptHeader({
               ":hover": { borderColor: "rgba(255, 255, 255, 0.3)" },
             })}
           >
-            {handoff.branch}
+            {task.branch}
           </span>
         )
       ) : null}

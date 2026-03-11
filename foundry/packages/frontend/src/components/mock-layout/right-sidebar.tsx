@@ -4,7 +4,7 @@ import { LabelSmall } from "baseui/typography";
 import { Archive, ArrowUpFromLine, ChevronRight, FileCode, FilePlus, FileX, FolderOpen, GitPullRequest } from "lucide-react";
 
 import { type ContextMenuItem, ContextMenuOverlay, PanelHeaderBar, SPanel, ScrollBody, useContextMenu } from "./ui";
-import { type FileTreeNode, type Handoff, diffTabId } from "./view-model";
+import { type FileTreeNode, type Task, diffTabId } from "./view-model";
 
 const FileTree = memo(function FileTree({
   nodes,
@@ -87,14 +87,14 @@ const FileTree = memo(function FileTree({
 });
 
 export const RightSidebar = memo(function RightSidebar({
-  handoff,
+  task,
   activeTabId,
   onOpenDiff,
   onArchive,
   onRevertFile,
   onPublishPr,
 }: {
-  handoff: Handoff;
+  task: Task;
   activeTabId: string | null;
   onOpenDiff: (path: string) => void;
   onArchive: () => void;
@@ -104,9 +104,9 @@ export const RightSidebar = memo(function RightSidebar({
   const [css, theme] = useStyletron();
   const [rightTab, setRightTab] = useState<"changes" | "files">("changes");
   const contextMenu = useContextMenu();
-  const changedPaths = useMemo(() => new Set(handoff.fileChanges.map((file) => file.path)), [handoff.fileChanges]);
-  const isTerminal = handoff.status === "archived";
-  const pullRequestUrl = handoff.pullRequest != null ? `https://github.com/${handoff.repoName}/pull/${handoff.pullRequest.number}` : null;
+  const changedPaths = useMemo(() => new Set(task.fileChanges.map((file) => file.path)), [task.fileChanges]);
+  const isTerminal = task.status === "archived";
+  const pullRequestUrl = task.pullRequest != null ? `https://github.com/${task.repoName}/pull/${task.pullRequest.number}` : null;
 
   const copyFilePath = useCallback(async (path: string) => {
     try {
@@ -270,7 +270,7 @@ export const RightSidebar = memo(function RightSidebar({
             })}
           >
             Changes
-            {handoff.fileChanges.length > 0 ? (
+            {task.fileChanges.length > 0 ? (
               <span
                 className={css({
                   display: "inline-flex",
@@ -286,7 +286,7 @@ export const RightSidebar = memo(function RightSidebar({
                   borderRadius: "8px",
                 })}
               >
-                {handoff.fileChanges.length}
+                {task.fileChanges.length}
               </span>
             ) : null}
           </button>
@@ -325,12 +325,12 @@ export const RightSidebar = memo(function RightSidebar({
         <ScrollBody>
           {rightTab === "changes" ? (
             <div className={css({ padding: "10px 14px", display: "flex", flexDirection: "column", gap: "2px" })}>
-              {handoff.fileChanges.length === 0 ? (
+              {task.fileChanges.length === 0 ? (
                 <div className={css({ padding: "20px 0", textAlign: "center" })}>
                   <LabelSmall color={theme.colors.contentTertiary}>No changes yet</LabelSmall>
                 </div>
               ) : null}
-              {handoff.fileChanges.map((file) => {
+              {task.fileChanges.map((file) => {
                 const isActive = activeTabId === diffTabId(file.path);
                 const TypeIcon = file.type === "A" ? FilePlus : file.type === "D" ? FileX : FileCode;
                 const iconColor = file.type === "A" ? "#7ee787" : file.type === "D" ? "#ffa198" : theme.colors.contentTertiary;
@@ -385,8 +385,8 @@ export const RightSidebar = memo(function RightSidebar({
             </div>
           ) : (
             <div className={css({ padding: "6px 0" })}>
-              {handoff.fileTree.length > 0 ? (
-                <FileTree nodes={handoff.fileTree} depth={0} onSelectFile={onOpenDiff} onFileContextMenu={openFileMenu} changedPaths={changedPaths} />
+              {task.fileTree.length > 0 ? (
+                <FileTree nodes={task.fileTree} depth={0} onSelectFile={onOpenDiff} onFileContextMenu={openFileMenu} changedPaths={changedPaths} />
               ) : (
                 <div className={css({ padding: "20px 0", textAlign: "center" })}>
                   <LabelSmall color={theme.colors.contentTertiary}>No files yet</LabelSmall>

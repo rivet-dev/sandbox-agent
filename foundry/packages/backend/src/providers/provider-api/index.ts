@@ -10,7 +10,7 @@ export interface CreateSandboxRequest {
   repoId: string;
   repoRemote: string;
   branchName: string;
-  handoffId: string;
+  taskId: string;
   debug?: (message: string, context?: Record<string, unknown>) => void;
   options?: Record<string, unknown>;
 }

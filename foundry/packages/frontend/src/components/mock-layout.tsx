@@ -18,38 +18,38 @@ import {
   diffTabId,
   formatThinkingDuration,
   isDiffTab,
-  type Handoff,
+  type Task,
   type HistoryEvent,
   type LineAttachment,
   type Message,
   type ModelId,
 } from "./mock-layout/view-model";
 import { activeMockOrganization, useMockAppSnapshot } from "../lib/mock-app";
-import { handoffWorkbenchClient } from "../lib/workbench";
+import { taskWorkbenchClient } from "../lib/workbench";
 
-function firstAgentTabId(handoff: Handoff): string | null {
-  return handoff.tabs[0]?.id ?? null;
+function firstAgentTabId(task: Task): string | null {
+  return task.tabs[0]?.id ?? null;
 }
 
-function sanitizeOpenDiffs(handoff: Handoff, paths: string[] | undefined): string[] {
+function sanitizeOpenDiffs(task: Task, paths: string[] | undefined): string[] {
   if (!paths) {
     return [];
   }
 
-  return paths.filter((path) => handoff.diffs[path] != null);
+  return paths.filter((path) => task.diffs[path] != null);
 }
 
-function sanitizeLastAgentTabId(handoff: Handoff, tabId: string | null | undefined): string | null {
-  if (tabId && handoff.tabs.some((tab) => tab.id === tabId)) {
+function sanitizeLastAgentTabId(task: Task, tabId: string | null | undefined): string | null {
+  if (tabId && task.tabs.some((tab) => tab.id === tabId)) {
     return tabId;
   }
 
-  return firstAgentTabId(handoff);
+  return firstAgentTabId(task);
 }
 
-function sanitizeActiveTabId(handoff: Handoff, tabId: string | null | undefined, openDiffs: string[], lastAgentTabId: string | null): string | null {
+function sanitizeActiveTabId(task: Task, tabId: string | null | undefined, openDiffs: string[], lastAgentTabId: string | null): string | null {
   if (tabId) {
-    if (handoff.tabs.some((tab) => tab.id === tabId)) {
+    if (task.tabs.some((tab) => tab.id === tabId)) {
       return tabId;
     }
     if (isDiffTab(tabId) && openDiffs.includes(diffPath(tabId))) {
@@ -61,7 +61,7 @@ function sanitizeActiveTabId(handoff: Handoff, tabId: string | null | undefined,
 }
 
 const TranscriptPanel = memo(function TranscriptPanel({
-  handoff,
+  task,
   activeTabId,
   lastAgentTabId,
   openDiffs,
@@ -70,11 +70,11 @@ const TranscriptPanel = memo(function TranscriptPanel({
   onSetLastAgentTabId,
   onSetOpenDiffs,
 }: {
-  handoff: Handoff;
+  task: Task;
   activeTabId: string | null;
   lastAgentTabId: string | null;
   openDiffs: string[];
-  onSyncRouteSession: (handoffId: string, sessionId: string | null, replace?: boolean) => void;
+  onSyncRouteSession: (taskId: string, sessionId: string | null, replace?: boolean) => void;
   onSetActiveTabId: (tabId: string | null) => void;
   onSetLastAgentTabId: (tabId: string | null) => void;
   onSetOpenDiffs: (paths: string[]) => void;
@@ -91,10 +91,10 @@ const TranscriptPanel = memo(function TranscriptPanel({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const messageRefs = useRef(new Map<string, HTMLDivElement>());
   const activeDiff = activeTabId && isDiffTab(activeTabId) ? diffPath(activeTabId) : null;
-  const activeAgentTab = activeDiff ? null : (handoff.tabs.find((candidate) => candidate.id === activeTabId) ?? handoff.tabs[0] ?? null);
-  const promptTab = handoff.tabs.find((candidate) => candidate.id === lastAgentTabId) ?? handoff.tabs[0] ?? null;
-  const isTerminal = handoff.status === "archived";
-  const historyEvents = useMemo(() => buildHistoryEvents(handoff.tabs), [handoff.tabs]);
+  const activeAgentTab = activeDiff ? null : (task.tabs.find((candidate) => candidate.id === activeTabId) ?? task.tabs[0] ?? null);
+  const promptTab = task.tabs.find((candidate) => candidate.id === lastAgentTabId) ?? task.tabs[0] ?? null;
+  const isTerminal = task.status === "archived";
+  const historyEvents = useMemo(() => buildHistoryEvents(task.tabs), [task.tabs]);
   const activeMessages = useMemo(() => buildDisplayMessages(activeAgentTab), [activeAgentTab]);
   const draft = promptTab?.draft.text ?? "";
   const attachments = promptTab?.draft.attachments ?? [];
@@ -107,12 +107,12 @@ const TranscriptPanel = memo(function TranscriptPanel({
 
   useEffect(() => {
     textareaRef.current?.focus();
-  }, [activeTabId, handoff.id]);
+  }, [activeTabId, task.id]);
 
   useEffect(() => {
     setEditingSessionTabId(null);
     setEditingSessionName("");
-  }, [handoff.id]);
+  }, [task.id]);
 
   useLayoutEffect(() => {
     const textarea = textareaRef.current;
@@ -124,7 +124,7 @@ const TranscriptPanel = memo(function TranscriptPanel({
     const nextHeight = Math.min(textarea.scrollHeight, PROMPT_TEXTAREA_MAX_HEIGHT);
     textarea.style.height = `${Math.max(PROMPT_TEXTAREA_MIN_HEIGHT, nextHeight)}px`;
     textarea.style.overflowY = textarea.scrollHeight > PROMPT_TEXTAREA_MAX_HEIGHT ? "auto" : "hidden";
-  }, [draft, activeTabId, handoff.id]);
+  }, [draft, activeTabId, task.id]);
 
   useEffect(() => {
     if (!pendingHistoryTarget || activeTabId !== pendingHistoryTarget.tabId) {
@@ -170,12 +170,12 @@ const TranscriptPanel = memo(function TranscriptPanel({
       return;
     }
 
-    void handoffWorkbenchClient.setSessionUnread({
-      handoffId: handoff.id,
+    void taskWorkbenchClient.setSessionUnread({
+      taskId: task.id,
       tabId: activeAgentTab.id,
       unread: false,
     });
-  }, [activeAgentTab?.id, activeAgentTab?.unread, handoff.id]);
+  }, [activeAgentTab?.id, activeAgentTab?.unread, task.id]);
 
   const startEditingField = useCallback((field: "title" | "branch", value: string) => {
     setEditingField(field);
@@ -195,13 +195,13 @@ const TranscriptPanel = memo(function TranscriptPanel({
       }
 
       if (field === "title") {
-        void handoffWorkbenchClient.renameHandoff({ handoffId: handoff.id, value });
+        void taskWorkbenchClient.renameTask({ taskId: task.id, value });
       } else {
-        void handoffWorkbenchClient.renameBranch({ handoffId: handoff.id, value });
+        void taskWorkbenchClient.renameBranch({ taskId: task.id, value });
       }
       setEditingField(null);
     },
-    [editValue, handoff.id],
+    [editValue, task.id],
   );
 
   const updateDraft = useCallback(
@@ -210,14 +210,14 @@ const TranscriptPanel = memo(function TranscriptPanel({
         return;
       }
 
-      void handoffWorkbenchClient.updateDraft({
-        handoffId: handoff.id,
+      void taskWorkbenchClient.updateDraft({
+        taskId: task.id,
         tabId: promptTab.id,
         text: nextText,
         attachments: nextAttachments,
       });
     },
-    [handoff.id, promptTab],
+    [task.id, promptTab],
   );
 
   const sendMessage = useCallback(() => {
@@ -228,24 +228,24 @@ const TranscriptPanel = memo(function TranscriptPanel({
 
     onSetActiveTabId(promptTab.id);
     onSetLastAgentTabId(promptTab.id);
-    void handoffWorkbenchClient.sendMessage({
-      handoffId: handoff.id,
+    void taskWorkbenchClient.sendMessage({
+      taskId: task.id,
       tabId: promptTab.id,
       text,
       attachments,
     });
-  }, [attachments, draft, handoff.id, onSetActiveTabId, onSetLastAgentTabId, promptTab]);
+  }, [attachments, draft, task.id, onSetActiveTabId, onSetLastAgentTabId, promptTab]);
 
   const stopAgent = useCallback(() => {
     if (!promptTab) {
       return;
     }
 
-    void handoffWorkbenchClient.stopAgent({
-      handoffId: handoff.id,
+    void taskWorkbenchClient.stopAgent({
+      taskId: task.id,
       tabId: promptTab.id,
     });
-  }, [handoff.id, promptTab]);
+  }, [task.id, promptTab]);
 
   const switchTab = useCallback(
     (tabId: string) => {
@@ -253,30 +253,30 @@ const TranscriptPanel = memo(function TranscriptPanel({
 
       if (!isDiffTab(tabId)) {
         onSetLastAgentTabId(tabId);
-        const tab = handoff.tabs.find((candidate) => candidate.id === tabId);
+        const tab = task.tabs.find((candidate) => candidate.id === tabId);
         if (tab?.unread) {
-          void handoffWorkbenchClient.setSessionUnread({
-            handoffId: handoff.id,
+          void taskWorkbenchClient.setSessionUnread({
+            taskId: task.id,
             tabId,
             unread: false,
           });
         }
-        onSyncRouteSession(handoff.id, tabId);
+        onSyncRouteSession(task.id, tabId);
       }
     },
-    [handoff.id, handoff.tabs, onSetActiveTabId, onSetLastAgentTabId, onSyncRouteSession],
+    [task.id, task.tabs, onSetActiveTabId, onSetLastAgentTabId, onSyncRouteSession],
   );
 
   const setTabUnread = useCallback(
     (tabId: string, unread: boolean) => {
-      void handoffWorkbenchClient.setSessionUnread({ handoffId: handoff.id, tabId, unread });
+      void taskWorkbenchClient.setSessionUnread({ taskId: task.id, tabId, unread });
     },
-    [handoff.id],
+    [task.id],
   );
 
   const startRenamingTab = useCallback(
     (tabId: string) => {
-      const targetTab = handoff.tabs.find((candidate) => candidate.id === tabId);
+      const targetTab = task.tabs.find((candidate) => candidate.id === tabId);
       if (!targetTab) {
         throw new Error(`Unable to rename missing session tab ${tabId}`);
       }
@@ -284,7 +284,7 @@ const TranscriptPanel = memo(function TranscriptPanel({
       setEditingSessionTabId(tabId);
       setEditingSessionName(targetTab.sessionName);
     },
-    [handoff.tabs],
+    [task.tabs],
   );
 
   const cancelTabRename = useCallback(() => {
@@ -303,17 +303,17 @@ const TranscriptPanel = memo(function TranscriptPanel({
       return;
     }
 
-    void handoffWorkbenchClient.renameSession({
-      handoffId: handoff.id,
+    void taskWorkbenchClient.renameSession({
+      taskId: task.id,
       tabId: editingSessionTabId,
       title: trimmedName,
     });
     cancelTabRename();
-  }, [cancelTabRename, editingSessionName, editingSessionTabId, handoff.id]);
+  }, [cancelTabRename, editingSessionName, editingSessionTabId, task.id]);
 
   const closeTab = useCallback(
     (tabId: string) => {
-      const remainingTabs = handoff.tabs.filter((candidate) => candidate.id !== tabId);
+      const remainingTabs = task.tabs.filter((candidate) => candidate.id !== tabId);
       const nextTabId = remainingTabs[0]?.id ?? null;
 
       if (activeTabId === tabId) {
@@ -323,10 +323,10 @@ const TranscriptPanel = memo(function TranscriptPanel({
         onSetLastAgentTabId(nextTabId);
       }
 
-      onSyncRouteSession(handoff.id, nextTabId);
-      void handoffWorkbenchClient.closeTab({ handoffId: handoff.id, tabId });
+      onSyncRouteSession(task.id, nextTabId);
+      void taskWorkbenchClient.closeTab({ taskId: task.id, tabId });
     },
-    [activeTabId, handoff.id, handoff.tabs, lastAgentTabId, onSetActiveTabId, onSetLastAgentTabId, onSyncRouteSession],
+    [activeTabId, task.id, task.tabs, lastAgentTabId, onSetActiveTabId, onSetLastAgentTabId, onSyncRouteSession],
   );
 
   const closeDiffTab = useCallback(
@@ -334,34 +334,34 @@ const TranscriptPanel = memo(function TranscriptPanel({
       const nextOpenDiffs = openDiffs.filter((candidate) => candidate !== path);
       onSetOpenDiffs(nextOpenDiffs);
       if (activeTabId === diffTabId(path)) {
-        onSetActiveTabId(nextOpenDiffs.length > 0 ? diffTabId(nextOpenDiffs[nextOpenDiffs.length - 1]!) : (lastAgentTabId ?? firstAgentTabId(handoff)));
+        onSetActiveTabId(nextOpenDiffs.length > 0 ? diffTabId(nextOpenDiffs[nextOpenDiffs.length - 1]!) : (lastAgentTabId ?? firstAgentTabId(task)));
       }
     },
-    [activeTabId, handoff, lastAgentTabId, onSetActiveTabId, onSetOpenDiffs, openDiffs],
+    [activeTabId, task, lastAgentTabId, onSetActiveTabId, onSetOpenDiffs, openDiffs],
   );
 
   const addTab = useCallback(() => {
     void (async () => {
-      const { tabId } = await handoffWorkbenchClient.addTab({ handoffId: handoff.id });
+      const { tabId } = await taskWorkbenchClient.addTab({ taskId: task.id });
       onSetLastAgentTabId(tabId);
       onSetActiveTabId(tabId);
-      onSyncRouteSession(handoff.id, tabId);
+      onSyncRouteSession(task.id, tabId);
     })();
-  }, [handoff.id, onSetActiveTabId, onSetLastAgentTabId, onSyncRouteSession]);
+  }, [task.id, onSetActiveTabId, onSetLastAgentTabId, onSyncRouteSession]);
 
   const changeModel = useCallback(
     (model: ModelId) => {
       if (!promptTab) {
-        throw new Error(`Unable to change model for task ${handoff.id} without an active prompt tab`);
+        throw new Error(`Unable to change model for task ${task.id} without an active prompt tab`);
       }
 
-      void handoffWorkbenchClient.changeModel({
-        handoffId: handoff.id,
+      void taskWorkbenchClient.changeModel({
+        taskId: task.id,
         tabId: promptTab.id,
         model,
       });
     },
-    [handoff.id, promptTab],
+    [task.id, promptTab],
   );
 
   const addAttachment = useCallback(
@@ -429,7 +429,7 @@ const TranscriptPanel = memo(function TranscriptPanel({
   return (
     <SPanel>
       <TranscriptHeader
-        handoff={handoff}
+        task={task}
         activeTab={activeAgentTab}
         editingField={editingField}
         editValue={editValue}
@@ -457,7 +457,7 @@ const TranscriptPanel = memo(function TranscriptPanel({
         }}
       >
         <TabStrip
-          handoff={handoff}
+          task={task}
           activeTabId={activeTabId}
           openDiffs={openDiffs}
           editingSessionTabId={editingSessionTabId}
@@ -475,11 +475,11 @@ const TranscriptPanel = memo(function TranscriptPanel({
         {activeDiff ? (
           <DiffContent
             filePath={activeDiff}
-            file={handoff.fileChanges.find((file) => file.path === activeDiff)}
-            diff={handoff.diffs[activeDiff]}
+            file={task.fileChanges.find((file) => file.path === activeDiff)}
+            diff={task.diffs[activeDiff]}
             onAddAttachment={addAttachment}
           />
-        ) : handoff.tabs.length === 0 ? (
+        ) : task.tabs.length === 0 ? (
           <ScrollBody>
             <div
               style={{
@@ -633,7 +633,7 @@ const TERMINAL_HEIGHT_STORAGE_KEY = "foundry:terminal-height";
 
 const RightRail = memo(function RightRail({
   workspaceId,
-  handoff,
+  task,
   activeTabId,
   onOpenDiff,
   onArchive,
@@ -641,7 +641,7 @@ const RightRail = memo(function RightRail({
   onPublishPr,
 }: {
   workspaceId: string;
-  handoff: Handoff;
+  task: Task;
   activeTabId: string | null;
   onOpenDiff: (path: string) => void;
   onArchive: () => void;
@@ -729,7 +729,7 @@ const RightRail = memo(function RightRail({
         })}
       >
         <RightSidebar
-          handoff={handoff}
+          task={task}
           activeTabId={activeTabId}
           onOpenDiff={onOpenDiff}
           onArchive={onArchive}
@@ -769,7 +769,7 @@ const RightRail = memo(function RightRail({
           overflow: "hidden",
         })}
       >
-        <TerminalPane workspaceId={workspaceId} handoffId={handoff.id} />
+        <TerminalPane workspaceId={workspaceId} taskId={task.id} />
       </div>
     </div>
   );
@@ -777,7 +777,7 @@ const RightRail = memo(function RightRail({
 
 interface MockLayoutProps {
   workspaceId: string;
-  selectedHandoffId?: string | null;
+  selectedTaskId?: string | null;
   selectedSessionId?: string | null;
 }
 
@@ -856,14 +856,14 @@ function MockWorkspaceOrgBar() {
   );
 }
 
-export function MockLayout({ workspaceId, selectedHandoffId, selectedSessionId }: MockLayoutProps) {
+export function MockLayout({ workspaceId, selectedTaskId, selectedSessionId }: MockLayoutProps) {
   const navigate = useNavigate();
   const viewModel = useSyncExternalStore(
-    handoffWorkbenchClient.subscribe.bind(handoffWorkbenchClient),
-    handoffWorkbenchClient.getSnapshot.bind(handoffWorkbenchClient),
-    handoffWorkbenchClient.getSnapshot.bind(handoffWorkbenchClient),
+    taskWorkbenchClient.subscribe.bind(taskWorkbenchClient),
+    taskWorkbenchClient.getSnapshot.bind(taskWorkbenchClient),
+    taskWorkbenchClient.getSnapshot.bind(taskWorkbenchClient),
   );
-  const handoffs = viewModel.handoffs ?? [];
+  const tasks = viewModel.tasks ?? [];
   const rawProjects = viewModel.projects ?? [];
   const [projectOrder, setProjectOrder] = useState<string[] | null>(null);
   const projects = useMemo(() => {
@@ -884,9 +884,9 @@ export function MockLayout({ workspaceId, selectedHandoffId, selectedSessionId }
     },
     [projects],
   );
-  const [activeTabIdByHandoff, setActiveTabIdByHandoff] = useState<Record<string, string | null>>({});
-  const [lastAgentTabIdByHandoff, setLastAgentTabIdByHandoff] = useState<Record<string, string | null>>({});
-  const [openDiffsByHandoff, setOpenDiffsByHandoff] = useState<Record<string, string[]>>({});
+  const [activeTabIdByTask, setActiveTabIdByTask] = useState<Record<string, string | null>>({});
+  const [lastAgentTabIdByTask, setLastAgentTabIdByTask] = useState<Record<string, string | null>>({});
+  const [openDiffsByTask, setOpenDiffsByTask] = useState<Record<string, string[]>>({});
   const [leftWidth, setLeftWidth] = useState(() => readStoredWidth(LEFT_WIDTH_STORAGE_KEY, LEFT_SIDEBAR_DEFAULT_WIDTH));
   const [rightWidth, setRightWidth] = useState(() => readStoredWidth(RIGHT_WIDTH_STORAGE_KEY, RIGHT_SIDEBAR_DEFAULT_WIDTH));
   const leftWidthRef = useRef(leftWidth);
@@ -921,42 +921,42 @@ export function MockLayout({ workspaceId, selectedHandoffId, selectedSessionId }
     startRightRef.current = rightWidthRef.current;
   }, []);
 
-  const activeHandoff = useMemo(() => handoffs.find((handoff) => handoff.id === selectedHandoffId) ?? handoffs[0] ?? null, [handoffs, selectedHandoffId]);
+  const activeTask = useMemo(() => tasks.find((task) => task.id === selectedTaskId) ?? tasks[0] ?? null, [tasks, selectedTaskId]);
 
   useEffect(() => {
-    if (activeHandoff) {
+    if (activeTask) {
       return;
     }
 
-    const fallbackHandoffId = handoffs[0]?.id;
-    if (!fallbackHandoffId) {
+    const fallbackTaskId = tasks[0]?.id;
+    if (!fallbackTaskId) {
       return;
     }
 
-    const fallbackHandoff = handoffs.find((handoff) => handoff.id === fallbackHandoffId) ?? null;
+    const fallbackTask = tasks.find((task) => task.id === fallbackTaskId) ?? null;
 
     void navigate({
-      to: "/workspaces/$workspaceId/handoffs/$handoffId",
+      to: "/workspaces/$workspaceId/tasks/$taskId",
       params: {
         workspaceId,
-        handoffId: fallbackHandoffId,
+        taskId: fallbackTaskId,
       },
-      search: { sessionId: fallbackHandoff?.tabs[0]?.id ?? undefined },
+      search: { sessionId: fallbackTask?.tabs[0]?.id ?? undefined },
       replace: true,
     });
-  }, [activeHandoff, handoffs, navigate, workspaceId]);
+  }, [activeTask, tasks, navigate, workspaceId]);
 
-  const openDiffs = activeHandoff ? sanitizeOpenDiffs(activeHandoff, openDiffsByHandoff[activeHandoff.id]) : [];
-  const lastAgentTabId = activeHandoff ? sanitizeLastAgentTabId(activeHandoff, lastAgentTabIdByHandoff[activeHandoff.id]) : null;
-  const activeTabId = activeHandoff ? sanitizeActiveTabId(activeHandoff, activeTabIdByHandoff[activeHandoff.id], openDiffs, lastAgentTabId) : null;
+  const openDiffs = activeTask ? sanitizeOpenDiffs(activeTask, openDiffsByTask[activeTask.id]) : [];
+  const lastAgentTabId = activeTask ? sanitizeLastAgentTabId(activeTask, lastAgentTabIdByTask[activeTask.id]) : null;
+  const activeTabId = activeTask ? sanitizeActiveTabId(activeTask, activeTabIdByTask[activeTask.id], openDiffs, lastAgentTabId) : null;
 
   const syncRouteSession = useCallback(
-    (handoffId: string, sessionId: string | null, replace = false) => {
+    (taskId: string, sessionId: string | null, replace = false) => {
       void navigate({
-        to: "/workspaces/$workspaceId/handoffs/$handoffId",
+        to: "/workspaces/$workspaceId/tasks/$taskId",
         params: {
           workspaceId,
-          handoffId,
+          taskId,
         },
         search: { sessionId: sessionId ?? undefined },
         ...(replace ? { replace: true } : {}),
@@ -966,116 +966,116 @@ export function MockLayout({ workspaceId, selectedHandoffId, selectedSessionId }
   );
 
   useEffect(() => {
-    if (!activeHandoff) {
+    if (!activeTask) {
       return;
     }
 
-    const resolvedRouteSessionId = sanitizeLastAgentTabId(activeHandoff, selectedSessionId);
+    const resolvedRouteSessionId = sanitizeLastAgentTabId(activeTask, selectedSessionId);
     if (!resolvedRouteSessionId) {
       return;
     }
 
     if (selectedSessionId !== resolvedRouteSessionId) {
-      syncRouteSession(activeHandoff.id, resolvedRouteSessionId, true);
+      syncRouteSession(activeTask.id, resolvedRouteSessionId, true);
       return;
     }
 
-    if (lastAgentTabIdByHandoff[activeHandoff.id] === resolvedRouteSessionId) {
+    if (lastAgentTabIdByTask[activeTask.id] === resolvedRouteSessionId) {
       return;
     }
 
-    setLastAgentTabIdByHandoff((current) => ({
+    setLastAgentTabIdByTask((current) => ({
       ...current,
-      [activeHandoff.id]: resolvedRouteSessionId,
+      [activeTask.id]: resolvedRouteSessionId,
     }));
-    setActiveTabIdByHandoff((current) => {
-      const currentActive = current[activeHandoff.id];
+    setActiveTabIdByTask((current) => {
+      const currentActive = current[activeTask.id];
       if (currentActive && isDiffTab(currentActive)) {
         return current;
       }
 
       return {
         ...current,
-        [activeHandoff.id]: resolvedRouteSessionId,
+        [activeTask.id]: resolvedRouteSessionId,
       };
     });
-  }, [activeHandoff, lastAgentTabIdByHandoff, selectedSessionId, syncRouteSession]);
+  }, [activeTask, lastAgentTabIdByTask, selectedSessionId, syncRouteSession]);
 
-  const createHandoff = useCallback(() => {
+  const createTask = useCallback(() => {
     void (async () => {
-      const repoId = activeHandoff?.repoId ?? viewModel.repos[0]?.id ?? "";
+      const repoId = activeTask?.repoId ?? viewModel.repos[0]?.id ?? "";
       if (!repoId) {
         throw new Error("Cannot create a task without an available repo");
       }
 
-      const { handoffId, tabId } = await handoffWorkbenchClient.createHandoff({
+      const { taskId, tabId } = await taskWorkbenchClient.createTask({
         repoId,
         task: "New task",
         model: "gpt-4o",
         title: "New task",
       });
       await navigate({
-        to: "/workspaces/$workspaceId/handoffs/$handoffId",
+        to: "/workspaces/$workspaceId/tasks/$taskId",
         params: {
           workspaceId,
-          handoffId,
+          taskId,
         },
         search: { sessionId: tabId ?? undefined },
       });
     })();
-  }, [activeHandoff?.repoId, navigate, viewModel.repos, workspaceId]);
+  }, [activeTask?.repoId, navigate, viewModel.repos, workspaceId]);
 
   const openDiffTab = useCallback(
     (path: string) => {
-      if (!activeHandoff) {
+      if (!activeTask) {
         throw new Error("Cannot open a diff tab without an active task");
       }
-      setOpenDiffsByHandoff((current) => {
-        const existing = sanitizeOpenDiffs(activeHandoff, current[activeHandoff.id]);
+      setOpenDiffsByTask((current) => {
+        const existing = sanitizeOpenDiffs(activeTask, current[activeTask.id]);
         if (existing.includes(path)) {
           return current;
         }
 
         return {
           ...current,
-          [activeHandoff.id]: [...existing, path],
+          [activeTask.id]: [...existing, path],
         };
       });
-      setActiveTabIdByHandoff((current) => ({
+      setActiveTabIdByTask((current) => ({
         ...current,
-        [activeHandoff.id]: diffTabId(path),
+        [activeTask.id]: diffTabId(path),
       }));
     },
-    [activeHandoff],
+    [activeTask],
   );
 
-  const selectHandoff = useCallback(
+  const selectTask = useCallback(
     (id: string) => {
-      const handoff = handoffs.find((candidate) => candidate.id === id) ?? null;
+      const task = tasks.find((candidate) => candidate.id === id) ?? null;
       void navigate({
-        to: "/workspaces/$workspaceId/handoffs/$handoffId",
+        to: "/workspaces/$workspaceId/tasks/$taskId",
         params: {
           workspaceId,
-          handoffId: id,
+          taskId: id,
         },
-        search: { sessionId: handoff?.tabs[0]?.id ?? undefined },
+        search: { sessionId: task?.tabs[0]?.id ?? undefined },
       });
     },
-    [handoffs, navigate, workspaceId],
+    [tasks, navigate, workspaceId],
   );
 
-  const markHandoffUnread = useCallback((id: string) => {
-    void handoffWorkbenchClient.markHandoffUnread({ handoffId: id });
+  const markTaskUnread = useCallback((id: string) => {
+    void taskWorkbenchClient.markTaskUnread({ taskId: id });
   }, []);
 
-  const renameHandoff = useCallback(
+  const renameTask = useCallback(
     (id: string) => {
-      const currentHandoff = handoffs.find((handoff) => handoff.id === id);
-      if (!currentHandoff) {
+      const currentTask = tasks.find((task) => task.id === id);
+      if (!currentTask) {
         throw new Error(`Unable to rename missing task ${id}`);
       }
 
-      const nextTitle = window.prompt("Rename task", currentHandoff.title);
+      const nextTitle = window.prompt("Rename task", currentTask.title);
       if (nextTitle === null) {
         return;
       }
@@ -1085,19 +1085,19 @@ export function MockLayout({ workspaceId, selectedHandoffId, selectedSessionId }
         return;
       }
 
-      void handoffWorkbenchClient.renameHandoff({ handoffId: id, value: trimmedTitle });
+      void taskWorkbenchClient.renameTask({ taskId: id, value: trimmedTitle });
     },
-    [handoffs],
+    [tasks],
   );
 
   const renameBranch = useCallback(
     (id: string) => {
-      const currentHandoff = handoffs.find((handoff) => handoff.id === id);
-      if (!currentHandoff) {
+      const currentTask = tasks.find((task) => task.id === id);
+      if (!currentTask) {
         throw new Error(`Unable to rename missing task ${id}`);
       }
 
-      const nextBranch = window.prompt("Rename branch", currentHandoff.branch ?? "");
+      const nextBranch = window.prompt("Rename branch", currentTask.branch ?? "");
       if (nextBranch === null) {
         return;
       }
@@ -1107,50 +1107,50 @@ export function MockLayout({ workspaceId, selectedHandoffId, selectedSessionId }
         return;
       }
 
-      void handoffWorkbenchClient.renameBranch({ handoffId: id, value: trimmedBranch });
+      void taskWorkbenchClient.renameBranch({ taskId: id, value: trimmedBranch });
     },
-    [handoffs],
+    [tasks],
   );
 
-  const archiveHandoff = useCallback(() => {
-    if (!activeHandoff) {
+  const archiveTask = useCallback(() => {
+    if (!activeTask) {
       throw new Error("Cannot archive without an active task");
     }
-    void handoffWorkbenchClient.archiveHandoff({ handoffId: activeHandoff.id });
-  }, [activeHandoff]);
+    void taskWorkbenchClient.archiveTask({ taskId: activeTask.id });
+  }, [activeTask]);
 
   const publishPr = useCallback(() => {
-    if (!activeHandoff) {
+    if (!activeTask) {
       throw new Error("Cannot publish PR without an active task");
     }
-    void handoffWorkbenchClient.publishPr({ handoffId: activeHandoff.id });
-  }, [activeHandoff]);
+    void taskWorkbenchClient.publishPr({ taskId: activeTask.id });
+  }, [activeTask]);
 
   const revertFile = useCallback(
     (path: string) => {
-      if (!activeHandoff) {
+      if (!activeTask) {
         throw new Error("Cannot revert a file without an active task");
       }
-      setOpenDiffsByHandoff((current) => ({
+      setOpenDiffsByTask((current) => ({
         ...current,
-        [activeHandoff.id]: sanitizeOpenDiffs(activeHandoff, current[activeHandoff.id]).filter((candidate) => candidate !== path),
+        [activeTask.id]: sanitizeOpenDiffs(activeTask, current[activeTask.id]).filter((candidate) => candidate !== path),
       }));
-      setActiveTabIdByHandoff((current) => ({
+      setActiveTabIdByTask((current) => ({
         ...current,
-        [activeHandoff.id]:
-          current[activeHandoff.id] === diffTabId(path)
-            ? sanitizeLastAgentTabId(activeHandoff, lastAgentTabIdByHandoff[activeHandoff.id])
-            : (current[activeHandoff.id] ?? null),
+        [activeTask.id]:
+          current[activeTask.id] === diffTabId(path)
+            ? sanitizeLastAgentTabId(activeTask, lastAgentTabIdByTask[activeTask.id])
+            : (current[activeTask.id] ?? null),
       }));
 
-      void handoffWorkbenchClient.revertFile({
-        handoffId: activeHandoff.id,
+      void taskWorkbenchClient.revertFile({
+        taskId: activeTask.id,
         path,
       });
     },
-    [activeHandoff, lastAgentTabIdByHandoff],
+    [activeTask, lastAgentTabIdByTask],
   );
-  if (!activeHandoff) {
+  if (!activeTask) {
     return (
       <>
         <MockWorkspaceOrgBar />
@@ -1159,10 +1159,10 @@ export function MockLayout({ workspaceId, selectedHandoffId, selectedSessionId }
             <Sidebar
               projects={projects}
               activeId=""
-              onSelect={selectHandoff}
-              onCreate={createHandoff}
-              onMarkUnread={markHandoffUnread}
-              onRenameHandoff={renameHandoff}
+              onSelect={selectTask}
+              onCreate={createTask}
+              onMarkUnread={markTaskUnread}
+              onRenameTask={renameTask}
               onRenameBranch={renameBranch}
               onReorderProjects={reorderProjects}
             />
@@ -1196,7 +1196,7 @@ export function MockLayout({ workspaceId, selectedHandoffId, selectedSessionId }
                   </p>
                   <button
                     type="button"
-                    onClick={createHandoff}
+                    onClick={createTask}
                     disabled={viewModel.repos.length === 0}
                     style={{
                       alignSelf: "center",
@@ -1231,11 +1231,11 @@ export function MockLayout({ workspaceId, selectedHandoffId, selectedSessionId }
         <div style={{ width: `${leftWidth}px`, flexShrink: 0, minWidth: 0, display: "flex", flexDirection: "column" }}>
           <Sidebar
             projects={projects}
-            activeId={activeHandoff.id}
-            onSelect={selectHandoff}
-            onCreate={createHandoff}
-            onMarkUnread={markHandoffUnread}
-            onRenameHandoff={renameHandoff}
+            activeId={activeTask.id}
+            onSelect={selectTask}
+            onCreate={createTask}
+            onMarkUnread={markTaskUnread}
+            onRenameTask={renameTask}
             onRenameBranch={renameBranch}
             onReorderProjects={reorderProjects}
           />
@@ -1243,19 +1243,19 @@ export function MockLayout({ workspaceId, selectedHandoffId, selectedSessionId }
         <PanelResizeHandle onResizeStart={onLeftResizeStart} onResize={onLeftResize} />
         <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
           <TranscriptPanel
-            handoff={activeHandoff}
+            task={activeTask}
             activeTabId={activeTabId}
             lastAgentTabId={lastAgentTabId}
             openDiffs={openDiffs}
             onSyncRouteSession={syncRouteSession}
             onSetActiveTabId={(tabId) => {
-              setActiveTabIdByHandoff((current) => ({ ...current, [activeHandoff.id]: tabId }));
+              setActiveTabIdByTask((current) => ({ ...current, [activeTask.id]: tabId }));
             }}
             onSetLastAgentTabId={(tabId) => {
-              setLastAgentTabIdByHandoff((current) => ({ ...current, [activeHandoff.id]: tabId }));
+              setLastAgentTabIdByTask((current) => ({ ...current, [activeTask.id]: tabId }));
             }}
             onSetOpenDiffs={(paths) => {
-              setOpenDiffsByHandoff((current) => ({ ...current, [activeHandoff.id]: paths }));
+              setOpenDiffsByTask((current) => ({ ...current, [activeTask.id]: paths }));
             }}
           />
         </div>
@@ -1263,10 +1263,10 @@ export function MockLayout({ workspaceId, selectedHandoffId, selectedSessionId }
         <div style={{ width: `${rightWidth}px`, flexShrink: 0, minWidth: 0, display: "flex", flexDirection: "column" }}>
           <RightRail
             workspaceId={workspaceId}
-            handoff={activeHandoff}
+            task={activeTask}
             activeTabId={activeTabId}
             onOpenDiff={openDiffTab}
-            onArchive={archiveHandoff}
+            onArchive={archiveTask}
             onRevertFile={revertFile}
             onPublishPr={publishPr}
           />

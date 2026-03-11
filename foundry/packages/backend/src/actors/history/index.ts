@@ -14,14 +14,14 @@ export interface HistoryInput {
 
 export interface AppendHistoryCommand {
   kind: string;
-  handoffId?: string;
+  taskId?: string;
   branchName?: string;
   payload: Record<string, unknown>;
 }
 
 export interface ListHistoryParams {
   branch?: string;
-  handoffId?: string;
+  taskId?: string;
   limit?: number;
 }
 
@@ -32,7 +32,7 @@ async function appendHistoryRow(loopCtx: any, body: AppendHistoryCommand): Promi
   await loopCtx.db
     .insert(events)
     .values({
-      handoffId: body.handoffId ?? null,
+      taskId: body.taskId ?? null,
       branchName: body.branchName ?? null,
       kind: body.kind,
       payloadJson: JSON.stringify(body.payload),
@@ -77,8 +77,8 @@ export const history = actor({
 
     async list(c, params?: ListHistoryParams): Promise<HistoryEvent[]> {
       const whereParts = [];
-      if (params?.handoffId) {
-        whereParts.push(eq(events.handoffId, params.handoffId));
+      if (params?.taskId) {
+        whereParts.push(eq(events.taskId, params.taskId));
       }
       if (params?.branch) {
         whereParts.push(eq(events.branchName, params.branch));
@@ -87,7 +87,7 @@ export const history = actor({
       const base = c.db
         .select({
           id: events.id,
-          handoffId: events.handoffId,
+          taskId: events.taskId,
           branchName: events.branchName,
           kind: events.kind,
           payloadJson: events.payloadJson,

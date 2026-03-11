@@ -21,7 +21,7 @@ export const project = actor({
     remoteUrl: input.remoteUrl,
     localPath: null as string | null,
     syncActorsStarted: false,
-    handoffIndexHydrated: false,
+    taskIndexHydrated: false,
   }),
   actions: projectActions,
   run: workflow(runProjectWorkflow),

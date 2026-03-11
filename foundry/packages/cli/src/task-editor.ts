@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
-const DEFAULT_EDITOR_TEMPLATE = ["# Enter handoff task details below.", "# Lines starting with # are ignored.", ""].join("\n");
+const DEFAULT_EDITOR_TEMPLATE = ["# Enter task task details below.", "# Lines starting with # are ignored.", ""].join("\n");
 
 export function sanitizeEditorTask(input: string): string {
   return input
@@ -32,7 +32,7 @@ export function openEditorForTask(): string {
     const raw = readFileSync(taskPath, "utf8");
     const task = sanitizeEditorTask(raw);
     if (!task) {
-      throw new Error("Missing handoff task text");
+      throw new Error("Missing task task text");
     }
     return task;
   } finally {

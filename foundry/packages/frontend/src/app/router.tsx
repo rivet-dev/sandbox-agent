@@ -12,7 +12,7 @@ import {
 } from "../components/mock-onboarding";
 import { defaultWorkspaceId, isMockFrontendClient } from "../lib/env";
 import { activeMockOrganization, getMockOrganizationById, isAppSnapshotBootstrapping, useMockAppClient, useMockAppSnapshot } from "../lib/mock-app";
-import { handoffWorkbenchClient } from "../lib/workbench";
+import { taskWorkbenchClient } from "../lib/workbench";
 
 const rootRoute = createRootRoute({
   component: RootLayout,
@@ -66,13 +66,13 @@ const workspaceIndexRoute = createRoute({
   component: WorkspaceRoute,
 });
 
-const handoffRoute = createRoute({
+const taskRoute = createRoute({
   getParentRoute: () => workspaceRoute,
-  path: "handoffs/$handoffId",
+  path: "tasks/$taskId",
   validateSearch: (search: Record<string, unknown>) => ({
     sessionId: typeof search.sessionId === "string" && search.sessionId.trim().length > 0 ? search.sessionId : undefined,
   }),
-  component: HandoffRoute,
+  component: TaskRoute,
 });
 
 const repoRoute = createRoute({
@@ -88,7 +88,7 @@ const routeTree = rootRoute.addChildren([
   organizationSettingsRoute,
   organizationBillingRoute,
   organizationCheckoutRoute,
-  workspaceRoute.addChildren([workspaceIndexRoute, handoffRoute, repoRoute]),
+  workspaceRoute.addChildren([workspaceIndexRoute, taskRoute, repoRoute]),
 ]);
 
 export const router = createRouter({ routeTree });
@@ -222,50 +222,50 @@ function WorkspaceRoute() {
   const { workspaceId } = workspaceRoute.useParams();
   return (
     <AppWorkspaceGate workspaceId={workspaceId}>
-      <WorkspaceView workspaceId={workspaceId} selectedHandoffId={null} selectedSessionId={null} />
+      <WorkspaceView workspaceId={workspaceId} selectedTaskId={null} selectedSessionId={null} />
     </AppWorkspaceGate>
   );
 }
 
 function WorkspaceView({
   workspaceId,
-  selectedHandoffId,
+  selectedTaskId,
   selectedSessionId,
 }: {
   workspaceId: string;
-  selectedHandoffId: string | null;
+  selectedTaskId: string | null;
   selectedSessionId: string | null;
 }) {
   useEffect(() => {
     setFrontendErrorContext({
       workspaceId,
-      handoffId: undefined,
+      taskId: undefined,
     });
   }, [workspaceId]);
 
-  return <MockLayout workspaceId={workspaceId} selectedHandoffId={selectedHandoffId} selectedSessionId={selectedSessionId} />;
+  return <MockLayout workspaceId={workspaceId} selectedTaskId={selectedTaskId} selectedSessionId={selectedSessionId} />;
 }
 
-function HandoffRoute() {
-  const { workspaceId, handoffId } = handoffRoute.useParams();
-  const { sessionId } = handoffRoute.useSearch();
+function TaskRoute() {
+  const { workspaceId, taskId } = taskRoute.useParams();
+  const { sessionId } = taskRoute.useSearch();
   return (
     <AppWorkspaceGate workspaceId={workspaceId}>
-      <HandoffView workspaceId={workspaceId} handoffId={handoffId} sessionId={sessionId ?? null} />
+      <TaskView workspaceId={workspaceId} taskId={taskId} sessionId={sessionId ?? null} />
     </AppWorkspaceGate>
   );
 }
 
-function HandoffView({ workspaceId, handoffId, sessionId }: { workspaceId: string; handoffId: string; sessionId: string | null }) {
+function TaskView({ workspaceId, taskId, sessionId }: { workspaceId: string; taskId: string; sessionId: string | null }) {
   useEffect(() => {
     setFrontendErrorContext({
       workspaceId,
-      handoffId,
+      taskId,
       repoId: undefined,
     });
-  }, [handoffId, workspaceId]);
+  }, [taskId, workspaceId]);
 
-  return <MockLayout workspaceId={workspaceId} selectedHandoffId={handoffId} selectedSessionId={sessionId} />;
+  return <MockLayout workspaceId={workspaceId} selectedTaskId={taskId} selectedSessionId={sessionId} />;
 }
 
 function RepoRoute() {
@@ -307,22 +307,15 @@ function RepoRouteInner({ workspaceId, repoId }: { workspaceId: string; repoId: 
   useEffect(() => {
     setFrontendErrorContext({
       workspaceId,
-      handoffId: undefined,
+      taskId: undefined,
       repoId,
     });
   }, [repoId, workspaceId]);
-  const activeHandoffId = handoffWorkbenchClient.getSnapshot().handoffs.find((handoff) => handoff.repoId === repoId)?.id;
-  if (!activeHandoffId) {
+  const activeTaskId = taskWorkbenchClient.getSnapshot().tasks.find((task) => task.repoId === repoId)?.id;
+  if (!activeTaskId) {
     return <Navigate to="/workspaces/$workspaceId" params={{ workspaceId }} replace />;
   }
-  return (
-    <Navigate
-      to="/workspaces/$workspaceId/handoffs/$handoffId"
-      params={{ workspaceId, handoffId: activeHandoffId }}
-      search={{ sessionId: undefined }}
-      replace
-    />
-  );
+  return <Navigate to="/workspaces/$workspaceId/tasks/$taskId" params={{ workspaceId, taskId: activeTaskId }} search={{ sessionId: undefined }} replace />;
 }
 
 function RootLayout() {

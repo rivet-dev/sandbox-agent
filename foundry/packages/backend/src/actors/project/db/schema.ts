@@ -36,8 +36,8 @@ export const prCache = sqliteTable("pr_cache", {
   updatedAt: integer("updated_at").notNull(),
 });
 
-export const handoffIndex = sqliteTable("handoff_index", {
-  handoffId: text("handoff_id").notNull().primaryKey(),
+export const taskIndex = sqliteTable("task_index", {
+  taskId: text("task_id").notNull().primaryKey(),
   branchName: text("branch_name"),
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull(),

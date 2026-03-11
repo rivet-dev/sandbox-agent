@@ -4,34 +4,34 @@
 
 ### What I Was Working On
 
-Verifying the BaseUI frontend against the real `rivet-dev/handoff-testing` repo, creating live PR-backed handoffs, and driving the flow through the browser.
+Verifying the BaseUI frontend against the real `rivet-dev/task-testing` repo, creating live PR-backed tasks, and driving the flow through the browser.
 
 ### Friction / Issue
 
 Three separate issues stacked together during live verification:
 
-1. A half-created handoff actor remained in project indexes after earlier runtime failures. The actor state existed, but its durable handoff row did not, so repo overview polling spammed `Handoff not found` and kept trying to load an orphaned handoff.
+1. A half-created task actor remained in project indexes after earlier runtime failures. The actor state existed, but its durable task row did not, so repo overview polling spammed `Task not found` and kept trying to load an orphaned task.
 2. Rebuilding the backend container outside `just dev` dropped injected GitHub auth, which made repo overview fall back to `Open PRs 0` until `GITHUB_TOKEN`/`GH_TOKEN` were passed back into `docker compose`.
-3. In the create-handoff modal, the BaseUI-controlled form looked populated in the browser, but submit gating/click behavior was unreliable under browser automation, making it hard to distinguish frontend state bugs from backend failures.
+3. In the create-task modal, the BaseUI-controlled form looked populated in the browser, but submit gating/click behavior was unreliable under browser automation, making it hard to distinguish frontend state bugs from backend failures.
 
 ### Attempted Fix / Workaround
 
-1. Updated project-actor stale handoff pruning to treat `Handoff not found:` the same as actor-not-found and rebuilt the backend image.
-2. Recovered the orphaned handoff by forcing an initialize attempt, which surfaced a missing `body?.providerId` guard in the handoff init workflow and led to pruning the stale project index row.
+1. Updated project-actor stale task pruning to treat `Task not found:` the same as actor-not-found and rebuilt the backend image.
+2. Recovered the orphaned task by forcing an initialize attempt, which surfaced a missing `body?.providerId` guard in the task init workflow and led to pruning the stale project index row.
 3. Recreated the backend with `GITHUB_TOKEN="$(gh auth token)" GH_TOKEN="$(gh auth token)" docker compose ... up -d --build backend` so PR sync could see live GitHub data again.
-4. Used `agent-browser` plus screenshots to separate working paths (repo overview + PR visibility) from the remaining broken path (modal submit / handoff creation UI).
+4. Used `agent-browser` plus screenshots to separate working paths (repo overview + PR visibility) from the remaining broken path (modal submit / task creation UI).
 
 ### Outcome
 
-- Live repo overview now shows the real `handoff-testing` PRs again.
-- The stale handoff actor no longer blocks repo overview polling.
-- The remaining blocker is narrowed to the frontend create-handoff interaction path, plus missing agent API credentials for exercising real agent messaging end to end.
+- Live repo overview now shows the real `task-testing` PRs again.
+- The stale task actor no longer blocks repo overview polling.
+- The remaining blocker is narrowed to the frontend create-task interaction path, plus missing agent API credentials for exercising real agent messaging end to end.
 
 ## 2026-03-06 - uncommitted
 
 ### What I Was Working On
 
-Exercising the live selected-handoff UI end to end, including session creation, prompt send, and agent response rendering.
+Exercising the live selected-task UI end to end, including session creation, prompt send, and agent response rendering.
 
 ### Friction / Issue
 
@@ -46,7 +46,7 @@ The Docker dev backend container was starting on Bun `1.2.23` and accepting TCP 
 ### Outcome
 
 - Dev-runtime debugging is narrowed from "backend/UI path is broken" to a concrete Docker Bun version issue.
-- After rebuild, the next verification step is the real selected-handoff transcript flow with agent messaging.
+- After rebuild, the next verification step is the real selected-task transcript flow with agent messaging.
 
 ## 2026-02-17 - uncommitted
 
@@ -97,11 +97,11 @@ The `gs` binary on this environment resolves to Ghostscript (`/usr/bin/gs`), not
 
 ### What I Was Working On
 
-Fixing Daytona `hf create` failures where `handoff.attach` would exhaust retries with `Handoff not found`.
+Fixing Daytona `hf create` failures where `task.attach` would exhaust retries with `Task not found`.
 
 ### Friction / Issue
 
-Foundry was using RivetKit's KV-backed durable SQLite VFS via `rivetkit/db/drizzle`, which opens the SQLite DB keyed by `ctx.actorId`. Since actor instances can be rescheduled (new `actorId`) between requests, DB writes from initialization were not visible to later actions (e.g. `attach`), causing “Handoff not found” errors and action timeouts.
+Foundry was using RivetKit's KV-backed durable SQLite VFS via `rivetkit/db/drizzle`, which opens the SQLite DB keyed by `ctx.actorId`. Since actor instances can be rescheduled (new `actorId`) between requests, DB writes from initialization were not visible to later actions (e.g. `attach`), causing “Task not found” errors and action timeouts.
 
 Separately, importing `bun:sqlite` directly broke:
 
@@ -335,7 +335,7 @@ Docker Desktop recovered, but the frontend container failed immediately with `Ca
 
 ### What I Was Working On
 
-Verifying the selected-handoff UI flow end to end in the browser: create repo, create handoff, select the handoff, start an agent session, and send a follow-up message.
+Verifying the selected-task UI flow end to end in the browser: create repo, create task, select the task, start an agent session, and send a follow-up message.
 
 ### Friction / Issue
 
@@ -354,6 +354,6 @@ Local dev hit three stacked runtime issues during live UI verification:
 
 ### Outcome
 
-- The browser flow now reaches the real selected-handoff transcript screen.
-- Handoff creation and initial session creation work in the UI against the local provider.
+- The browser flow now reaches the real selected-task transcript screen.
+- Task creation and initial session creation work in the UI against the local provider.
 - A remaining upstream auth/runtime blocker still prevents a clean verified assistant text response in the final follow-up-message step, so that part of the end-to-end flow is not yet reliable enough to claim complete.

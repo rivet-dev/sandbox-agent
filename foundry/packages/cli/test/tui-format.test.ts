@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
-import type { HandoffRecord } from "@sandbox-agent/foundry-shared";
-import { filterHandoffs, fuzzyMatch } from "@sandbox-agent/foundry-client";
+import type { TaskRecord } from "@sandbox-agent/foundry-shared";
+import { filterTasks, fuzzyMatch } from "@sandbox-agent/foundry-client";
 import { formatRows } from "../src/tui.js";
 
-const sample: HandoffRecord = {
+const sample: TaskRecord = {
   workspaceId: "default",
   repoId: "repo-a",
   repoRemote: "https://example.com/repo-a.git",
-  handoffId: "handoff-1",
+  taskId: "task-1",
   branchName: "feature/test",
   title: "Test Title",
   task: "Do test",
@@ -76,18 +76,18 @@ describe("search", () => {
   });
 
   it("filters rows across branch and title", () => {
-    const rows: HandoffRecord[] = [
+    const rows: TaskRecord[] = [
       sample,
       {
         ...sample,
-        handoffId: "handoff-2",
+        taskId: "task-2",
         branchName: "docs/update-intro",
         title: "Docs Intro Refresh",
         status: "idle",
       },
     ];
-    expect(filterHandoffs(rows, "doc")).toHaveLength(1);
-    expect(filterHandoffs(rows, "h2")).toHaveLength(1);
-    expect(filterHandoffs(rows, "test")).toHaveLength(2);
+    expect(filterTasks(rows, "doc")).toHaveLength(1);
+    expect(filterTasks(rows, "h2")).toHaveLength(1);
+    expect(filterTasks(rows, "test")).toHaveLength(2);
   });
 });

@@ -18,7 +18,7 @@ Date: 2026-02-08
 11. RivetKit local dependency wiring is `link:`-based.
 12. Keep the existing config file path (`~/.config/foundry/config.toml`) and evolve keys in place.
 13. `.agents` and skill files are in scope for migration updates.
-14. Parent orchestration actors (`workspace`, `project`, `handoff`) use command-only loops with no timeout.
+14. Parent orchestration actors (`workspace`, `project`, `task`) use command-only loops with no timeout.
 15. Periodic syncing/polling runs in dedicated child actors, each with a single timeout cadence.
 16. For each actor, define the main loop and exactly what data it mutates; keep single-writer ownership strict.
 
@@ -32,7 +32,7 @@ We will replace the existing Rust backend/CLI/TUI with TypeScript services and U
 - TUI: TypeScript + OpenTUI
 - State: SQLite + Drizzle (actor-owned writes)
 
-The core architecture changes from "worktree-per-handoff" to "provider-selected sandbox-per-handoff." Local worktrees remain supported through a `worktree` provider.
+The core architecture changes from "worktree-per-task" to "provider-selected sandbox-per-task." Local worktrees remain supported through a `worktree` provider.
 
 ## Breaking Changes (Intentional)
 
@@ -61,12 +61,12 @@ packages/
       actors/
         workspace.ts
         project.ts
-        handoff.ts
+        task.ts
         sandbox-instance.ts
         history.ts
         project-pr-sync.ts
         project-branch-sync.ts
-        handoff-status-sync.ts
+        task-status-sync.ts
         keys.ts
         events.ts
         registry.ts
@@ -119,11 +119,11 @@ Backend actor files and responsibilities:
 2. `packages/backend/src/actors/project.ts`
 - `ProjectActor` implementation.
 - Branch snapshot refresh, PR cache orchestration, stream publication.
-- Routes handoff actions to `HandoffActor`.
+- Routes task actions to `TaskActor`.
 
-3. `packages/backend/src/actors/handoff.ts`
-- `HandoffActor` implementation.
-- Handoff lifecycle, session/sandbox orchestration, post-idle automation.
+3. `packages/backend/src/actors/task.ts`
+- `TaskActor` implementation.
+- Task lifecycle, session/sandbox orchestration, post-idle automation.
 
 4. `packages/backend/src/actors/sandbox-instance.ts`
 - `SandboxInstanceActor` implementation.
@@ -153,9 +153,9 @@ Backend actor files and responsibilities:
 - Read-only branch snapshot polling loop (single timeout cadence).
 - Sends sync results back to `ProjectActor`.
 
-12. `packages/backend/src/actors/handoff-status-sync.ts`
+12. `packages/backend/src/actors/task-status-sync.ts`
 - Read-only session/sandbox status polling loop (single timeout cadence).
-- Sends status updates back to `HandoffActor`.
+- Sends status updates back to `TaskActor`.
 
 ## RivetKit Source Policy (Local Only)
 
@@ -198,12 +198,12 @@ RivetKit registry actor keys are workspace-prefixed:
 2. `ProjectActor`
 - Key: `["ws", workspaceId, "project", repoId]`
 - Owns repo snapshot cache and PR cache refresh orchestration.
-- Routes branch/handoff commands to handoff actors.
+- Routes branch/task commands to task actors.
 - Streams project updates to CLI/TUI subscribers.
 
-3. `HandoffActor`
-- Key: `["ws", workspaceId, "project", repoId, "handoff", handoffId]`
-- Owns handoff metadata/runtime state.
+3. `TaskActor`
+- Key: `["ws", workspaceId, "project", repoId, "task", taskId]`
+- Owns task metadata/runtime state.
 - Creates/resumes sandbox + session through provider adapter.
 - Handles attach/push/sync/merge/archive/kill and post-idle automation.
 
@@ -225,9 +225,9 @@ RivetKit registry actor keys are workspace-prefixed:
 - Polls branch/worktree state on interval and emits results to `ProjectActor`.
 - Does not write DB directly.
 
-8. `HandoffStatusSyncActor` (child poller)
-- Key: `["ws", workspaceId, "project", repoId, "handoff", handoffId, "status-sync"]`
-- Polls agent/session/sandbox health on interval and emits results to `HandoffActor`.
+8. `TaskStatusSyncActor` (child poller)
+- Key: `["ws", workspaceId, "project", repoId, "task", taskId, "status-sync"]`
+- Polls agent/session/sandbox health on interval and emits results to `TaskActor`.
 - Does not write DB directly.
 
 Ownership rule: each table/row has one actor writer.
@@ -242,8 +242,8 @@ Always define actor run-loop + mutated state together:
 2. `ProjectActor`
 - Mutates: `repos`, `branches`, `pr_cache` (applies child poller results).
 
-3. `HandoffActor`
-- Mutates: `handoffs`, `handoff_runtime` (applies child poller results).
+3. `TaskActor`
+- Mutates: `tasks`, `task_runtime` (applies child poller results).
 
 4. `SandboxInstanceActor`
 - Mutates: `sandbox_instances`.
@@ -251,7 +251,7 @@ Always define actor run-loop + mutated state together:
 5. `HistoryActor`
 - Mutates: `events`.
 
-6. Child sync actors (`project-pr-sync`, `project-branch-sync`, `handoff-status-sync`)
+6. Child sync actors (`project-pr-sync`, `project-branch-sync`, `task-status-sync`)
 - Mutates: none (read-only pollers; publish result messages only).
 
 ## Run Loop Patterns (Required)
@@ -280,13 +280,13 @@ run: async (c) => {
 };
 ```
 
-### `HandoffActor` (no timeout)
+### `TaskActor` (no timeout)
 
 ```ts
 run: async (c) => {
   while (true) {
-    const msg = await c.queue.next("handoff.command");
-    await handleHandoffCommand(c, msg); // includes applying status results to handoff_runtime
+    const msg = await c.queue.next("task.command");
+    await handleTaskCommand(c, msg); // includes applying status results to task_runtime
   }
 };
 ```
@@ -349,16 +349,16 @@ run: async (c) => {
 };
 ```
 
-### `HandoffStatusSyncActor` (single timeout cadence)
+### `TaskStatusSyncActor` (single timeout cadence)
 
 ```ts
 run: async (c) => {
   const intervalMs = 2_000;
   while (true) {
-    const msg = await c.queue.next("handoff.status_sync.command", { timeout: intervalMs });
+    const msg = await c.queue.next("task.status_sync.command", { timeout: intervalMs });
     if (!msg) {
       const result = await pollSessionAndSandboxStatus();
-      await sendToHandoff({ name: "handoff.status_sync.result", result });
+      await sendToTask({ name: "task.status_sync.result", result });
       continue;
     }
     await handleStatusSyncControl(c, msg);
@@ -368,7 +368,7 @@ run: async (c) => {
 
 ## Sandbox Provider Interface
 
-Provider contract lives under `packages/backend/src/providers/provider-api` and is consumed by workspace/project/handoff actors.
+Provider contract lives under `packages/backend/src/providers/provider-api` and is consumed by workspace/project/task actors.
 
 ```ts
 interface SandboxProvider {
@@ -402,7 +402,7 @@ Initial providers:
 
 1. `hf create ... --workspace <ws> --provider <worktree|daytona>`
 2. `hf switch --workspace <ws> [target]`
-3. `hf attach --workspace <ws> [handoff]`
+3. `hf attach --workspace <ws> [task]`
 4. `hf list --workspace <ws>`
 5. `hf kill|archive|merge|push|sync --workspace <ws> ...`
 6. `hf workspace use <ws>` to set default workspace
@@ -421,8 +421,8 @@ Tables (workspace-scoped):
 2. `workspace_provider_profiles`
 3. `repos` (`workspace_id`, `repo_id`, ...)
 4. `branches` (`workspace_id`, `repo_id`, ...)
-5. `handoffs` (`workspace_id`, `handoff_id`, `provider_id`, ...)
-6. `handoff_runtime` (`workspace_id`, `handoff_id`, `sandbox_id`, `session_id`, ...)
+5. `tasks` (`workspace_id`, `task_id`, `provider_id`, ...)
+6. `task_runtime` (`workspace_id`, `task_id`, `sandbox_id`, `session_id`, ...)
 7. `sandbox_instances` (`workspace_id`, `provider_id`, `sandbox_id`, ...)
 8. `pr_cache` (`workspace_id`, `repo_id`, ...)
 9. `events` (`workspace_id`, `repo_id`, ...)
@@ -487,10 +487,10 @@ Exit criteria:
 Exit criteria:
 - `create/list/switch/attach/push/sync/kill` pass on worktree provider.
 
-## Phase 4: Workspace/Handoff Lifecycle
+## Phase 4: Workspace/Task Lifecycle
 
 1. Implement workspace coordinator flows.
-2. Implement HandoffActor full lifecycle + post-idle automation.
+2. Implement TaskActor full lifecycle + post-idle automation.
 3. Implement history events and PR/CI/review change tracking.
 
 Exit criteria:
@@ -545,7 +545,7 @@ Exit criteria:
 4. Reliability tests
 - sandbox-agent restarts
 - transient provider failures
-- backend restart with in-flight handoffs
+- backend restart with in-flight tasks
 
 ## Open Questions To Resolve Before Implementation
 

@@ -26,17 +26,17 @@ function createRepo(): { repoPath: string } {
 
 async function waitForWorkspaceRows(ws: any, workspaceId: string, expectedCount: number) {
   for (let attempt = 0; attempt < 40; attempt += 1) {
-    const rows = await ws.listHandoffs({ workspaceId });
+    const rows = await ws.listTasks({ workspaceId });
     if (rows.length >= expectedCount) {
       return rows;
     }
     await delay(50);
   }
-  return ws.listHandoffs({ workspaceId });
+  return ws.listTasks({ workspaceId });
 }
 
 describe("workspace isolation", () => {
-  it.skipIf(!runActorIntegration)("keeps handoff lists isolated by workspace", async (t) => {
+  it.skipIf(!runActorIntegration)("keeps task lists isolated by workspace", async (t) => {
     const testDriver = createTestDriver();
     createTestRuntimeContext(testDriver);
 
@@ -52,7 +52,7 @@ describe("workspace isolation", () => {
     const repoA = await wsA.addRepo({ workspaceId: "alpha", remoteUrl: repoPath });
     const repoB = await wsB.addRepo({ workspaceId: "beta", remoteUrl: repoPath });
 
-    await wsA.createHandoff({
+    await wsA.createTask({
       workspaceId: "alpha",
       repoId: repoA.repoId,
       task: "task A",
@@ -61,7 +61,7 @@ describe("workspace isolation", () => {
       explicitTitle: "A",
     });
 
-    await wsB.createHandoff({
+    await wsB.createTask({
       workspaceId: "beta",
       repoId: repoB.repoId,
       task: "task B",
@@ -77,6 +77,6 @@ describe("workspace isolation", () => {
     expect(bRows.length).toBe(1);
     expect(aRows[0]?.workspaceId).toBe("alpha");
     expect(bRows[0]?.workspaceId).toBe("beta");
-    expect(aRows[0]?.handoffId).not.toBe(bRows[0]?.handoffId);
+    expect(aRows[0]?.taskId).not.toBe(bRows[0]?.taskId);
   });
 });

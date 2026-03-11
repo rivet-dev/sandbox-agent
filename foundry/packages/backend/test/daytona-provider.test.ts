@@ -69,7 +69,7 @@ describe("daytona provider snapshot image behavior", () => {
       repoId: "repo-1",
       repoRemote: "https://github.com/acme/repo.git",
       branchName: "feature/test",
-      handoffId: "handoff-1",
+      taskId: "task-1",
     });
 
     expect(client.createSandboxCalls).toHaveLength(1);
@@ -94,7 +94,7 @@ describe("daytona provider snapshot image behavior", () => {
 
     expect(handle.metadata.snapshot).toBe("snapshot-foundry");
     expect(handle.metadata.image).toBe("ubuntu:24.04");
-    expect(handle.metadata.cwd).toBe("/home/daytona/foundry/default/repo-1/handoff-1/repo");
+    expect(handle.metadata.cwd).toBe("/home/daytona/foundry/default/repo-1/task-1/repo");
     expect(client.executedCommands.length).toBeGreaterThan(0);
   });
 
@@ -155,7 +155,7 @@ describe("daytona provider snapshot image behavior", () => {
           repoId: "repo-1",
           repoRemote: "https://github.com/acme/repo.git",
           branchName: "feature/test",
-          handoffId: "handoff-timeout",
+          taskId: "task-timeout",
         }),
       ).rejects.toThrow("daytona create sandbox timed out after 120ms");
     } finally {

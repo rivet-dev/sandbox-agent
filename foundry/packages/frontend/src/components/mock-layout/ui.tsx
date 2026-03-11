@@ -111,15 +111,7 @@ export const UnreadDot = memo(function UnreadDot() {
   );
 });
 
-export const HandoffIndicator = memo(function HandoffIndicator({
-  isRunning,
-  hasUnread,
-  isDraft,
-}: {
-  isRunning: boolean;
-  hasUnread: boolean;
-  isDraft: boolean;
-}) {
+export const TaskIndicator = memo(function TaskIndicator({ isRunning, hasUnread, isDraft }: { isRunning: boolean; hasUnread: boolean; isDraft: boolean }) {
   if (isRunning) return <SpinnerDot size={8} />;
   if (hasUnread) return <UnreadDot />;
   if (isDraft) return <GitPullRequestDraft size={12} color="#a1a1aa" />;

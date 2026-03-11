@@ -109,12 +109,12 @@ export async function createBackends(configOrder: string[]): Promise<NotifyBacke
   const backends: NotifyBackend[] = [];
 
   for (const name of configOrder) {
-    const factory = backendFactories[name];
-    if (!factory) {
+    const backendBuilder = backendFactories[name];
+    if (!backendBuilder) {
       continue;
     }
 
-    const backend = factory();
+    const backend = backendBuilder();
     if (await backend.available()) {
       backends.push(backend);
     }

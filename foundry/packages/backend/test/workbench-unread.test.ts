@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { shouldMarkSessionUnreadForStatus } from "../src/actors/handoff/workbench.js";
+import { shouldMarkSessionUnreadForStatus } from "../src/actors/task/workbench.js";
 
 describe("workbench unread status transitions", () => {
   it("marks unread when a running session first becomes idle", () => {

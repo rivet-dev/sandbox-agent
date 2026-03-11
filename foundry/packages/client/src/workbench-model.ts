@@ -3,8 +3,8 @@ import type {
   WorkbenchAgentTab as AgentTab,
   WorkbenchDiffLineKind as DiffLineKind,
   WorkbenchFileTreeNode as FileTreeNode,
-  WorkbenchHandoff as Handoff,
-  HandoffWorkbenchSnapshot,
+  WorkbenchTask as Task,
+  TaskWorkbenchSnapshot,
   WorkbenchHistoryEvent as HistoryEvent,
   WorkbenchModelGroup as ModelGroup,
   WorkbenchModelId as ModelId,
@@ -264,7 +264,7 @@ export function removeFileTreePath(nodes: FileTreeNode[], targetPath: string): F
   });
 }
 
-export function buildInitialHandoffs(): Handoff[] {
+export function buildInitialTasks(): Task[] {
   return [
     // ── rivet-dev/sandbox-agent ──
     {
@@ -1113,7 +1113,7 @@ export function buildInitialHandoffs(): Handoff[] {
   ];
 }
 
-export function buildInitialMockLayoutViewModel(): HandoffWorkbenchSnapshot {
+export function buildInitialMockLayoutViewModel(): TaskWorkbenchSnapshot {
   const repos: WorkbenchRepo[] = [
     { id: "sandbox-agent", label: "rivet-dev/sandbox-agent" },
     { id: "rivet", label: "rivet-dev/rivet" },
@@ -1121,16 +1121,16 @@ export function buildInitialMockLayoutViewModel(): HandoffWorkbenchSnapshot {
     { id: "engine-ee", label: "rivet-dev/engine-ee" },
     { id: "secure-exec", label: "rivet-dev/secure-exec" },
   ];
-  const handoffs = buildInitialHandoffs();
+  const tasks = buildInitialTasks();
   return {
     workspaceId: "default",
     repos,
-    projects: groupWorkbenchProjects(repos, handoffs),
-    handoffs,
+    projects: groupWorkbenchProjects(repos, tasks),
+    tasks,
   };
 }
 
-export function groupWorkbenchProjects(repos: WorkbenchRepo[], handoffs: Handoff[]): WorkbenchProjectSection[] {
+export function groupWorkbenchProjects(repos: WorkbenchRepo[], tasks: Task[]): WorkbenchProjectSection[] {
   const grouped = new Map<string, WorkbenchProjectSection>();
 
   for (const repo of repos) {
@@ -1138,29 +1138,29 @@ export function groupWorkbenchProjects(repos: WorkbenchRepo[], handoffs: Handoff
       id: repo.id,
       label: repo.label,
       updatedAtMs: 0,
-      handoffs: [],
+      tasks: [],
     });
   }
 
-  for (const handoff of handoffs) {
-    const existing = grouped.get(handoff.repoId) ?? {
-      id: handoff.repoId,
-      label: handoff.repoName,
+  for (const task of tasks) {
+    const existing = grouped.get(task.repoId) ?? {
+      id: task.repoId,
+      label: task.repoName,
       updatedAtMs: 0,
-      handoffs: [],
+      tasks: [],
     };
 
-    existing.handoffs.push(handoff);
-    existing.updatedAtMs = Math.max(existing.updatedAtMs, handoff.updatedAtMs);
-    grouped.set(handoff.repoId, existing);
+    existing.tasks.push(task);
+    existing.updatedAtMs = Math.max(existing.updatedAtMs, task.updatedAtMs);
+    grouped.set(task.repoId, existing);
   }
 
   return [...grouped.values()]
     .map((project) => ({
       ...project,
-      handoffs: [...project.handoffs].sort((a, b) => b.updatedAtMs - a.updatedAtMs),
-      updatedAtMs: project.handoffs.length > 0 ? Math.max(...project.handoffs.map((handoff) => handoff.updatedAtMs)) : project.updatedAtMs,
+      tasks: [...project.tasks].sort((a, b) => b.updatedAtMs - a.updatedAtMs),
+      updatedAtMs: project.tasks.length > 0 ? Math.max(...project.tasks.map((task) => task.updatedAtMs)) : project.updatedAtMs,
     }))
-    .filter((project) => project.handoffs.length > 0)
+    .filter((project) => project.tasks.length > 0)
     .sort((a, b) => b.updatedAtMs - a.updatedAtMs);
 }

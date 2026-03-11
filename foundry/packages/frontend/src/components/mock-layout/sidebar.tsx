@@ -3,8 +3,8 @@ import { useStyletron } from "baseui";
 import { LabelSmall, LabelXSmall } from "baseui/typography";
 import { ChevronDown, ChevronUp, CloudUpload, GitPullRequestDraft, ListChecks, Plus } from "lucide-react";
 
-import { formatRelativeAge, type Handoff, type ProjectSection } from "./view-model";
-import { ContextMenuOverlay, HandoffIndicator, PanelHeaderBar, SPanel, ScrollBody, useContextMenu } from "./ui";
+import { formatRelativeAge, type Task, type ProjectSection } from "./view-model";
+import { ContextMenuOverlay, TaskIndicator, PanelHeaderBar, SPanel, ScrollBody, useContextMenu } from "./ui";
 
 const PROJECT_COLORS = ["#6366f1", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6", "#ec4899", "#06b6d4", "#f97316"];
 
@@ -28,7 +28,7 @@ export const Sidebar = memo(function Sidebar({
   onSelect,
   onCreate,
   onMarkUnread,
-  onRenameHandoff,
+  onRenameTask,
   onRenameBranch,
   onReorderProjects,
 }: {
@@ -37,7 +37,7 @@ export const Sidebar = memo(function Sidebar({
   onSelect: (id: string) => void;
   onCreate: () => void;
   onMarkUnread: (id: string) => void;
-  onRenameHandoff: (id: string) => void;
+  onRenameTask: (id: string) => void;
   onRenameBranch: (id: string) => void;
   onReorderProjects: (fromIndex: number, toIndex: number) => void;
 }) {
@@ -200,25 +200,25 @@ export const Sidebar = memo(function Sidebar({
                 </div>
 
                 {!isCollapsed &&
-                  project.handoffs.map((handoff) => {
-                    const isActive = handoff.id === activeId;
-                    const isDim = handoff.status === "archived";
-                    const isRunning = handoff.tabs.some((tab) => tab.status === "running");
-                    const hasUnread = handoff.tabs.some((tab) => tab.unread);
-                    const isDraft = handoff.pullRequest == null || handoff.pullRequest.status === "draft";
-                    const totalAdded = handoff.fileChanges.reduce((sum, file) => sum + file.added, 0);
-                    const totalRemoved = handoff.fileChanges.reduce((sum, file) => sum + file.removed, 0);
+                  project.tasks.map((task) => {
+                    const isActive = task.id === activeId;
+                    const isDim = task.status === "archived";
+                    const isRunning = task.tabs.some((tab) => tab.status === "running");
+                    const hasUnread = task.tabs.some((tab) => tab.unread);
+                    const isDraft = task.pullRequest == null || task.pullRequest.status === "draft";
+                    const totalAdded = task.fileChanges.reduce((sum, file) => sum + file.added, 0);
+                    const totalRemoved = task.fileChanges.reduce((sum, file) => sum + file.removed, 0);
                     const hasDiffs = totalAdded > 0 || totalRemoved > 0;
 
                     return (
                       <div
-                        key={handoff.id}
-                        onClick={() => onSelect(handoff.id)}
+                        key={task.id}
+                        onClick={() => onSelect(task.id)}
                         onContextMenu={(event) =>
                           contextMenu.open(event, [
-                            { label: "Rename task", onClick: () => onRenameHandoff(handoff.id) },
-                            { label: "Rename branch", onClick: () => onRenameBranch(handoff.id) },
-                            { label: "Mark as unread", onClick: () => onMarkUnread(handoff.id) },
+                            { label: "Rename task", onClick: () => onRenameTask(task.id) },
+                            { label: "Rename branch", onClick: () => onRenameBranch(task.id) },
+                            { label: "Mark as unread", onClick: () => onMarkUnread(task.id) },
                           ])
                         }
                         className={css({
@@ -245,7 +245,7 @@ export const Sidebar = memo(function Sidebar({
                               flexShrink: 0,
                             })}
                           >
-                            <HandoffIndicator isRunning={isRunning} hasUnread={hasUnread} isDraft={isDraft} />
+                            <TaskIndicator isRunning={isRunning} hasUnread={hasUnread} isDraft={isDraft} />
                           </div>
                           <LabelSmall
                             $style={{
@@ -258,14 +258,14 @@ export const Sidebar = memo(function Sidebar({
                             }}
                             color={hasUnread ? "#ffffff" : theme.colors.contentSecondary}
                           >
-                            {handoff.title}
+                            {task.title}
                           </LabelSmall>
-                          {handoff.pullRequest != null ? (
+                          {task.pullRequest != null ? (
                             <span className={css({ display: "inline-flex", alignItems: "center", gap: "4px", flexShrink: 0 })}>
                               <LabelXSmall color={theme.colors.contentSecondary} $style={{ fontWeight: 600 }}>
-                                #{handoff.pullRequest.number}
+                                #{task.pullRequest.number}
                               </LabelXSmall>
-                              {handoff.pullRequest.status === "draft" ? <CloudUpload size={11} color="#ff4f00" /> : null}
+                              {task.pullRequest.status === "draft" ? <CloudUpload size={11} color="#ff4f00" /> : null}
                             </span>
                           ) : (
                             <GitPullRequestDraft size={11} color={theme.colors.contentTertiary} />
@@ -277,7 +277,7 @@ export const Sidebar = memo(function Sidebar({
                             </div>
                           ) : null}
                           <LabelXSmall color={theme.colors.contentTertiary} $style={{ flexShrink: 0, marginLeft: hasDiffs ? undefined : "auto" }}>
-                            {formatRelativeAge(handoff.updatedAtMs)}
+                            {formatRelativeAge(task.updatedAtMs)}
                           </LabelXSmall>
                         </div>
                       </div>

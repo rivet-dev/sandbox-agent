@@ -7,7 +7,7 @@
 
 ### claude code/opencode
 
-1. "handoff this task to do xxxx"
+1. "task this task to do xxxx"
 2. ask clarifying questions
 3. works in background (attach opencode session with `hf attach` and switch to session with `hf switch`)
 4. automatically submits draft pr (if configured)
@@ -62,7 +62,7 @@
     - model (for the agent)
 - todo list & plan management -> with simplenote sync
 - sqlite (global)
-- list of all global handoff repos
+- list of all global task repos
 - heartbeat status to tell openclaw what it needs to send you
 - sandbox agent sdk support
 - serve command to run server
@@ -78,5 +78,5 @@
 
 - automatically uses your opencode theme
 - auto symlink target/node_modules/etc
-- auto-archives handoffs when closed
+- auto-archives tasks when closed
 - shows agent status in the tmux window name

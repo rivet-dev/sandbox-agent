@@ -1,6 +1,6 @@
 # Foundry
 
-TypeScript workspace handoff system powered by RivetKit actors, SQLite/Drizzle state, and OpenTUI.
+TypeScript workspace task system powered by RivetKit actors, SQLite/Drizzle state, and OpenTUI.
 
 **Documentation**: see `../docs/` in the repository root
 

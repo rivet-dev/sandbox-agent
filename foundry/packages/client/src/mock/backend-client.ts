@@ -1,21 +1,21 @@
 import type {
   AddRepoInput,
-  CreateHandoffInput,
+  CreateTaskInput,
   FoundryAppSnapshot,
-  HandoffRecord,
-  HandoffSummary,
-  HandoffWorkbenchChangeModelInput,
-  HandoffWorkbenchCreateHandoffInput,
-  HandoffWorkbenchCreateHandoffResponse,
-  HandoffWorkbenchDiffInput,
-  HandoffWorkbenchRenameInput,
-  HandoffWorkbenchRenameSessionInput,
-  HandoffWorkbenchSelectInput,
-  HandoffWorkbenchSetSessionUnreadInput,
-  HandoffWorkbenchSendMessageInput,
-  HandoffWorkbenchSnapshot,
-  HandoffWorkbenchTabInput,
-  HandoffWorkbenchUpdateDraftInput,
+  TaskRecord,
+  TaskSummary,
+  TaskWorkbenchChangeModelInput,
+  TaskWorkbenchCreateTaskInput,
+  TaskWorkbenchCreateTaskResponse,
+  TaskWorkbenchDiffInput,
+  TaskWorkbenchRenameInput,
+  TaskWorkbenchRenameSessionInput,
+  TaskWorkbenchSelectInput,
+  TaskWorkbenchSetSessionUnreadInput,
+  TaskWorkbenchSendMessageInput,
+  TaskWorkbenchSnapshot,
+  TaskWorkbenchTabInput,
+  TaskWorkbenchUpdateDraftInput,
   HistoryEvent,
   HistoryQueryInput,
   ProviderId,
@@ -53,8 +53,8 @@ function mockRepoRemote(label: string): string {
   return `https://example.test/${label}.git`;
 }
 
-function mockCwd(repoLabel: string, handoffId: string): string {
-  return `/mock/${repoLabel.replace(/\//g, "-")}/${handoffId}`;
+function mockCwd(repoLabel: string, taskId: string): string {
+  return `/mock/${repoLabel.replace(/\//g, "-")}/${taskId}`;
 }
 
 function unsupportedAppSnapshot(): FoundryAppSnapshot {
@@ -75,7 +75,7 @@ function unsupportedAppSnapshot(): FoundryAppSnapshot {
   };
 }
 
-function toHandoffStatus(status: HandoffRecord["status"], archived: boolean): HandoffRecord["status"] {
+function toTaskStatus(status: TaskRecord["status"], archived: boolean): TaskRecord["status"] {
   if (archived) {
     return "archived";
   }
@@ -89,12 +89,12 @@ export function createMockBackendClient(defaultWorkspaceId = "default"): Backend
   let nextPid = 4000;
   let nextProcessId = 1;
 
-  const requireHandoff = (handoffId: string) => {
-    const handoff = workbench.getSnapshot().handoffs.find((candidate) => candidate.id === handoffId);
-    if (!handoff) {
-      throw new Error(`Unknown mock handoff ${handoffId}`);
+  const requireTask = (taskId: string) => {
+    const task = workbench.getSnapshot().tasks.find((candidate) => candidate.id === taskId);
+    if (!task) {
+      throw new Error(`Unknown mock task ${taskId}`);
     }
-    return handoff;
+    return task;
   };
 
   const ensureProcessList = (sandboxId: string): MockProcessRecord[] => {
@@ -117,47 +117,47 @@ export function createMockBackendClient(defaultWorkspaceId = "default"): Backend
     }
   };
 
-  const buildHandoffRecord = (handoffId: string): HandoffRecord => {
-    const handoff = requireHandoff(handoffId);
-    const cwd = mockCwd(handoff.repoName, handoff.id);
-    const archived = handoff.status === "archived";
+  const buildTaskRecord = (taskId: string): TaskRecord => {
+    const task = requireTask(taskId);
+    const cwd = mockCwd(task.repoName, task.id);
+    const archived = task.status === "archived";
     return {
       workspaceId: defaultWorkspaceId,
-      repoId: handoff.repoId,
-      repoRemote: mockRepoRemote(handoff.repoName),
-      handoffId: handoff.id,
-      branchName: handoff.branch,
-      title: handoff.title,
-      task: handoff.title,
+      repoId: task.repoId,
+      repoRemote: mockRepoRemote(task.repoName),
+      taskId: task.id,
+      branchName: task.branch,
+      title: task.title,
+      task: task.title,
       providerId: "local",
-      status: toHandoffStatus(archived ? "archived" : "running", archived),
+      status: toTaskStatus(archived ? "archived" : "running", archived),
       statusMessage: archived ? "archived" : "mock sandbox ready",
-      activeSandboxId: handoff.id,
-      activeSessionId: handoff.tabs[0]?.sessionId ?? null,
+      activeSandboxId: task.id,
+      activeSessionId: task.tabs[0]?.sessionId ?? null,
       sandboxes: [
         {
-          sandboxId: handoff.id,
+          sandboxId: task.id,
           providerId: "local",
           sandboxActorId: "mock-sandbox",
-          switchTarget: `mock://${handoff.id}`,
+          switchTarget: `mock://${task.id}`,
           cwd,
-          createdAt: handoff.updatedAtMs,
-          updatedAt: handoff.updatedAtMs,
+          createdAt: task.updatedAtMs,
+          updatedAt: task.updatedAtMs,
         },
       ],
-      agentType: handoff.tabs[0]?.agent === "Codex" ? "codex" : "claude",
-      prSubmitted: Boolean(handoff.pullRequest),
-      diffStat: handoff.fileChanges.length > 0 ? `+${handoff.fileChanges.length}/-${handoff.fileChanges.length}` : "+0/-0",
-      prUrl: handoff.pullRequest ? `https://example.test/pr/${handoff.pullRequest.number}` : null,
-      prAuthor: handoff.pullRequest ? "mock" : null,
+      agentType: task.tabs[0]?.agent === "Codex" ? "codex" : "claude",
+      prSubmitted: Boolean(task.pullRequest),
+      diffStat: task.fileChanges.length > 0 ? `+${task.fileChanges.length}/-${task.fileChanges.length}` : "+0/-0",
+      prUrl: task.pullRequest ? `https://example.test/pr/${task.pullRequest.number}` : null,
+      prAuthor: task.pullRequest ? "mock" : null,
       ciStatus: null,
       reviewStatus: null,
       reviewer: null,
       conflictsWithMain: "0",
-      hasUnpushed: handoff.fileChanges.length > 0 ? "1" : "0",
+      hasUnpushed: task.fileChanges.length > 0 ? "1" : "0",
       parentBranch: null,
-      createdAt: handoff.updatedAtMs,
-      updatedAt: handoff.updatedAtMs,
+      createdAt: task.updatedAtMs,
+      updatedAt: task.updatedAtMs,
     };
   };
 
@@ -258,22 +258,22 @@ export function createMockBackendClient(defaultWorkspaceId = "default"): Backend
       }));
     },
 
-    async createHandoff(_input: CreateHandoffInput): Promise<HandoffRecord> {
-      notSupported("createHandoff");
+    async createTask(_input: CreateTaskInput): Promise<TaskRecord> {
+      notSupported("createTask");
     },
 
-    async listHandoffs(_workspaceId: string, repoId?: string): Promise<HandoffSummary[]> {
+    async listTasks(_workspaceId: string, repoId?: string): Promise<TaskSummary[]> {
       return workbench
         .getSnapshot()
-        .handoffs.filter((handoff) => !repoId || handoff.repoId === repoId)
-        .map((handoff) => ({
+        .tasks.filter((task) => !repoId || task.repoId === repoId)
+        .map((task) => ({
           workspaceId: defaultWorkspaceId,
-          repoId: handoff.repoId,
-          handoffId: handoff.id,
-          branchName: handoff.branch,
-          title: handoff.title,
-          status: handoff.status === "archived" ? "archived" : "running",
-          updatedAt: handoff.updatedAtMs,
+          repoId: task.repoId,
+          taskId: task.id,
+          branchName: task.branch,
+          title: task.title,
+          status: task.status === "archived" ? "archived" : "running",
+          updatedAt: task.updatedAtMs,
         }));
     },
 
@@ -285,31 +285,31 @@ export function createMockBackendClient(defaultWorkspaceId = "default"): Backend
       notSupported("runRepoStackAction");
     },
 
-    async getHandoff(_workspaceId: string, handoffId: string): Promise<HandoffRecord> {
-      return buildHandoffRecord(handoffId);
+    async getTask(_workspaceId: string, taskId: string): Promise<TaskRecord> {
+      return buildTaskRecord(taskId);
     },
 
     async listHistory(_input: HistoryQueryInput): Promise<HistoryEvent[]> {
       return [];
     },
 
-    async switchHandoff(_workspaceId: string, handoffId: string): Promise<SwitchResult> {
+    async switchTask(_workspaceId: string, taskId: string): Promise<SwitchResult> {
       return {
         workspaceId: defaultWorkspaceId,
-        handoffId,
+        taskId,
         providerId: "local",
-        switchTarget: `mock://${handoffId}`,
+        switchTarget: `mock://${taskId}`,
       };
     },
 
-    async attachHandoff(_workspaceId: string, handoffId: string): Promise<{ target: string; sessionId: string | null }> {
+    async attachTask(_workspaceId: string, taskId: string): Promise<{ target: string; sessionId: string | null }> {
       return {
-        target: `mock://${handoffId}`,
-        sessionId: requireHandoff(handoffId).tabs[0]?.sessionId ?? null,
+        target: `mock://${taskId}`,
+        sessionId: requireTask(taskId).tabs[0]?.sessionId ?? null,
       };
     },
 
-    async runAction(_workspaceId: string, _handoffId: string): Promise<void> {
+    async runAction(_workspaceId: string, _taskId: string): Promise<void> {
       notSupported("runAction");
     },
 
@@ -331,9 +331,9 @@ export function createMockBackendClient(defaultWorkspaceId = "default"): Backend
       sandboxId: string;
       request: ProcessCreateRequest;
     }): Promise<SandboxProcessRecord> {
-      const handoff = requireHandoff(input.sandboxId);
+      const task = requireTask(input.sandboxId);
       const processes = ensureProcessList(input.sandboxId);
-      const created = createProcessRecord(input.sandboxId, mockCwd(handoff.repoName, handoff.id), input.request);
+      const created = createProcessRecord(input.sandboxId, mockCwd(task.repoName, task.id), input.request);
       processes.unshift(created);
       notifySandbox(input.sandboxId);
       return cloneProcess(created);
@@ -458,7 +458,7 @@ export function createMockBackendClient(defaultWorkspaceId = "default"): Backend
       return { endpoint: "mock://terminal-unavailable" };
     },
 
-    async getWorkbench(): Promise<HandoffWorkbenchSnapshot> {
+    async getWorkbench(): Promise<TaskWorkbenchSnapshot> {
       return workbench.getSnapshot();
     },
 
@@ -466,59 +466,59 @@ export function createMockBackendClient(defaultWorkspaceId = "default"): Backend
       return workbench.subscribe(listener);
     },
 
-    async createWorkbenchHandoff(_workspaceId: string, input: HandoffWorkbenchCreateHandoffInput): Promise<HandoffWorkbenchCreateHandoffResponse> {
-      return await workbench.createHandoff(input);
+    async createWorkbenchTask(_workspaceId: string, input: TaskWorkbenchCreateTaskInput): Promise<TaskWorkbenchCreateTaskResponse> {
+      return await workbench.createTask(input);
     },
 
-    async markWorkbenchUnread(_workspaceId: string, input: HandoffWorkbenchSelectInput): Promise<void> {
-      await workbench.markHandoffUnread(input);
+    async markWorkbenchUnread(_workspaceId: string, input: TaskWorkbenchSelectInput): Promise<void> {
+      await workbench.markTaskUnread(input);
     },
 
-    async renameWorkbenchHandoff(_workspaceId: string, input: HandoffWorkbenchRenameInput): Promise<void> {
-      await workbench.renameHandoff(input);
+    async renameWorkbenchTask(_workspaceId: string, input: TaskWorkbenchRenameInput): Promise<void> {
+      await workbench.renameTask(input);
     },
 
-    async renameWorkbenchBranch(_workspaceId: string, input: HandoffWorkbenchRenameInput): Promise<void> {
+    async renameWorkbenchBranch(_workspaceId: string, input: TaskWorkbenchRenameInput): Promise<void> {
       await workbench.renameBranch(input);
     },
 
-    async createWorkbenchSession(_workspaceId: string, input: HandoffWorkbenchSelectInput & { model?: string }): Promise<{ tabId: string }> {
+    async createWorkbenchSession(_workspaceId: string, input: TaskWorkbenchSelectInput & { model?: string }): Promise<{ tabId: string }> {
       return await workbench.addTab(input);
     },
 
-    async renameWorkbenchSession(_workspaceId: string, input: HandoffWorkbenchRenameSessionInput): Promise<void> {
+    async renameWorkbenchSession(_workspaceId: string, input: TaskWorkbenchRenameSessionInput): Promise<void> {
       await workbench.renameSession(input);
     },
 
-    async setWorkbenchSessionUnread(_workspaceId: string, input: HandoffWorkbenchSetSessionUnreadInput): Promise<void> {
+    async setWorkbenchSessionUnread(_workspaceId: string, input: TaskWorkbenchSetSessionUnreadInput): Promise<void> {
       await workbench.setSessionUnread(input);
     },
 
-    async updateWorkbenchDraft(_workspaceId: string, input: HandoffWorkbenchUpdateDraftInput): Promise<void> {
+    async updateWorkbenchDraft(_workspaceId: string, input: TaskWorkbenchUpdateDraftInput): Promise<void> {
       await workbench.updateDraft(input);
     },
 
-    async changeWorkbenchModel(_workspaceId: string, input: HandoffWorkbenchChangeModelInput): Promise<void> {
+    async changeWorkbenchModel(_workspaceId: string, input: TaskWorkbenchChangeModelInput): Promise<void> {
       await workbench.changeModel(input);
     },
 
-    async sendWorkbenchMessage(_workspaceId: string, input: HandoffWorkbenchSendMessageInput): Promise<void> {
+    async sendWorkbenchMessage(_workspaceId: string, input: TaskWorkbenchSendMessageInput): Promise<void> {
       await workbench.sendMessage(input);
     },
 
-    async stopWorkbenchSession(_workspaceId: string, input: HandoffWorkbenchTabInput): Promise<void> {
+    async stopWorkbenchSession(_workspaceId: string, input: TaskWorkbenchTabInput): Promise<void> {
       await workbench.stopAgent(input);
     },
 
-    async closeWorkbenchSession(_workspaceId: string, input: HandoffWorkbenchTabInput): Promise<void> {
+    async closeWorkbenchSession(_workspaceId: string, input: TaskWorkbenchTabInput): Promise<void> {
       await workbench.closeTab(input);
     },
 
-    async publishWorkbenchPr(_workspaceId: string, input: HandoffWorkbenchSelectInput): Promise<void> {
+    async publishWorkbenchPr(_workspaceId: string, input: TaskWorkbenchSelectInput): Promise<void> {
       await workbench.publishPr(input);
     },
 
-    async revertWorkbenchFile(_workspaceId: string, input: HandoffWorkbenchDiffInput): Promise<void> {
+    async revertWorkbenchFile(_workspaceId: string, input: TaskWorkbenchDiffInput): Promise<void> {
       await workbench.revertFile(input);
     },
 

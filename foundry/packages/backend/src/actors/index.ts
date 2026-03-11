@@ -1,6 +1,6 @@
 import { setup } from "rivetkit";
-import { handoffStatusSync } from "./handoff-status-sync/index.js";
-import { handoff } from "./handoff/index.js";
+import { taskStatusSync } from "./task-status-sync/index.js";
+import { task } from "./task/index.js";
 import { history } from "./history/index.js";
 import { projectBranchSync } from "./project-branch-sync/index.js";
 import { projectPrSync } from "./project-pr-sync/index.js";
@@ -30,12 +30,12 @@ export const registry = setup({
   use: {
     workspace,
     project,
-    handoff,
+    task,
     sandboxInstance,
     history,
     projectPrSync,
     projectBranchSync,
-    handoffStatusSync,
+    taskStatusSync,
   },
   managerPort: resolveManagerPort(),
   managerHost: resolveManagerHost(),
@@ -43,8 +43,8 @@ export const registry = setup({
 
 export * from "./context.js";
 export * from "./events.js";
-export * from "./handoff-status-sync/index.js";
-export * from "./handoff/index.js";
+export * from "./task-status-sync/index.js";
+export * from "./task/index.js";
 export * from "./history/index.js";
 export * from "./keys.js";
 export * from "./project-branch-sync/index.js";

@@ -3,7 +3,7 @@ export type FrontendErrorKind = "window-error" | "resource-error" | "unhandled-r
 export interface FrontendErrorContext {
   route?: string;
   workspaceId?: string;
-  handoffId?: string;
+  taskId?: string;
   [key: string]: string | number | boolean | null | undefined;
 }
 

@@ -1,6 +1,6 @@
-import type { AppConfig, HandoffRecord } from "@sandbox-agent/foundry-shared";
+import type { AppConfig, TaskRecord } from "@sandbox-agent/foundry-shared";
 import { spawnSync } from "node:child_process";
-import { createBackendClientFromConfig, filterHandoffs, formatRelativeAge, groupHandoffStatus } from "@sandbox-agent/foundry-client";
+import { createBackendClientFromConfig, filterTasks, formatRelativeAge, groupTaskStatus } from "@sandbox-agent/foundry-client";
 import { CLI_BUILD_ID } from "./build-id.js";
 import { resolveTuiTheme, type TuiTheme } from "./theme.js";
 
@@ -18,7 +18,7 @@ const HELP_LINES = [
   "Ctrl-O           open PR in browser",
   "Ctrl-X           archive branch / close PR",
   "Ctrl-Y           merge highlighted PR",
-  "Ctrl-S           sync handoff with remote",
+  "Ctrl-S           sync task with remote",
   "Ctrl-N / Down    next row",
   "Ctrl-P / Up      previous row",
   "Backspace        delete filter",
@@ -128,8 +128,8 @@ function buildFooterLine(width: number, segments: string[], right: string): stri
   return `${left}${padding}${right}`;
 }
 
-function agentSymbol(status: HandoffRecord["status"]): string {
-  const group = groupHandoffStatus(status);
+function agentSymbol(status: TaskRecord["status"]): string {
+  const group = groupTaskStatus(status);
   if (group === "running") return "🤖";
   if (group === "idle") return "💬";
   if (group === "error") return "⚠";
@@ -137,7 +137,7 @@ function agentSymbol(status: HandoffRecord["status"]): string {
   return "-";
 }
 
-function toDisplayRow(row: HandoffRecord): DisplayRow {
+function toDisplayRow(row: TaskRecord): DisplayRow {
   const conflictPrefix = row.conflictsWithMain === "true" ? "\u26A0 " : "";
 
   const prLabel = row.prUrl ? `#${row.prUrl.match(/\/pull\/(\d+)/)?.[1] ?? "?"}` : row.prSubmitted ? "sub" : "-";
@@ -180,7 +180,7 @@ function helpLines(width: number): string[] {
 }
 
 export function formatRows(
-  rows: HandoffRecord[],
+  rows: TaskRecord[],
   selected: number,
   workspaceId: string,
   status: string,
@@ -330,8 +330,8 @@ export async function runTui(config: AppConfig, workspaceId: string): Promise<vo
   renderer.root.add(text);
   renderer.start();
 
-  let allRows: HandoffRecord[] = [];
-  let filteredRows: HandoffRecord[] = [];
+  let allRows: TaskRecord[] = [];
+  let filteredRows: TaskRecord[] = [];
   let selected = 0;
   let searchQuery = "";
   let showHelp = false;
@@ -371,13 +371,13 @@ export async function runTui(config: AppConfig, workspaceId: string): Promise<vo
       return;
     }
     try {
-      allRows = await client.listHandoffs(workspaceId);
+      allRows = await client.listTasks(workspaceId);
       if (closed) {
         return;
       }
-      filteredRows = filterHandoffs(allRows, searchQuery);
+      filteredRows = filterTasks(allRows, searchQuery);
       clampSelected();
-      status = `handoffs=${allRows.length} filtered=${filteredRows.length}`;
+      status = `tasks=${allRows.length} filtered=${filteredRows.length}`;
     } catch (err) {
       if (closed) {
         return;
@@ -387,7 +387,7 @@ export async function runTui(config: AppConfig, workspaceId: string): Promise<vo
     render();
   };
 
-  const selectedRow = (): HandoffRecord | null => {
+  const selectedRow = (): TaskRecord | null => {
     if (filteredRows.length === 0) {
       return null;
     }
@@ -500,7 +500,7 @@ export async function runTui(config: AppConfig, workspaceId: string): Promise<vo
 
     if (name === "backspace") {
       searchQuery = searchQuery.slice(0, -1);
-      filteredRows = filterHandoffs(allRows, searchQuery);
+      filteredRows = filterTasks(allRows, searchQuery);
       selected = 0;
       render();
       return;
@@ -512,11 +512,11 @@ export async function runTui(config: AppConfig, workspaceId: string): Promise<vo
         return;
       }
       busy = true;
-      status = `switching ${row.handoffId}...`;
+      status = `switching ${row.taskId}...`;
       render();
       void (async () => {
         try {
-          const result = await client.switchHandoff(workspaceId, row.handoffId);
+          const result = await client.switchTask(workspaceId, row.taskId);
           close(`cd ${result.switchTarget}`);
         } catch (err) {
           busy = false;
@@ -533,11 +533,11 @@ export async function runTui(config: AppConfig, workspaceId: string): Promise<vo
         return;
       }
       busy = true;
-      status = `attaching ${row.handoffId}...`;
+      status = `attaching ${row.taskId}...`;
       render();
       void (async () => {
         try {
-          const result = await client.attachHandoff(workspaceId, row.handoffId);
+          const result = await client.attachTask(workspaceId, row.taskId);
           close(`target=${result.target} session=${result.sessionId ?? "none"}`);
         } catch (err) {
           busy = false;
@@ -553,7 +553,7 @@ export async function runTui(config: AppConfig, workspaceId: string): Promise<vo
       if (!row) {
         return;
       }
-      void runActionWithRefresh(`archiving ${row.handoffId}`, async () => client.runAction(workspaceId, row.handoffId, "archive"), `archived ${row.handoffId}`);
+      void runActionWithRefresh(`archiving ${row.taskId}`, async () => client.runAction(workspaceId, row.taskId, "archive"), `archived ${row.taskId}`);
       return;
     }
 
@@ -562,7 +562,7 @@ export async function runTui(config: AppConfig, workspaceId: string): Promise<vo
       if (!row) {
         return;
       }
-      void runActionWithRefresh(`syncing ${row.handoffId}`, async () => client.runAction(workspaceId, row.handoffId, "sync"), `synced ${row.handoffId}`);
+      void runActionWithRefresh(`syncing ${row.taskId}`, async () => client.runAction(workspaceId, row.taskId, "sync"), `synced ${row.taskId}`);
       return;
     }
 
@@ -572,12 +572,12 @@ export async function runTui(config: AppConfig, workspaceId: string): Promise<vo
         return;
       }
       void runActionWithRefresh(
-        `merging ${row.handoffId}`,
+        `merging ${row.taskId}`,
         async () => {
-          await client.runAction(workspaceId, row.handoffId, "merge");
-          await client.runAction(workspaceId, row.handoffId, "archive");
+          await client.runAction(workspaceId, row.taskId, "merge");
+          await client.runAction(workspaceId, row.taskId, "archive");
         },
-        `merged+archived ${row.handoffId}`,
+        `merged+archived ${row.taskId}`,
       );
       return;
     }
@@ -585,7 +585,7 @@ export async function runTui(config: AppConfig, workspaceId: string): Promise<vo
     if (ctrl && name === "o") {
       const row = selectedRow();
       if (!row?.prUrl) {
-        status = "no PR URL available for this handoff";
+        status = "no PR URL available for this task";
         render();
         return;
       }
@@ -598,7 +598,7 @@ export async function runTui(config: AppConfig, workspaceId: string): Promise<vo
 
     if (!ctrl && !event.meta && name.length === 1) {
       searchQuery += name;
-      filteredRows = filterHandoffs(allRows, searchQuery);
+      filteredRows = filterTasks(allRows, searchQuery);
       selected = 0;
       render();
     }

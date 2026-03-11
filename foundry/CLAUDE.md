@@ -32,7 +32,7 @@ Use `pnpm` workspaces and Turborepo.
 
 ## Common Commands
 
-- Foundry is the canonical name for this product tree. Do not introduce or preserve `factory` or `openhandoff` naming in code, docs, commands, or runtime paths.
+- Foundry is the canonical name for this product tree. Do not introduce or preserve legacy pre-Foundry naming in code, docs, commands, or runtime paths.
 - Install deps: `pnpm install`
 - Full active-workspace validation: `pnpm -w typecheck`, `pnpm -w build`, `pnpm -w test`
 - Start the full dev stack: `just foundry-dev`
@@ -81,12 +81,12 @@ For all Rivet/RivetKit implementation:
 2. SQLite is **per actor instance** (per actor key), not a shared backend-global database:
    - Each actor instance gets its own SQLite DB.
    - Schema design should assume a single actor instance owns the entire DB.
-   - Do not add `workspaceId`/`repoId`/`handoffId` columns just to "namespace" rows for a given actor instance; use actor state and/or the actor key instead.
-   - Example: the `handoff` actor instance already represents `(workspaceId, repoId, handoffId)`, so its SQLite tables should not need those columns for primary keys.
+   - Do not add `workspaceId`/`repoId`/`taskId` columns just to "namespace" rows for a given actor instance; use actor state and/or the actor key instead.
+   - Example: the `task` actor instance already represents `(workspaceId, repoId, taskId)`, so its SQLite tables should not need those columns for primary keys.
 3. Do not use backend-global SQLite singletons; database access must go through actor `db` providers (`c.db`).
 4. The default dependency source for RivetKit is the published `rivetkit` package so workspace installs and CI remain self-contained.
 5. When working on coordinated RivetKit changes, you may temporarily relink to a local checkout instead of the published package.
-   - Dedicated local checkout for this workspace: `/Users/nathan/conductor/workspaces/handoff/rivet-checkout`
+   - Dedicated local checkout for this workspace: `/Users/nathan/conductor/workspaces/task/rivet-checkout`
    - Preferred local link target: `../rivet-checkout/rivetkit-typescript/packages/rivetkit`
    - Sub-packages (`@rivetkit/sqlite-vfs`, etc.) resolve transitively from the RivetKit workspace when using the local checkout.
 6. Before using a local checkout, build RivetKit in the rivet repo:
@@ -104,7 +104,7 @@ For all Rivet/RivetKit implementation:
   curl -sS http://127.0.0.1:7741/api/rivet/metadata | jq -r '.clientEndpoint'
   ```
 - List actors:
-  - `GET {manager}/actors?name=handoff`
+  - `GET {manager}/actors?name=task`
 - Inspector endpoints (path prefix: `/gateway/{actorId}/inspector`):
   - `GET /state`
   - `PATCH /state`
@@ -118,12 +118,12 @@ For all Rivet/RivetKit implementation:
 - Auth:
   - Production: send `Authorization: Bearer $RIVET_INSPECTOR_TOKEN`.
   - Development: auth can be skipped when no inspector token is configured.
-- Handoff workflow quick inspect:
+- Task workflow quick inspect:
   ```bash
   MGR="$(curl -sS http://127.0.0.1:7741/api/rivet/metadata | jq -r '.clientEndpoint')"
   HID="7df7656e-bbd2-4b8c-bf0f-30d4df2f619a"
-  AID="$(curl -sS "$MGR/actors?name=handoff" \
-    | jq -r --arg hid "$HID" '.actors[] | select(.key | endswith("/handoff/\($hid)")) | .actor_id' \
+  AID="$(curl -sS "$MGR/actors?name=task" \
+    | jq -r --arg hid "$HID" '.actors[] | select(.key | endswith("/task/\($hid)")) | .actor_id' \
     | head -n1)"
   curl -sS "$MGR/gateway/$AID/inspector/workflow-history" | jq .
   curl -sS "$MGR/gateway/$AID/inspector/summary" | jq .
@@ -140,7 +140,7 @@ For all Rivet/RivetKit implementation:
 - Do not add custom backend REST endpoints (no `/v1/*` shim layer).
 - We own the sandbox-agent project; treat sandbox-agent defects as first-party bugs and fix them instead of working around them.
 - Keep strict single-writer ownership: each table/row has exactly one actor writer.
-- Parent actors (`workspace`, `project`, `handoff`, `history`, `sandbox-instance`) use command-only loops with no timeout.
+- Parent actors (`workspace`, `project`, `task`, `history`, `sandbox-instance`) use command-only loops with no timeout.
 - Periodic syncing lives in dedicated child actors with one timeout cadence each.
 - Actor handle policy:
 - Prefer explicit `get` or explicit `create` based on workflow intent; do not default to `getOrCreate`.
@@ -154,7 +154,7 @@ For all Rivet/RivetKit implementation:
 - Production: never auto-delete actor state to resolve `HistoryDivergedError`; ship explicit workflow migrations (`ctx.removed(...)`, step compatibility).
 - Development: manual local state reset is allowed as an operator recovery path when migrations are not yet available.
 - Storage rule of thumb:
-- Put simple metadata in `c.state` (KV state): small scalars and identifiers like `{ handoffId }`, `{ repoId }`, booleans, counters, timestamps, status strings.
+- Put simple metadata in `c.state` (KV state): small scalars and identifiers like `{ taskId }`, `{ repoId }`, booleans, counters, timestamps, status strings.
 - If it grows beyond trivial (arrays, maps, histories, query/filter needs, relational consistency), use SQLite + Drizzle in `c.db`.
 
 ## Testing Policy

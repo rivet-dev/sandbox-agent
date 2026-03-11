@@ -148,7 +148,7 @@ export class SandboxAgentClient {
     // If the agent doesn't support session modes, ignore.
     //
     // Do this in the background: ACP mode updates can occasionally time out (504),
-    // and waiting here can stall session creation long enough to trip handoff init
+    // and waiting here can stall session creation long enough to trip task init
     // step timeouts even though the session itself was created.
     if (modeId) {
       void session.rawSend("session/set_mode", { modeId }).catch(() => {

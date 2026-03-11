@@ -10,10 +10,10 @@ WorkspaceActor
 ├─ ProjectActor(repo)
 │  ├─ ProjectBranchSyncActor
 │  ├─ ProjectPrSyncActor
-│  └─ HandoffActor(handoff)
-│     ├─ HandoffSessionActor(session) × N
+│  └─ TaskActor(task)
+│     ├─ TaskSessionActor(session) × N
 │     │  └─ SessionStatusSyncActor(session) × 0..1
-│     └─ Handoff-local workbench state
+│     └─ Task-local workbench state
 └─ SandboxInstanceActor(providerId, sandboxId) × N
 ```
 
@@ -22,12 +22,12 @@ WorkspaceActor
 - `WorkspaceActor` is the workspace coordinator and lookup/index owner.
 - `HistoryActor` is workspace-scoped. There is one workspace-level history feed.
 - `ProjectActor` is the repo coordinator and owns repo-local caches/indexes.
-- `HandoffActor` is one branch. Treat `1 handoff = 1 branch` once branch assignment is finalized.
-- `HandoffActor` can have many sessions.
-- `HandoffActor` can reference many sandbox instances historically, but should have only one active sandbox/session at a time.
+- `TaskActor` is one branch. Treat `1 task = 1 branch` once branch assignment is finalized.
+- `TaskActor` can have many sessions.
+- `TaskActor` can reference many sandbox instances historically, but should have only one active sandbox/session at a time.
 - Session unread state and draft prompts are backend-owned workbench state, not frontend-local state.
 - Branch rename is a real git operation, not just metadata.
-- `SandboxInstanceActor` stays separate from `HandoffActor`; handoffs/sessions reference it by identity.
+- `SandboxInstanceActor` stays separate from `TaskActor`; tasks/sessions reference it by identity.
 - Sync actors are polling workers only. They feed parent actors and should not become the source of truth.
 
 ## Maintenance

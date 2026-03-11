@@ -2,14 +2,14 @@
 import { randomUUID } from "node:crypto";
 import { and, desc, eq, isNotNull, ne } from "drizzle-orm";
 import { Loop } from "rivetkit/workflow";
-import type { AgentType, HandoffRecord, HandoffSummary, ProviderId, RepoOverview, RepoStackAction, RepoStackActionResult } from "@sandbox-agent/foundry-shared";
+import type { AgentType, TaskRecord, TaskSummary, ProviderId, RepoOverview, RepoStackAction, RepoStackActionResult } from "@sandbox-agent/foundry-shared";
 import { getActorRuntimeContext } from "../context.js";
-import { getHandoff, getOrCreateHandoff, getOrCreateHistory, getOrCreateProjectBranchSync, getOrCreateProjectPrSync, selfProject } from "../handles.js";
+import { getTask, getOrCreateTask, getOrCreateHistory, getOrCreateProjectBranchSync, getOrCreateProjectPrSync, selfProject } from "../handles.js";
 import { isActorNotFoundError, logActorWarning, resolveErrorMessage } from "../logging.js";
 import { foundryRepoClonePath } from "../../services/foundry-paths.js";
 import { expectQueueResponse } from "../../services/queue.js";
 import { withRepoGitLock } from "../../services/repo-git-lock.js";
-import { branches, handoffIndex, prCache, repoMeta } from "./db/schema.js";
+import { branches, taskIndex, prCache, repoMeta } from "./db/schema.js";
 import { deriveFallbackTitle } from "../../services/create-flow.js";
 import { normalizeBaseBranchName } from "../../integrations/git-spice/index.js";
 import { sortBranchesForOverview } from "./stack-model.js";
@@ -22,7 +22,7 @@ interface EnsureProjectResult {
   localPath: string;
 }
 
-interface CreateHandoffCommand {
+interface CreateTaskCommand {
   task: string;
   providerId: ProviderId;
   agentType: AgentType | null;
@@ -32,22 +32,22 @@ interface CreateHandoffCommand {
   onBranch: string | null;
 }
 
-interface HydrateHandoffIndexCommand {}
+interface HydrateTaskIndexCommand {}
 
 interface ListReservedBranchesCommand {}
 
-interface RegisterHandoffBranchCommand {
-  handoffId: string;
+interface RegisterTaskBranchCommand {
+  taskId: string;
   branchName: string;
   requireExistingRemote?: boolean;
 }
 
-interface ListHandoffSummariesCommand {
+interface ListTaskSummariesCommand {
   includeArchived?: boolean;
 }
 
-interface GetHandoffEnrichedCommand {
-  handoffId: string;
+interface GetTaskEnrichedCommand {
+  taskId: string;
 }
 
 interface GetPullRequestForBranchCommand {
@@ -93,9 +93,9 @@ interface RunRepoStackActionCommand {
 
 const PROJECT_QUEUE_NAMES = [
   "project.command.ensure",
-  "project.command.hydrateHandoffIndex",
-  "project.command.createHandoff",
-  "project.command.registerHandoffBranch",
+  "project.command.hydrateTaskIndex",
+  "project.command.createTask",
+  "project.command.registerTaskBranch",
   "project.command.runRepoStackAction",
   "project.command.applyPrSyncResult",
   "project.command.applyBranchSyncResult",
@@ -131,59 +131,59 @@ async function ensureProjectSyncActors(c: any, localPath: string): Promise<void>
   c.state.syncActorsStarted = true;
 }
 
-async function deleteStaleHandoffIndexRow(c: any, handoffId: string): Promise<void> {
+async function deleteStaleTaskIndexRow(c: any, taskId: string): Promise<void> {
   try {
-    await c.db.delete(handoffIndex).where(eq(handoffIndex.handoffId, handoffId)).run();
+    await c.db.delete(taskIndex).where(eq(taskIndex.taskId, taskId)).run();
   } catch {
     // Best-effort cleanup only; preserve the original caller flow.
   }
 }
 
-function isStaleHandoffReferenceError(error: unknown): boolean {
+function isStaleTaskReferenceError(error: unknown): boolean {
   const message = resolveErrorMessage(error);
-  return isActorNotFoundError(error) || message.startsWith("Handoff not found:");
+  return isActorNotFoundError(error) || message.startsWith("Task not found:");
 }
 
-async function ensureHandoffIndexHydrated(c: any): Promise<void> {
-  if (c.state.handoffIndexHydrated) {
+async function ensureTaskIndexHydrated(c: any): Promise<void> {
+  if (c.state.taskIndexHydrated) {
     return;
   }
 
-  const existing = await c.db.select({ handoffId: handoffIndex.handoffId }).from(handoffIndex).limit(1).get();
+  const existing = await c.db.select({ taskId: taskIndex.taskId }).from(taskIndex).limit(1).get();
 
   if (existing) {
-    c.state.handoffIndexHydrated = true;
+    c.state.taskIndexHydrated = true;
     return;
   }
 
-  // Migration path for old project actors that only tracked handoffs in history.
+  // Migration path for old project actors that only tracked tasks in history.
   try {
     const history = await getOrCreateHistory(c, c.state.workspaceId, c.state.repoId);
     const rows = await history.list({ limit: 5_000 });
     const seen = new Set<string>();
-    let skippedMissingHandoffActors = 0;
+    let skippedMissingTaskActors = 0;
 
     for (const row of rows) {
-      if (!row.handoffId || seen.has(row.handoffId)) {
+      if (!row.taskId || seen.has(row.taskId)) {
         continue;
       }
-      seen.add(row.handoffId);
+      seen.add(row.taskId);
 
       try {
-        const h = getHandoff(c, c.state.workspaceId, c.state.repoId, row.handoffId);
+        const h = getTask(c, c.state.workspaceId, c.state.repoId, row.taskId);
         await h.get();
       } catch (error) {
-        if (isStaleHandoffReferenceError(error)) {
-          skippedMissingHandoffActors += 1;
+        if (isStaleTaskReferenceError(error)) {
+          skippedMissingTaskActors += 1;
           continue;
         }
         throw error;
       }
 
       await c.db
-        .insert(handoffIndex)
+        .insert(taskIndex)
         .values({
-          handoffId: row.handoffId,
+          taskId: row.taskId,
           branchName: row.branchName,
           createdAt: row.createdAt,
           updatedAt: row.createdAt,
@@ -192,22 +192,22 @@ async function ensureHandoffIndexHydrated(c: any): Promise<void> {
         .run();
     }
 
-    if (skippedMissingHandoffActors > 0) {
-      logActorWarning("project", "skipped missing handoffs while hydrating index", {
+    if (skippedMissingTaskActors > 0) {
+      logActorWarning("project", "skipped missing tasks while hydrating index", {
         workspaceId: c.state.workspaceId,
         repoId: c.state.repoId,
-        skippedMissingHandoffActors,
+        skippedMissingTaskActors,
       });
     }
   } catch (error) {
-    logActorWarning("project", "handoff index hydration from history failed", {
+    logActorWarning("project", "task index hydration from history failed", {
       workspaceId: c.state.workspaceId,
       repoId: c.state.repoId,
       error: resolveErrorMessage(error),
     });
   }
 
-  c.state.handoffIndexHydrated = true;
+  c.state.taskIndexHydrated = true;
 }
 
 async function ensureProjectReady(c: any): Promise<string> {
@@ -241,11 +241,11 @@ async function ensureProjectReadyForRead(c: any): Promise<string> {
   return c.state.localPath;
 }
 
-async function ensureHandoffIndexHydratedForRead(c: any): Promise<void> {
-  if (c.state.handoffIndexHydrated) {
+async function ensureTaskIndexHydratedForRead(c: any): Promise<void> {
+  if (c.state.taskIndexHydrated) {
     return;
   }
-  await projectActions.hydrateHandoffIndex(c, {});
+  await projectActions.hydrateTaskIndex(c, {});
 }
 
 async function forceProjectSync(c: any, localPath: string): Promise<void> {
@@ -256,7 +256,7 @@ async function forceProjectSync(c: any, localPath: string): Promise<void> {
   await branchSync.force();
 }
 
-async function enrichHandoffRecord(c: any, record: HandoffRecord): Promise<HandoffRecord> {
+async function enrichTaskRecord(c: any, record: TaskRecord): Promise<TaskRecord> {
   const branchName = record.branchName;
   const br =
     branchName != null
@@ -325,16 +325,16 @@ async function ensureProjectMutation(c: any, cmd: EnsureProjectCommand): Promise
   return { localPath };
 }
 
-async function hydrateHandoffIndexMutation(c: any, _cmd?: HydrateHandoffIndexCommand): Promise<void> {
-  await ensureHandoffIndexHydrated(c);
+async function hydrateTaskIndexMutation(c: any, _cmd?: HydrateTaskIndexCommand): Promise<void> {
+  await ensureTaskIndexHydrated(c);
 }
 
-async function createHandoffMutation(c: any, cmd: CreateHandoffCommand): Promise<HandoffRecord> {
+async function createTaskMutation(c: any, cmd: CreateTaskCommand): Promise<TaskRecord> {
   const localPath = await ensureProjectReady(c);
   const onBranch = cmd.onBranch?.trim() || null;
   const initialBranchName = onBranch;
   const initialTitle = onBranch ? deriveFallbackTitle(cmd.task, cmd.explicitTitle ?? undefined) : null;
-  const handoffId = randomUUID();
+  const taskId = randomUUID();
 
   if (onBranch) {
     await forceProjectSync(c, localPath);
@@ -344,19 +344,19 @@ async function createHandoffMutation(c: any, cmd: CreateHandoffCommand): Promise
       throw new Error(`Branch not found in repo snapshot: ${onBranch}`);
     }
 
-    await registerHandoffBranchMutation(c, {
-      handoffId,
+    await registerTaskBranchMutation(c, {
+      taskId,
       branchName: onBranch,
       requireExistingRemote: true,
     });
   }
 
-  let handoff: Awaited<ReturnType<typeof getOrCreateHandoff>>;
+  let task: Awaited<ReturnType<typeof getOrCreateTask>>;
   try {
-    handoff = await getOrCreateHandoff(c, c.state.workspaceId, c.state.repoId, handoffId, {
+    task = await getOrCreateTask(c, c.state.workspaceId, c.state.repoId, taskId, {
       workspaceId: c.state.workspaceId,
       repoId: c.state.repoId,
-      handoffId,
+      taskId,
       repoRemote: c.state.remoteUrl,
       repoLocalPath: localPath,
       branchName: initialBranchName,
@@ -371,8 +371,8 @@ async function createHandoffMutation(c: any, cmd: CreateHandoffCommand): Promise
   } catch (error) {
     if (onBranch) {
       await c.db
-        .delete(handoffIndex)
-        .where(eq(handoffIndex.handoffId, handoffId))
+        .delete(taskIndex)
+        .where(eq(taskIndex.taskId, taskId))
         .run()
         .catch(() => {});
     }
@@ -382,9 +382,9 @@ async function createHandoffMutation(c: any, cmd: CreateHandoffCommand): Promise
   if (!onBranch) {
     const now = Date.now();
     await c.db
-      .insert(handoffIndex)
+      .insert(taskIndex)
       .values({
-        handoffId,
+        taskId,
         branchName: initialBranchName,
         createdAt: now,
         updatedAt: now,
@@ -393,12 +393,12 @@ async function createHandoffMutation(c: any, cmd: CreateHandoffCommand): Promise
       .run();
   }
 
-  const created = await handoff.initialize({ providerId: cmd.providerId });
+  const created = await task.initialize({ providerId: cmd.providerId });
 
   const history = await getOrCreateHistory(c, c.state.workspaceId, c.state.repoId);
   await history.append({
-    kind: "handoff.created",
-    handoffId,
+    kind: "task.created",
+    taskId,
     payload: {
       repoId: c.state.repoId,
       providerId: cmd.providerId,
@@ -408,7 +408,7 @@ async function createHandoffMutation(c: any, cmd: CreateHandoffCommand): Promise
   return created;
 }
 
-async function registerHandoffBranchMutation(c: any, cmd: RegisterHandoffBranchCommand): Promise<{ branchName: string; headSha: string }> {
+async function registerTaskBranchMutation(c: any, cmd: RegisterTaskBranchCommand): Promise<{ branchName: string; headSha: string }> {
   const localPath = await ensureProjectReady(c);
 
   const branchName = cmd.branchName.trim();
@@ -417,27 +417,27 @@ async function registerHandoffBranchMutation(c: any, cmd: RegisterHandoffBranchC
     throw new Error("branchName is required");
   }
 
-  await ensureHandoffIndexHydrated(c);
+  await ensureTaskIndexHydrated(c);
 
   const existingOwner = await c.db
-    .select({ handoffId: handoffIndex.handoffId })
-    .from(handoffIndex)
-    .where(and(eq(handoffIndex.branchName, branchName), ne(handoffIndex.handoffId, cmd.handoffId)))
+    .select({ taskId: taskIndex.taskId })
+    .from(taskIndex)
+    .where(and(eq(taskIndex.branchName, branchName), ne(taskIndex.taskId, cmd.taskId)))
     .get();
 
   if (existingOwner) {
     let ownerMissing = false;
     try {
-      const h = getHandoff(c, c.state.workspaceId, c.state.repoId, existingOwner.handoffId);
+      const h = getTask(c, c.state.workspaceId, c.state.repoId, existingOwner.taskId);
       await h.get();
     } catch (error) {
-      if (isStaleHandoffReferenceError(error)) {
+      if (isStaleTaskReferenceError(error)) {
         ownerMissing = true;
-        await deleteStaleHandoffIndexRow(c, existingOwner.handoffId);
-        logActorWarning("project", "pruned stale handoff index row during branch registration", {
+        await deleteStaleTaskIndexRow(c, existingOwner.taskId);
+        logActorWarning("project", "pruned stale task index row during branch registration", {
           workspaceId: c.state.workspaceId,
           repoId: c.state.repoId,
-          handoffId: existingOwner.handoffId,
+          taskId: existingOwner.taskId,
           branchName,
         });
       } else {
@@ -445,7 +445,7 @@ async function registerHandoffBranchMutation(c: any, cmd: RegisterHandoffBranchC
       }
     }
     if (!ownerMissing) {
-      throw new Error(`branch is already assigned to a different handoff: ${branchName}`);
+      throw new Error(`branch is already assigned to a different task: ${branchName}`);
     }
   }
 
@@ -525,15 +525,15 @@ async function registerHandoffBranchMutation(c: any, cmd: RegisterHandoffBranchC
     .run();
 
   await c.db
-    .insert(handoffIndex)
+    .insert(taskIndex)
     .values({
-      handoffId: cmd.handoffId,
+      taskId: cmd.taskId,
       branchName,
       createdAt: now,
       updatedAt: now,
     })
     .onConflictDoUpdate({
-      target: handoffIndex.handoffId,
+      target: taskIndex.taskId,
       set: {
         branchName,
         updatedAt: now,
@@ -546,7 +546,7 @@ async function registerHandoffBranchMutation(c: any, cmd: RegisterHandoffBranchC
 
 async function runRepoStackActionMutation(c: any, cmd: RunRepoStackActionCommand): Promise<RepoStackActionResult> {
   const localPath = await ensureProjectReady(c);
-  await ensureHandoffIndexHydrated(c);
+  await ensureTaskIndexHydrated(c);
 
   const { driver } = getActorRuntimeContext();
   const at = Date.now();
@@ -682,30 +682,30 @@ async function applyPrSyncResultMutation(c: any, body: PrSyncResult): Promise<vo
       continue;
     }
 
-    const row = await c.db.select({ handoffId: handoffIndex.handoffId }).from(handoffIndex).where(eq(handoffIndex.branchName, item.headRefName)).get();
+    const row = await c.db.select({ taskId: taskIndex.taskId }).from(taskIndex).where(eq(taskIndex.branchName, item.headRefName)).get();
     if (!row) {
       continue;
     }
 
     try {
-      const h = getHandoff(c, c.state.workspaceId, c.state.repoId, row.handoffId);
+      const h = getTask(c, c.state.workspaceId, c.state.repoId, row.taskId);
       await h.archive({ reason: `PR ${item.state.toLowerCase()}` });
     } catch (error) {
-      if (isStaleHandoffReferenceError(error)) {
-        await deleteStaleHandoffIndexRow(c, row.handoffId);
-        logActorWarning("project", "pruned stale handoff index row during PR close archive", {
+      if (isStaleTaskReferenceError(error)) {
+        await deleteStaleTaskIndexRow(c, row.taskId);
+        logActorWarning("project", "pruned stale task index row during PR close archive", {
           workspaceId: c.state.workspaceId,
           repoId: c.state.repoId,
-          handoffId: row.handoffId,
+          taskId: row.taskId,
           branchName: item.headRefName,
           prState: item.state,
         });
         continue;
       }
-      logActorWarning("project", "failed to auto-archive handoff after PR close", {
+      logActorWarning("project", "failed to auto-archive task after PR close", {
         workspaceId: c.state.workspaceId,
         repoId: c.state.repoId,
-        handoffId: row.handoffId,
+        taskId: row.taskId,
         branchName: item.headRefName,
         prState: item.state,
         error: resolveErrorMessage(error),
@@ -787,27 +787,27 @@ export async function runProjectWorkflow(ctx: any): Promise<void> {
       return Loop.continue(undefined);
     }
 
-    if (msg.name === "project.command.hydrateHandoffIndex") {
-      await loopCtx.step("project-hydrate-handoff-index", async () => hydrateHandoffIndexMutation(loopCtx, msg.body as HydrateHandoffIndexCommand));
+    if (msg.name === "project.command.hydrateTaskIndex") {
+      await loopCtx.step("project-hydrate-task-index", async () => hydrateTaskIndexMutation(loopCtx, msg.body as HydrateTaskIndexCommand));
       await msg.complete({ ok: true });
       return Loop.continue(undefined);
     }
 
-    if (msg.name === "project.command.createHandoff") {
+    if (msg.name === "project.command.createTask") {
       const result = await loopCtx.step({
-        name: "project-create-handoff",
+        name: "project-create-task",
         timeout: 12 * 60_000,
-        run: async () => createHandoffMutation(loopCtx, msg.body as CreateHandoffCommand),
+        run: async () => createTaskMutation(loopCtx, msg.body as CreateTaskCommand),
       });
       await msg.complete(result);
       return Loop.continue(undefined);
     }
 
-    if (msg.name === "project.command.registerHandoffBranch") {
+    if (msg.name === "project.command.registerTaskBranch") {
       const result = await loopCtx.step({
-        name: "project-register-handoff-branch",
+        name: "project-register-task-branch",
         timeout: 5 * 60_000,
-        run: async () => registerHandoffBranchMutation(loopCtx, msg.body as RegisterHandoffBranchCommand),
+        run: async () => registerTaskBranchMutation(loopCtx, msg.body as RegisterTaskBranchCommand),
       });
       await msg.complete(result);
       return Loop.continue(undefined);
@@ -857,10 +857,10 @@ export const projectActions = {
     );
   },
 
-  async createHandoff(c: any, cmd: CreateHandoffCommand): Promise<HandoffRecord> {
+  async createTask(c: any, cmd: CreateTaskCommand): Promise<TaskRecord> {
     const self = selfProject(c);
-    return expectQueueResponse<HandoffRecord>(
-      await self.send(projectWorkflowQueueName("project.command.createHandoff"), cmd, {
+    return expectQueueResponse<TaskRecord>(
+      await self.send(projectWorkflowQueueName("project.command.createTask"), cmd, {
         wait: true,
         timeout: 12 * 60_000,
       }),
@@ -868,42 +868,42 @@ export const projectActions = {
   },
 
   async listReservedBranches(c: any, _cmd?: ListReservedBranchesCommand): Promise<string[]> {
-    await ensureHandoffIndexHydratedForRead(c);
+    await ensureTaskIndexHydratedForRead(c);
 
-    const rows = await c.db.select({ branchName: handoffIndex.branchName }).from(handoffIndex).where(isNotNull(handoffIndex.branchName)).all();
+    const rows = await c.db.select({ branchName: taskIndex.branchName }).from(taskIndex).where(isNotNull(taskIndex.branchName)).all();
 
     return rows.map((row) => row.branchName).filter((name): name is string => typeof name === "string" && name.trim().length > 0);
   },
 
-  async registerHandoffBranch(c: any, cmd: RegisterHandoffBranchCommand): Promise<{ branchName: string; headSha: string }> {
+  async registerTaskBranch(c: any, cmd: RegisterTaskBranchCommand): Promise<{ branchName: string; headSha: string }> {
     const self = selfProject(c);
     return expectQueueResponse<{ branchName: string; headSha: string }>(
-      await self.send(projectWorkflowQueueName("project.command.registerHandoffBranch"), cmd, {
+      await self.send(projectWorkflowQueueName("project.command.registerTaskBranch"), cmd, {
         wait: true,
         timeout: 5 * 60_000,
       }),
     );
   },
 
-  async hydrateHandoffIndex(c: any, cmd?: HydrateHandoffIndexCommand): Promise<void> {
+  async hydrateTaskIndex(c: any, cmd?: HydrateTaskIndexCommand): Promise<void> {
     const self = selfProject(c);
-    await self.send(projectWorkflowQueueName("project.command.hydrateHandoffIndex"), cmd ?? {}, {
+    await self.send(projectWorkflowQueueName("project.command.hydrateTaskIndex"), cmd ?? {}, {
       wait: true,
       timeout: 60_000,
     });
   },
 
-  async listHandoffSummaries(c: any, cmd?: ListHandoffSummariesCommand): Promise<HandoffSummary[]> {
+  async listTaskSummaries(c: any, cmd?: ListTaskSummariesCommand): Promise<TaskSummary[]> {
     const body = cmd ?? {};
-    const records: HandoffSummary[] = [];
+    const records: TaskSummary[] = [];
 
-    await ensureHandoffIndexHydratedForRead(c);
+    await ensureTaskIndexHydratedForRead(c);
 
-    const handoffRows = await c.db.select({ handoffId: handoffIndex.handoffId }).from(handoffIndex).orderBy(desc(handoffIndex.updatedAt)).all();
+    const taskRows = await c.db.select({ taskId: taskIndex.taskId }).from(taskIndex).orderBy(desc(taskIndex.updatedAt)).all();
 
-    for (const row of handoffRows) {
+    for (const row of taskRows) {
       try {
-        const h = getHandoff(c, c.state.workspaceId, c.state.repoId, row.handoffId);
+        const h = getTask(c, c.state.workspaceId, c.state.repoId, row.taskId);
         const record = await h.get();
 
         if (!body.includeArchived && record.status === "archived") {
@@ -913,26 +913,26 @@ export const projectActions = {
         records.push({
           workspaceId: record.workspaceId,
           repoId: record.repoId,
-          handoffId: record.handoffId,
+          taskId: record.taskId,
           branchName: record.branchName,
           title: record.title,
           status: record.status,
           updatedAt: record.updatedAt,
         });
       } catch (error) {
-        if (isStaleHandoffReferenceError(error)) {
-          await deleteStaleHandoffIndexRow(c, row.handoffId);
-          logActorWarning("project", "pruned stale handoff index row during summary listing", {
+        if (isStaleTaskReferenceError(error)) {
+          await deleteStaleTaskIndexRow(c, row.taskId);
+          logActorWarning("project", "pruned stale task index row during summary listing", {
             workspaceId: c.state.workspaceId,
             repoId: c.state.repoId,
-            handoffId: row.handoffId,
+            taskId: row.taskId,
           });
           continue;
         }
-        logActorWarning("project", "failed loading handoff summary row", {
+        logActorWarning("project", "failed loading task summary row", {
           workspaceId: c.state.workspaceId,
           repoId: c.state.repoId,
-          handoffId: row.handoffId,
+          taskId: row.taskId,
           error: resolveErrorMessage(error),
         });
       }
@@ -942,22 +942,22 @@ export const projectActions = {
     return records;
   },
 
-  async getHandoffEnriched(c: any, cmd: GetHandoffEnrichedCommand): Promise<HandoffRecord> {
-    await ensureHandoffIndexHydratedForRead(c);
+  async getTaskEnriched(c: any, cmd: GetTaskEnrichedCommand): Promise<TaskRecord> {
+    await ensureTaskIndexHydratedForRead(c);
 
-    const row = await c.db.select({ handoffId: handoffIndex.handoffId }).from(handoffIndex).where(eq(handoffIndex.handoffId, cmd.handoffId)).get();
+    const row = await c.db.select({ taskId: taskIndex.taskId }).from(taskIndex).where(eq(taskIndex.taskId, cmd.taskId)).get();
     if (!row) {
-      throw new Error(`Unknown handoff in repo ${c.state.repoId}: ${cmd.handoffId}`);
+      throw new Error(`Unknown task in repo ${c.state.repoId}: ${cmd.taskId}`);
     }
 
     try {
-      const h = getHandoff(c, c.state.workspaceId, c.state.repoId, cmd.handoffId);
+      const h = getTask(c, c.state.workspaceId, c.state.repoId, cmd.taskId);
       const record = await h.get();
-      return await enrichHandoffRecord(c, record);
+      return await enrichTaskRecord(c, record);
     } catch (error) {
-      if (isStaleHandoffReferenceError(error)) {
-        await deleteStaleHandoffIndexRow(c, cmd.handoffId);
-        throw new Error(`Unknown handoff in repo ${c.state.repoId}: ${cmd.handoffId}`);
+      if (isStaleTaskReferenceError(error)) {
+        await deleteStaleTaskIndexRow(c, cmd.taskId);
+        throw new Error(`Unknown task in repo ${c.state.repoId}: ${cmd.taskId}`);
       }
       throw error;
     }
@@ -965,7 +965,7 @@ export const projectActions = {
 
   async getRepoOverview(c: any, _cmd?: RepoOverviewCommand): Promise<RepoOverview> {
     const localPath = await ensureProjectReadyForRead(c);
-    await ensureHandoffIndexHydratedForRead(c);
+    await ensureTaskIndexHydratedForRead(c);
     await forceProjectSync(c, localPath);
 
     const { driver } = getActorRuntimeContext();
@@ -989,45 +989,45 @@ export const projectActions = {
       .from(branches)
       .all();
 
-    const handoffRows = await c.db
+    const taskRows = await c.db
       .select({
-        handoffId: handoffIndex.handoffId,
-        branchName: handoffIndex.branchName,
-        updatedAt: handoffIndex.updatedAt,
+        taskId: taskIndex.taskId,
+        branchName: taskIndex.branchName,
+        updatedAt: taskIndex.updatedAt,
       })
-      .from(handoffIndex)
+      .from(taskIndex)
       .all();
 
-    const handoffMetaByBranch = new Map<string, { handoffId: string; title: string | null; status: HandoffRecord["status"] | null; updatedAt: number }>();
+    const taskMetaByBranch = new Map<string, { taskId: string; title: string | null; status: TaskRecord["status"] | null; updatedAt: number }>();
 
-    for (const row of handoffRows) {
+    for (const row of taskRows) {
       if (!row.branchName) {
         continue;
       }
       try {
-        const h = getHandoff(c, c.state.workspaceId, c.state.repoId, row.handoffId);
+        const h = getTask(c, c.state.workspaceId, c.state.repoId, row.taskId);
         const record = await h.get();
-        handoffMetaByBranch.set(row.branchName, {
-          handoffId: row.handoffId,
+        taskMetaByBranch.set(row.branchName, {
+          taskId: row.taskId,
           title: record.title ?? null,
           status: record.status,
           updatedAt: record.updatedAt,
         });
       } catch (error) {
-        if (isStaleHandoffReferenceError(error)) {
-          await deleteStaleHandoffIndexRow(c, row.handoffId);
-          logActorWarning("project", "pruned stale handoff index row during repo overview", {
+        if (isStaleTaskReferenceError(error)) {
+          await deleteStaleTaskIndexRow(c, row.taskId);
+          logActorWarning("project", "pruned stale task index row during repo overview", {
             workspaceId: c.state.workspaceId,
             repoId: c.state.repoId,
-            handoffId: row.handoffId,
+            taskId: row.taskId,
             branchName: row.branchName,
           });
           continue;
         }
-        logActorWarning("project", "failed loading handoff while building repo overview", {
+        logActorWarning("project", "failed loading task while building repo overview", {
           workspaceId: c.state.workspaceId,
           repoId: c.state.repoId,
-          handoffId: row.handoffId,
+          taskId: row.taskId,
           branchName: row.branchName,
           error: resolveErrorMessage(error),
         });
@@ -1060,7 +1060,7 @@ export const projectActions = {
 
     const branchRows = combinedRows.map((ordering) => {
       const row = detailByBranch.get(ordering.branchName)!;
-      const handoffMeta = handoffMetaByBranch.get(row.branchName);
+      const taskMeta = taskMetaByBranch.get(row.branchName);
       const pr = prByBranch.get(row.branchName);
       return {
         branchName: row.branchName,
@@ -1070,9 +1070,9 @@ export const projectActions = {
         diffStat: row.diffStat ?? null,
         hasUnpushed: Boolean(row.hasUnpushed),
         conflictsWithMain: Boolean(row.conflictsWithMain),
-        handoffId: handoffMeta?.handoffId ?? null,
-        handoffTitle: handoffMeta?.title ?? null,
-        handoffStatus: handoffMeta?.status ?? null,
+        taskId: taskMeta?.taskId ?? null,
+        taskTitle: taskMeta?.title ?? null,
+        taskStatus: taskMeta?.status ?? null,
         prNumber: pr?.prNumber ?? null,
         prState: pr?.prState ?? null,
         prUrl: pr?.prUrl ?? null,
@@ -1081,7 +1081,7 @@ export const projectActions = {
         reviewer: pr?.reviewer ?? null,
         firstSeenAt: row.firstSeenAt ?? null,
         lastSeenAt: row.lastSeenAt ?? null,
-        updatedAt: Math.max(row.updatedAt, handoffMeta?.updatedAt ?? 0),
+        updatedAt: Math.max(row.updatedAt, taskMeta?.updatedAt ?? 0),
       };
     });
 

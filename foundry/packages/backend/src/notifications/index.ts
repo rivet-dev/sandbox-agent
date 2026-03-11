@@ -12,7 +12,7 @@ export interface NotificationService {
   prApproved(branchName: string, prNumber: number, reviewer: string): Promise<void>;
   changesRequested(branchName: string, prNumber: number, reviewer: string): Promise<void>;
   prMerged(branchName: string, prNumber: number): Promise<void>;
-  handoffCreated(branchName: string): Promise<void>;
+  taskCreated(branchName: string): Promise<void>;
 }
 
 export function createNotificationService(backends: NotifyBackend[]): NotificationService {
@@ -56,8 +56,8 @@ export function createNotificationService(backends: NotifyBackend[]): Notificati
       await notify("PR Merged", `PR #${prNumber} on ${branchName} merged`, "normal");
     },
 
-    async handoffCreated(branchName: string): Promise<void> {
-      await notify("Handoff Created", `New handoff on ${branchName}`, "low");
+    async taskCreated(branchName: string): Promise<void> {
+      await notify("Task Created", `New task on ${branchName}`, "low");
     },
   };
 }

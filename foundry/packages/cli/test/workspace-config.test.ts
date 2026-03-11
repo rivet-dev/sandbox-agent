@@ -11,7 +11,7 @@ describe("cli workspace resolution", () => {
       backend: {
         host: "127.0.0.1",
         port: 7741,
-        dbPath: "~/.local/share/foundry/handoff.db",
+        dbPath: "~/.local/share/foundry/task.db",
         opencode_poll_interval: 2,
         github_poll_interval: 30,
         backup_interval_secs: 3600,

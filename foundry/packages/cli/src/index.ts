@@ -2,8 +2,8 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { AgentTypeSchema, CreateHandoffInputSchema, type HandoffRecord } from "@sandbox-agent/foundry-shared";
-import { readBackendMetadata, createBackendClientFromConfig, formatRelativeAge, groupHandoffStatus, summarizeHandoffs } from "@sandbox-agent/foundry-client";
+import { AgentTypeSchema, CreateTaskInputSchema, type TaskRecord } from "@sandbox-agent/foundry-shared";
+import { readBackendMetadata, createBackendClientFromConfig, formatRelativeAge, groupTaskStatus, summarizeTasks } from "@sandbox-agent/foundry-client";
 import { ensureBackendRunning, getBackendStatus, parseBackendPort, stopBackend } from "./backend/manager.js";
 import { openEditorForTask } from "./task-editor.js";
 import { spawnCreateTmuxWindow } from "./tmux.js";
@@ -94,19 +94,19 @@ Usage:
   hf backend status
   hf backend inspect
   hf status [--workspace WS] [--json]
-  hf history [--workspace WS] [--limit N] [--branch NAME] [--handoff ID] [--json]
+  hf history [--workspace WS] [--limit N] [--branch NAME] [--task ID] [--json]
   hf workspace use <name>
   hf tui [--workspace WS]
 
   hf create [task] [--workspace WS] --repo <git-remote> [--name NAME|--branch NAME] [--title TITLE] [--agent claude|codex] [--on BRANCH]
   hf list [--workspace WS] [--format table|json] [--full]
-  hf switch [handoff-id | -] [--workspace WS]
-  hf attach <handoff-id> [--workspace WS]
-  hf merge <handoff-id> [--workspace WS]
-  hf archive <handoff-id> [--workspace WS]
-  hf push <handoff-id> [--workspace WS]
-  hf sync <handoff-id> [--workspace WS]
-  hf kill <handoff-id> [--workspace WS] [--delete-branch] [--abandon]
+  hf switch [task-id | -] [--workspace WS]
+  hf attach <task-id> [--workspace WS]
+  hf merge <task-id> [--workspace WS]
+  hf archive <task-id> [--workspace WS]
+  hf push <task-id> [--workspace WS]
+  hf sync <task-id> [--workspace WS]
+  hf kill <task-id> [--workspace WS] [--delete-branch] [--abandon]
   hf prune [--workspace WS] [--dry-run] [--yes]
   hf statusline [--workspace WS] [--format table|claude-code]
   hf db path
@@ -115,7 +115,7 @@ Usage:
 Tips:
   hf status --help    Show status output format and examples
   hf history --help   Show history output format and examples
-  hf switch -         Switch to most recently updated handoff
+  hf switch -         Switch to most recently updated task
 `);
 }
 
@@ -127,7 +127,7 @@ Usage:
 Text Output:
   workspace=<workspace-id>
   backend running=<true|false> pid=<pid|unknown> version=<version|unknown>
-  handoffs total=<number>
+  tasks total=<number>
   status queued=<n> running=<n> idle=<n> archived=<n> killed=<n> error=<n>
   providers <provider-id>=<count> ...
   providers -
@@ -136,7 +136,7 @@ JSON Output:
   {
     "workspaceId": "default",
     "backend": { ...backend status object... },
-    "handoffs": {
+    "tasks": {
       "total": 4,
       "byStatus": { "queued": 0, "running": 1, "idle": 2, "archived": 1, "killed": 0, "error": 0 },
       "byProvider": { "daytona": 4 }
@@ -148,11 +148,11 @@ JSON Output:
 function printHistoryUsage(): void {
   console.log(`
 Usage:
-  hf history [--workspace WS] [--limit N] [--branch NAME] [--handoff ID] [--json]
+  hf history [--workspace WS] [--limit N] [--branch NAME] [--task ID] [--json]
 
 Text Output:
-  <iso8601>\t<event-kind>\t<branch|handoff|repo|->\t<payload-json>
-  <iso8601>\t<event-kind>\t<branch|handoff|repo|->\t<payload-json...>
+  <iso8601>\t<event-kind>\t<branch|task|repo|->\t<payload-json>
+  <iso8601>\t<event-kind>\t<branch|task|repo|->\t<payload-json...>
   no events
 
 Notes:
@@ -164,8 +164,8 @@ JSON Output:
     {
       "id": "...",
       "workspaceId": "default",
-      "kind": "handoff.created",
-      "handoffId": "...",
+      "kind": "task.created",
+      "taskId": "...",
       "repoId": "...",
       "branchName": "feature/foo",
       "payloadJson": "{\\"providerId\\":\\"daytona\\"}",
@@ -262,7 +262,7 @@ async function handleList(args: string[]): Promise<void> {
   const format = readOption(args, "--format") ?? "table";
   const full = hasFlag(args, "--full");
   const client = createBackendClientFromConfig(config);
-  const rows = await client.listHandoffs(workspaceId);
+  const rows = await client.listTasks(workspaceId);
 
   if (format === "json") {
     console.log(JSON.stringify(rows, null, 2));
@@ -270,13 +270,13 @@ async function handleList(args: string[]): Promise<void> {
   }
 
   if (rows.length === 0) {
-    console.log("no handoffs");
+    console.log("no tasks");
     return;
   }
 
   for (const row of rows) {
     const age = formatRelativeAge(row.updatedAt);
-    let line = `${row.handoffId}\t${row.branchName}\t${row.status}\t${row.providerId}\t${age}`;
+    let line = `${row.taskId}\t${row.branchName}\t${row.status}\t${row.providerId}\t${age}`;
     if (full) {
       const task = row.task.length > 60 ? `${row.task.slice(0, 57)}...` : row.task;
       line += `\t${row.title}\t${task}\t${row.activeSessionId ?? "-"}\t${row.activeSandboxId ?? "-"}`;
@@ -286,33 +286,33 @@ async function handleList(args: string[]): Promise<void> {
 }
 
 async function handlePush(args: string[]): Promise<void> {
-  const handoffId = positionals(args)[0];
-  if (!handoffId) {
-    throw new Error("Missing handoff id for push");
+  const taskId = positionals(args)[0];
+  if (!taskId) {
+    throw new Error("Missing task id for push");
   }
   const config = loadConfig();
   const workspaceId = resolveWorkspace(readOption(args, "--workspace"), config);
   const client = createBackendClientFromConfig(config);
-  await client.runAction(workspaceId, handoffId, "push");
+  await client.runAction(workspaceId, taskId, "push");
   console.log("ok");
 }
 
 async function handleSync(args: string[]): Promise<void> {
-  const handoffId = positionals(args)[0];
-  if (!handoffId) {
-    throw new Error("Missing handoff id for sync");
+  const taskId = positionals(args)[0];
+  if (!taskId) {
+    throw new Error("Missing task id for sync");
   }
   const config = loadConfig();
   const workspaceId = resolveWorkspace(readOption(args, "--workspace"), config);
   const client = createBackendClientFromConfig(config);
-  await client.runAction(workspaceId, handoffId, "sync");
+  await client.runAction(workspaceId, taskId, "sync");
   console.log("ok");
 }
 
 async function handleKill(args: string[]): Promise<void> {
-  const handoffId = positionals(args)[0];
-  if (!handoffId) {
-    throw new Error("Missing handoff id for kill");
+  const taskId = positionals(args)[0];
+  if (!taskId) {
+    throw new Error("Missing task id for kill");
   }
   const config = loadConfig();
   const workspaceId = resolveWorkspace(readOption(args, "--workspace"), config);
@@ -327,7 +327,7 @@ async function handleKill(args: string[]): Promise<void> {
   }
 
   const client = createBackendClientFromConfig(config);
-  await client.runAction(workspaceId, handoffId, "kill");
+  await client.runAction(workspaceId, taskId, "kill");
   console.log("ok");
 }
 
@@ -337,7 +337,7 @@ async function handlePrune(args: string[]): Promise<void> {
   const dryRun = hasFlag(args, "--dry-run");
   const yes = hasFlag(args, "--yes");
   const client = createBackendClientFromConfig(config);
-  const rows = await client.listHandoffs(workspaceId);
+  const rows = await client.listTasks(workspaceId);
   const prunable = rows.filter((r) => r.status === "archived" || r.status === "killed");
 
   if (prunable.length === 0) {
@@ -347,11 +347,11 @@ async function handlePrune(args: string[]): Promise<void> {
 
   for (const row of prunable) {
     const age = formatRelativeAge(row.updatedAt);
-    console.log(`${dryRun ? "[dry-run] " : ""}${row.handoffId}\t${row.branchName}\t${row.status}\t${age}`);
+    console.log(`${dryRun ? "[dry-run] " : ""}${row.taskId}\t${row.branchName}\t${row.status}\t${age}`);
   }
 
   if (dryRun) {
-    console.log(`\n${prunable.length} handoff(s) would be pruned`);
+    console.log(`\n${prunable.length} task(s) would be pruned`);
     return;
   }
 
@@ -360,7 +360,7 @@ async function handlePrune(args: string[]): Promise<void> {
     return;
   }
 
-  console.log(`\n${prunable.length} handoff(s) would be pruned (pruning not yet implemented)`);
+  console.log(`\n${prunable.length} task(s) would be pruned (pruning not yet implemented)`);
 }
 
 async function handleStatusline(args: string[]): Promise<void> {
@@ -368,8 +368,8 @@ async function handleStatusline(args: string[]): Promise<void> {
   const workspaceId = resolveWorkspace(readOption(args, "--workspace"), config);
   const format = readOption(args, "--format") ?? "table";
   const client = createBackendClientFromConfig(config);
-  const rows = await client.listHandoffs(workspaceId);
-  const summary = summarizeHandoffs(rows);
+  const rows = await client.listTasks(workspaceId);
+  const summary = summarizeTasks(rows);
   const running = summary.byStatus.running;
   const idle = summary.byStatus.idle;
   const errorCount = summary.byStatus.error;
@@ -399,29 +399,29 @@ async function handleDb(args: string[]): Promise<void> {
   throw new Error("Usage: hf db path | hf db nuke");
 }
 
-async function waitForHandoffReady(
+async function waitForTaskReady(
   client: ReturnType<typeof createBackendClientFromConfig>,
   workspaceId: string,
-  handoffId: string,
+  taskId: string,
   timeoutMs: number,
-): Promise<HandoffRecord> {
+): Promise<TaskRecord> {
   const start = Date.now();
   let delayMs = 250;
 
   for (;;) {
-    const record = await client.getHandoff(workspaceId, handoffId);
+    const record = await client.getTask(workspaceId, taskId);
     const hasName = Boolean(record.branchName && record.title);
     const hasSandbox = Boolean(record.activeSandboxId);
 
     if (record.status === "error") {
-      throw new Error(`handoff entered error state while provisioning: ${handoffId}`);
+      throw new Error(`task entered error state while provisioning: ${taskId}`);
     }
     if (hasName && hasSandbox) {
       return record;
     }
 
     if (Date.now() - start > timeoutMs) {
-      throw new Error(`timed out waiting for handoff provisioning: ${handoffId}`);
+      throw new Error(`timed out waiting for task provisioning: ${taskId}`);
     }
 
     await new Promise((r) => setTimeout(r, delayMs));
@@ -450,7 +450,7 @@ async function handleCreate(args: string[]): Promise<void> {
   const client = createBackendClientFromConfig(config);
   const repo = await client.addRepo(workspaceId, repoRemote);
 
-  const payload = CreateHandoffInputSchema.parse({
+  const payload = CreateTaskInputSchema.parse({
     workspaceId,
     repoId: repo.repoId,
     task,
@@ -460,31 +460,31 @@ async function handleCreate(args: string[]): Promise<void> {
     onBranch,
   });
 
-  const created = await client.createHandoff(payload);
-  const handoff = await waitForHandoffReady(client, workspaceId, created.handoffId, 180_000);
-  const switched = await client.switchHandoff(workspaceId, handoff.handoffId);
-  const attached = await client.attachHandoff(workspaceId, handoff.handoffId);
+  const created = await client.createTask(payload);
+  const task = await waitForTaskReady(client, workspaceId, created.taskId, 180_000);
+  const switched = await client.switchTask(workspaceId, task.taskId);
+  const attached = await client.attachTask(workspaceId, task.taskId);
 
-  console.log(`Branch:   ${handoff.branchName ?? "-"}`);
-  console.log(`Handoff:  ${handoff.handoffId}`);
-  console.log(`Provider: ${handoff.providerId}`);
+  console.log(`Branch:   ${task.branchName ?? "-"}`);
+  console.log(`Task:  ${task.taskId}`);
+  console.log(`Provider: ${task.providerId}`);
   console.log(`Session:  ${attached.sessionId ?? "none"}`);
   console.log(`Target:   ${switched.switchTarget || attached.target}`);
-  console.log(`Title:    ${handoff.title ?? "-"}`);
+  console.log(`Title:    ${task.title ?? "-"}`);
 
   const tmuxResult = spawnCreateTmuxWindow({
-    branchName: handoff.branchName ?? handoff.handoffId,
+    branchName: task.branchName ?? task.taskId,
     targetPath: switched.switchTarget || attached.target,
     sessionId: attached.sessionId,
   });
 
   if (tmuxResult.created) {
-    console.log(`Window:   created (${handoff.branchName})`);
+    console.log(`Window:   created (${task.branchName})`);
     return;
   }
 
   console.log("");
-  console.log(`Run: hf switch ${handoff.handoffId}`);
+  console.log(`Run: hf switch ${task.taskId}`);
   if ((switched.switchTarget || attached.target).startsWith("/")) {
     console.log(`cd ${switched.switchTarget || attached.target}`);
   }
@@ -506,8 +506,8 @@ async function handleStatus(args: string[]): Promise<void> {
   const workspaceId = resolveWorkspace(readOption(args, "--workspace"), config);
   const client = createBackendClientFromConfig(config);
   const backendStatus = await getBackendStatus(config.backend.host, config.backend.port);
-  const rows = await client.listHandoffs(workspaceId);
-  const summary = summarizeHandoffs(rows);
+  const rows = await client.listTasks(workspaceId);
+  const summary = summarizeTasks(rows);
 
   if (hasFlag(args, "--json")) {
     console.log(
@@ -515,7 +515,7 @@ async function handleStatus(args: string[]): Promise<void> {
         {
           workspaceId,
           backend: backendStatus,
-          handoffs: {
+          tasks: {
             total: summary.total,
             byStatus: summary.byStatus,
             byProvider: summary.byProvider,
@@ -530,7 +530,7 @@ async function handleStatus(args: string[]): Promise<void> {
 
   console.log(`workspace=${workspaceId}`);
   console.log(`backend running=${backendStatus.running} pid=${backendStatus.pid ?? "unknown"} version=${backendStatus.version ?? "unknown"}`);
-  console.log(`handoffs total=${summary.total}`);
+  console.log(`tasks total=${summary.total}`);
   console.log(
     `status queued=${summary.byStatus.queued} running=${summary.byStatus.running} idle=${summary.byStatus.idle} archived=${summary.byStatus.archived} killed=${summary.byStatus.killed} error=${summary.byStatus.error}`,
   );
@@ -550,13 +550,13 @@ async function handleHistory(args: string[]): Promise<void> {
   const workspaceId = resolveWorkspace(readOption(args, "--workspace"), config);
   const limit = parseIntOption(readOption(args, "--limit"), 20, "limit");
   const branch = readOption(args, "--branch");
-  const handoffId = readOption(args, "--handoff");
+  const taskId = readOption(args, "--task");
   const client = createBackendClientFromConfig(config);
   const rows = await client.listHistory({
     workspaceId,
     limit,
     branch: branch || undefined,
-    handoffId: handoffId || undefined,
+    taskId: taskId || undefined,
   });
 
   if (hasFlag(args, "--json")) {
@@ -571,7 +571,7 @@ async function handleHistory(args: string[]): Promise<void> {
 
   for (const row of rows) {
     const ts = new Date(row.createdAt).toISOString();
-    const target = row.branchName || row.handoffId || row.repoId || "-";
+    const target = row.branchName || row.taskId || row.repoId || "-";
     let payload = row.payloadJson;
     if (payload.length > 120) {
       payload = `${payload.slice(0, 117)}...`;
@@ -581,48 +581,48 @@ async function handleHistory(args: string[]): Promise<void> {
 }
 
 async function handleSwitchLike(cmd: string, args: string[]): Promise<void> {
-  let handoffId = positionals(args)[0];
-  if (!handoffId && cmd === "switch") {
+  let taskId = positionals(args)[0];
+  if (!taskId && cmd === "switch") {
     await handleTui(args);
     return;
   }
 
-  if (!handoffId) {
-    throw new Error(`Missing handoff id for ${cmd}`);
+  if (!taskId) {
+    throw new Error(`Missing task id for ${cmd}`);
   }
 
   const config = loadConfig();
   const workspaceId = resolveWorkspace(readOption(args, "--workspace"), config);
   const client = createBackendClientFromConfig(config);
 
-  if (cmd === "switch" && handoffId === "-") {
-    const rows = await client.listHandoffs(workspaceId);
+  if (cmd === "switch" && taskId === "-") {
+    const rows = await client.listTasks(workspaceId);
     const active = rows.filter((r) => {
-      const group = groupHandoffStatus(r.status);
+      const group = groupTaskStatus(r.status);
       return group === "running" || group === "idle" || group === "queued";
     });
     const sorted = active.sort((a, b) => b.updatedAt - a.updatedAt);
     const target = sorted[0];
     if (!target) {
-      throw new Error("No active handoffs to switch to");
+      throw new Error("No active tasks to switch to");
     }
-    handoffId = target.handoffId;
+    taskId = target.taskId;
   }
 
   if (cmd === "switch") {
-    const result = await client.switchHandoff(workspaceId, handoffId);
+    const result = await client.switchTask(workspaceId, taskId);
     console.log(`cd ${result.switchTarget}`);
     return;
   }
 
   if (cmd === "attach") {
-    const result = await client.attachHandoff(workspaceId, handoffId);
+    const result = await client.attachTask(workspaceId, taskId);
     console.log(`target=${result.target} session=${result.sessionId ?? "none"}`);
     return;
   }
 
   if (cmd === "merge" || cmd === "archive") {
-    await client.runAction(workspaceId, handoffId, cmd);
+    await client.runAction(workspaceId, taskId, cmd);
     console.log("ok");
     return;
   }

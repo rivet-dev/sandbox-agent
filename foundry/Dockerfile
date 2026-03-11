@@ -34,7 +34,7 @@ RUN pnpm --filter @sandbox-agent/foundry-backend deploy --prod --legacy /out
 
 FROM oven/bun:1.2 AS runtime
 ENV NODE_ENV=production
-ENV HOME=/home/handoff
+ENV HOME=/home/task
 WORKDIR /app
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
@@ -43,11 +43,11 @@ RUN apt-get update \
     gh \
     openssh-client \
   && rm -rf /var/lib/apt/lists/*
-RUN addgroup --system --gid 1001 handoff \
-  && adduser --system --uid 1001 --home /home/handoff --ingroup handoff handoff \
-  && mkdir -p /home/handoff \
-  && chown -R handoff:handoff /home/handoff /app
+RUN addgroup --system --gid 1001 task \
+  && adduser --system --uid 1001 --home /home/task --ingroup task task \
+  && mkdir -p /home/task \
+  && chown -R task:task /home/task /app
 COPY --from=build /out ./
-USER handoff
+USER task
 EXPOSE 7741
 CMD ["bun", "dist/index.js", "start", "--host", "0.0.0.0"]

@@ -14,8 +14,8 @@ export const repos = sqliteTable("repos", {
   updatedAt: integer("updated_at").notNull(),
 });
 
-export const handoffLookup = sqliteTable("handoff_lookup", {
-  handoffId: text("handoff_id").notNull().primaryKey(),
+export const taskLookup = sqliteTable("task_lookup", {
+  taskId: text("task_id").notNull().primaryKey(),
   repoId: text("repo_id").notNull(),
 });
 

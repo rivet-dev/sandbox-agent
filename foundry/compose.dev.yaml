@@ -32,8 +32,8 @@ services:
       - "8750:8750"
     volumes:
       - "..:/app"
-      # The linked RivetKit checkout resolves from Foundry packages to /handoff/rivet-checkout in-container.
-      - "../../../handoff/rivet-checkout:/handoff/rivet-checkout:ro"
+      # The linked RivetKit checkout resolves from Foundry packages to /task/rivet-checkout in-container.
+      - "../../../task/rivet-checkout:/task/rivet-checkout:ro"
       # Reuse the host Codex auth profile for local sandbox-agent Codex sessions in dev.
       - "${HOME}/.codex:/root/.codex"
       # Keep backend dependency installs Linux-native instead of using host node_modules.
@@ -64,7 +64,7 @@ services:
       - "..:/app"
       # Ensure logs in .foundry/ persist on the host even if we change source mounts later.
       - "./.foundry:/app/foundry/.foundry"
-      - "../../../handoff/rivet-checkout:/handoff/rivet-checkout:ro"
+      - "../../../task/rivet-checkout:/task/rivet-checkout:ro"
       # Use Linux-native workspace dependencies inside the container instead of host node_modules.
       - "foundry_node_modules:/app/node_modules"
       - "foundry_client_node_modules:/app/foundry/packages/client/node_modules"
