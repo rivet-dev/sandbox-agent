@@ -5,10 +5,16 @@
   "type": "module",
   "scripts": {
     "dev": "tauri dev",
+    "dev:ios": "VITE_MOBILE=1 tauri ios dev",
+    "dev:android": "VITE_MOBILE=1 tauri android dev",
     "build": "tauri build",
+    "build:ios": "tauri ios build",
+    "build:android": "tauri android build",
     "build:sidecar": "tsx scripts/build-sidecar.ts",
     "build:frontend": "tsx scripts/build-frontend.ts",
+    "build:frontend:mobile": "tsx scripts/build-frontend-mobile.ts",
     "build:all": "pnpm build:sidecar && pnpm build:frontend && pnpm build",
+    "build:all:ios": "pnpm build:frontend:mobile && pnpm build:ios",
     "tauri": "tauri"
   },
   "devDependencies": {

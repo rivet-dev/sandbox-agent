@@ -12,6 +12,7 @@ export interface MockFoundryUser {
   name: string;
   email: string;
   githubLogin: string;
+  avatarUrl: string | null;
   roleLabel: string;
   eligibleOrganizationIds: string[];
 }
@@ -22,6 +23,8 @@ export interface MockFoundryOrganizationMember {
   email: string;
   role: "owner" | "admin" | "member";
   state: "active" | "invited";
+  avatarUrl: string | null;
+  githubLogin: string | null;
 }
 
 export interface MockFoundryInvoice {
@@ -162,6 +165,7 @@ function buildDefaultSnapshot(): MockFoundryAppSnapshot {
         name: "Nathan",
         email: "nathan@acme.dev",
         githubLogin: "nathan",
+        avatarUrl: "https://github.com/NathanFlurry.png",
         roleLabel: "Founder",
         eligibleOrganizationIds: ["personal-nathan", "acme", "rivet"],
       },
@@ -170,6 +174,7 @@ function buildDefaultSnapshot(): MockFoundryAppSnapshot {
         name: "Maya",
         email: "maya@acme.dev",
         githubLogin: "maya",
+        avatarUrl: "https://github.com/octocat.png",
         roleLabel: "Staff Engineer",
         eligibleOrganizationIds: ["acme"],
       },
@@ -178,6 +183,7 @@ function buildDefaultSnapshot(): MockFoundryAppSnapshot {
         name: "Jamie",
         email: "jamie@rivet.dev",
         githubLogin: "jamie",
+        avatarUrl: "https://github.com/defunkt.png",
         roleLabel: "Platform Lead",
         eligibleOrganizationIds: ["personal-jamie", "rivet"],
       },
@@ -213,7 +219,17 @@ function buildDefaultSnapshot(): MockFoundryAppSnapshot {
           paymentMethodLabel: "No card required",
           invoices: [],
         },
-        members: [{ id: "member-nathan", name: "Nathan", email: "nathan@acme.dev", role: "owner", state: "active" }],
+        members: [
+          {
+            id: "member-nathan",
+            name: "Nathan",
+            email: "nathan@acme.dev",
+            role: "owner",
+            state: "active",
+            avatarUrl: "https://github.com/NathanFlurry.png",
+            githubLogin: "NathanFlurry",
+          },
+        ],
         seatAssignments: ["nathan@acme.dev"],
         repoCatalog: ["nathan/personal-site"],
       },
@@ -251,10 +267,34 @@ function buildDefaultSnapshot(): MockFoundryAppSnapshot {
           ],
         },
         members: [
-          { id: "member-acme-nathan", name: "Nathan", email: "nathan@acme.dev", role: "owner", state: "active" },
-          { id: "member-acme-maya", name: "Maya", email: "maya@acme.dev", role: "admin", state: "active" },
-          { id: "member-acme-priya", name: "Priya", email: "priya@acme.dev", role: "member", state: "active" },
-          { id: "member-acme-devon", name: "Devon", email: "devon@acme.dev", role: "member", state: "invited" },
+          {
+            id: "member-acme-nathan",
+            name: "Nathan",
+            email: "nathan@acme.dev",
+            role: "owner",
+            state: "active",
+            avatarUrl: "https://github.com/NathanFlurry.png",
+            githubLogin: "NathanFlurry",
+          },
+          {
+            id: "member-acme-maya",
+            name: "Maya",
+            email: "maya@acme.dev",
+            role: "admin",
+            state: "active",
+            avatarUrl: "https://github.com/octocat.png",
+            githubLogin: "octocat",
+          },
+          {
+            id: "member-acme-priya",
+            name: "Priya",
+            email: "priya@acme.dev",
+            role: "member",
+            state: "active",
+            avatarUrl: "https://github.com/mona.png",
+            githubLogin: "mona",
+          },
+          { id: "member-acme-devon", name: "Devon", email: "devon@acme.dev", role: "member", state: "invited", avatarUrl: null, githubLogin: null },
         ],
         seatAssignments: ["nathan@acme.dev", "maya@acme.dev"],
         repoCatalog: ["acme/backend", "acme/frontend", "acme/infra"],
@@ -290,9 +330,33 @@ function buildDefaultSnapshot(): MockFoundryAppSnapshot {
           invoices: [{ id: "inv-rivet-001", label: "Team pilot", issuedAt: "2026-03-04", amountUsd: 0, status: "paid" }],
         },
         members: [
-          { id: "member-rivet-jamie", name: "Jamie", email: "jamie@rivet.dev", role: "owner", state: "active" },
-          { id: "member-rivet-nathan", name: "Nathan", email: "nathan@acme.dev", role: "member", state: "active" },
-          { id: "member-rivet-lena", name: "Lena", email: "lena@rivet.dev", role: "admin", state: "active" },
+          {
+            id: "member-rivet-jamie",
+            name: "Jamie",
+            email: "jamie@rivet.dev",
+            role: "owner",
+            state: "active",
+            avatarUrl: "https://github.com/defunkt.png",
+            githubLogin: "defunkt",
+          },
+          {
+            id: "member-rivet-nathan",
+            name: "Nathan",
+            email: "nathan@acme.dev",
+            role: "member",
+            state: "active",
+            avatarUrl: "https://github.com/NathanFlurry.png",
+            githubLogin: "NathanFlurry",
+          },
+          {
+            id: "member-rivet-lena",
+            name: "Lena",
+            email: "lena@rivet.dev",
+            role: "admin",
+            state: "active",
+            avatarUrl: "https://github.com/mojombo.png",
+            githubLogin: "mojombo",
+          },
         ],
         seatAssignments: ["jamie@rivet.dev"],
         repoCatalog: ["rivet/dashboard", "rivet/agents", "rivet/billing", "rivet/infrastructure"],
@@ -327,7 +391,17 @@ function buildDefaultSnapshot(): MockFoundryAppSnapshot {
           paymentMethodLabel: "No card required",
           invoices: [],
         },
-        members: [{ id: "member-jamie", name: "Jamie", email: "jamie@rivet.dev", role: "owner", state: "active" }],
+        members: [
+          {
+            id: "member-jamie",
+            name: "Jamie",
+            email: "jamie@rivet.dev",
+            role: "owner",
+            state: "active",
+            avatarUrl: "https://github.com/defunkt.png",
+            githubLogin: "defunkt",
+          },
+        ],
         seatAssignments: ["jamie@rivet.dev"],
         repoCatalog: ["jamie/demo-app"],
       },

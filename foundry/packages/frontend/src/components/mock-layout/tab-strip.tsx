@@ -1,11 +1,11 @@
 import { memo } from "react";
 import { useStyletron } from "baseui";
 import { LabelXSmall } from "baseui/typography";
-import { FileCode, Plus, X } from "lucide-react";
+import { FileCode, Plus, SquareTerminal, X } from "lucide-react";
 
 import { useFoundryTokens } from "../../app/theme";
-import { ContextMenuOverlay, TabAvatar, useContextMenu } from "./ui";
-import { diffTabId, fileName, type Task } from "./view-model";
+import { ContextMenuOverlay, TabAvatar, Tooltip, useContextMenu } from "./ui";
+import { diffTabId, fileName, terminalTabId, type Task } from "./view-model";
 
 export const TabStrip = memo(function TabStrip({
   task,
@@ -22,6 +22,8 @@ export const TabStrip = memo(function TabStrip({
   onCloseTab,
   onCloseDiffTab,
   onAddTab,
+  terminalTabOpen,
+  onCloseTerminalTab,
   sidebarCollapsed,
 }: {
   task: Task;
@@ -38,6 +40,8 @@ export const TabStrip = memo(function TabStrip({
   onCloseTab: (tabId: string) => void;
   onCloseDiffTab: (path: string) => void;
   onAddTab: () => void;
+  terminalTabOpen?: boolean;
+  onCloseTerminalTab?: () => void;
   sidebarCollapsed?: boolean;
 }) {
   const [css] = useStyletron();
@@ -216,21 +220,71 @@ export const TabStrip = memo(function TabStrip({
             </div>
           );
         })}
-        <div
-          onClick={onAddTab}
-          className={css({
-            display: "flex",
-            alignItems: "center",
-            padding: "0 10px",
-            cursor: "pointer",
-            opacity: 0.4,
-            lineHeight: 0,
-            ":hover": { opacity: 0.7 },
-            flexShrink: 0,
-          })}
-        >
-          <Plus size={14} color={t.textTertiary} />
-        </div>
+        {terminalTabOpen
+          ? (() => {
+              const tabId = terminalTabId();
+              const isActive = tabId === activeTabId;
+              return (
+                <div
+                  key={tabId}
+                  onClick={() => onSwitchTab(tabId)}
+                  onMouseDown={(event) => {
+                    if (event.button === 1) {
+                      event.preventDefault();
+                      onCloseTerminalTab?.();
+                    }
+                  }}
+                  data-tab
+                  className={css({
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    padding: "4px 12px",
+                    marginTop: "6px",
+                    marginBottom: "6px",
+                    borderRadius: "8px",
+                    backgroundColor: isActive ? t.interactiveHover : "transparent",
+                    cursor: "pointer",
+                    transition: "color 200ms ease, background-color 200ms ease",
+                    flexShrink: 0,
+                    ":hover": { color: t.textPrimary, backgroundColor: isActive ? t.interactiveHover : t.interactiveSubtle },
+                  })}
+                >
+                  <SquareTerminal size={12} color={isActive ? t.textPrimary : t.textSecondary} />
+                  <LabelXSmall color={isActive ? t.textPrimary : t.textSecondary} $style={{ fontWeight: 500 }}>
+                    Terminal
+                  </LabelXSmall>
+                  <X
+                    size={11}
+                    color={t.textTertiary}
+                    data-tab-close
+                    className={css({ cursor: "pointer", opacity: 0 })}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onCloseTerminalTab?.();
+                    }}
+                  />
+                </div>
+              );
+            })()
+          : null}
+        <Tooltip label="New session" placement="bottom">
+          <div
+            onClick={onAddTab}
+            className={css({
+              display: "flex",
+              alignItems: "center",
+              padding: "0 10px",
+              cursor: "pointer",
+              opacity: 0.4,
+              lineHeight: 0,
+              ":hover": { opacity: 0.7 },
+              flexShrink: 0,
+            })}
+          >
+            <Plus size={14} color={t.textTertiary} />
+          </div>
+        </Tooltip>
       </div>
       {contextMenu.menu ? <ContextMenuOverlay menu={contextMenu.menu} onClose={contextMenu.close} /> : null}
     </>

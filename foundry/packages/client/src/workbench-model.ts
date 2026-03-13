@@ -435,6 +435,10 @@ export function buildInitialTasks(): Task[] {
         },
       ],
       minutesUsed: 42,
+      presence: [
+        { memberId: "member-acme-nathan", name: "Nathan", avatarUrl: "https://github.com/NathanFlurry.png", lastSeenAtMs: minutesAgo(1) },
+        { memberId: "member-acme-maya", name: "Maya", avatarUrl: "https://github.com/octocat.png", lastSeenAtMs: minutesAgo(0), typing: true },
+      ],
     },
     {
       id: "h2",
@@ -535,6 +539,7 @@ export function buildInitialTasks(): Task[] {
         },
       ],
       minutesUsed: 187,
+      presence: [{ memberId: "member-acme-priya", name: "Priya", avatarUrl: "https://github.com/mona.png", lastSeenAtMs: minutesAgo(0) }],
     },
     {
       id: "h3",
@@ -609,6 +614,7 @@ export function buildInitialTasks(): Task[] {
         },
       ],
       minutesUsed: 23,
+      presence: [],
     },
     // ── rivet-dev/rivet ──
     {
@@ -744,6 +750,11 @@ export function buildInitialTasks(): Task[] {
         },
       ],
       minutesUsed: 5,
+      presence: [
+        { memberId: "member-acme-nathan", name: "Nathan", avatarUrl: "https://github.com/NathanFlurry.png", lastSeenAtMs: minutesAgo(0) },
+        { memberId: "member-acme-maya", name: "Maya", avatarUrl: "https://github.com/octocat.png", lastSeenAtMs: minutesAgo(2) },
+        { memberId: "member-acme-priya", name: "Priya", avatarUrl: "https://github.com/mona.png", lastSeenAtMs: minutesAgo(5) },
+      ],
     },
     {
       id: "h5",
@@ -800,6 +811,7 @@ export function buildInitialTasks(): Task[] {
       diffs: {},
       fileTree: [],
       minutesUsed: 312,
+      presence: [{ memberId: "member-acme-maya", name: "Maya", avatarUrl: "https://github.com/octocat.png", lastSeenAtMs: minutesAgo(45) }],
     },
     // ── rivet-dev/cloud ──
     {
@@ -909,6 +921,7 @@ export function buildInitialTasks(): Task[] {
         },
       ],
       minutesUsed: 0,
+      presence: [],
     },
     // ── rivet-dev/engine-ee ──
     {
@@ -1023,6 +1036,7 @@ export function buildInitialTasks(): Task[] {
         },
       ],
       minutesUsed: 78,
+      presence: [],
     },
     // ── rivet-dev/engine-ee (archived) ──
     {
@@ -1065,6 +1079,7 @@ export function buildInitialTasks(): Task[] {
       diffs: {},
       fileTree: [],
       minutesUsed: 15,
+      presence: [],
     },
     // ── rivet-dev/secure-exec ──
     {
@@ -1118,6 +1133,7 @@ export function buildInitialTasks(): Task[] {
       diffs: {},
       fileTree: [],
       minutesUsed: 3,
+      presence: [],
     },
   ];
 }

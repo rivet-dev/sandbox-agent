@@ -1,0 +1,5 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Border layer: flat inner rounded rect stroke. No glow — let Liquid Glass handle depth. -->
+  <rect x="152" y="152" width="720" height="720" rx="205"
+        fill="none" stroke="#F0F0F0" stroke-width="67" stroke-opacity="0.9"/>
+</svg>

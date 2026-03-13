@@ -10,7 +10,7 @@ import {
   CloudUpload,
   CreditCard,
   GitPullRequestDraft,
-  ListChecks,
+  List,
   LogOut,
   PanelLeft,
   Plus,
@@ -18,13 +18,165 @@ import {
   User,
 } from "lucide-react";
 
+import type { WorkbenchPresence } from "@sandbox-agent/foundry-shared";
 import { formatRelativeAge, type Task, type ProjectSection } from "./view-model";
-import { ContextMenuOverlay, TaskIndicator, PanelHeaderBar, SPanel, ScrollBody, useContextMenu } from "./ui";
+import { ContextMenuOverlay, TaskIndicator, PanelHeaderBar, SPanel, ScrollBody, Tooltip, useContextMenu } from "./ui";
 import { activeMockOrganization, eligibleOrganizations, useMockAppClient, useMockAppSnapshot } from "../../lib/mock-app";
 import { useFoundryTokens } from "../../app/theme";
 import type { FoundryTokens } from "../../styles/tokens";
 
 const PROJECT_COLORS = ["#6366f1", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6", "#ec4899", "#06b6d4", "#f97316"];
+
+const AWAY_THRESHOLD_MS = 2 * 60 * 1000;
+
+const PresenceAvatar = memo(function PresenceAvatar({ member, idx, isAway }: { member: WorkbenchPresence; idx: number; isAway: boolean }) {
+  const [css] = useStyletron();
+  const t = useFoundryTokens();
+  const label = `${member.name}${isAway ? " (away)" : ""}`;
+
+  return (
+    <div
+      className={css({
+        position: "relative",
+        marginLeft: idx > 0 ? "-5px" : "0",
+        flexShrink: 0,
+        ":hover > div:last-child": {
+          opacity: 1,
+          transform: "translateX(-50%) translateY(0)",
+          pointerEvents: "auto",
+        },
+      })}
+    >
+      <div
+        className={css({
+          width: "18px",
+          height: "18px",
+          borderRadius: "50%",
+          border: `1.5px solid ${t.surfacePrimary}`,
+          overflow: "hidden",
+          backgroundColor: t.interactiveHover,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          opacity: isAway ? 0.35 : 1,
+          filter: isAway ? "grayscale(1)" : "none",
+          transition: "opacity 0.3s, filter 0.3s",
+        })}
+      >
+        {member.avatarUrl ? (
+          <img src={member.avatarUrl} alt={member.name} className={css({ width: "100%", height: "100%", objectFit: "cover", display: "block" })} />
+        ) : (
+          <span className={css({ fontSize: "9px", fontWeight: 600, color: t.textTertiary })}>{member.name.charAt(0).toUpperCase()}</span>
+        )}
+      </div>
+      <div
+        className={css({
+          position: "absolute",
+          bottom: "calc(100% + 6px)",
+          left: "50%",
+          transform: "translateX(-50%) translateY(4px)",
+          padding: "4px 8px",
+          borderRadius: "6px",
+          backgroundColor: "rgba(32, 32, 32, 0.98)",
+          backdropFilter: "blur(12px)",
+          border: `1px solid ${t.borderDefault}`,
+          boxShadow: "0 4px 12px rgba(0, 0, 0, 0.4)",
+          color: "#e0e0e0",
+          fontSize: "10px",
+          fontWeight: 500,
+          whiteSpace: "nowrap",
+          pointerEvents: "none",
+          opacity: 0,
+          transition: "opacity 150ms ease, transform 150ms ease",
+          zIndex: 300,
+        })}
+      >
+        {label}
+      </div>
+    </div>
+  );
+});
+
+const PresenceAvatars = memo(function PresenceAvatars({ presence }: { presence: WorkbenchPresence[] }) {
+  const [css] = useStyletron();
+  const t = useFoundryTokens();
+  const maxShow = 3;
+  const visible = presence.slice(0, maxShow);
+  const overflow = presence.length - maxShow;
+  const now = Date.now();
+
+  return (
+    <div className={css({ display: "flex", alignItems: "center", gap: "6px", paddingLeft: "22px", paddingTop: "2px" })}>
+      <div className={css({ display: "flex", alignItems: "center" })}>
+        {visible.map((member, idx) => {
+          const isAway = now - member.lastSeenAtMs > AWAY_THRESHOLD_MS;
+          return <PresenceAvatar key={member.memberId} member={member} idx={idx} isAway={isAway} />;
+        })}
+        {overflow > 0 && (
+          <div
+            className={css({
+              position: "relative",
+              marginLeft: "-5px",
+              flexShrink: 0,
+              ":hover > div:last-child": {
+                opacity: 1,
+                transform: "translateX(-50%) translateY(0)",
+                pointerEvents: "auto",
+              },
+            })}
+          >
+            <div
+              className={css({
+                width: "18px",
+                height: "18px",
+                borderRadius: "50%",
+                border: `1.5px solid ${t.surfacePrimary}`,
+                backgroundColor: t.interactiveHover,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              })}
+            >
+              <span className={css({ fontSize: "8px", fontWeight: 600, color: t.textTertiary })}>+{overflow}</span>
+            </div>
+            <div
+              className={css({
+                position: "absolute",
+                bottom: "calc(100% + 6px)",
+                left: "50%",
+                transform: "translateX(-50%) translateY(4px)",
+                padding: "4px 8px",
+                borderRadius: "6px",
+                backgroundColor: "rgba(32, 32, 32, 0.98)",
+                backdropFilter: "blur(12px)",
+                border: `1px solid ${t.borderDefault}`,
+                boxShadow: "0 4px 12px rgba(0, 0, 0, 0.4)",
+                color: "#e0e0e0",
+                fontSize: "10px",
+                fontWeight: 500,
+                whiteSpace: "nowrap",
+                pointerEvents: "none",
+                opacity: 0,
+                transition: "opacity 150ms ease, transform 150ms ease",
+                zIndex: 300,
+              })}
+            >
+              {presence
+                .slice(maxShow)
+                .map((m) => m.name)
+                .join(", ")}
+            </div>
+          </div>
+        )}
+      </div>
+      {presence.length <= 2 && (
+        <span className={css({ fontSize: "10px", color: t.textTertiary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })}>
+          {presence.map((m) => m.name).join(", ")}
+        </span>
+      )}
+    </div>
+  );
+});
 
 function projectInitial(label: string): string {
   const parts = label.split("/");
@@ -55,13 +207,15 @@ export const Sidebar = memo(function Sidebar({
   taskOrderByProject,
   onReorderTasks,
   onToggleSidebar,
+  hideSettings,
+  panelStyle,
 }: {
   projects: ProjectSection[];
   newTaskRepos: Array<{ id: string; label: string }>;
   selectedNewTaskRepoId: string;
   activeId: string;
   onSelect: (id: string) => void;
-  onCreate: () => void;
+  onCreate: (repoId?: string) => void;
   onSelectNewTaskRepo: (repoId: string) => void;
   onMarkUnread: (id: string) => void;
   onRenameTask: (id: string) => void;
@@ -70,6 +224,8 @@ export const Sidebar = memo(function Sidebar({
   taskOrderByProject: Record<string, string[]>;
   onReorderTasks: (projectId: string, fromIndex: number, toIndex: number) => void;
   onToggleSidebar?: () => void;
+  hideSettings?: boolean;
+  panelStyle?: Record<string, string>;
 }) {
   const [css] = useStyletron();
   const t = useFoundryTokens();
@@ -90,6 +246,7 @@ export const Sidebar = memo(function Sidebar({
   // Attach global mousemove/mouseup when dragging
   useEffect(() => {
     if (!drag) return;
+    document.body.style.cursor = "grabbing";
     const onMove = (e: MouseEvent) => {
       // Detect which element is under the cursor using data attributes
       const el = document.elementFromPoint(e.clientX, e.clientY);
@@ -132,6 +289,7 @@ export const Sidebar = memo(function Sidebar({
     document.addEventListener("mousemove", onMove);
     document.addEventListener("mouseup", onUp);
     return () => {
+      document.body.style.cursor = "";
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
     };
@@ -152,12 +310,12 @@ export const Sidebar = memo(function Sidebar({
   }, [createMenuOpen]);
 
   return (
-    <SPanel>
+    <SPanel $style={panelStyle}>
       <style>{`
-        [data-project-header]:hover [data-chevron] {
+        [data-project-header] [data-chevron] {
           display: inline-flex !important;
         }
-        [data-project-header]:hover [data-project-icon] {
+        [data-project-header] [data-project-icon] {
           display: none !important;
         }
       `}</style>
@@ -175,6 +333,43 @@ export const Sidebar = memo(function Sidebar({
           })}
         >
           {onToggleSidebar ? (
+            <Tooltip label="Toggle sidebar" placement="bottom">
+              <div
+                role="button"
+                tabIndex={0}
+                onClick={onToggleSidebar}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") onToggleSidebar();
+                }}
+                className={css({
+                  width: "26px",
+                  height: "26px",
+                  borderRadius: "6px",
+                  color: t.textTertiary,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                  ":hover": { color: t.textSecondary, backgroundColor: t.interactiveHover },
+                })}
+              >
+                <PanelLeft size={14} />
+              </div>
+            </Tooltip>
+          ) : null}
+        </div>
+      ) : null}
+      <PanelHeaderBar $style={{ backgroundColor: "transparent", borderBottom: "none" }}>
+        <LabelSmall
+          color={t.textPrimary}
+          $style={{ fontWeight: 600, flex: 1, fontSize: "16px", display: "flex", alignItems: "center", gap: "6px", lineHeight: 1 }}
+        >
+          <List size={16} />
+          Tasks
+        </LabelSmall>
+        {!import.meta.env.VITE_DESKTOP && onToggleSidebar ? (
+          <Tooltip label="Toggle sidebar" placement="bottom">
             <div
               role="button"
               tabIndex={0}
@@ -197,84 +392,53 @@ export const Sidebar = memo(function Sidebar({
             >
               <PanelLeft size={14} />
             </div>
-          ) : null}
-        </div>
-      ) : null}
-      <PanelHeaderBar $style={{ backgroundColor: "transparent", borderBottom: "none" }}>
-        <LabelSmall
-          color={t.textPrimary}
-          $style={{ fontWeight: 500, flex: 1, fontSize: "13px", display: "flex", alignItems: "center", gap: "6px", lineHeight: 1 }}
-        >
-          <ListChecks size={14} />
-          Tasks
-        </LabelSmall>
-        {!import.meta.env.VITE_DESKTOP && onToggleSidebar ? (
-          <div
-            role="button"
-            tabIndex={0}
-            onClick={onToggleSidebar}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") onToggleSidebar();
-            }}
-            className={css({
-              width: "26px",
-              height: "26px",
-              borderRadius: "6px",
-              color: t.textTertiary,
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              flexShrink: 0,
-              ":hover": { color: t.textSecondary, backgroundColor: t.interactiveHover },
-            })}
-          >
-            <PanelLeft size={14} />
-          </div>
+          </Tooltip>
         ) : null}
         <div ref={createMenuRef} className={css({ position: "relative", flexShrink: 0 })}>
-          <div
-            role="button"
-            tabIndex={0}
-            aria-disabled={newTaskRepos.length === 0}
-            onClick={() => {
-              if (newTaskRepos.length === 0) return;
-              if (newTaskRepos.length === 1) {
-                onSelectNewTaskRepo(newTaskRepos[0]!.id);
-                onCreate();
-              } else {
-                setCreateMenuOpen((prev) => !prev);
-              }
-            }}
-            onKeyDown={(event) => {
-              if (newTaskRepos.length === 0) return;
-              if (event.key === "Enter" || event.key === " ") {
+          <Tooltip label="New task" placement="bottom">
+            <div
+              role="button"
+              tabIndex={0}
+              aria-disabled={newTaskRepos.length === 0}
+              onClick={() => {
+                if (newTaskRepos.length === 0) return;
                 if (newTaskRepos.length === 1) {
                   onSelectNewTaskRepo(newTaskRepos[0]!.id);
-                  onCreate();
+                  onCreate(newTaskRepos[0]!.id);
                 } else {
                   setCreateMenuOpen((prev) => !prev);
                 }
-              }
-            }}
-            className={css({
-              width: "26px",
-              height: "26px",
-              borderRadius: "8px",
-              backgroundColor: newTaskRepos.length > 0 ? t.borderMedium : t.interactiveHover,
-              color: t.textPrimary,
-              cursor: newTaskRepos.length > 0 ? "pointer" : "not-allowed",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              transition: "background 200ms ease",
-              flexShrink: 0,
-              opacity: newTaskRepos.length > 0 ? 1 : 0.6,
-              ":hover": newTaskRepos.length > 0 ? { backgroundColor: "rgba(255, 255, 255, 0.20)" } : undefined,
-            })}
-          >
-            <Plus size={14} style={{ display: "block" }} />
-          </div>
+              }}
+              onKeyDown={(event) => {
+                if (newTaskRepos.length === 0) return;
+                if (event.key === "Enter" || event.key === " ") {
+                  if (newTaskRepos.length === 1) {
+                    onSelectNewTaskRepo(newTaskRepos[0]!.id);
+                    onCreate(newTaskRepos[0]!.id);
+                  } else {
+                    setCreateMenuOpen((prev) => !prev);
+                  }
+                }
+              }}
+              className={css({
+                width: "26px",
+                height: "26px",
+                borderRadius: "8px",
+                backgroundColor: newTaskRepos.length > 0 ? t.borderMedium : t.interactiveHover,
+                color: t.textPrimary,
+                cursor: newTaskRepos.length > 0 ? "pointer" : "not-allowed",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                transition: "background 200ms ease",
+                flexShrink: 0,
+                opacity: newTaskRepos.length > 0 ? 1 : 0.6,
+                ":hover": newTaskRepos.length > 0 ? { backgroundColor: "rgba(255, 255, 255, 0.20)" } : undefined,
+              })}
+            >
+              <Plus size={14} style={{ display: "block" }} />
+            </div>
+          </Tooltip>
           {createMenuOpen && newTaskRepos.length > 1 ? (
             <div
               className={css({
@@ -303,7 +467,7 @@ export const Sidebar = memo(function Sidebar({
                   onClick={() => {
                     onSelectNewTaskRepo(repo.id);
                     setCreateMenuOpen(false);
-                    onCreate();
+                    onCreate(repo.id);
                   }}
                   className={css({
                     display: "flex",
@@ -442,9 +606,31 @@ export const Sidebar = memo(function Sidebar({
                       >
                         {projectInitial(project.label)}
                       </span>
-                      <span className={css({ position: "absolute", inset: 0, display: "none", alignItems: "center", justifyContent: "center" })} data-chevron>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setCollapsedProjects((current) => ({
+                            ...current,
+                            [project.id]: !current[project.id],
+                          }));
+                        }}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        className={css({
+                          position: "absolute",
+                          inset: 0,
+                          display: "none",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          cursor: "pointer",
+                          background: "none",
+                          border: "none",
+                          padding: 0,
+                          margin: 0,
+                        })}
+                        data-chevron
+                      >
                         {isCollapsed ? <ChevronDown size={12} color={t.textTertiary} /> : <ChevronUp size={12} color={t.textTertiary} />}
-                      </span>
+                      </button>
                     </div>
                     <LabelSmall
                       color={t.textSecondary}
@@ -468,7 +654,7 @@ export const Sidebar = memo(function Sidebar({
                         e.stopPropagation();
                         setHoveredProjectId(null);
                         onSelectNewTaskRepo(project.id);
-                        onCreate();
+                        onCreate(project.id);
                       }}
                       onMouseDown={(e) => e.stopPropagation()}
                       className={css({
@@ -543,7 +729,7 @@ export const Sidebar = memo(function Sidebar({
                           position: "relative",
                           backgroundColor: isActive ? t.interactiveHover : "transparent",
                           opacity: isTaskBeingDragged ? 0.4 : 1,
-                          cursor: "pointer",
+                          cursor: drag?.type === "task" ? "grabbing" : "pointer",
                           transition: "all 150ms ease",
                           "::before": {
                             content: '""',
@@ -607,6 +793,7 @@ export const Sidebar = memo(function Sidebar({
                             {formatRelativeAge(task.updatedAtMs)}
                           </LabelXSmall>
                         </div>
+                        {task.presence.length > 0 && <PresenceAvatars presence={task.presence} />}
                       </div>
                     );
                   })}
@@ -658,7 +845,7 @@ export const Sidebar = memo(function Sidebar({
           />
         </div>
       </ScrollBody>
-      <SidebarFooter />
+      {!hideSettings && <SidebarFooter />}
       {contextMenu.menu ? <ContextMenuOverlay menu={contextMenu.menu} onClose={contextMenu.close} /> : null}
     </SPanel>
   );
@@ -945,34 +1132,36 @@ function SidebarFooter() {
         </div>
       ) : null}
       <div className={css({ padding: "8px" })}>
-        <button
-          type="button"
-          onClick={() => {
-            setOpen((prev) => {
-              if (prev) setWorkspaceFlyoutOpen(false);
-              return !prev;
-            });
-          }}
-          className={css({
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            width: "28px",
-            height: "28px",
-            borderRadius: "6px",
-            border: "none",
-            background: open ? t.interactiveHover : "transparent",
-            color: open ? t.textPrimary : t.textTertiary,
-            cursor: "pointer",
-            transition: "all 160ms ease",
-            ":hover": {
-              backgroundColor: t.interactiveHover,
-              color: t.textSecondary,
-            },
-          })}
-        >
-          <Settings size={14} />
-        </button>
+        <Tooltip label="Settings" placement="right">
+          <button
+            type="button"
+            onClick={() => {
+              setOpen((prev) => {
+                if (prev) setWorkspaceFlyoutOpen(false);
+                return !prev;
+              });
+            }}
+            className={css({
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: "28px",
+              height: "28px",
+              borderRadius: "6px",
+              border: "none",
+              background: open ? t.interactiveHover : "transparent",
+              color: open ? t.textPrimary : t.textTertiary,
+              cursor: "pointer",
+              transition: "all 160ms ease",
+              ":hover": {
+                backgroundColor: t.interactiveHover,
+                color: t.textSecondary,
+              },
+            })}
+          >
+            <Settings size={14} />
+          </button>
+        </Tooltip>
       </div>
     </div>
   );

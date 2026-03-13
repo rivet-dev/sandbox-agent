@@ -4,6 +4,7 @@ import { LabelXSmall } from "baseui/typography";
 import { History } from "lucide-react";
 
 import { useFoundryTokens } from "../../app/theme";
+import { Tooltip } from "./ui";
 import { formatMessageTimestamp, type HistoryEvent } from "./view-model";
 
 export const HistoryMinimap = memo(function HistoryMinimap({ events, onSelect }: { events: HistoryEvent[]; onSelect: (event: HistoryEvent) => void }) {
@@ -41,29 +42,31 @@ export const HistoryMinimap = memo(function HistoryMinimap({ events, onSelect }:
         gap: "6px",
       })}
     >
-      <div
-        role="button"
-        tabIndex={0}
-        onClick={() => setOpen((prev) => !prev)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") setOpen((prev) => !prev);
-        }}
-        className={css({
-          width: "26px",
-          height: "26px",
-          borderRadius: "6px",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          cursor: "pointer",
-          color: open ? t.textSecondary : t.textTertiary,
-          backgroundColor: open ? t.interactiveHover : "transparent",
-          transition: "background 200ms ease, color 200ms ease",
-          ":hover": { color: t.textSecondary, backgroundColor: t.interactiveHover },
-        })}
-      >
-        <History size={14} />
-      </div>
+      <Tooltip label="History" placement="left">
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={() => setOpen((prev) => !prev)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") setOpen((prev) => !prev);
+          }}
+          className={css({
+            width: "26px",
+            height: "26px",
+            borderRadius: "6px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            cursor: "pointer",
+            color: open ? t.textSecondary : t.textTertiary,
+            backgroundColor: open ? t.interactiveHover : "transparent",
+            transition: "background 200ms ease, color 200ms ease",
+            ":hover": { color: t.textSecondary, backgroundColor: t.interactiveHover },
+          })}
+        >
+          <History size={14} />
+        </div>
+      </Tooltip>
 
       {open ? (
         <div

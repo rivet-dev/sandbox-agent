@@ -1,0 +1,7 @@
+{
+  "identifier": "mobile",
+  "description": "Capability for Foundry mobile (iOS/Android)",
+  "windows": ["main"],
+  "platforms": ["iOS", "android"],
+  "permissions": ["core:default"]
+}

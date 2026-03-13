@@ -2,6 +2,7 @@
   "identifier": "default",
   "description": "Default capability for Foundry desktop",
   "windows": ["main"],
+  "platforms": ["macOS", "windows", "linux"],
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging",

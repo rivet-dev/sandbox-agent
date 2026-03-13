@@ -76,6 +76,14 @@ export interface WorkbenchPullRequestSummary {
   status: "draft" | "ready";
 }
 
+export interface WorkbenchPresence {
+  memberId: string;
+  name: string;
+  avatarUrl: string | null;
+  lastSeenAtMs: number;
+  typing?: boolean;
+}
+
 export interface WorkbenchTask {
   id: string;
   repoId: string;
@@ -90,6 +98,7 @@ export interface WorkbenchTask {
   diffs: Record<string, string>;
   fileTree: WorkbenchFileTreeNode[];
   minutesUsed: number;
+  presence: WorkbenchPresence[];
 }
 
 export interface WorkbenchRepo {

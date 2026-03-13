@@ -245,6 +245,7 @@ async function buildAppSnapshot(c: any, sessionId: string): Promise<FoundryAppSn
         name: session.currentUserName ?? session.currentUserGithubLogin ?? "GitHub user",
         email: session.currentUserEmail ?? "",
         githubLogin: session.currentUserGithubLogin ?? "",
+        avatarUrl: session.currentUserGithubLogin ? `https://github.com/${session.currentUserGithubLogin}.png` : null,
         roleLabel: session.currentUserRoleLabel ?? "GitHub user",
         eligibleOrganizationIds: organizations.map((organization) => organization.id),
       }

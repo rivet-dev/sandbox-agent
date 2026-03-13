@@ -14,11 +14,15 @@ const TranscriptMessageBody = memo(function TranscriptMessageBody({
   messageRefs,
   copiedMessageId,
   onCopyMessage,
+  userName,
+  userAvatarUrl,
 }: {
   message: Message;
   messageRefs: MutableRefObject<Map<string, HTMLDivElement>>;
   copiedMessageId: string | null;
   onCopyMessage: (message: Message) => void;
+  userName?: string | null;
+  userAvatarUrl?: string | null;
 }) {
   const [css] = useStyletron();
   const t = useFoundryTokens();
@@ -81,12 +85,52 @@ const TranscriptMessageBody = memo(function TranscriptMessageBody({
         className={css({
           display: "flex",
           alignItems: "center",
-          gap: "10px",
+          gap: "6px",
           justifyContent: isUser ? "flex-end" : "flex-start",
           minHeight: "16px",
           paddingLeft: isUser ? undefined : "2px",
         })}
       >
+        {isUser && (userAvatarUrl || userName) ? (
+          <>
+            {userAvatarUrl ? (
+              <img
+                src={userAvatarUrl}
+                alt=""
+                className={css({
+                  width: "18px",
+                  height: "18px",
+                  borderRadius: "50%",
+                  objectFit: "cover",
+                  flexShrink: 0,
+                })}
+              />
+            ) : userName ? (
+              <div
+                className={css({
+                  width: "18px",
+                  height: "18px",
+                  borderRadius: "50%",
+                  backgroundColor: t.borderMedium,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: "10px",
+                  fontWeight: 600,
+                  color: t.textSecondary,
+                  flexShrink: 0,
+                })}
+              >
+                {userName.charAt(0).toUpperCase()}
+              </div>
+            ) : null}
+            {userName ? (
+              <LabelXSmall color={t.textTertiary} $style={{ fontWeight: 500 }}>
+                {userName}
+              </LabelXSmall>
+            ) : null}
+          </>
+        ) : null}
         {displayFooter ? (
           <LabelXSmall color={t.textTertiary} $style={{ fontFamily: '"IBM Plex Mono", monospace', letterSpacing: "0.01em" }}>
             {displayFooter}
@@ -130,6 +174,8 @@ export const MessageList = memo(function MessageList({
   copiedMessageId,
   onCopyMessage,
   thinkingTimerLabel,
+  userName,
+  userAvatarUrl,
 }: {
   tab: AgentTab | null | undefined;
   scrollRef: Ref<HTMLDivElement>;
@@ -139,6 +185,8 @@ export const MessageList = memo(function MessageList({
   copiedMessageId: string | null;
   onCopyMessage: (message: Message) => void;
   thinkingTimerLabel: string | null;
+  userName?: string | null;
+  userAvatarUrl?: string | null;
 }) {
   const [css] = useStyletron();
   const t = useFoundryTokens();
@@ -238,7 +286,16 @@ export const MessageList = memo(function MessageList({
                 return null;
               }
 
-              return <TranscriptMessageBody message={message} messageRefs={messageRefs} copiedMessageId={copiedMessageId} onCopyMessage={onCopyMessage} />;
+              return (
+                <TranscriptMessageBody
+                  message={message}
+                  messageRefs={messageRefs}
+                  copiedMessageId={copiedMessageId}
+                  onCopyMessage={onCopyMessage}
+                  userName={userName}
+                  userAvatarUrl={userAvatarUrl}
+                />
+              );
             }}
             isThinking={Boolean(tab && tab.status === "running" && transcriptEntries.length > 0)}
             renderThinkingState={() => (

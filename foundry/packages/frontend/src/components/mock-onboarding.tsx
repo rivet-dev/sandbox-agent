@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type FoundryBillingPlanId, type FoundryOrganization, type FoundryOrganizationMember, type FoundryUser } from "@sandbox-agent/foundry-shared";
 import { useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, Clock, CreditCard, FileText, Github, LogOut, Moon, Settings, Sun, Users } from "lucide-react";
+import { ArrowLeft, Clock, CreditCard, FileText, Github, LogOut, Moon, Settings, Sun, Users, Volume2 } from "lucide-react";
+import { NOTIFICATION_SOUND_OPTIONS, previewNotificationSound, useNotificationSound } from "../lib/notification-sound";
 import { activeMockUser, eligibleOrganizations, useMockAppClient, useMockAppSnapshot } from "../lib/mock-app";
 import { isMockFrontendClient } from "../lib/env";
+import { useIsMobile } from "../lib/platform";
 import { useColorMode, useFoundryTokens } from "../app/theme";
 import type { FoundryTokens } from "../styles/tokens";
 import { appSurfaceStyle, primaryButtonStyle, secondaryButtonStyle, subtleButtonStyle, cardStyle, badgeStyle, inputStyle } from "../styles/shared-styles";
@@ -124,7 +126,7 @@ function statusBadge(t: FoundryTokens, organization: FoundryOrganization) {
 
 function githubBadge(t: FoundryTokens, organization: FoundryOrganization) {
   if (organization.github.installationStatus === "connected") {
-    return <span style={badgeStyle(t, "rgba(46, 160, 67, 0.16)", "#b7f0c3")}>GitHub connected</span>;
+    return <span style={badgeStyle(t, "rgba(46, 160, 67, 0.16)", "#1a7f37")}>GitHub connected</span>;
   }
   if (organization.github.installationStatus === "reconnect_required") {
     return <span style={badgeStyle(t, "rgba(255, 193, 7, 0.18)", "#ffe6a6")}>Reconnect required</span>;
@@ -164,9 +166,42 @@ function MemberRow({ member }: { member: FoundryOrganizationMember }) {
         alignItems: "center",
       }}
     >
-      <div>
-        <div style={{ fontWeight: 500, fontSize: "12px" }}>{member.name}</div>
-        <div style={{ color: t.textSecondary, fontSize: "11px" }}>{member.email}</div>
+      <div style={{ display: "flex", alignItems: "center", gap: "8px", overflow: "hidden" }}>
+        {member.avatarUrl ? (
+          <img
+            src={member.avatarUrl}
+            alt={member.name}
+            style={{
+              width: "24px",
+              height: "24px",
+              borderRadius: "50%",
+              flexShrink: 0,
+              objectFit: "cover",
+            }}
+          />
+        ) : (
+          <div
+            style={{
+              width: "24px",
+              height: "24px",
+              borderRadius: "50%",
+              flexShrink: 0,
+              backgroundColor: t.interactiveHover,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: "10px",
+              fontWeight: 600,
+              color: t.textSecondary,
+            }}
+          >
+            {member.name.charAt(0).toUpperCase()}
+          </div>
+        )}
+        <div style={{ overflow: "hidden" }}>
+          <div style={{ fontWeight: 500, fontSize: "12px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{member.name}</div>
+          <div style={{ color: t.textSecondary, fontSize: "11px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{member.email}</div>
+        </div>
       </div>
       <div style={{ color: t.textSecondary, fontSize: "12px", textTransform: "capitalize" }}>{member.role}</div>
       <div>
@@ -284,7 +319,7 @@ export function MockSignInPage() {
 
         {/* Footer */}
         <a
-          href="https://sandbox-agent.dev"
+          href="https://sandboxagent.dev/"
           target="_blank"
           rel="noopener noreferrer"
           style={{
@@ -551,16 +586,130 @@ function SettingsLayout({
   const user = activeMockUser(snapshot);
   const navigate = useNavigate();
   const t = useFoundryTokens();
+  const isMobile = useIsMobile();
 
   const navSections: Array<{ section: SettingsSection; icon: React.ReactNode; label: string }> = [
     { section: "settings", icon: <Settings size={13} />, label: "Settings" },
     { section: "members", icon: <Users size={13} />, label: "Members" },
-    { section: "billing", icon: <CreditCard size={13} />, label: "Billing & Invoices" },
+    { section: "billing", icon: <CreditCard size={13} />, label: "Billing" },
     { section: "docs", icon: <FileText size={13} />, label: "Docs" },
   ];
 
+  const goBack = () => {
+    void (async () => {
+      await client.selectOrganization(organization.id);
+      await navigate({ to: workspacePath(organization) });
+    })();
+  };
+
+  const handleNavClick = (item: (typeof navSections)[0]) => {
+    if (item.section === "billing") {
+      void navigate({ to: billingPath(organization) });
+    } else if (onSectionChange) {
+      onSectionChange(item.section);
+    } else {
+      void navigate({ to: settingsPath(organization) });
+    }
+  };
+
+  if (isMobile) {
+    return (
+      <div
+        style={{
+          ...appSurfaceStyle(t),
+          height: "100dvh",
+          maxHeight: "100dvh",
+          display: "flex",
+          flexDirection: "column",
+          paddingTop: "max(var(--safe-area-top), 47px)",
+        }}
+      >
+        {/* Mobile header */}
+        <div
+          style={{
+            flexShrink: 0,
+            padding: "8px 12px",
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
+            borderBottom: `1px solid ${t.borderSubtle}`,
+          }}
+        >
+          <button
+            type="button"
+            onClick={goBack}
+            style={{
+              ...subtleButtonStyle(t),
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: "32px",
+              height: "32px",
+              padding: 0,
+              borderRadius: "8px",
+              flexShrink: 0,
+            }}
+          >
+            <ArrowLeft size={16} />
+          </button>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: "15px", fontWeight: 600 }}>{organization.settings.displayName}</div>
+            <div style={{ fontSize: "11px", color: t.textMuted }}>{planCatalog[organization.billing.planId]?.label ?? "Free"} Plan</div>
+          </div>
+        </div>
+
+        {/* Mobile tab strip */}
+        <div
+          style={{
+            flexShrink: 0,
+            display: "flex",
+            gap: "2px",
+            padding: "6px 12px",
+            overflowX: "auto",
+            borderBottom: `1px solid ${t.borderSubtle}`,
+          }}
+        >
+          {navSections.map((item) => {
+            const isActive = activeSection === item.section;
+            return (
+              <button
+                key={item.section}
+                type="button"
+                onClick={() => handleNavClick(item)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "5px",
+                  padding: "6px 12px",
+                  borderRadius: "8px",
+                  border: "none",
+                  background: isActive ? t.interactiveHover : "transparent",
+                  color: isActive ? t.textPrimary : t.textMuted,
+                  cursor: "pointer",
+                  fontSize: "12px",
+                  fontWeight: isActive ? 500 : 400,
+                  whiteSpace: "nowrap",
+                  fontFamily: "'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif",
+                  flexShrink: 0,
+                }}
+              >
+                {item.icon}
+                {item.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Content */}
+        <div style={{ flex: 1, overflowY: "auto", padding: "20px 16px 40px" }}>
+          <div style={{ maxWidth: "560px" }}>{children}</div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div style={appSurfaceStyle(t)}>
+    <div style={{ ...appSurfaceStyle(t), height: "100dvh", maxHeight: "100dvh" }}>
       <DesktopDragRegion />
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
         {/* Left nav */}
@@ -579,12 +728,7 @@ function SettingsLayout({
           {/* Back to workspace */}
           <button
             type="button"
-            onClick={() => {
-              void (async () => {
-                await client.selectOrganization(organization.id);
-                await navigate({ to: workspacePath(organization) });
-              })();
-            }}
+            onClick={goBack}
             style={{
               ...subtleButtonStyle(t),
               display: "flex",
@@ -612,15 +756,7 @@ function SettingsLayout({
               icon={item.icon}
               label={item.label}
               active={activeSection === item.section}
-              onClick={() => {
-                if (item.section === "billing") {
-                  void navigate({ to: billingPath(organization) });
-                } else if (onSectionChange) {
-                  onSectionChange(item.section);
-                } else {
-                  void navigate({ to: settingsPath(organization) });
-                }
-              }}
+              onClick={() => handleNavClick(item)}
             />
           ))}
         </div>
@@ -691,6 +827,8 @@ export function MockOrganizationSettingsPage({ organization }: { organization: F
           </SettingsContentSection>
 
           <AppearanceSection />
+
+          <NotificationSoundSection />
 
           <SettingsContentSection
             title="GitHub"
@@ -1090,6 +1228,7 @@ export function MockAccountSettingsPage() {
   const user = activeMockUser(snapshot);
   const navigate = useNavigate();
   const t = useFoundryTokens();
+  const isMobile = useIsMobile();
   const [name, setName] = useState(user?.name ?? "");
   const [email, setEmail] = useState(user?.email ?? "");
 
@@ -1098,8 +1237,168 @@ export function MockAccountSettingsPage() {
     setEmail(user?.email ?? "");
   }, [user?.name, user?.email]);
 
+  const accountContent = (
+    <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+      <div>
+        <h1 style={{ margin: "0 0 2px", fontSize: "15px", fontWeight: 600 }}>Account</h1>
+        <p style={{ margin: 0, fontSize: "11px", color: t.textMuted }}>Manage your personal account settings.</p>
+      </div>
+
+      <SettingsContentSection title="Profile">
+        <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "4px" }}>
+          {user?.avatarUrl ? (
+            <img
+              src={user.avatarUrl}
+              alt={user.name}
+              style={{
+                width: "48px",
+                height: "48px",
+                borderRadius: "50%",
+                objectFit: "cover",
+                border: `1px solid ${t.borderSubtle}`,
+              }}
+            />
+          ) : (
+            <div
+              style={{
+                width: "48px",
+                height: "48px",
+                borderRadius: "50%",
+                backgroundColor: t.interactiveHover,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: "18px",
+                fontWeight: 600,
+                color: t.textSecondary,
+                border: `1px solid ${t.borderSubtle}`,
+              }}
+            >
+              {(user?.name ?? "U").charAt(0).toUpperCase()}
+            </div>
+          )}
+          <div>
+            <div style={{ fontSize: "13px", fontWeight: 600 }}>{user?.name ?? "User"}</div>
+            <div style={{ fontSize: "11px", color: t.textMuted }}>@{user?.githubLogin ?? ""}</div>
+          </div>
+        </div>
+        <label style={{ display: "grid", gap: "4px" }}>
+          <span style={{ fontSize: "11px", fontWeight: 500, color: t.textMuted }}>Display name</span>
+          <input value={name} onChange={(e) => setName(e.target.value)} style={inputStyle(t)} />
+        </label>
+        <label style={{ display: "grid", gap: "4px" }}>
+          <span style={{ fontSize: "11px", fontWeight: 500, color: t.textMuted }}>Email</span>
+          <input value={email} onChange={(e) => setEmail(e.target.value)} style={inputStyle(t)} />
+        </label>
+        <label style={{ display: "grid", gap: "4px" }}>
+          <span style={{ fontSize: "11px", fontWeight: 500, color: t.textMuted }}>GitHub</span>
+          <input value={`@${user?.githubLogin ?? ""}`} readOnly style={{ ...inputStyle(t), color: t.textMuted }} />
+        </label>
+        <div>
+          <button type="button" style={primaryButtonStyle(t)}>
+            Save changes
+          </button>
+        </div>
+      </SettingsContentSection>
+
+      <SettingsContentSection title="Sessions" description="Manage your active sessions across devices.">
+        <SettingsRow label="Current session" description="This device — signed in via GitHub OAuth." />
+      </SettingsContentSection>
+
+      <SettingsContentSection title="Sign out" description="Sign out of Foundry on this device.">
+        <div>
+          <button
+            type="button"
+            onClick={() => {
+              void (async () => {
+                await client.signOut();
+                await navigate({ to: "/signin" });
+              })();
+            }}
+            style={{ ...secondaryButtonStyle(t), display: "inline-flex", alignItems: "center", gap: "6px" }}
+          >
+            <LogOut size={12} />
+            Sign out
+          </button>
+        </div>
+      </SettingsContentSection>
+
+      <SettingsContentSection title="Danger zone">
+        <SettingsRow
+          label="Delete account"
+          description="Permanently delete your account and all data."
+          action={
+            <button
+              type="button"
+              style={{
+                ...secondaryButtonStyle(t),
+                borderColor: "rgba(255, 110, 110, 0.24)",
+                color: t.statusError,
+                whiteSpace: "nowrap",
+                flexShrink: 0,
+              }}
+            >
+              Delete
+            </button>
+          }
+        />
+      </SettingsContentSection>
+    </div>
+  );
+
+  if (isMobile) {
+    return (
+      <div
+        style={{
+          ...appSurfaceStyle(t),
+          height: "100dvh",
+          maxHeight: "100dvh",
+          display: "flex",
+          flexDirection: "column",
+          paddingTop: "max(var(--safe-area-top), 47px)",
+        }}
+      >
+        {/* Mobile header */}
+        <div
+          style={{
+            flexShrink: 0,
+            padding: "8px 12px",
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
+            borderBottom: `1px solid ${t.borderSubtle}`,
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => void navigate({ to: "/" })}
+            style={{
+              ...subtleButtonStyle(t),
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: "32px",
+              height: "32px",
+              padding: 0,
+              borderRadius: "8px",
+              flexShrink: 0,
+            }}
+          >
+            <ArrowLeft size={16} />
+          </button>
+          <div style={{ fontSize: "15px", fontWeight: 600 }}>Account</div>
+        </div>
+
+        {/* Content */}
+        <div style={{ flex: 1, overflowY: "auto", padding: "20px 16px 40px" }}>
+          <div style={{ maxWidth: "560px" }}>{accountContent}</div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div style={appSurfaceStyle(t)}>
+    <div style={{ ...appSurfaceStyle(t), height: "100dvh", maxHeight: "100dvh" }}>
       <DesktopDragRegion />
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
         {/* Left nav */}
@@ -1131,9 +1430,32 @@ export function MockAccountSettingsPage() {
             Back to workspace
           </button>
 
-          <div style={{ padding: "2px 10px 12px", display: "flex", flexDirection: "column", gap: "1px" }}>
-            <span style={{ fontSize: "12px", fontWeight: 600 }}>{user?.name ?? "User"}</span>
-            <span style={{ fontSize: "10px", color: t.textMuted }}>{user?.email ?? ""}</span>
+          <div style={{ padding: "2px 10px 12px", display: "flex", alignItems: "center", gap: "8px" }}>
+            {user?.avatarUrl ? (
+              <img src={user.avatarUrl} alt={user.name} style={{ width: "24px", height: "24px", borderRadius: "50%", objectFit: "cover", flexShrink: 0 }} />
+            ) : (
+              <div
+                style={{
+                  width: "24px",
+                  height: "24px",
+                  borderRadius: "50%",
+                  flexShrink: 0,
+                  backgroundColor: t.interactiveHover,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: "10px",
+                  fontWeight: 600,
+                  color: t.textSecondary,
+                }}
+              >
+                {(user?.name ?? "U").charAt(0).toUpperCase()}
+              </div>
+            )}
+            <div style={{ display: "flex", flexDirection: "column", gap: "1px", overflow: "hidden" }}>
+              <span style={{ fontSize: "12px", fontWeight: 600 }}>{user?.name ?? "User"}</span>
+              <span style={{ fontSize: "10px", color: t.textMuted }}>{user?.email ?? ""}</span>
+            </div>
           </div>
 
           <SettingsNavItem icon={<Settings size={13} />} label="General" active onClick={() => {}} />
@@ -1141,77 +1463,7 @@ export function MockAccountSettingsPage() {
 
         {/* Content */}
         <div style={{ flex: 1, overflowY: "auto", padding: "80px 36px 40px" }}>
-          <div style={{ maxWidth: "560px" }}>
-            <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
-              <div>
-                <h1 style={{ margin: "0 0 2px", fontSize: "15px", fontWeight: 600 }}>Account</h1>
-                <p style={{ margin: 0, fontSize: "11px", color: t.textMuted }}>Manage your personal account settings.</p>
-              </div>
-
-              <SettingsContentSection title="Profile">
-                <label style={{ display: "grid", gap: "4px" }}>
-                  <span style={{ fontSize: "11px", fontWeight: 500, color: t.textMuted }}>Display name</span>
-                  <input value={name} onChange={(e) => setName(e.target.value)} style={inputStyle(t)} />
-                </label>
-                <label style={{ display: "grid", gap: "4px" }}>
-                  <span style={{ fontSize: "11px", fontWeight: 500, color: t.textMuted }}>Email</span>
-                  <input value={email} onChange={(e) => setEmail(e.target.value)} style={inputStyle(t)} />
-                </label>
-                <label style={{ display: "grid", gap: "4px" }}>
-                  <span style={{ fontSize: "11px", fontWeight: 500, color: t.textMuted }}>GitHub</span>
-                  <input value={`@${user?.githubLogin ?? ""}`} readOnly style={{ ...inputStyle(t), color: t.textMuted }} />
-                </label>
-                <div>
-                  <button type="button" style={primaryButtonStyle(t)}>
-                    Save changes
-                  </button>
-                </div>
-              </SettingsContentSection>
-
-              <SettingsContentSection title="Sessions" description="Manage your active sessions across devices.">
-                <SettingsRow label="Current session" description="This device — signed in via GitHub OAuth." />
-              </SettingsContentSection>
-
-              <SettingsContentSection title="Sign out" description="Sign out of Foundry on this device.">
-                <div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void (async () => {
-                        await client.signOut();
-                        await navigate({ to: "/signin" });
-                      })();
-                    }}
-                    style={{ ...secondaryButtonStyle(t), display: "inline-flex", alignItems: "center", gap: "6px" }}
-                  >
-                    <LogOut size={12} />
-                    Sign out
-                  </button>
-                </div>
-              </SettingsContentSection>
-
-              <SettingsContentSection title="Danger zone">
-                <SettingsRow
-                  label="Delete account"
-                  description="Permanently delete your account and all data."
-                  action={
-                    <button
-                      type="button"
-                      style={{
-                        ...secondaryButtonStyle(t),
-                        borderColor: "rgba(255, 110, 110, 0.24)",
-                        color: t.statusError,
-                        whiteSpace: "nowrap",
-                        flexShrink: 0,
-                      }}
-                    >
-                      Delete
-                    </button>
-                  }
-                />
-              </SettingsContentSection>
-            </div>
-          </div>
+          <div style={{ maxWidth: "560px" }}>{accountContent}</div>
         </div>
       </div>
     </div>
@@ -1238,7 +1490,7 @@ function AppearanceSection() {
               height: "20px",
               borderRadius: "10px",
               border: "1px solid rgba(128, 128, 128, 0.3)",
-              background: isDark ? t.borderDefault : t.accent,
+              background: isDark ? t.borderDefault : t.textPrimary,
               cursor: "pointer",
               padding: 0,
               transition: "background 0.2s",
@@ -1260,9 +1512,136 @@ function AppearanceSection() {
                 justifyContent: "center",
               }}
             >
-              {isDark ? <Moon size={8} /> : <Sun size={8} color={t.accent} />}
+              {isDark ? <Moon size={8} /> : <Sun size={8} color={t.textPrimary} />}
             </div>
           </button>
+        }
+      />
+    </SettingsContentSection>
+  );
+}
+
+function NotificationSoundSection() {
+  const t = useFoundryTokens();
+  const [selected, setSelected] = useNotificationSound();
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const selectedLabel = NOTIFICATION_SOUND_OPTIONS.find((o) => o.id === selected)?.label ?? "None";
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  return (
+    <SettingsContentSection title="Notifications" description="Play a sound when the agent finishes and needs your input.">
+      <SettingsRow
+        label="Completion sound"
+        description={selected === "none" ? "No sound will play." : `"${selectedLabel}" will play when the agent is done.`}
+        action={
+          <div ref={containerRef} style={{ position: "relative", display: "flex", alignItems: "center", gap: "6px" }}>
+            <button
+              type="button"
+              onClick={() => setOpen((prev) => !prev)}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                padding: "5px 10px",
+                borderRadius: "6px",
+                border: `1px solid ${t.borderDefault}`,
+                background: t.interactiveSubtle,
+                color: t.textPrimary,
+                fontSize: "11px",
+                fontWeight: 500,
+                fontFamily: "inherit",
+                cursor: "pointer",
+                minWidth: "90px",
+                justifyContent: "space-between",
+              }}
+            >
+              <span>{selectedLabel}</span>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={t.textTertiary} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d={open ? "m18 15-6-6-6 6" : "m6 9 6 6 6-6"} />
+              </svg>
+            </button>
+            {open && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: "calc(100% + 4px)",
+                  right: 0,
+                  minWidth: "160px",
+                  backgroundColor: "rgba(32, 32, 32, 0.98)",
+                  backdropFilter: "blur(12px)",
+                  borderRadius: "10px",
+                  border: `1px solid ${t.borderDefault}`,
+                  boxShadow: `0 8px 32px rgba(0, 0, 0, 0.5), 0 0 0 1px ${t.interactiveSubtle}`,
+                  padding: "4px 0",
+                  zIndex: 200,
+                }}
+              >
+                {NOTIFICATION_SOUND_OPTIONS.map((option) => {
+                  const isActive = option.id === selected;
+                  return (
+                    <button
+                      key={option.id}
+                      type="button"
+                      onClick={() => {
+                        setSelected(option.id);
+                        setOpen(false);
+                      }}
+                      onMouseEnter={(e) => {
+                        (e.currentTarget as HTMLElement).style.backgroundColor = t.borderSubtle;
+                      }}
+                      onMouseLeave={(e) => {
+                        (e.currentTarget as HTMLElement).style.backgroundColor = "transparent";
+                      }}
+                      style={
+                        {
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: "8px",
+                          width: "calc(100% - 8px)",
+                          padding: "6px 12px",
+                          border: "none",
+                          background: "transparent",
+                          color: isActive ? t.textPrimary : t.textSecondary,
+                          fontSize: "12px",
+                          fontWeight: isActive ? 600 : 400,
+                          fontFamily: "inherit",
+                          cursor: "pointer",
+                          borderRadius: "6px",
+                          margin: "0 4px",
+                          boxSizing: "border-box",
+                        } as React.CSSProperties
+                      }
+                    >
+                      <span>{option.label}</span>
+                      {option.id !== "none" && (
+                        <Volume2
+                          size={11}
+                          color={isActive ? t.accent : t.textTertiary}
+                          style={{ cursor: "pointer", flexShrink: 0 }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            previewNotificationSound(option.id);
+                          }}
+                        />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         }
       />
     </SettingsContentSection>

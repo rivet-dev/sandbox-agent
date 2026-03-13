@@ -5,6 +5,10 @@
   font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
   background: var(--f-surface-primary, #000000);
   color: var(--f-text-primary, #ffffff);
+  --safe-area-top: env(safe-area-inset-top, 0px);
+  --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-area-left: env(safe-area-inset-left, 0px);
+  --safe-area-right: env(safe-area-inset-right, 0px);
 }
 
 html,
@@ -41,6 +45,41 @@ a {
 @keyframes hf-spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+@keyframes hf-dot-fade {
+  0%, 80%, 100% {
+    opacity: 0.2;
+  }
+  40% {
+    opacity: 1;
+  }
+}
+
+@keyframes hf-typing-in {
+  from {
+    opacity: 0;
+    max-height: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    max-height: 40px;
+    transform: translateY(0);
+  }
+}
+
+@keyframes hf-typing-out {
+  from {
+    opacity: 1;
+    max-height: 40px;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    max-height: 0;
+    transform: translateY(8px);
   }
 }
 

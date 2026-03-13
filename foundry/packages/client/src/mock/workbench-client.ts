@@ -100,6 +100,7 @@ class MockWorkbenchStore implements TaskWorkbenchClient {
       diffs: {},
       fileTree: [],
       minutesUsed: 0,
+      presence: [],
     };
 
     this.updateState((current) => ({

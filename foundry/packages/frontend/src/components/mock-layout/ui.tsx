@@ -1,4 +1,5 @@
-import { memo, useCallback, useEffect, useState, type MouseEvent } from "react";
+import { memo, useCallback, useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { styled, useStyletron } from "baseui";
 import { GitPullRequest, GitPullRequestDraft } from "lucide-react";
 
@@ -209,6 +210,115 @@ export const ScrollBody = styled("div", () => ({
   display: "flex",
   flexDirection: "column" as const,
 }));
+
+export const Tooltip = memo(function Tooltip({
+  label,
+  children,
+  placement = "bottom",
+}: {
+  label: string;
+  children: ReactNode;
+  placement?: "top" | "bottom" | "left" | "right";
+}) {
+  const [css] = useStyletron();
+  const t = useFoundryTokens();
+  const triggerRef = useRef<HTMLDivElement>(null);
+  const tooltipRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+
+  const show = useCallback(() => {
+    const el = triggerRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    let top: number;
+    let left: number;
+    if (placement === "bottom") {
+      top = rect.bottom + 6;
+      left = rect.left + rect.width / 2;
+    } else if (placement === "top") {
+      top = rect.top - 6;
+      left = rect.left + rect.width / 2;
+    } else if (placement === "left") {
+      top = rect.top + rect.height / 2;
+      left = rect.left - 6;
+    } else {
+      top = rect.top + rect.height / 2;
+      left = rect.right + 6;
+    }
+    setPos({ top, left });
+  }, [placement]);
+
+  const hide = useCallback(() => setPos(null), []);
+
+  // Clamp tooltip position after it renders so it stays within the viewport
+  useEffect(() => {
+    if (!pos) return;
+    const tip = tooltipRef.current;
+    if (!tip) return;
+    const tipRect = tip.getBoundingClientRect();
+    const pad = 8;
+    let adjustLeft = 0;
+    let adjustTop = 0;
+    if (tipRect.right > window.innerWidth - pad) {
+      adjustLeft = window.innerWidth - pad - tipRect.right;
+    }
+    if (tipRect.left < pad) {
+      adjustLeft = pad - tipRect.left;
+    }
+    if (tipRect.bottom > window.innerHeight - pad) {
+      adjustTop = window.innerHeight - pad - tipRect.bottom;
+    }
+    if (tipRect.top < pad) {
+      adjustTop = pad - tipRect.top;
+    }
+    if (adjustLeft !== 0 || adjustTop !== 0) {
+      setPos((prev) => prev && { top: prev.top + adjustTop, left: prev.left + adjustLeft });
+    }
+  }, [pos]);
+
+  const transform =
+    placement === "bottom"
+      ? "translateX(-50%)"
+      : placement === "top"
+        ? "translateX(-50%) translateY(-100%)"
+        : placement === "left"
+          ? "translateX(-100%) translateY(-50%)"
+          : "translateY(-50%)";
+
+  return (
+    <div ref={triggerRef} onMouseEnter={show} onMouseLeave={hide} className={css({ display: "inline-flex" })}>
+      {children}
+      {pos &&
+        createPortal(
+          <div
+            ref={tooltipRef}
+            className={css({
+              position: "fixed",
+              top: `${pos.top}px`,
+              left: `${pos.left}px`,
+              transform,
+              zIndex: 99999,
+              pointerEvents: "none",
+              padding: "4px 8px",
+              borderRadius: "6px",
+              backgroundColor: "rgba(32, 32, 32, 0.98)",
+              backdropFilter: "blur(12px)",
+              border: `1px solid ${t.borderDefault}`,
+              boxShadow: "0 4px 12px rgba(0, 0, 0, 0.4)",
+              color: "#e0e0e0",
+              fontSize: "11px",
+              fontWeight: 500,
+              lineHeight: "1.3",
+              whiteSpace: "nowrap",
+            })}
+          >
+            {label}
+          </div>,
+          document.body,
+        )}
+    </div>
+  );
+});
 
 export const HEADER_HEIGHT = "42px";
 export const PROMPT_TEXTAREA_MIN_HEIGHT = 56;

@@ -4,7 +4,7 @@ import { LabelSmall } from "baseui/typography";
 import { Clock, PanelLeft, PanelRight } from "lucide-react";
 
 import { useFoundryTokens } from "../../app/theme";
-import { PanelHeaderBar } from "./ui";
+import { PanelHeaderBar, Tooltip } from "./ui";
 import { type AgentTab, type Task } from "./view-model";
 
 export const TranscriptHeader = memo(function TranscriptHeader({
@@ -50,25 +50,27 @@ export const TranscriptHeader = memo(function TranscriptHeader({
   return (
     <PanelHeaderBar $style={{ backgroundColor: t.surfaceSecondary, borderBottom: "none", paddingLeft: needsTrafficLightInset ? "74px" : "14px" }}>
       {sidebarCollapsed && onToggleSidebar ? (
-        <div
-          className={css({
-            width: "26px",
-            height: "26px",
-            borderRadius: "6px",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            cursor: "pointer",
-            color: t.textTertiary,
-            flexShrink: 0,
-            ":hover": { color: t.textSecondary, backgroundColor: t.interactiveHover },
-          })}
-          onClick={onToggleSidebar}
-          onMouseEnter={onSidebarPeekStart}
-          onMouseLeave={onSidebarPeekEnd}
-        >
-          <PanelLeft size={14} />
-        </div>
+        <Tooltip label="Toggle sidebar" placement="bottom">
+          <div
+            className={css({
+              width: "26px",
+              height: "26px",
+              borderRadius: "6px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: "pointer",
+              color: t.textTertiary,
+              flexShrink: 0,
+              ":hover": { color: t.textSecondary, backgroundColor: t.interactiveHover },
+            })}
+            onClick={onToggleSidebar}
+            onMouseEnter={onSidebarPeekStart}
+            onMouseLeave={onSidebarPeekEnd}
+          >
+            <PanelLeft size={14} />
+          </div>
+        </Tooltip>
       ) : null}
       {editingField === "title" ? (
         <input
@@ -190,23 +192,25 @@ export const TranscriptHeader = memo(function TranscriptHeader({
         <span>{task.minutesUsed ?? 0} min used</span>
       </div>
       {rightSidebarCollapsed && onToggleRightSidebar ? (
-        <div
-          className={css({
-            width: "26px",
-            height: "26px",
-            borderRadius: "6px",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            cursor: "pointer",
-            color: t.textTertiary,
-            flexShrink: 0,
-            ":hover": { color: t.textSecondary, backgroundColor: t.interactiveHover },
-          })}
-          onClick={onToggleRightSidebar}
-        >
-          <PanelRight size={14} />
-        </div>
+        <Tooltip label="Toggle changes" placement="bottom">
+          <div
+            className={css({
+              width: "26px",
+              height: "26px",
+              borderRadius: "6px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: "pointer",
+              color: t.textTertiary,
+              flexShrink: 0,
+              ":hover": { color: t.textSecondary, backgroundColor: t.interactiveHover },
+            })}
+            onClick={onToggleRightSidebar}
+          >
+            <PanelRight size={14} />
+          </div>
+        </Tooltip>
       ) : null}
     </PanelHeaderBar>
   );

@@ -1,0 +1,10 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-cli/schema.json",
+  "build": {
+    "beforeDevCommand": "FOUNDRY_FRONTEND_CLIENT_MODE=mock VITE_MOBILE=1 pnpm --filter @sandbox-agent/foundry-frontend dev --host 0.0.0.0 --port 4173"
+  },
+  "bundle": {
+    "externalBin": []
+  },
+  "plugins": {}
+}

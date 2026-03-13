@@ -2,8 +2,10 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { useNavigate } from "@tanstack/react-router";
 import { useStyletron } from "baseui";
 
+import type { WorkbenchPresence } from "@sandbox-agent/foundry-shared";
 import { PanelLeft, PanelRight } from "lucide-react";
 import { useFoundryTokens } from "../app/theme";
+import { useAgentDoneNotification } from "../lib/notification-sound";
 
 import { DiffContent } from "./mock-layout/diff-content";
 import { MessageList } from "./mock-layout/message-list";
@@ -11,15 +13,17 @@ import { PromptComposer } from "./mock-layout/prompt-composer";
 import { RightSidebar } from "./mock-layout/right-sidebar";
 import { Sidebar } from "./mock-layout/sidebar";
 import { TabStrip } from "./mock-layout/tab-strip";
-import { TerminalPane } from "./mock-layout/terminal-pane";
+import { TerminalPane, type ProcessTab } from "./mock-layout/terminal-pane";
 import { TranscriptHeader } from "./mock-layout/transcript-header";
-import { PROMPT_TEXTAREA_MAX_HEIGHT, PROMPT_TEXTAREA_MIN_HEIGHT, SPanel, ScrollBody, Shell } from "./mock-layout/ui";
+import { PROMPT_TEXTAREA_MAX_HEIGHT, PROMPT_TEXTAREA_MIN_HEIGHT, SPanel, ScrollBody, Shell, Tooltip } from "./mock-layout/ui";
 import {
   buildDisplayMessages,
   diffPath,
   diffTabId,
   formatThinkingDuration,
   isDiffTab,
+  isTerminalTab,
+  terminalTabId,
   buildHistoryEvents,
   type Task,
   type HistoryEvent,
@@ -27,8 +31,10 @@ import {
   type Message,
   type ModelId,
 } from "./mock-layout/view-model";
-import { activeMockOrganization, useMockAppSnapshot } from "../lib/mock-app";
+import { activeMockOrganization, activeMockUser, useMockAppSnapshot } from "../lib/mock-app";
+import { useIsMobile } from "../lib/platform";
 import { getTaskWorkbenchClient } from "../lib/workbench";
+import { MobileLayout } from "./mock-layout/mobile-layout";
 
 function firstAgentTabId(task: Task): string | null {
   return task.tabs[0]?.id ?? null;
@@ -58,12 +64,127 @@ function sanitizeActiveTabId(task: Task, tabId: string | null | undefined, openD
     if (isDiffTab(tabId) && openDiffs.includes(diffPath(tabId))) {
       return tabId;
     }
+    if (isTerminalTab(tabId)) {
+      return tabId;
+    }
   }
 
   return openDiffs.length > 0 ? diffTabId(openDiffs[openDiffs.length - 1]!) : lastAgentTabId;
 }
 
+function TypingIndicator({ presence, currentUserId }: { presence: WorkbenchPresence[]; currentUserId: string | null }) {
+  const [css] = useStyletron();
+  const t = useFoundryTokens();
+  const typingMembers = presence.filter((member) => member.typing && member.memberId !== currentUserId);
+  const isTyping = typingMembers.length > 0;
+  const [animState, setAnimState] = useState<"in" | "out" | "hidden">(isTyping ? "in" : "hidden");
+  const lastMembersRef = useRef(typingMembers);
+
+  if (isTyping) {
+    lastMembersRef.current = typingMembers;
+  }
+
+  useEffect(() => {
+    if (isTyping) {
+      setAnimState("in");
+    } else if (lastMembersRef.current.length > 0) {
+      setAnimState("out");
+    }
+  }, [isTyping]);
+
+  if (animState === "hidden") return null;
+
+  const members = lastMembersRef.current;
+  if (members.length === 0) return null;
+  const label =
+    members.length === 1
+      ? `${members[0]!.name} is typing`
+      : members.length === 2
+        ? `${members[0]!.name} & ${members[1]!.name} are typing`
+        : `${members[0]!.name} & ${members.length - 1} others are typing`;
+
+  return (
+    <div
+      className={css({
+        display: "flex",
+        alignItems: "center",
+        gap: "8px",
+        padding: "6px 20px",
+        flexShrink: 0,
+        overflow: "hidden",
+        animationName: animState === "in" ? "hf-typing-in" : "hf-typing-out",
+        animationDuration: "0.2s",
+        animationTimingFunction: "ease-out",
+        animationFillMode: "forwards",
+      })}
+      onAnimationEnd={() => {
+        if (animState === "out") setAnimState("hidden");
+      }}
+    >
+      <div className={css({ display: "flex", alignItems: "center" })}>
+        {members.slice(0, 3).map((member) =>
+          member.avatarUrl ? (
+            <img
+              key={member.memberId}
+              src={member.avatarUrl}
+              alt=""
+              className={css({
+                width: "16px",
+                height: "16px",
+                borderRadius: "50%",
+                objectFit: "cover",
+                border: `1.5px solid ${t.surfacePrimary}`,
+                marginLeft: "-4px",
+                ":first-child": { marginLeft: 0 },
+              })}
+            />
+          ) : (
+            <div
+              key={member.memberId}
+              className={css({
+                width: "16px",
+                height: "16px",
+                borderRadius: "50%",
+                backgroundColor: t.borderMedium,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: "9px",
+                fontWeight: 600,
+                color: t.textSecondary,
+                border: `1.5px solid ${t.surfacePrimary}`,
+                marginLeft: "-4px",
+                ":first-child": { marginLeft: 0 },
+              })}
+            >
+              {member.name.charAt(0).toUpperCase()}
+            </div>
+          ),
+        )}
+      </div>
+      <span className={css({ fontSize: "12px", color: t.textTertiary })}>
+        {label}
+        {[0, 1, 2].map((i) => (
+          <span
+            key={i}
+            className={css({
+              animationName: "hf-dot-fade",
+              animationDuration: "1.4s",
+              animationIterationCount: "infinite",
+              animationFillMode: "both",
+              animationDelay: `${i * 0.2}s`,
+            })}
+          >
+            .
+          </span>
+        ))}
+      </span>
+    </div>
+  );
+}
+
 const TranscriptPanel = memo(function TranscriptPanel({
+  workspaceId,
   taskWorkbenchClient,
   task,
   activeTabId,
@@ -80,7 +201,18 @@ const TranscriptPanel = memo(function TranscriptPanel({
   rightSidebarCollapsed,
   onToggleRightSidebar,
   onNavigateToUsage,
+  terminalTabOpen,
+  onOpenTerminalTab,
+  onCloseTerminalTab,
+  terminalProcessTabs,
+  onTerminalProcessTabsChange,
+  terminalActiveTabId,
+  onTerminalActiveTabIdChange,
+  terminalCustomNames,
+  onTerminalCustomNamesChange,
+  mobile,
 }: {
+  workspaceId: string;
   taskWorkbenchClient: ReturnType<typeof getTaskWorkbenchClient>;
   task: Task;
   activeTabId: string | null;
@@ -97,8 +229,20 @@ const TranscriptPanel = memo(function TranscriptPanel({
   rightSidebarCollapsed?: boolean;
   onToggleRightSidebar?: () => void;
   onNavigateToUsage?: () => void;
+  terminalTabOpen?: boolean;
+  onOpenTerminalTab?: () => void;
+  onCloseTerminalTab?: () => void;
+  terminalProcessTabs?: ProcessTab[];
+  onTerminalProcessTabsChange?: (tabs: ProcessTab[]) => void;
+  terminalActiveTabId?: string | null;
+  onTerminalActiveTabIdChange?: (id: string | null) => void;
+  terminalCustomNames?: Record<string, string>;
+  onTerminalCustomNamesChange?: (names: Record<string, string>) => void;
+  mobile?: boolean;
 }) {
   const t = useFoundryTokens();
+  const transcriptAppSnapshot = useMockAppSnapshot();
+  const currentUser = activeMockUser(transcriptAppSnapshot);
   const [defaultModel, setDefaultModel] = useState<ModelId>("claude-sonnet-4");
   const [editingField, setEditingField] = useState<"title" | "branch" | null>(null);
   const [editValue, setEditValue] = useState("");
@@ -111,9 +255,11 @@ const TranscriptPanel = memo(function TranscriptPanel({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const messageRefs = useRef(new Map<string, HTMLDivElement>());
   const activeDiff = activeTabId && isDiffTab(activeTabId) ? diffPath(activeTabId) : null;
-  const activeAgentTab = activeDiff ? null : (task.tabs.find((candidate) => candidate.id === activeTabId) ?? task.tabs[0] ?? null);
+  const activeTerminal = activeTabId && isTerminalTab(activeTabId) ? true : false;
+  const activeAgentTab = activeDiff || activeTerminal ? null : (task.tabs.find((candidate) => candidate.id === activeTabId) ?? task.tabs[0] ?? null);
   const promptTab = task.tabs.find((candidate) => candidate.id === lastAgentTabId) ?? task.tabs[0] ?? null;
   const isTerminal = task.status === "archived";
+  useAgentDoneNotification(promptTab?.status);
   const historyEvents = useMemo(() => buildHistoryEvents(task.tabs), [task.tabs]);
   const activeMessages = useMemo(() => buildDisplayMessages(activeAgentTab), [activeAgentTab]);
   const draft = promptTab?.draft.text ?? "";
@@ -271,7 +417,7 @@ const TranscriptPanel = memo(function TranscriptPanel({
     (tabId: string) => {
       onSetActiveTabId(tabId);
 
-      if (!isDiffTab(tabId)) {
+      if (!isDiffTab(tabId) && !isTerminalTab(tabId)) {
         onSetLastAgentTabId(tabId);
         const tab = task.tabs.find((candidate) => candidate.id === tabId);
         if (tab?.unread) {
@@ -448,28 +594,30 @@ const TranscriptPanel = memo(function TranscriptPanel({
 
   return (
     <SPanel>
-      <TranscriptHeader
-        task={task}
-        activeTab={activeAgentTab}
-        editingField={editingField}
-        editValue={editValue}
-        onEditValueChange={setEditValue}
-        onStartEditingField={startEditingField}
-        onCommitEditingField={commitEditingField}
-        onCancelEditingField={cancelEditingField}
-        onSetActiveTabUnread={(unread) => {
-          if (activeAgentTab) {
-            setTabUnread(activeAgentTab.id, unread);
-          }
-        }}
-        sidebarCollapsed={sidebarCollapsed}
-        onToggleSidebar={onToggleSidebar}
-        onSidebarPeekStart={onSidebarPeekStart}
-        onSidebarPeekEnd={onSidebarPeekEnd}
-        rightSidebarCollapsed={rightSidebarCollapsed}
-        onToggleRightSidebar={onToggleRightSidebar}
-        onNavigateToUsage={onNavigateToUsage}
-      />
+      {!mobile && (
+        <TranscriptHeader
+          task={task}
+          activeTab={activeAgentTab}
+          editingField={editingField}
+          editValue={editValue}
+          onEditValueChange={setEditValue}
+          onStartEditingField={startEditingField}
+          onCommitEditingField={commitEditingField}
+          onCancelEditingField={cancelEditingField}
+          onSetActiveTabUnread={(unread) => {
+            if (activeAgentTab) {
+              setTabUnread(activeAgentTab.id, unread);
+            }
+          }}
+          sidebarCollapsed={sidebarCollapsed}
+          onToggleSidebar={onToggleSidebar}
+          onSidebarPeekStart={onSidebarPeekStart}
+          onSidebarPeekEnd={onSidebarPeekEnd}
+          rightSidebarCollapsed={rightSidebarCollapsed}
+          onToggleRightSidebar={onToggleRightSidebar}
+          onNavigateToUsage={onNavigateToUsage}
+        />
+      )}
       <div
         style={{
           flex: 1,
@@ -478,11 +626,15 @@ const TranscriptPanel = memo(function TranscriptPanel({
           flexDirection: "column",
           backgroundColor: t.surfacePrimary,
           overflow: "hidden",
-          borderTopLeftRadius: "12px",
-          borderTopRightRadius: rightSidebarCollapsed ? "12px" : 0,
-          borderBottomLeftRadius: "24px",
-          borderBottomRightRadius: rightSidebarCollapsed ? "24px" : 0,
-          border: `1px solid ${t.borderDefault}`,
+          ...(mobile
+            ? {}
+            : {
+                borderTopLeftRadius: "12px",
+                borderTopRightRadius: rightSidebarCollapsed ? "12px" : 0,
+                borderBottomLeftRadius: "24px",
+                borderBottomRightRadius: rightSidebarCollapsed ? "24px" : 0,
+                border: `1px solid ${t.borderDefault}`,
+              }),
         }}
       >
         <TabStrip
@@ -500,9 +652,26 @@ const TranscriptPanel = memo(function TranscriptPanel({
           onCloseTab={closeTab}
           onCloseDiffTab={closeDiffTab}
           onAddTab={addTab}
+          terminalTabOpen={terminalTabOpen}
+          onCloseTerminalTab={onCloseTerminalTab}
           sidebarCollapsed={sidebarCollapsed}
         />
-        {activeDiff ? (
+        {activeTerminal ? (
+          <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+            <TerminalPane
+              workspaceId={workspaceId}
+              taskId={task.id}
+              isExpanded
+              hideHeader
+              processTabs={terminalProcessTabs}
+              onProcessTabsChange={onTerminalProcessTabsChange}
+              activeProcessTabId={terminalActiveTabId}
+              onActiveProcessTabIdChange={onTerminalActiveTabIdChange}
+              customTabNames={terminalCustomNames}
+              onCustomTabNamesChange={onTerminalCustomNamesChange}
+            />
+          </div>
+        ) : activeDiff ? (
           <DiffContent
             filePath={activeDiff}
             file={task.fileChanges.find((file) => file.path === activeDiff)}
@@ -563,25 +732,30 @@ const TranscriptPanel = memo(function TranscriptPanel({
                 void copyMessage(message);
               }}
               thinkingTimerLabel={thinkingTimerLabel}
+              userName={currentUser?.name ?? null}
+              userAvatarUrl={currentUser?.avatarUrl ?? null}
             />
           </ScrollBody>
         )}
-        {!isTerminal && promptTab ? (
-          <PromptComposer
-            draft={draft}
-            textareaRef={textareaRef}
-            placeholder={!promptTab.created ? "Describe your task..." : "Send a message..."}
-            attachments={attachments}
-            defaultModel={defaultModel}
-            model={promptTab.model}
-            isRunning={promptTab.status === "running"}
-            onDraftChange={(value) => updateDraft(value, attachments)}
-            onSend={sendMessage}
-            onStop={stopAgent}
-            onRemoveAttachment={removeAttachment}
-            onChangeModel={changeModel}
-            onSetDefaultModel={setDefaultModel}
-          />
+        {!isTerminal && !activeTerminal && promptTab ? (
+          <>
+            <TypingIndicator presence={task.presence} currentUserId={currentUser?.id ?? null} />
+            <PromptComposer
+              draft={draft}
+              textareaRef={textareaRef}
+              placeholder={!promptTab.created ? "Describe your task..." : "Send a message..."}
+              attachments={attachments}
+              defaultModel={defaultModel}
+              model={promptTab.model}
+              isRunning={promptTab.status === "running"}
+              onDraftChange={(value) => updateDraft(value, attachments)}
+              onSend={sendMessage}
+              onStop={stopAgent}
+              onRemoveAttachment={removeAttachment}
+              onChangeModel={changeModel}
+              onSetDefaultModel={setDefaultModel}
+            />
+          </>
         ) : null}
       </div>
     </SPanel>
@@ -670,6 +844,14 @@ const RightRail = memo(function RightRail({
   onRevertFile,
   onPublishPr,
   onToggleSidebar,
+  onOpenTerminalTab,
+  terminalTabOpen,
+  terminalProcessTabs,
+  onTerminalProcessTabsChange,
+  terminalActiveTabId,
+  onTerminalActiveTabIdChange,
+  terminalCustomNames,
+  onTerminalCustomNamesChange,
 }: {
   workspaceId: string;
   task: Task;
@@ -679,6 +861,14 @@ const RightRail = memo(function RightRail({
   onRevertFile: (path: string) => void;
   onPublishPr: () => void;
   onToggleSidebar?: () => void;
+  onOpenTerminalTab?: () => void;
+  terminalTabOpen?: boolean;
+  terminalProcessTabs?: ProcessTab[];
+  onTerminalProcessTabsChange?: (tabs: ProcessTab[]) => void;
+  terminalActiveTabId?: string | null;
+  onTerminalActiveTabIdChange?: (id: string | null) => void;
+  terminalCustomNames?: Record<string, string>;
+  onTerminalCustomNamesChange?: (names: Record<string, string>) => void;
 }) {
   const [css] = useStyletron();
   const t = useFoundryTokens();
@@ -761,6 +951,13 @@ const RightRail = memo(function RightRail({
           minWidth: 0,
           display: "flex",
           flexDirection: "column",
+          ...(terminalTabOpen
+            ? {
+                borderBottomRightRadius: "12px",
+                borderBottom: `1px solid ${t.borderDefault}`,
+                overflow: "hidden",
+              }
+            : {}),
         })}
       >
         <RightSidebar
@@ -775,14 +972,14 @@ const RightRail = memo(function RightRail({
       </div>
       <div
         className={css({
-          height: `${terminalHeight}px`,
-          minHeight: "43px",
+          height: terminalTabOpen ? 0 : `${terminalHeight}px`,
+          minHeight: terminalTabOpen ? 0 : "43px",
           backgroundColor: t.surfacePrimary,
           overflow: "hidden",
           borderBottomRightRadius: "12px",
-          borderRight: `1px solid ${t.borderDefault}`,
-          borderBottom: `1px solid ${t.borderDefault}`,
-          display: "flex",
+          borderRight: terminalTabOpen ? "none" : `1px solid ${t.borderDefault}`,
+          borderBottom: terminalTabOpen ? "none" : `1px solid ${t.borderDefault}`,
+          display: terminalTabOpen ? "none" : "flex",
           flexDirection: "column",
         })}
       >
@@ -802,6 +999,13 @@ const RightRail = memo(function RightRail({
           onCollapse={() => {
             setTerminalHeight(43);
           }}
+          onOpenTerminalTab={onOpenTerminalTab}
+          processTabs={terminalProcessTabs}
+          onProcessTabsChange={onTerminalProcessTabsChange}
+          activeProcessTabId={terminalActiveTabId}
+          onActiveProcessTabIdChange={onTerminalActiveTabIdChange}
+          customTabNames={terminalCustomNames}
+          onCustomTabNamesChange={onTerminalCustomNamesChange}
         />
       </div>
     </div>
@@ -909,6 +1113,11 @@ export function MockLayout({ workspaceId, selectedTaskId, selectedSessionId }: M
       void navigate({ to: "/organizations/$organizationId/billing" as never, params: { organizationId: activeOrg.id } });
     }
   }, [activeOrg, navigate]);
+  const navigateToSettings = useCallback(() => {
+    if (activeOrg) {
+      void navigate({ to: "/organizations/$organizationId/settings" as never, params: { organizationId: activeOrg.id } as never });
+    }
+  }, [activeOrg, navigate]);
   const [projectOrder, setProjectOrder] = useState<string[] | null>(null);
   const projects = useMemo(() => {
     if (!projectOrder) return rawProjects;
@@ -922,6 +1131,10 @@ export function MockLayout({ workspaceId, selectedTaskId, selectedSessionId }: M
   const [activeTabIdByTask, setActiveTabIdByTask] = useState<Record<string, string | null>>({});
   const [lastAgentTabIdByTask, setLastAgentTabIdByTask] = useState<Record<string, string | null>>({});
   const [openDiffsByTask, setOpenDiffsByTask] = useState<Record<string, string[]>>({});
+  const [terminalTabOpenByTask, setTerminalTabOpenByTask] = useState<Record<string, boolean>>({});
+  const [terminalProcessTabsByTask, setTerminalProcessTabsByTask] = useState<Record<string, ProcessTab[]>>({});
+  const [terminalActiveTabIdByTask, setTerminalActiveTabIdByTask] = useState<Record<string, string | null>>({});
+  const [terminalCustomNamesByTask, setTerminalCustomNamesByTask] = useState<Record<string, Record<string, string>>>({});
   const [selectedNewTaskRepoId, setSelectedNewTaskRepoId] = useState("");
   const [leftWidth, setLeftWidth] = useState(() => readStoredWidth(LEFT_WIDTH_STORAGE_KEY, LEFT_SIDEBAR_DEFAULT_WIDTH));
   const [rightWidth, setRightWidth] = useState(() => readStoredWidth(RIGHT_WIDTH_STORAGE_KEY, RIGHT_SIDEBAR_DEFAULT_WIDTH));
@@ -1021,6 +1234,10 @@ export function MockLayout({ workspaceId, selectedTaskId, selectedSessionId }: M
   }, [activeTask, tasks, navigate, workspaceId]);
 
   const openDiffs = activeTask ? sanitizeOpenDiffs(activeTask, openDiffsByTask[activeTask.id]) : [];
+  const terminalTabOpen = activeTask ? (terminalTabOpenByTask[activeTask.id] ?? false) : false;
+  const terminalProcessTabs = activeTask ? (terminalProcessTabsByTask[activeTask.id] ?? []) : [];
+  const terminalActiveTabId = activeTask ? (terminalActiveTabIdByTask[activeTask.id] ?? null) : null;
+  const terminalCustomNames = activeTask ? (terminalCustomNamesByTask[activeTask.id] ?? {}) : {};
   const lastAgentTabId = activeTask ? sanitizeLastAgentTabId(activeTask, lastAgentTabIdByTask[activeTask.id]) : null;
   const activeTabId = activeTask ? sanitizeActiveTabId(activeTask, activeTabIdByTask[activeTask.id], openDiffs, lastAgentTabId) : null;
 
@@ -1115,29 +1332,32 @@ export function MockLayout({ workspaceId, selectedTaskId, selectedSessionId }: M
     })();
   }, [activeTask, selectedSessionId, syncRouteSession, taskWorkbenchClient]);
 
-  const createTask = useCallback(() => {
-    void (async () => {
-      const repoId = selectedNewTaskRepoId;
-      if (!repoId) {
-        throw new Error("Cannot create a task without an available repo");
-      }
+  const createTask = useCallback(
+    (overrideRepoId?: string) => {
+      void (async () => {
+        const repoId = overrideRepoId || selectedNewTaskRepoId;
+        if (!repoId) {
+          throw new Error("Cannot create a task without an available repo");
+        }
 
-      const { taskId, tabId } = await taskWorkbenchClient.createTask({
-        repoId,
-        task: "New task",
-        model: "gpt-4o",
-        title: "New task",
-      });
-      await navigate({
-        to: "/workspaces/$workspaceId/tasks/$taskId",
-        params: {
-          workspaceId,
-          taskId,
-        },
-        search: { sessionId: tabId ?? undefined },
-      });
-    })();
-  }, [navigate, selectedNewTaskRepoId, workspaceId]);
+        const { taskId, tabId } = await taskWorkbenchClient.createTask({
+          repoId,
+          task: "New task",
+          model: "gpt-4o",
+          title: "New task",
+        });
+        await navigate({
+          to: "/workspaces/$workspaceId/tasks/$taskId",
+          params: {
+            workspaceId,
+            taskId,
+          },
+          search: { sessionId: tabId ?? undefined },
+        });
+      })();
+    },
+    [navigate, selectedNewTaskRepoId, workspaceId],
+  );
 
   const openDiffTab = useCallback(
     (path: string) => {
@@ -1159,6 +1379,46 @@ export function MockLayout({ workspaceId, selectedTaskId, selectedSessionId }: M
         ...current,
         [activeTask.id]: diffTabId(path),
       }));
+    },
+    [activeTask],
+  );
+
+  const openTerminalTab = useCallback(() => {
+    if (!activeTask) return;
+    setTerminalTabOpenByTask((current) => ({ ...current, [activeTask.id]: true }));
+    setActiveTabIdByTask((current) => ({ ...current, [activeTask.id]: terminalTabId() }));
+  }, [activeTask]);
+
+  const closeTerminalTab = useCallback(() => {
+    if (!activeTask) return;
+    setTerminalTabOpenByTask((current) => ({ ...current, [activeTask.id]: false }));
+    const currentActive = activeTabIdByTask[activeTask.id];
+    if (currentActive && isTerminalTab(currentActive)) {
+      const fallback = lastAgentTabIdByTask[activeTask.id] ?? activeTask.tabs[0]?.id ?? null;
+      setActiveTabIdByTask((current) => ({ ...current, [activeTask.id]: fallback }));
+    }
+  }, [activeTask, activeTabIdByTask, lastAgentTabIdByTask]);
+
+  const setTerminalProcessTabs = useCallback(
+    (tabs: ProcessTab[]) => {
+      if (!activeTask) return;
+      setTerminalProcessTabsByTask((current) => ({ ...current, [activeTask.id]: tabs }));
+    },
+    [activeTask],
+  );
+
+  const setTerminalActiveTabId = useCallback(
+    (id: string | null) => {
+      if (!activeTask) return;
+      setTerminalActiveTabIdByTask((current) => ({ ...current, [activeTask.id]: id }));
+    },
+    [activeTask],
+  );
+
+  const setTerminalCustomNames = useCallback(
+    (names: Record<string, string>) => {
+      if (!activeTask) return;
+      setTerminalCustomNamesByTask((current) => ({ ...current, [activeTask.id]: names }));
     },
     [activeTask],
   );
@@ -1265,6 +1525,8 @@ export function MockLayout({ workspaceId, selectedTaskId, selectedSessionId }: M
     [activeTask, lastAgentTabIdByTask],
   );
 
+  const isMobile = useIsMobile();
+
   const isDesktop = !!import.meta.env.VITE_DESKTOP;
   const onDragMouseDown = useCallback((event: ReactPointerEvent) => {
     if (event.button !== 0) return;
@@ -1274,6 +1536,58 @@ export function MockLayout({ workspaceId, selectedTaskId, selectedSessionId }: M
       ipc.invoke("plugin:window|start_dragging").catch(() => {});
     }
   }, []);
+
+  // Mobile layout: single-panel stack navigation with bottom tab bar
+  if (isMobile && activeTask) {
+    return (
+      <MobileLayout
+        workspaceId={workspaceId}
+        task={activeTask}
+        tasks={tasks}
+        projects={projects}
+        repos={viewModel.repos}
+        selectedNewTaskRepoId={selectedNewTaskRepoId}
+        onSelectNewTaskRepo={setSelectedNewTaskRepoId}
+        onSelectTask={selectTask}
+        onCreateTask={createTask}
+        onMarkUnread={markTaskUnread}
+        onRenameTask={renameTask}
+        onRenameBranch={renameBranch}
+        onReorderProjects={reorderProjects}
+        taskOrderByProject={taskOrderByProject}
+        onReorderTasks={reorderTasks}
+        activeTabId={activeTabId}
+        transcriptPanel={
+          <TranscriptPanel
+            workspaceId={workspaceId}
+            taskWorkbenchClient={taskWorkbenchClient}
+            task={activeTask}
+            activeTabId={activeTabId}
+            lastAgentTabId={lastAgentTabId}
+            openDiffs={openDiffs}
+            onSyncRouteSession={syncRouteSession}
+            onSetActiveTabId={(tabId) => setActiveTabIdByTask((current) => ({ ...current, [activeTask.id]: tabId }))}
+            onSetLastAgentTabId={(tabId) => setLastAgentTabIdByTask((current) => ({ ...current, [activeTask.id]: tabId }))}
+            onSetOpenDiffs={(paths) => setOpenDiffsByTask((current) => ({ ...current, [activeTask.id]: paths }))}
+            onNavigateToUsage={navigateToUsage}
+            mobile
+          />
+        }
+        onOpenDiff={openDiffTab}
+        onArchive={archiveTask}
+        onRevertFile={revertFile}
+        onPublishPr={publishPr}
+        terminalProcessTabs={terminalProcessTabs}
+        onTerminalProcessTabsChange={setTerminalProcessTabs}
+        terminalActiveTabId={terminalActiveTabId}
+        onTerminalActiveTabIdChange={setTerminalActiveTabId}
+        terminalCustomNames={terminalCustomNames}
+        onTerminalCustomNamesChange={setTerminalCustomNames}
+        onOpenSettings={navigateToSettings}
+      />
+    );
+  }
+
   const dragRegion = isDesktop ? (
     <div
       style={{
@@ -1310,11 +1624,11 @@ export function MockLayout({ workspaceId, selectedTaskId, selectedSessionId }: M
     alignItems: "center",
     justifyContent: "center",
     cursor: "pointer",
-    color: t.textTertiary,
+    color: t.textPrimary,
     position: "relative",
     zIndex: 9999,
     flexShrink: 0,
-    ":hover": { color: t.textSecondary, backgroundColor: t.interactiveHover },
+    ":hover": { color: t.textPrimary, backgroundColor: t.interactiveHover },
   });
 
   const sidebarTransition = "width 200ms ease";
@@ -1370,15 +1684,19 @@ export function MockLayout({ workspaceId, selectedTaskId, selectedSessionId }: M
               {!leftSidebarOpen || !rightSidebarOpen ? (
                 <div style={{ display: "flex", alignItems: "center", padding: "8px 8px 0 8px" }}>
                   {leftSidebarOpen ? null : (
-                    <div className={collapsedToggleClass} onClick={() => setLeftSidebarOpen(true)}>
-                      <PanelLeft size={14} />
-                    </div>
+                    <Tooltip label="Toggle sidebar" placement="bottom">
+                      <div className={collapsedToggleClass} onClick={() => setLeftSidebarOpen(true)}>
+                        <PanelLeft size={14} />
+                      </div>
+                    </Tooltip>
                   )}
                   <div style={{ flex: 1 }} />
                   {rightSidebarOpen ? null : (
-                    <div className={collapsedToggleClass} onClick={() => setRightSidebarOpen(true)}>
-                      <PanelRight size={14} />
-                    </div>
+                    <Tooltip label="Toggle changes" placement="bottom">
+                      <div className={collapsedToggleClass} onClick={() => setRightSidebarOpen(true)}>
+                        <PanelRight size={14} />
+                      </div>
+                    </Tooltip>
                   )}
                 </div>
               ) : null}
@@ -1409,7 +1727,7 @@ export function MockLayout({ workspaceId, selectedTaskId, selectedSessionId }: M
                     </p>
                     <button
                       type="button"
-                      onClick={createTask}
+                      onClick={() => createTask()}
                       disabled={viewModel.repos.length === 0}
                       style={{
                         alignSelf: "center",
@@ -1543,6 +1861,7 @@ export function MockLayout({ workspaceId, selectedTaskId, selectedSessionId }: M
           {leftSidebarOpen ? <PanelResizeHandle onResizeStart={onLeftResizeStart} onResize={onLeftResize} /> : null}
           <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
             <TranscriptPanel
+              workspaceId={workspaceId}
               taskWorkbenchClient={taskWorkbenchClient}
               task={activeTask}
               activeTabId={activeTabId}
@@ -1568,6 +1887,15 @@ export function MockLayout({ workspaceId, selectedTaskId, selectedSessionId }: M
               rightSidebarCollapsed={!rightSidebarOpen}
               onToggleRightSidebar={() => setRightSidebarOpen(true)}
               onNavigateToUsage={navigateToUsage}
+              terminalTabOpen={terminalTabOpen}
+              onOpenTerminalTab={openTerminalTab}
+              onCloseTerminalTab={closeTerminalTab}
+              terminalProcessTabs={terminalProcessTabs}
+              onTerminalProcessTabsChange={setTerminalProcessTabs}
+              terminalActiveTabId={terminalActiveTabId}
+              onTerminalActiveTabIdChange={setTerminalActiveTabId}
+              terminalCustomNames={terminalCustomNames}
+              onTerminalCustomNamesChange={setTerminalCustomNames}
             />
           </div>
           {rightSidebarOpen ? <PanelResizeHandle onResizeStart={onRightResizeStart} onResize={onRightResize} /> : null}
@@ -1592,6 +1920,14 @@ export function MockLayout({ workspaceId, selectedTaskId, selectedSessionId }: M
                 onRevertFile={revertFile}
                 onPublishPr={publishPr}
                 onToggleSidebar={() => setRightSidebarOpen(false)}
+                onOpenTerminalTab={openTerminalTab}
+                terminalTabOpen={terminalTabOpen}
+                terminalProcessTabs={terminalProcessTabs}
+                onTerminalProcessTabsChange={setTerminalProcessTabs}
+                terminalActiveTabId={terminalActiveTabId}
+                onTerminalActiveTabIdChange={setTerminalActiveTabId}
+                terminalCustomNames={terminalCustomNames}
+                onTerminalCustomNamesChange={setTerminalCustomNames}
               />
             </div>
           </div>

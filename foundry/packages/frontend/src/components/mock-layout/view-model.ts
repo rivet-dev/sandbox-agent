@@ -102,6 +102,7 @@ export function providerAgent(provider: string): AgentKind {
 }
 
 const DIFF_PREFIX = "diff:";
+const TERMINAL_PREFIX = "terminal:";
 
 export function isDiffTab(id: string): boolean {
   return id.startsWith(DIFF_PREFIX);
@@ -113,6 +114,14 @@ export function diffPath(id: string): string {
 
 export function diffTabId(path: string): string {
   return `${DIFF_PREFIX}${path}`;
+}
+
+export function isTerminalTab(id: string): boolean {
+  return id.startsWith(TERMINAL_PREFIX);
+}
+
+export function terminalTabId(): string {
+  return `${TERMINAL_PREFIX}main`;
 }
 
 export function fileName(path: string): string {

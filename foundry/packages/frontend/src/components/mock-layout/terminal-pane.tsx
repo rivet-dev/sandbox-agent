@@ -3,7 +3,7 @@ import { ProcessTerminal } from "@sandbox-agent/react";
 import { useQuery } from "@tanstack/react-query";
 import { useStyletron } from "baseui";
 import { useFoundryTokens } from "../../app/theme";
-import { ChevronDown, ChevronUp, Plus, SquareTerminal, Trash2 } from "lucide-react";
+import { ArrowUpLeft, ChevronDown, ChevronUp, Plus, SquareTerminal, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { SandboxAgent } from "sandbox-agent";
 import { backendClient } from "../../lib/backend";
@@ -12,10 +12,20 @@ interface TerminalPaneProps {
   workspaceId: string;
   taskId: string | null;
   isExpanded?: boolean;
+  hideHeader?: boolean;
   onExpand?: () => void;
   onCollapse?: () => void;
   onStartResize?: (e: React.PointerEvent) => void;
+  onOpenTerminalTab?: () => void;
+  processTabs?: ProcessTab[];
+  onProcessTabsChange?: (tabs: ProcessTab[]) => void;
+  activeProcessTabId?: string | null;
+  onActiveProcessTabIdChange?: (id: string | null) => void;
+  customTabNames?: Record<string, string>;
+  onCustomTabNamesChange?: (names: Record<string, string>) => void;
 }
+
+export type { ProcessTab };
 
 interface ProcessTab {
   id: string;
@@ -94,15 +104,66 @@ function HeaderIconButton({
   );
 }
 
-export function TerminalPane({ workspaceId, taskId, isExpanded, onExpand, onCollapse, onStartResize }: TerminalPaneProps) {
+export function TerminalPane({
+  workspaceId,
+  taskId,
+  isExpanded,
+  hideHeader,
+  onExpand,
+  onCollapse,
+  onStartResize,
+  onOpenTerminalTab,
+  processTabs: controlledProcessTabs,
+  onProcessTabsChange,
+  activeProcessTabId: controlledActiveTabId,
+  onActiveProcessTabIdChange,
+  customTabNames: controlledCustomTabNames,
+  onCustomTabNamesChange,
+}: TerminalPaneProps) {
   const [css] = useStyletron();
   const t = useFoundryTokens();
-  const [activeTabId, setActiveTabId] = useState<string | null>(null);
-  const [processTabs, setProcessTabs] = useState<ProcessTab[]>([]);
+  const [internalActiveTabId, setInternalActiveTabId] = useState<string | null>(null);
+  const [internalProcessTabs, setInternalProcessTabs] = useState<ProcessTab[]>([]);
   const [creatingProcess, setCreatingProcess] = useState(false);
   const [hoveredTabId, setHoveredTabId] = useState<string | null>(null);
   const [terminalClient, setTerminalClient] = useState<SandboxAgent | null>(null);
-  const [customTabNames, setCustomTabNames] = useState<Record<string, string>>({});
+  const [internalCustomTabNames, setInternalCustomTabNames] = useState<Record<string, string>>({});
+
+  const processTabs = controlledProcessTabs ?? internalProcessTabs;
+  const setProcessTabs = useCallback(
+    (update: ProcessTab[] | ((prev: ProcessTab[]) => ProcessTab[])) => {
+      if (onProcessTabsChange) {
+        const next = typeof update === "function" ? update(controlledProcessTabs ?? []) : update;
+        onProcessTabsChange(next);
+      } else {
+        setInternalProcessTabs(update);
+      }
+    },
+    [onProcessTabsChange, controlledProcessTabs],
+  );
+  const activeTabId = controlledActiveTabId !== undefined ? controlledActiveTabId : internalActiveTabId;
+  const setActiveTabId = useCallback(
+    (id: string | null) => {
+      if (onActiveProcessTabIdChange) {
+        onActiveProcessTabIdChange(id);
+      } else {
+        setInternalActiveTabId(id);
+      }
+    },
+    [onActiveProcessTabIdChange],
+  );
+  const customTabNames = controlledCustomTabNames ?? internalCustomTabNames;
+  const setCustomTabNames = useCallback(
+    (update: Record<string, string> | ((prev: Record<string, string>) => Record<string, string>)) => {
+      if (onCustomTabNamesChange) {
+        const next = typeof update === "function" ? update(controlledCustomTabNames ?? {}) : update;
+        onCustomTabNamesChange(next);
+      } else {
+        setInternalCustomTabNames(update);
+      }
+    },
+    [onCustomTabNamesChange, controlledCustomTabNames],
+  );
   const [editingTabId, setEditingTabId] = useState<string | null>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
 
@@ -135,7 +196,7 @@ export function TerminalPane({ workspaceId, taskId, isExpanded, onExpand, onColl
         setProcessTabs((prev) => {
           const next = [...prev];
           const [moved] = next.splice(d.fromIdx, 1);
-          next.splice(d.overIdx!, 0, moved);
+          if (moved) next.splice(d.overIdx!, 0, moved);
           return next;
         });
       }
@@ -306,43 +367,48 @@ export function TerminalPane({ workspaceId, taskId, isExpanded, onExpand, onColl
     };
   }, [terminalClient]);
 
+  // Only reset on taskId change when using internal (uncontrolled) state.
+  // When controlled, the parent (MockLayout) owns per-task state via keyed records.
   useEffect(() => {
-    setActiveTabId(null);
-    setProcessTabs([]);
-  }, [taskId]);
+    if (!controlledProcessTabs) {
+      setActiveTabId(null);
+      setProcessTabs([]);
+    }
+  }, [taskId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const processes = processesQuery.data?.processes ?? [];
 
-  const openTerminalTab = useCallback((process: SandboxProcessRecord) => {
-    setProcessTabs((current) => {
-      const existing = current.find((tab) => tab.processId === process.id);
-      if (existing) {
-        setActiveTabId(existing.id);
-        return current;
-      }
-
-      const nextTab: ProcessTab = {
-        id: `terminal:${process.id}`,
-        processId: process.id,
-        title: formatProcessTabTitle(process, current.length + 1),
-      };
-      setActiveTabId(nextTab.id);
-      return [...current, nextTab];
-    });
-  }, []);
-
-  const closeTerminalTab = useCallback((tabId: string) => {
-    setProcessTabs((current) => {
-      const next = current.filter((tab) => tab.id !== tabId);
-      setActiveTabId((currentActive) => {
-        if (currentActive === tabId) {
-          return next.length > 0 ? next[next.length - 1]!.id : null;
+  const openTerminalTab = useCallback(
+    (process: SandboxProcessRecord) => {
+      setProcessTabs((current) => {
+        const existing = current.find((tab) => tab.processId === process.id);
+        if (existing) {
+          setActiveTabId(existing.id);
+          return current;
         }
-        return currentActive;
+
+        const nextTab: ProcessTab = {
+          id: `terminal:${process.id}`,
+          processId: process.id,
+          title: formatProcessTabTitle(process, current.length + 1),
+        };
+        setActiveTabId(nextTab.id);
+        return [...current, nextTab];
       });
-      return next;
-    });
-  }, []);
+    },
+    [setProcessTabs, setActiveTabId],
+  );
+
+  const closeTerminalTab = useCallback(
+    (tabId: string) => {
+      const next = processTabs.filter((tab) => tab.id !== tabId);
+      setProcessTabs(next);
+      if (activeTabId === tabId) {
+        setActiveTabId(next.length > 0 ? next[next.length - 1]!.id : null);
+      }
+    },
+    [processTabs, activeTabId, setProcessTabs, setActiveTabId],
+  );
 
   const spawnTerminal = useCallback(async () => {
     if (!activeSandbox?.sandboxId) {
@@ -527,25 +593,27 @@ export function TerminalPane({ workspaceId, taskId, isExpanded, onExpand, onColl
         overflow: "hidden",
       })}
     >
-      {/* Resize handle */}
-      <div
-        onPointerDown={onStartResize}
-        className={css({
-          height: "3px",
-          flexShrink: 0,
-          cursor: "ns-resize",
-          position: "relative",
-          "::before": {
-            content: '""',
-            position: "absolute",
-            top: "-2px",
-            left: 0,
-            right: 0,
-            height: "7px",
-          },
-        })}
-      />
-      {/* Full-width header bar */}
+      {/* Resize handle — hidden when in tab view */}
+      {!hideHeader && (
+        <div
+          onPointerDown={onStartResize}
+          className={css({
+            height: "3px",
+            flexShrink: 0,
+            cursor: "ns-resize",
+            position: "relative",
+            "::before": {
+              content: '""',
+              position: "absolute",
+              top: "-2px",
+              left: 0,
+              right: 0,
+              height: "7px",
+            },
+          })}
+        />
+      )}
+      {/* Header bar — in tab view, only show action buttons (no title/expand/chevron) */}
       <div
         className={css({
           display: "flex",
@@ -554,13 +622,17 @@ export function TerminalPane({ workspaceId, taskId, isExpanded, onExpand, onColl
           minHeight: "39px",
           maxHeight: "39px",
           padding: "0 14px",
-          borderTop: `1px solid ${t.borderDefault}`,
+          borderTop: hideHeader ? "none" : `1px solid ${t.borderDefault}`,
           backgroundColor: t.surfacePrimary,
           flexShrink: 0,
         })}
       >
-        <SquareTerminal size={14} color={t.textTertiary} />
-        <span className={css({ fontSize: "12px", fontWeight: 600, color: t.textSecondary })}>Terminal</span>
+        {!hideHeader && (
+          <>
+            <SquareTerminal size={14} color={t.textTertiary} />
+            <span className={css({ fontSize: "12px", fontWeight: 600, color: t.textSecondary })}>Terminal</span>
+          </>
+        )}
         <div className={css({ flex: 1 })} />
         <div className={css({ display: "flex", alignItems: "center", gap: "2px" })}>
           <HeaderIconButton
@@ -585,14 +657,21 @@ export function TerminalPane({ workspaceId, taskId, isExpanded, onExpand, onColl
           >
             <Trash2 size={13} />
           </HeaderIconButton>
-          <HeaderIconButton css={css} t={t} label={isExpanded ? "Collapse terminal" : "Expand terminal"} onClick={isExpanded ? onCollapse : onExpand}>
-            {isExpanded ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
-          </HeaderIconButton>
+          {!hideHeader && onOpenTerminalTab ? (
+            <HeaderIconButton css={css} t={t} label="Open terminal in tab" onClick={onOpenTerminalTab}>
+              <ArrowUpLeft size={13} />
+            </HeaderIconButton>
+          ) : null}
+          {!hideHeader && (
+            <HeaderIconButton css={css} t={t} label={isExpanded ? "Collapse terminal" : "Expand terminal"} onClick={isExpanded ? onCollapse : onExpand}>
+              {isExpanded ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+            </HeaderIconButton>
+          )}
         </div>
       </div>
 
-      {/* Two-column body: terminal left, list right — hidden when no tabs */}
-      {processTabs.length > 0 && (
+      {/* Two-column body: terminal left, list right — visible when expanded or when tabs exist */}
+      {(processTabs.length > 0 || hideHeader) && (
         <div className={css({ flex: 1, minHeight: 0, display: "flex", flexDirection: "row" })}>
           {/* Left: terminal content */}
           <div className={css({ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" })}>{renderBody()}</div>

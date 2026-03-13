@@ -3,13 +3,20 @@ name = "foundry"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+crate-type = ["staticlib", "cdylib", "lib"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
-tauri-plugin-shell = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", features = ["json"] }
 tokio = { version = "1", features = ["time"] }
+
+# Shell plugin is desktop-only (used for sidecar spawning).
+# Exclude iOS and Android targets.
+[target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
+tauri-plugin-shell = "2"

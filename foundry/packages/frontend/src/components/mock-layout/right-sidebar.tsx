@@ -4,7 +4,7 @@ import { LabelSmall } from "baseui/typography";
 import { Archive, ArrowUpFromLine, ChevronRight, FileCode, FilePlus, FileX, FolderOpen, GitPullRequest, PanelRight } from "lucide-react";
 
 import { useFoundryTokens } from "../../app/theme";
-import { type ContextMenuItem, ContextMenuOverlay, PanelHeaderBar, SPanel, ScrollBody, useContextMenu } from "./ui";
+import { type ContextMenuItem, ContextMenuOverlay, PanelHeaderBar, SPanel, ScrollBody, Tooltip, useContextMenu } from "./ui";
 import { type FileTreeNode, type Task, diffTabId } from "./view-model";
 
 const FileTree = memo(function FileTree({
@@ -96,6 +96,7 @@ export const RightSidebar = memo(function RightSidebar({
   onRevertFile,
   onPublishPr,
   onToggleSidebar,
+  mobile,
 }: {
   task: Task;
   activeTabId: string | null;
@@ -104,6 +105,7 @@ export const RightSidebar = memo(function RightSidebar({
   onRevertFile: (path: string) => void;
   onPublishPr: () => void;
   onToggleSidebar?: () => void;
+  mobile?: boolean;
 }) {
   const [css] = useStyletron();
   const t = useFoundryTokens();
@@ -151,128 +153,138 @@ export const RightSidebar = memo(function RightSidebar({
 
   return (
     <SPanel $style={{ backgroundColor: t.surfacePrimary, minWidth: 0 }}>
-      <PanelHeaderBar $style={{ backgroundColor: t.surfaceSecondary, borderBottom: "none", overflow: "hidden" }}>
-        <div ref={headerRef} className={css({ display: "flex", alignItems: "center", flex: 1, minWidth: 0, justifyContent: "flex-end", gap: "2px" })}>
-          {!isTerminal ? (
-            <div className={css({ display: "flex", alignItems: "center", gap: "2px", flexShrink: 1, minWidth: 0 })}>
-              <button
-                onClick={() => {
-                  if (pullRequestUrl) {
-                    window.open(pullRequestUrl, "_blank", "noopener,noreferrer");
-                    return;
-                  }
+      {!mobile && (
+        <PanelHeaderBar $style={{ backgroundColor: t.surfaceSecondary, borderBottom: "none", overflow: "hidden" }}>
+          <div ref={headerRef} className={css({ display: "flex", alignItems: "center", flex: 1, minWidth: 0, justifyContent: "flex-end", gap: "2px" })}>
+            {!isTerminal ? (
+              <div className={css({ display: "flex", alignItems: "center", gap: "2px", flexShrink: 1, minWidth: 0 })}>
+                <Tooltip label={pullRequestUrl ? "Open PR" : "Publish PR"} placement="bottom">
+                  <button
+                    onClick={() => {
+                      if (pullRequestUrl) {
+                        window.open(pullRequestUrl, "_blank", "noopener,noreferrer");
+                        return;
+                      }
 
-                  onPublishPr();
-                }}
-                className={css({
-                  appearance: "none",
-                  WebkitAppearance: "none",
-                  background: "none",
-                  border: "none",
-                  margin: "0",
-                  boxSizing: "border-box",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "5px",
-                  padding: compact ? "4px 6px" : "4px 10px",
-                  borderRadius: "6px",
-                  fontSize: "11px",
-                  fontWeight: 500,
-                  lineHeight: 1,
-                  whiteSpace: "nowrap",
-                  flexShrink: 0,
-                  color: t.textSecondary,
-                  cursor: "pointer",
-                  transition: "all 200ms ease",
-                  ":hover": { backgroundColor: t.interactiveHover, color: t.textPrimary },
-                })}
-              >
-                <GitPullRequest size={12} style={{ flexShrink: 0 }} />
-                {!compact && <span>{pullRequestUrl ? "Open PR" : "Publish PR"}</span>}
-              </button>
-              <button
-                className={css({
-                  appearance: "none",
-                  WebkitAppearance: "none",
-                  background: "none",
-                  border: "none",
-                  margin: "0",
-                  boxSizing: "border-box",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "5px",
-                  padding: compact ? "4px 6px" : "4px 10px",
-                  borderRadius: "6px",
-                  fontSize: "11px",
-                  fontWeight: 500,
-                  lineHeight: 1,
-                  whiteSpace: "nowrap",
-                  flexShrink: 0,
-                  color: t.textSecondary,
-                  cursor: "pointer",
-                  transition: "all 200ms ease",
-                  ":hover": { backgroundColor: t.interactiveHover, color: t.textPrimary },
-                })}
-              >
-                <ArrowUpFromLine size={12} style={{ flexShrink: 0 }} />
-                {!compact && <span>Push</span>}
-              </button>
-              <button
-                onClick={onArchive}
-                className={css({
-                  appearance: "none",
-                  WebkitAppearance: "none",
-                  background: "none",
-                  border: "none",
-                  margin: "0",
-                  boxSizing: "border-box",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "5px",
-                  padding: compact ? "4px 6px" : "4px 10px",
-                  borderRadius: "6px",
-                  fontSize: "11px",
-                  fontWeight: 500,
-                  lineHeight: 1,
-                  whiteSpace: "nowrap",
-                  flexShrink: 0,
-                  color: t.textSecondary,
-                  cursor: "pointer",
-                  transition: "all 200ms ease",
-                  ":hover": { backgroundColor: t.interactiveHover, color: t.textPrimary },
-                })}
-              >
-                <Archive size={12} style={{ flexShrink: 0 }} />
-                {!compact && <span>Archive</span>}
-              </button>
-            </div>
-          ) : null}
-          {onToggleSidebar ? (
-            <div
-              role="button"
-              tabIndex={0}
-              onClick={onToggleSidebar}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") onToggleSidebar();
-              }}
-              className={css({
-                width: "26px",
-                height: "26px",
-                borderRadius: "6px",
-                color: t.textTertiary,
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                flexShrink: 0,
-                ":hover": { color: t.textSecondary, backgroundColor: t.interactiveHover },
-              })}
-            >
-              <PanelRight size={14} />
-            </div>
-          ) : null}
-        </div>
-      </PanelHeaderBar>
+                      onPublishPr();
+                    }}
+                    className={css({
+                      appearance: "none",
+                      WebkitAppearance: "none",
+                      background: "none",
+                      border: "none",
+                      margin: "0",
+                      boxSizing: "border-box",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "5px",
+                      padding: compact ? "4px 6px" : "4px 10px",
+                      borderRadius: "6px",
+                      fontSize: "11px",
+                      fontWeight: 500,
+                      lineHeight: 1,
+                      whiteSpace: "nowrap",
+                      flexShrink: 0,
+                      color: t.textSecondary,
+                      cursor: "pointer",
+                      transition: "all 200ms ease",
+                      ":hover": { backgroundColor: t.interactiveHover, color: t.textPrimary },
+                    })}
+                  >
+                    <GitPullRequest size={12} style={{ flexShrink: 0 }} />
+                    {!compact && <span>{pullRequestUrl ? "Open PR" : "Publish PR"}</span>}
+                  </button>
+                </Tooltip>
+                <Tooltip label="Push" placement="bottom">
+                  <button
+                    className={css({
+                      appearance: "none",
+                      WebkitAppearance: "none",
+                      background: "none",
+                      border: "none",
+                      margin: "0",
+                      boxSizing: "border-box",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "5px",
+                      padding: compact ? "4px 6px" : "4px 10px",
+                      borderRadius: "6px",
+                      fontSize: "11px",
+                      fontWeight: 500,
+                      lineHeight: 1,
+                      whiteSpace: "nowrap",
+                      flexShrink: 0,
+                      color: t.textSecondary,
+                      cursor: "pointer",
+                      transition: "all 200ms ease",
+                      ":hover": { backgroundColor: t.interactiveHover, color: t.textPrimary },
+                    })}
+                  >
+                    <ArrowUpFromLine size={12} style={{ flexShrink: 0 }} />
+                    {!compact && <span>Push</span>}
+                  </button>
+                </Tooltip>
+                <Tooltip label="Archive" placement="bottom">
+                  <button
+                    onClick={onArchive}
+                    className={css({
+                      appearance: "none",
+                      WebkitAppearance: "none",
+                      background: "none",
+                      border: "none",
+                      margin: "0",
+                      boxSizing: "border-box",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "5px",
+                      padding: compact ? "4px 6px" : "4px 10px",
+                      borderRadius: "6px",
+                      fontSize: "11px",
+                      fontWeight: 500,
+                      lineHeight: 1,
+                      whiteSpace: "nowrap",
+                      flexShrink: 0,
+                      color: t.textSecondary,
+                      cursor: "pointer",
+                      transition: "all 200ms ease",
+                      ":hover": { backgroundColor: t.interactiveHover, color: t.textPrimary },
+                    })}
+                  >
+                    <Archive size={12} style={{ flexShrink: 0 }} />
+                    {!compact && <span>Archive</span>}
+                  </button>
+                </Tooltip>
+              </div>
+            ) : null}
+            {onToggleSidebar ? (
+              <Tooltip label="Toggle sidebar" placement="bottom">
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={onToggleSidebar}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") onToggleSidebar();
+                  }}
+                  className={css({
+                    width: "26px",
+                    height: "26px",
+                    borderRadius: "6px",
+                    color: t.textTertiary,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexShrink: 0,
+                    ":hover": { color: t.textSecondary, backgroundColor: t.interactiveHover },
+                  })}
+                >
+                  <PanelRight size={14} />
+                </div>
+              </Tooltip>
+            ) : null}
+          </div>
+        </PanelHeaderBar>
+      )}
 
       <div
         style={{
@@ -280,9 +292,13 @@ export const RightSidebar = memo(function RightSidebar({
           minHeight: 0,
           display: "flex",
           flexDirection: "column",
-          borderTop: `1px solid ${t.borderDefault}`,
-          borderRight: `1px solid ${t.borderDefault}`,
-          borderTopRightRadius: "12px",
+          ...(mobile
+            ? {}
+            : {
+                borderTop: `1px solid ${t.borderDefault}`,
+                borderRight: `1px solid ${t.borderDefault}`,
+                borderTopRightRadius: "12px",
+              }),
           overflow: "hidden",
         }}
       >
@@ -296,7 +312,7 @@ export const RightSidebar = memo(function RightSidebar({
             height: "41px",
             minHeight: "41px",
             flexShrink: 0,
-            borderTopRightRadius: "12px",
+            ...(mobile ? {} : { borderTopRightRadius: "12px" }),
           })}
         >
           <button

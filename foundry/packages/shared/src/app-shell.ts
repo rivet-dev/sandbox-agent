@@ -10,6 +10,7 @@ export interface FoundryUser {
   name: string;
   email: string;
   githubLogin: string;
+  avatarUrl: string | null;
   roleLabel: string;
   eligibleOrganizationIds: string[];
 }
@@ -20,6 +21,8 @@ export interface FoundryOrganizationMember {
   email: string;
   role: "owner" | "admin" | "member";
   state: "active" | "invited";
+  avatarUrl: string | null;
+  githubLogin: string | null;
 }
 
 export interface FoundryInvoice {
