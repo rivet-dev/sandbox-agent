@@ -1,6 +1,6 @@
 import { Daytona } from "@daytonaio/sdk";
 import { SandboxAgent } from "sandbox-agent";
-import { detectAgent, buildInspectorUrl } from "@sandbox-agent/example-shared";
+import { detectAgent, buildInspectorUrl, generateInstallCommand } from "@sandbox-agent/example-shared";
 
 const daytona = new Daytona();
 
@@ -14,11 +14,7 @@ const sandbox = await daytona.create({ envVars, autoStopInterval: 0 });
 
 // Install sandbox-agent and start server
 console.log("Installing sandbox-agent...");
-await sandbox.process.executeCommand("curl -fsSL https://releases.rivet.dev/sandbox-agent/0.3.x/install.sh | sh");
-
-console.log("Installing agents...");
-await sandbox.process.executeCommand("sandbox-agent install-agent claude");
-await sandbox.process.executeCommand("sandbox-agent install-agent codex");
+await sandbox.process.executeCommand(generateInstallCommand({ components: ["claude", "codex"] }));
 
 await sandbox.process.executeCommand("nohup sandbox-agent server --no-token --host 0.0.0.0 --port 3000 >/tmp/sandbox-agent.log 2>&1 &");
 

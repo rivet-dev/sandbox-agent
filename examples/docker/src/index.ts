@@ -2,7 +2,7 @@ import Docker from "dockerode";
 import fs from "node:fs";
 import path from "node:path";
 import { SandboxAgent } from "sandbox-agent";
-import { detectAgent, buildInspectorUrl } from "@sandbox-agent/example-shared";
+import { detectAgent, buildInspectorUrl, generateInstallCommand } from "@sandbox-agent/example-shared";
 
 const IMAGE = "node:22-bookworm-slim";
 const PORT = 3000;
@@ -35,7 +35,7 @@ const container = await docker.createContainer({
       "apt-get update",
       "DEBIAN_FRONTEND=noninteractive apt-get install -y curl ca-certificates bash libstdc++6",
       "rm -rf /var/lib/apt/lists/*",
-      "curl -fsSL https://releases.rivet.dev/sandbox-agent/0.3.x/install.sh | sh",
+      generateInstallCommand(),
       `sandbox-agent server --no-token --host 0.0.0.0 --port ${PORT}`,
     ].join(" && "),
   ],

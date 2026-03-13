@@ -1,6 +1,6 @@
 import { Daytona, Image } from "@daytonaio/sdk";
 import { SandboxAgent } from "sandbox-agent";
-import { detectAgent, buildInspectorUrl } from "@sandbox-agent/example-shared";
+import { detectAgent, buildInspectorUrl, generateInstallCommand } from "@sandbox-agent/example-shared";
 
 const daytona = new Daytona();
 
@@ -11,7 +11,7 @@ if (process.env.OPENAI_API_KEY) envVars.OPENAI_API_KEY = process.env.OPENAI_API_
 // Build a custom image with sandbox-agent pre-installed (slower first run, faster subsequent runs)
 const image = Image.base("ubuntu:22.04").runCommands(
   "apt-get update && apt-get install -y curl ca-certificates",
-  "curl -fsSL https://releases.rivet.dev/sandbox-agent/0.3.x/install.sh | sh",
+  generateInstallCommand(),
 );
 
 console.log("Creating Daytona sandbox (first run builds the base image and may take a few minutes, subsequent runs are fast)...");

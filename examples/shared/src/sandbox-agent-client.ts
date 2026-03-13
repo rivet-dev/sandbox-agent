@@ -3,6 +3,25 @@
  * Provides minimal helpers for connecting to and interacting with sandbox-agent servers.
  */
 
+export const SANDBOX_AGENT_INSTALL_VERSION = "0.3.1";
+
+export type SandboxAgentComponent = "claude" | "codex" | "opencode" | "amp";
+
+export function generateInstallCommand({
+  version = SANDBOX_AGENT_INSTALL_VERSION,
+  components = [],
+}: {
+  version?: string;
+  components?: SandboxAgentComponent[];
+} = {}): string {
+  const uniqueComponents = [...new Set(components)];
+
+  return [
+    `curl -fsSL https://releases.rivet.dev/sandbox-agent/${version}/install.sh | sh`,
+    ...uniqueComponents.map((component) => `sandbox-agent install-agent ${component}`),
+  ].join(" && ");
+}
+
 function normalizeBaseUrl(baseUrl: string): string {
   return baseUrl.replace(/\/+$/, "");
 }

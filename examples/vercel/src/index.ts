@@ -1,6 +1,6 @@
 import { Sandbox } from "@vercel/sandbox";
 import { SandboxAgent } from "sandbox-agent";
-import { detectAgent, buildInspectorUrl } from "@sandbox-agent/example-shared";
+import { detectAgent, buildInspectorUrl, generateInstallCommand } from "@sandbox-agent/example-shared";
 
 const envs: Record<string, string> = {};
 if (process.env.ANTHROPIC_API_KEY) envs.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
@@ -22,11 +22,7 @@ const run = async (cmd: string, args: string[] = []) => {
 };
 
 console.log("Installing sandbox-agent...");
-await run("sh", ["-c", "curl -fsSL https://releases.rivet.dev/sandbox-agent/0.3.x/install.sh | sh"]);
-
-console.log("Installing agents...");
-await run("sandbox-agent", ["install-agent", "claude"]);
-await run("sandbox-agent", ["install-agent", "codex"]);
+await run("sh", ["-c", generateInstallCommand({ components: ["claude", "codex"] })]);
 
 console.log("Starting server...");
 await sandbox.runCommand({

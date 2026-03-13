@@ -1,6 +1,6 @@
 import { Sandbox } from "@e2b/code-interpreter";
 import { SandboxAgent } from "sandbox-agent";
-import { detectAgent, buildInspectorUrl } from "@sandbox-agent/example-shared";
+import { detectAgent, buildInspectorUrl, generateInstallCommand } from "@sandbox-agent/example-shared";
 
 const envs: Record<string, string> = {};
 if (process.env.ANTHROPIC_API_KEY) envs.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
@@ -16,11 +16,7 @@ const run = async (cmd: string) => {
 };
 
 console.log("Installing sandbox-agent...");
-await run("curl -fsSL https://releases.rivet.dev/sandbox-agent/0.3.x/install.sh | sh");
-
-console.log("Installing agents...");
-await run("sandbox-agent install-agent claude");
-await run("sandbox-agent install-agent codex");
+await run(generateInstallCommand({ components: ["claude", "codex"] }));
 
 console.log("Starting server...");
 await sandbox.commands.run("sandbox-agent server --no-token --host 0.0.0.0 --port 3000", { background: true, timeoutMs: 0 });

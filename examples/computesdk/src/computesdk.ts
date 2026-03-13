@@ -10,7 +10,7 @@ import {
   type ProviderName,
 } from "computesdk";
 import { SandboxAgent } from "sandbox-agent";
-import { detectAgent, buildInspectorUrl } from "@sandbox-agent/example-shared";
+import { detectAgent, buildInspectorUrl, generateInstallCommand, type SandboxAgentComponent } from "@sandbox-agent/example-shared";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 
@@ -90,18 +90,12 @@ export async function setupComputeSdkSandboxAgent(): Promise<{
     return result;
   };
 
+  const components: SandboxAgentComponent[] = [];
+  if (env.ANTHROPIC_API_KEY) components.push("claude");
+  if (env.OPENAI_API_KEY) components.push("codex");
+
   console.log("Installing sandbox-agent...");
-  await run("curl -fsSL https://releases.rivet.dev/sandbox-agent/latest/install.sh | sh");
-
-  if (env.ANTHROPIC_API_KEY) {
-    console.log("Installing Claude agent...");
-    await run("sandbox-agent install-agent claude");
-  }
-
-  if (env.OPENAI_API_KEY) {
-    console.log("Installing Codex agent...");
-    await run("sandbox-agent install-agent codex");
-  }
+  await run(generateInstallCommand({ components }));
 
   console.log("Starting server...");
   await run(`sandbox-agent server --no-token --host 0.0.0.0 --port ${PORT}`, { background: true });
