@@ -180,10 +180,20 @@ jobs:
         include:
           - platform: linux/arm64
             runner: depot-ubuntu-24.04-arm-8
-            arch_suffix: -arm64
+            tag_suffix: -arm64
+            dockerfile: docker/runtime/Dockerfile
           - platform: linux/amd64
             runner: depot-ubuntu-24.04-8
-            arch_suffix: -amd64
+            tag_suffix: -amd64
+            dockerfile: docker/runtime/Dockerfile
+          - platform: linux/arm64
+            runner: depot-ubuntu-24.04-arm-8
+            tag_suffix: -full-arm64
+            dockerfile: docker/runtime/Dockerfile.full
+          - platform: linux/amd64
+            runner: depot-ubuntu-24.04-8
+            tag_suffix: -full-amd64
+            dockerfile: docker/runtime/Dockerfile.full
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
@@ -205,8 +215,8 @@ jobs:
         with:
           context: .
           push: true
-          tags: rivetdev/sandbox-agent:${{ steps.vars.outputs.sha_short }}${{ matrix.arch_suffix }}
-          file: docker/runtime/Dockerfile
+          tags: rivetdev/sandbox-agent:${{ steps.vars.outputs.sha_short }}${{ matrix.tag_suffix }}
+          file: ${{ matrix.dockerfile }}
           platforms: ${{ matrix.platform }}
           build-args: |
             TARGETARCH=${{ contains(matrix.platform, 'arm64') && 'arm64' || 'amd64' }}

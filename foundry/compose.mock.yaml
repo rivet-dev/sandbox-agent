@@ -1,0 +1,30 @@
+name: foundry-mock
+
+services:
+  frontend:
+    build:
+      context: ..
+      dockerfile: foundry/docker/frontend.dev.Dockerfile
+    working_dir: /app
+    environment:
+      HOME: "/tmp"
+      FOUNDRY_FRONTEND_CLIENT_MODE: "mock"
+    ports:
+      - "4174:4174"
+    command: ["bash", "-lc", "pnpm install --force --frozen-lockfile --filter @sandbox-agent/foundry-frontend... && cd foundry/packages/frontend && exec pnpm vite --host 0.0.0.0 --port 4174"]
+    volumes:
+      - "..:/app"
+      - "./.foundry:/app/foundry/.foundry"
+      - "../../../task/rivet-checkout:/task/rivet-checkout:ro"
+      - "mock_node_modules:/app/node_modules"
+      - "mock_client_node_modules:/app/foundry/packages/client/node_modules"
+      - "mock_frontend_node_modules:/app/foundry/packages/frontend/node_modules"
+      - "mock_shared_node_modules:/app/foundry/packages/shared/node_modules"
+      - "mock_pnpm_store:/tmp/.local/share/pnpm/store"
+
+volumes:
+  mock_node_modules: {}
+  mock_client_node_modules: {}
+  mock_frontend_node_modules: {}
+  mock_shared_node_modules: {}
+  mock_pnpm_store: {}

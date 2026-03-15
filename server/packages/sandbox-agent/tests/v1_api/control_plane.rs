@@ -182,10 +182,7 @@ async fn lazy_install_runs_on_first_bootstrap() {
             .expect("create agent processes dir");
         write_executable(&install_path.join("codex"), "#!/usr/bin/env sh\nexit 0\n");
         fs::create_dir_all(install_path.join("bin")).expect("create bin dir");
-        write_executable(
-            &install_path.join("bin").join("npx"),
-            "#!/usr/bin/env sh\nwhile IFS= read -r _line; do :; done\n",
-        );
+        write_fake_npm(&install_path.join("bin").join("npm"));
     });
 
     let original_path = std::env::var_os("PATH").unwrap_or_default();

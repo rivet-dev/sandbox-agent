@@ -1,0 +1,40 @@
+name: foundry-preview
+
+services:
+  backend:
+    build:
+      context: ..
+      dockerfile: foundry/docker/backend.preview.Dockerfile
+    image: foundry-backend-preview
+    environment:
+      HF_BACKEND_HOST: "0.0.0.0"
+      HF_BACKEND_PORT: "7841"
+      RIVETKIT_STORAGE_PATH: "/root/.local/share/foundry/rivetkit"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      CLAUDE_API_KEY: "${CLAUDE_API_KEY:-${ANTHROPIC_API_KEY:-}}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      CODEX_API_KEY: "${CODEX_API_KEY:-${OPENAI_API_KEY:-}}"
+      GITHUB_TOKEN: "${GITHUB_TOKEN:-${GITHUB_PAT:-}}"
+      GH_TOKEN: "${GH_TOKEN:-${GITHUB_TOKEN:-${GITHUB_PAT:-}}}"
+      DAYTONA_ENDPOINT: "${DAYTONA_ENDPOINT:-}"
+      DAYTONA_API_KEY: "${DAYTONA_API_KEY:-}"
+      HF_DAYTONA_ENDPOINT: "${HF_DAYTONA_ENDPOINT:-}"
+      HF_DAYTONA_API_KEY: "${HF_DAYTONA_API_KEY:-}"
+    ports:
+      - "7841:7841"
+    volumes:
+      - "${HOME}/.codex:/root/.codex"
+      - "foundry_preview_rivetkit_storage:/root/.local/share/foundry/rivetkit"
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: foundry/docker/frontend.preview.Dockerfile
+    image: foundry-frontend-preview
+    depends_on:
+      - backend
+    ports:
+      - "4273:4273"
+
+volumes:
+  foundry_preview_rivetkit_storage: {}

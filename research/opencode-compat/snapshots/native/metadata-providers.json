@@ -4,9 +4,7 @@
       "id": "opencode",
       "source": "api",
       "name": "OpenCode Zen",
-      "env": [
-        "OPENCODE_API_KEY"
-      ],
+      "env": ["OPENCODE_API_KEY"],
       "options": {},
       "models": {
         "glm-4.7": {
@@ -272,30 +270,22 @@
             "low": {
               "reasoningEffort": "low",
               "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
+              "include": ["reasoning.encrypted_content"]
             },
             "medium": {
               "reasoningEffort": "medium",
               "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
+              "include": ["reasoning.encrypted_content"]
             },
             "high": {
               "reasoningEffort": "high",
               "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
+              "include": ["reasoning.encrypted_content"]
             },
             "xhigh": {
               "reasoningEffort": "xhigh",
               "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
+              "include": ["reasoning.encrypted_content"]
             }
           }
         },
@@ -351,23 +341,17 @@
             "low": {
               "reasoningEffort": "low",
               "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
+              "include": ["reasoning.encrypted_content"]
             },
             "medium": {
               "reasoningEffort": "medium",
               "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
+              "include": ["reasoning.encrypted_content"]
             },
             "high": {
               "reasoningEffort": "high",
               "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
+              "include": ["reasoning.encrypted_content"]
             }
           }
         },
@@ -853,23 +837,17 @@
             "low": {
               "reasoningEffort": "low",
               "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
+              "include": ["reasoning.encrypted_content"]
             },
             "medium": {
               "reasoningEffort": "medium",
               "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
+              "include": ["reasoning.encrypted_content"]
             },
             "high": {
               "reasoningEffort": "high",
               "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
+              "include": ["reasoning.encrypted_content"]
             }
           }
         },
@@ -976,30 +954,22 @@
             "none": {
               "reasoningEffort": "none",
               "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
+              "include": ["reasoning.encrypted_content"]
             },
             "low": {
               "reasoningEffort": "low",
               "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
+              "include": ["reasoning.encrypted_content"]
             },
             "medium": {
               "reasoningEffort": "medium",
               "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
+              "include": ["reasoning.encrypted_content"]
             },
             "high": {
               "reasoningEffort": "high",
               "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
+              "include": ["reasoning.encrypted_content"]
             }
           }
         },
@@ -1055,30 +1025,22 @@
             "minimal": {
               "reasoningEffort": "minimal",
               "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
+              "include": ["reasoning.encrypted_content"]
             },
             "low": {
               "reasoningEffort": "low",
               "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
+              "include": ["reasoning.encrypted_content"]
             },
             "medium": {
               "reasoningEffort": "medium",
               "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
+              "include": ["reasoning.encrypted_content"]
             },
             "high": {
               "reasoningEffort": "high",
               "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
+              "include": ["reasoning.encrypted_content"]
             }
           }
         },
@@ -1134,23 +1096,17 @@
             "low": {
               "reasoningEffort": "low",
               "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
+              "include": ["reasoning.encrypted_content"]
             },
             "medium": {
               "reasoningEffort": "medium",
               "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
+              "include": ["reasoning.encrypted_content"]
             },
             "high": {
               "reasoningEffort": "high",
               "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
+              "include": ["reasoning.encrypted_content"]
             }
           }
         },
@@ -1472,23 +1428,17 @@
             "low": {
               "reasoningEffort": "low",
               "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
+              "include": ["reasoning.encrypted_content"]
             },
             "medium": {
               "reasoningEffort": "medium",
               "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
+              "include": ["reasoning.encrypted_content"]
             },
             "high": {
               "reasoningEffort": "high",
               "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
+              "include": ["reasoning.encrypted_content"]
             }
           }
         },
@@ -1714,30 +1664,22 @@
             "minimal": {
               "reasoningEffort": "minimal",
               "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
+              "include": ["reasoning.encrypted_content"]
             },
             "low": {
               "reasoningEffort": "low",
               "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
+              "include": ["reasoning.encrypted_content"]
             },
             "medium": {
               "reasoningEffort": "medium",
               "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
+              "include": ["reasoning.encrypted_content"]
             },
             "high": {
               "reasoningEffort": "high",
               "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
+              "include": ["reasoning.encrypted_content"]
             }
           }
         },
@@ -1844,37 +1786,27 @@
             "none": {
               "reasoningEffort": "none",
               "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
+              "include": ["reasoning.encrypted_content"]
             },
             "low": {
               "reasoningEffort": "low",
               "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
+              "include": ["reasoning.encrypted_content"]
             },
             "medium": {
               "reasoningEffort": "medium",
               "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
+              "include": ["reasoning.encrypted_content"]
             },
             "high": {
               "reasoningEffort": "high",
               "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
+              "include": ["reasoning.encrypted_content"]
             },
             "xhigh": {
               "reasoningEffort": "xhigh",
               "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
+              "include": ["reasoning.encrypted_content"]
             }
           }
         }
@@ -1885,9 +1817,7 @@
       "id": "cerebras",
       "source": "api",
       "name": "Cerebras",
-      "env": [
-        "CEREBRAS_API_KEY"
-      ],
+      "env": ["CEREBRAS_API_KEY"],
       "options": {
         "headers": {
           "X-Cerebras-3rd-Party-Integration": "opencode"
@@ -2054,9 +1984,7 @@
       "id": "openai",
       "source": "custom",
       "name": "OpenAI",
-      "env": [
-        "OPENAI_API_KEY"
-      ],
+      "env": ["OPENAI_API_KEY"],
       "options": {
         "apiKey": "opencode-oauth-dummy-key"
       },
@@ -2112,30 +2040,22 @@
             "low": {
               "reasoningEffort": "low",
               "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
+              "include": ["reasoning.encrypted_content"]
             },
             "medium": {
               "reasoningEffort": "medium",
               "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
+              "include": ["reasoning.encrypted_content"]
             },
             "high": {
               "reasoningEffort": "high",
               "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
+              "include": ["reasoning.encrypted_content"]
             },
             "xhigh": {
               "reasoningEffort": "xhigh",
               "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
+              "include": ["reasoning.encrypted_content"]
             }
           }
         },
@@ -2190,23 +2110,17 @@
             "low": {
               "reasoningEffort": "low",
               "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
+              "include": ["reasoning.encrypted_content"]
             },
             "medium": {
               "reasoningEffort": "medium",
               "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
+              "include": ["reasoning.encrypted_content"]
             },
             "high": {
               "reasoningEffort": "high",
               "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
+              "include": ["reasoning.encrypted_content"]
             }
           }
         },
@@ -2261,23 +2175,17 @@
             "low": {
               "reasoningEffort": "low",
               "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
+              "include": ["reasoning.encrypted_content"]
             },
             "medium": {
               "reasoningEffort": "medium",
               "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
+              "include": ["reasoning.encrypted_content"]
             },
             "high": {
               "reasoningEffort": "high",
               "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
+              "include": ["reasoning.encrypted_content"]
             }
           }
         },
@@ -2332,23 +2240,17 @@
             "low": {
               "reasoningEffort": "low",
               "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
+              "include": ["reasoning.encrypted_content"]
             },
             "medium": {
               "reasoningEffort": "medium",
               "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
+              "include": ["reasoning.encrypted_content"]
             },
             "high": {
               "reasoningEffort": "high",
               "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
+              "include": ["reasoning.encrypted_content"]
             }
           }
         },
@@ -2403,37 +2305,27 @@
             "none": {
               "reasoningEffort": "none",
               "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
+              "include": ["reasoning.encrypted_content"]
             },
             "low": {
               "reasoningEffort": "low",
               "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
+              "include": ["reasoning.encrypted_content"]
             },
             "medium": {
               "reasoningEffort": "medium",
               "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
+              "include": ["reasoning.encrypted_content"]
             },
             "high": {
               "reasoningEffort": "high",
               "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
+              "include": ["reasoning.encrypted_content"]
             },
             "xhigh": {
               "reasoningEffort": "xhigh",
               "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
+              "include": ["reasoning.encrypted_content"]
             }
           }
         }
@@ -2443,9 +2335,7 @@
       "id": "anthropic",
       "source": "custom",
       "name": "Anthropic",
-      "env": [
-        "ANTHROPIC_API_KEY"
-      ],
+      "env": ["ANTHROPIC_API_KEY"],
       "options": {
         "apiKey": "",
         "headers": {

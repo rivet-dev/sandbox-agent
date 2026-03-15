@@ -1,7 +1,8 @@
 import { getSandbox, type Sandbox } from "@cloudflare/sandbox";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { runPromptTest, type PromptTestRequest } from "./prompt-test";
+import { streamSSE } from "hono/streaming";
+import { runPromptEndpointStream, type PromptRequest } from "./prompt-endpoint";
 
 export { Sandbox } from "@cloudflare/sandbox";
 
@@ -49,7 +50,15 @@ async function getReadySandbox(name: string, env: Bindings): Promise<Sandbox> {
 
 async function proxyToSandbox(sandbox: Sandbox, request: Request, path: string): Promise<Response> {
   const query = new URL(request.url).search;
-  return sandbox.containerFetch(new Request(`http://localhost${path}${query}`, request), PORT);
+  return sandbox.containerFetch(
+    `http://localhost${path}${query}`,
+    {
+      method: request.method,
+      headers: request.headers,
+      body: request.body,
+    },
+    PORT,
+  );
 }
 
 const app = new Hono<AppEnv>();
@@ -63,15 +72,34 @@ app.post("/sandbox/:name/prompt", async (c) => {
     throw new HTTPException(400, { message: "Content-Type must be application/json" });
   }
 
-  let payload: PromptTestRequest;
+  let payload: PromptRequest;
   try {
-    payload = await c.req.json<PromptTestRequest>();
+    payload = await c.req.json<PromptRequest>();
   } catch {
     throw new HTTPException(400, { message: "Invalid JSON body" });
   }
 
   const sandbox = await getReadySandbox(c.req.param("name"), c.env);
-  return c.json(await runPromptTest(sandbox, payload, PORT));
+  return streamSSE(c, async (stream) => {
+    try {
+      await runPromptEndpointStream(sandbox, payload, PORT, async (event) => {
+        await stream.writeSSE({
+          event: event.type,
+          data: JSON.stringify(event),
+        });
+      });
+      await stream.writeSSE({
+        event: "done",
+        data: JSON.stringify({ ok: true }),
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await stream.writeSSE({
+        event: "error",
+        data: JSON.stringify({ message }),
+      });
+    }
+  });
 });
 
 app.all("/sandbox/:name/proxy/*", async (c) => {

@@ -16,10 +16,7 @@ function findBinary(): string | null {
     return process.env.SANDBOX_AGENT_BIN;
   }
 
-  const cargoPaths = [
-    resolve(__dirname, "../../../target/debug/sandbox-agent"),
-    resolve(__dirname, "../../../target/release/sandbox-agent"),
-  ];
+  const cargoPaths = [resolve(__dirname, "../../../target/debug/sandbox-agent"), resolve(__dirname, "../../../target/release/sandbox-agent")];
 
   for (const p of cargoPaths) {
     if (existsSync(p)) {
@@ -36,9 +33,7 @@ function uniqueDbName(prefix: string): string {
 
 const BINARY_PATH = findBinary();
 if (!BINARY_PATH) {
-  throw new Error(
-    "sandbox-agent binary not found. Build it (cargo build -p sandbox-agent) or set SANDBOX_AGENT_BIN.",
-  );
+  throw new Error("sandbox-agent binary not found. Build it (cargo build -p sandbox-agent) or set SANDBOX_AGENT_BIN.");
 }
 if (!process.env.SANDBOX_AGENT_BIN) {
   process.env.SANDBOX_AGENT_BIN = BINARY_PATH;
@@ -60,6 +55,10 @@ describe("IndexedDB persistence end-to-end", () => {
       timeoutMs: 30000,
       env: {
         XDG_DATA_HOME: dataHome,
+        HOME: dataHome,
+        USERPROFILE: dataHome,
+        APPDATA: join(dataHome, "AppData", "Roaming"),
+        LOCALAPPDATA: join(dataHome, "AppData", "Local"),
       },
     });
     baseUrl = handle.baseUrl;
@@ -119,11 +118,7 @@ describe("IndexedDB persistence end-to-end", () => {
       const params = payload.params as Record<string, unknown> | undefined;
       const prompt = Array.isArray(params?.prompt) ? params?.prompt : [];
       const firstBlock = prompt[0] as Record<string, unknown> | undefined;
-      return (
-        method === "session/prompt" &&
-        typeof firstBlock?.text === "string" &&
-        firstBlock.text.includes("Previous session history is replayed below")
-      );
+      return method === "session/prompt" && typeof firstBlock?.text === "string" && firstBlock.text.includes("Previous session history is replayed below");
     });
 
     expect(replayInjected).toBeTruthy();

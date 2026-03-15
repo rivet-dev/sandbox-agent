@@ -61,9 +61,11 @@ icon: "rocket"
 
       <Tab title="Docker">
         ```bash
-        docker run -e ANTHROPIC_API_KEY="sk-ant-..." \
+        docker run -p 2468:2468 \
+          -e ANTHROPIC_API_KEY="sk-ant-..." \
           -e OPENAI_API_KEY="sk-..." \
-          your-image
+          rivetdev/sandbox-agent:0.3.1-full \
+          server --no-token --host 0.0.0.0 --port 2468
         ```
       </Tab>
     </Tabs>
@@ -75,6 +77,9 @@ icon: "rocket"
       <Accordion title="Testing without API keys">
         Use the `mock` agent for SDK and integration testing without provider credentials.
       </Accordion>
+      <Accordion title="Multi-tenant and per-user billing">
+        For per-tenant token tracking, budget enforcement, or usage-based billing, see [LLM Credentials](/llm-credentials) for gateway options like OpenRouter, LiteLLM, and Portkey.
+      </Accordion>
     </AccordionGroup>
   </Step>
 
@@ -84,7 +89,7 @@ icon: "rocket"
         Install and run the binary directly.
 
         ```bash
-        curl -fsSL https://releases.rivet.dev/sandbox-agent/0.2.x/install.sh | sh
+        curl -fsSL https://releases.rivet.dev/sandbox-agent/0.3.x/install.sh | sh
         sandbox-agent server --no-token --host 0.0.0.0 --port 2468
         ```
       </Tab>
@@ -93,7 +98,7 @@ icon: "rocket"
         Run without installing globally.
 
         ```bash
-        npx @sandbox-agent/cli@0.2.x server --no-token --host 0.0.0.0 --port 2468
+        npx @sandbox-agent/cli@0.3.x server --no-token --host 0.0.0.0 --port 2468
         ```
       </Tab>
 
@@ -101,7 +106,7 @@ icon: "rocket"
         Run without installing globally.
 
         ```bash
-        bunx @sandbox-agent/cli@0.2.x server --no-token --host 0.0.0.0 --port 2468
+        bunx @sandbox-agent/cli@0.3.x server --no-token --host 0.0.0.0 --port 2468
         ```
       </Tab>
 
@@ -109,7 +114,7 @@ icon: "rocket"
         Install globally, then run.
 
         ```bash
-        npm install -g @sandbox-agent/cli@0.2.x
+        npm install -g @sandbox-agent/cli@0.3.x
         sandbox-agent server --no-token --host 0.0.0.0 --port 2468
         ```
       </Tab>
@@ -118,7 +123,7 @@ icon: "rocket"
         Install globally, then run.
 
         ```bash
-        bun add -g @sandbox-agent/cli@0.2.x
+        bun add -g @sandbox-agent/cli@0.3.x
         # Allow Bun to run postinstall scripts for native binaries (required for SandboxAgent.start()).
         bun pm -g trust @sandbox-agent/cli-linux-x64 @sandbox-agent/cli-linux-arm64 @sandbox-agent/cli-darwin-arm64 @sandbox-agent/cli-darwin-x64 @sandbox-agent/cli-win32-x64
         sandbox-agent server --no-token --host 0.0.0.0 --port 2468
@@ -129,7 +134,7 @@ icon: "rocket"
         For local development, use `SandboxAgent.start()` to spawn and manage the server as a subprocess.
 
         ```bash
-        npm install sandbox-agent@0.2.x
+        npm install sandbox-agent@0.3.x
         ```
 
         ```typescript
@@ -143,7 +148,7 @@ icon: "rocket"
         For local development, use `SandboxAgent.start()` to spawn and manage the server as a subprocess.
 
         ```bash
-        bun add sandbox-agent@0.2.x
+        bun add sandbox-agent@0.3.x
         # Allow Bun to run postinstall scripts for native binaries (required for SandboxAgent.start()).
         bun pm trust @sandbox-agent/cli-linux-x64 @sandbox-agent/cli-linux-arm64 @sandbox-agent/cli-darwin-arm64 @sandbox-agent/cli-darwin-x64 @sandbox-agent/cli-win32-x64
         ```
@@ -215,10 +220,7 @@ icon: "rocket"
     To preinstall agents:
 
     ```bash
-    sandbox-agent install-agent claude
-    sandbox-agent install-agent codex
-    sandbox-agent install-agent opencode
-    sandbox-agent install-agent amp
+    sandbox-agent install-agent --all
     ```
 
     If agents are not installed up front, they are lazily installed when creating a session.

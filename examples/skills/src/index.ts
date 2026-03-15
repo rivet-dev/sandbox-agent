@@ -22,4 +22,7 @@ console.log('  Try: "How do I start sandbox-agent?"');
 console.log("  Press Ctrl+C to stop.");
 
 const keepAlive = setInterval(() => {}, 60_000);
-process.on("SIGINT", () => { clearInterval(keepAlive); cleanup().then(() => process.exit(0)); });
+process.on("SIGINT", () => {
+  clearInterval(keepAlive);
+  cleanup().then(() => process.exit(0));
+});

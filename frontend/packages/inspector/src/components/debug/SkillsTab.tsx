@@ -10,11 +10,7 @@ type SkillEntry = {
 
 const SKILLS_DIRECTORY_STORAGE_KEY = "sandbox-agent-inspector-skills-directory";
 
-const SkillsTab = ({
-  getClient,
-}: {
-  getClient: () => SandboxAgent;
-}) => {
+const SkillsTab = ({ getClient }: { getClient: () => SandboxAgent }) => {
   const officialSkills = [
     {
       name: "Sandbox Agent SDK",
@@ -27,13 +23,7 @@ const SkillsTab = ({
       skillId: "rivet",
       source: "rivet-dev/skills",
       summary: "Open-source platform for building, deploying, and scaling AI agents.",
-      features: [
-        "Session Persistence",
-        "Resumable Sessions",
-        "Multi-Agent Support",
-        "Realtime Events",
-        "Tool Call Visibility",
-      ],
+      features: ["Session Persistence", "Resumable Sessions", "Multi-Agent Support", "Realtime Events", "Tool Call Visibility"],
     },
   ];
 
@@ -63,28 +53,29 @@ const SkillsTab = ({
   const [editError, setEditError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  const loadAll = useCallback(async (dir: string) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const configPath = `${dir === "/" ? "" : dir}/.sandbox-agent/config/skills.json`;
-      const bytes = await getClient().readFsFile({ path: configPath });
-      const text = new TextDecoder().decode(bytes);
-      if (!text.trim()) {
+  const loadAll = useCallback(
+    async (dir: string) => {
+      setLoading(true);
+      setError(null);
+      try {
+        const configPath = `${dir === "/" ? "" : dir}/.sandbox-agent/config/skills.json`;
+        const bytes = await getClient().readFsFile({ path: configPath });
+        const text = new TextDecoder().decode(bytes);
+        if (!text.trim()) {
+          setEntries([]);
+          return;
+        }
+        const map = JSON.parse(text) as Record<string, SkillEntry["config"]>;
+        setEntries(Object.entries(map).map(([name, config]) => ({ name, config })));
+      } catch {
+        // File doesn't exist yet or is empty — that's fine
         setEntries([]);
-        return;
+      } finally {
+        setLoading(false);
       }
-      const map = JSON.parse(text) as Record<string, SkillEntry["config"]>;
-      setEntries(
-        Object.entries(map).map(([name, config]) => ({ name, config })),
-      );
-    } catch {
-      // File doesn't exist yet or is empty — that's fine
-      setEntries([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [getClient]);
+    },
+    [getClient],
+  );
 
   useEffect(() => {
     loadAll(directory);
@@ -139,7 +130,10 @@ const SkillsTab = ({
     if (editRef.trim()) skillEntry.ref = editRef.trim();
     if (editSubpath.trim()) skillEntry.subpath = editSubpath.trim();
     const skillsList = editSkills.trim()
-      ? editSkills.split(",").map((s) => s.trim()).filter(Boolean)
+      ? editSkills
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean)
       : null;
     if (skillsList && skillsList.length > 0) skillEntry.skills = skillsList;
 
@@ -148,10 +142,7 @@ const SkillsTab = ({
     setSaving(true);
     setEditError(null);
     try {
-      await getClient().setSkillsConfig(
-        { directory, skillName: name },
-        config,
-      );
+      await getClient().setSkillsConfig({ directory, skillName: name }, config);
       cancelEdit();
       await loadAll(directory);
     } catch (err) {
@@ -197,7 +188,7 @@ const SkillsTab = ({
     }
   };
 
-  const applySkillPreset = (skill: typeof officialSkills[0]) => {
+  const applySkillPreset = (skill: (typeof officialSkills)[0]) => {
     setEditing(true);
     setEditName(skill.skillId);
     setEditSource(skill.source);
@@ -222,12 +213,12 @@ const SkillsTab = ({
       <div className="inline-row" style={{ marginBottom: 12, justifyContent: "space-between" }}>
         <span className="card-meta">Skills Configuration</span>
         <div className="inline-row" style={{ gap: 6 }}>
-          <button
-            className="button secondary small"
-            onClick={() => setShowSdkSkills((prev) => !prev)}
-            title="Toggle official skills list"
-          >
-            {showSdkSkills ? <ChevronDown className="button-icon" style={{ width: 12, height: 12 }} /> : <ChevronRight className="button-icon" style={{ width: 12, height: 12 }} />}
+          <button className="button secondary small" onClick={() => setShowSdkSkills((prev) => !prev)} title="Toggle official skills list">
+            {showSdkSkills ? (
+              <ChevronDown className="button-icon" style={{ width: 12, height: 12 }} />
+            ) : (
+              <ChevronRight className="button-icon" style={{ width: 12, height: 12 }} />
+            )}
             Official Skills
           </button>
           {!editing && (
@@ -261,7 +252,9 @@ const SkillsTab = ({
                   {copiedId === `skill-input-${skill.skillId}` ? "Filled" : "Use"}
                 </button>
               </div>
-              <div className="card-meta" style={{ fontSize: 10, marginBottom: skill.features ? 6 : 0 }}>{skill.summary}</div>
+              <div className="card-meta" style={{ fontSize: 10, marginBottom: skill.features ? 6 : 0 }}>
+                {skill.summary}
+              </div>
               {skill.features && (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
                   {skill.features.map((feature) => (
@@ -299,17 +292,15 @@ const SkillsTab = ({
             <input
               className="setup-input"
               value={editName}
-              onChange={(e) => { setEditName(e.target.value); setEditError(null); }}
+              onChange={(e) => {
+                setEditName(e.target.value);
+                setEditError(null);
+              }}
               placeholder="skill-name"
               style={{ marginBottom: 6, width: "100%", boxSizing: "border-box" }}
             />
             <div className="inline-row" style={{ marginBottom: 6, gap: 4 }}>
-              <select
-                className="setup-select"
-                value={editType}
-                onChange={(e) => setEditType(e.target.value)}
-                style={{ width: 90 }}
-              >
+              <select className="setup-select" value={editType} onChange={(e) => setEditType(e.target.value)} style={{ width: 90 }}>
                 <option value="github">github</option>
                 <option value="local">local</option>
                 <option value="git">git</option>
@@ -317,7 +308,10 @@ const SkillsTab = ({
               <input
                 className="setup-input mono"
                 value={editSource}
-                onChange={(e) => { setEditSource(e.target.value); setEditError(null); }}
+                onChange={(e) => {
+                  setEditSource(e.target.value);
+                  setEditError(null);
+                }}
                 placeholder={editType === "github" ? "owner/repo" : editType === "local" ? "/path/to/skill" : "https://..."}
                 style={{ flex: 1 }}
               />
@@ -347,7 +341,11 @@ const SkillsTab = ({
                 />
               </div>
             )}
-            {editError && <div className="banner error" style={{ marginTop: 4 }}>{editError}</div>}
+            {editError && (
+              <div className="banner error" style={{ marginTop: 4 }}>
+                {editError}
+              </div>
+            )}
           </div>
           <div className="card-actions">
             <button className="button primary small" onClick={save} disabled={saving}>
@@ -361,11 +359,7 @@ const SkillsTab = ({
         </div>
       )}
 
-      {entries.length === 0 && !editing && !loading && (
-        <div className="card-meta">
-          No skills configured in this directory.
-        </div>
-      )}
+      {entries.length === 0 && !editing && !loading && <div className="card-meta">No skills configured in this directory.</div>}
 
       {entries.map((entry) => {
         const isCollapsed = collapsedSkills[entry.name] ?? true;
@@ -387,12 +381,7 @@ const SkillsTab = ({
                 <span className="pill accent">
                   {entry.config.sources.length} source{entry.config.sources.length !== 1 ? "s" : ""}
                 </span>
-                <button
-                  className="button ghost small"
-                  onClick={() => remove(entry.name)}
-                  title="Remove"
-                  style={{ padding: "2px 4px" }}
-                >
+                <button className="button ghost small" onClick={() => remove(entry.name)} title="Remove" style={{ padding: "2px 4px" }}>
                   <Trash2 size={12} />
                 </button>
               </div>

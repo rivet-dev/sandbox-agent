@@ -23,25 +23,16 @@ console.log("Uploading script and skill file...");
 const client = await SandboxAgent.connect({ baseUrl });
 
 const script = await fs.promises.readFile(scriptFile);
-const scriptResult = await client.writeFsFile(
-  { path: "/opt/skills/random-number/random-number.cjs" },
-  script,
-);
+const scriptResult = await client.writeFsFile({ path: "/opt/skills/random-number/random-number.cjs" }, script);
 console.log(`  Script: ${scriptResult.path} (${scriptResult.bytesWritten} bytes)`);
 
 const skillMd = await fs.promises.readFile(path.resolve(__dirname, "../SKILL.md"));
-const skillResult = await client.writeFsFile(
-  { path: "/opt/skills/random-number/SKILL.md" },
-  skillMd,
-);
+const skillResult = await client.writeFsFile({ path: "/opt/skills/random-number/SKILL.md" }, skillMd);
 console.log(`  Skill:  ${skillResult.path} (${skillResult.bytesWritten} bytes)`);
 
 // Configure the uploaded skill.
 console.log("Configuring custom skill...");
-await client.setSkillsConfig(
-  { directory: "/", skillName: "random-number" },
-  { sources: [{ type: "local", source: "/opt/skills/random-number" }] },
-);
+await client.setSkillsConfig({ directory: "/", skillName: "random-number" }, { sources: [{ type: "local", source: "/opt/skills/random-number" }] });
 
 // Create a session.
 console.log("Creating session with custom skill...");
@@ -52,4 +43,7 @@ console.log('  Try: "generate a random number between 1 and 100"');
 console.log("  Press Ctrl+C to stop.");
 
 const keepAlive = setInterval(() => {}, 60_000);
-process.on("SIGINT", () => { clearInterval(keepAlive); cleanup().then(() => process.exit(0)); });
+process.on("SIGINT", () => {
+  clearInterval(keepAlive);
+  cleanup().then(() => process.exit(0));
+});

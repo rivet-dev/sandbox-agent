@@ -1,13 +1,14 @@
 ---
-import Layout from '../layouts/Layout.astro';
-import { Navigation } from '../components/Navigation';
-import { Hero } from '../components/Hero';
-import { PainPoints } from '../components/PainPoints';
-import { FeatureGrid } from '../components/FeatureGrid';
-import { GetStarted } from '../components/GetStarted';
-import { Inspector } from '../components/Inspector';
-import { FAQ } from '../components/FAQ';
-import { Footer } from '../components/Footer';
+import Layout from "../layouts/Layout.astro";
+import { Navigation } from "../components/Navigation";
+import { Hero } from "../components/Hero";
+import { PainPoints } from "../components/PainPoints";
+import { FeatureGrid } from "../components/FeatureGrid";
+import { GetStarted } from "../components/GetStarted";
+
+import { Inspector } from "../components/Inspector";
+import { FAQ } from "../components/FAQ";
+import { Footer } from "../components/Footer";
 ---
 
 <Layout title="Sandbox Agent SDK - Run Coding Agents in Sandboxes. Control Them Over HTTP.">
@@ -17,6 +18,7 @@ import { Footer } from '../components/Footer';
       <PainPoints client:visible />
       <FeatureGrid client:visible />
       <GetStarted client:visible />
+
       <Inspector client:visible />
       <FAQ client:visible />
     </main>

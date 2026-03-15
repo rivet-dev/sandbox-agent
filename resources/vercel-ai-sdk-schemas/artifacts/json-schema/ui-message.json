@@ -11,11 +11,7 @@
         },
         "role": {
           "type": "string",
-          "enum": [
-            "system",
-            "user",
-            "assistant"
-          ],
+          "enum": ["system", "user", "assistant"],
           "description": "The role of the message."
         },
         "metadata": {
@@ -38,10 +34,7 @@
                   },
                   "state": {
                     "type": "string",
-                    "enum": [
-                      "streaming",
-                      "done"
-                    ],
+                    "enum": ["streaming", "done"],
                     "description": "The state of the text part."
                   },
                   "providerMetadata": {
@@ -85,10 +78,7 @@
                     "description": "The provider metadata."
                   }
                 },
-                "required": [
-                  "type",
-                  "text"
-                ],
+                "required": ["type", "text"],
                 "additionalProperties": false,
                 "description": "A text part of a message."
               },
@@ -105,10 +95,7 @@
                   },
                   "state": {
                     "type": "string",
-                    "enum": [
-                      "streaming",
-                      "done"
-                    ],
+                    "enum": ["streaming", "done"],
                     "description": "The state of the reasoning part."
                   },
                   "providerMetadata": {
@@ -152,10 +139,7 @@
                     "description": "The provider metadata."
                   }
                 },
-                "required": [
-                  "type",
-                  "text"
-                ],
+                "required": ["type", "text"],
                 "additionalProperties": false,
                 "description": "A reasoning part of a message."
               },
@@ -232,12 +216,7 @@
                     "description": "Whether the tool call was executed by the provider."
                   }
                 },
-                "required": [
-                  "state",
-                  "toolCallId",
-                  "toolName",
-                  "type"
-                ]
+                "required": ["state", "toolCallId", "toolName", "type"]
               },
               {
                 "type": "object",
@@ -308,13 +287,7 @@
                     "description": "Whether the tool call was executed by the provider."
                   }
                 },
-                "required": [
-                  "input",
-                  "state",
-                  "toolCallId",
-                  "toolName",
-                  "type"
-                ]
+                "required": ["input", "state", "toolCallId", "toolName", "type"]
               },
               {
                 "type": "object",
@@ -372,9 +345,7 @@
                         "type": "string"
                       }
                     },
-                    "required": [
-                      "id"
-                    ],
+                    "required": ["id"],
                     "additionalProperties": false
                   },
                   "type": {
@@ -397,14 +368,7 @@
                     "description": "Whether the tool call was executed by the provider."
                   }
                 },
-                "required": [
-                  "approval",
-                  "input",
-                  "state",
-                  "toolCallId",
-                  "toolName",
-                  "type"
-                ]
+                "required": ["approval", "input", "state", "toolCallId", "toolName", "type"]
               },
               {
                 "type": "object",
@@ -468,10 +432,7 @@
                         "type": "string"
                       }
                     },
-                    "required": [
-                      "id",
-                      "approved"
-                    ],
+                    "required": ["id", "approved"],
                     "additionalProperties": false
                   },
                   "type": {
@@ -494,14 +455,7 @@
                     "description": "Whether the tool call was executed by the provider."
                   }
                 },
-                "required": [
-                  "approval",
-                  "input",
-                  "state",
-                  "toolCallId",
-                  "toolName",
-                  "type"
-                ]
+                "required": ["approval", "input", "state", "toolCallId", "toolName", "type"]
               },
               {
                 "type": "object",
@@ -570,10 +524,7 @@
                         "type": "string"
                       }
                     },
-                    "required": [
-                      "id",
-                      "approved"
-                    ],
+                    "required": ["id", "approved"],
                     "additionalProperties": false
                   },
                   "type": {
@@ -596,14 +547,7 @@
                     "description": "Whether the tool call was executed by the provider."
                   }
                 },
-                "required": [
-                  "input",
-                  "output",
-                  "state",
-                  "toolCallId",
-                  "toolName",
-                  "type"
-                ]
+                "required": ["input", "output", "state", "toolCallId", "toolName", "type"]
               },
               {
                 "type": "object",
@@ -671,10 +615,7 @@
                         "type": "string"
                       }
                     },
-                    "required": [
-                      "id",
-                      "approved"
-                    ],
+                    "required": ["id", "approved"],
                     "additionalProperties": false
                   },
                   "type": {
@@ -697,14 +638,7 @@
                     "description": "Whether the tool call was executed by the provider."
                   }
                 },
-                "required": [
-                  "errorText",
-                  "input",
-                  "state",
-                  "toolCallId",
-                  "toolName",
-                  "type"
-                ]
+                "required": ["errorText", "input", "state", "toolCallId", "toolName", "type"]
               },
               {
                 "type": "object",
@@ -769,10 +703,7 @@
                         "type": "string"
                       }
                     },
-                    "required": [
-                      "id",
-                      "approved"
-                    ],
+                    "required": ["id", "approved"],
                     "additionalProperties": false
                   },
                   "type": {
@@ -795,14 +726,7 @@
                     "description": "Whether the tool call was executed by the provider."
                   }
                 },
-                "required": [
-                  "approval",
-                  "input",
-                  "state",
-                  "toolCallId",
-                  "toolName",
-                  "type"
-                ]
+                "required": ["approval", "input", "state", "toolCallId", "toolName", "type"]
               },
               {
                 "type": "object",
@@ -861,11 +785,7 @@
                     "description": "Additional provider-specific metadata that is returned from the provider.\n\nThis is needed to enable provider-specific functionality that can be fully encapsulated in the provider."
                   }
                 },
-                "required": [
-                  "type",
-                  "sourceId",
-                  "url"
-                ],
+                "required": ["type", "sourceId", "url"],
                 "additionalProperties": false,
                 "description": "A source part of a message."
               },
@@ -929,12 +849,7 @@
                     "description": "Additional provider-specific metadata that is returned from the provider.\n\nThis is needed to enable provider-specific functionality that can be fully encapsulated in the provider."
                   }
                 },
-                "required": [
-                  "type",
-                  "sourceId",
-                  "mediaType",
-                  "title"
-                ],
+                "required": ["type", "sourceId", "mediaType", "title"],
                 "additionalProperties": false,
                 "description": "A document source part of a message."
               },
@@ -998,11 +913,7 @@
                     "description": "The provider metadata."
                   }
                 },
-                "required": [
-                  "type",
-                  "mediaType",
-                  "url"
-                ],
+                "required": ["type", "mediaType", "url"],
                 "additionalProperties": false,
                 "description": "A file part of a message."
               },
@@ -1018,9 +929,7 @@
                     "const": "step-start"
                   }
                 },
-                "required": [
-                  "type"
-                ],
+                "required": ["type"],
                 "additionalProperties": false,
                 "description": "A step boundary part of a message."
               }
@@ -1029,11 +938,7 @@
           "description": "The parts of the message. Use this for rendering the message in the UI.\n\nSystem messages should be avoided (set the system prompt on the server instead). They can have text parts.\n\nUser messages can have text parts and file parts.\n\nAssistant messages can have text, reasoning, tool invocation, and file parts."
         }
       },
-      "required": [
-        "id",
-        "role",
-        "parts"
-      ],
+      "required": ["id", "role", "parts"],
       "additionalProperties": false,
       "description": "AI SDK UI Messages. They are used in the client and to communicate between the frontend and the API routes."
     },

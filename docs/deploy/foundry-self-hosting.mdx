@@ -1,0 +1,155 @@
+---
+title: "Foundry Self-Hosting"
+description: "Environment, credentials, and deployment setup for Sandbox Agent Foundry auth, GitHub, and billing."
+---
+
+This guide documents the deployment contract for the Foundry product surface: app auth, GitHub onboarding, repository import, and billing.
+
+It also covers the local-development bootstrap that uses `.env.development` only when `NODE_ENV=development`.
+
+## Local Development
+
+For backend local development, the Foundry backend now supports a development-only dotenv bootstrap:
+
+- It loads `.env.development.local` and `.env.development`
+- It does this **only** when `NODE_ENV=development`
+- It does **not** load dotenv files in production
+
+The example file lives at [`/.env.development.example`](https://github.com/rivet-dev/sandbox-agent/blob/main/.env.development.example).
+
+To use it locally:
+
+```bash
+cp .env.development.example .env.development
+```
+
+Run the backend with:
+
+```bash
+just foundry-backend-start
+```
+
+That recipe sets `NODE_ENV=development`, which enables the dotenv loader.
+
+### Local Defaults
+
+These values can be safely defaulted for local development:
+
+- `APP_URL=http://localhost:4173`
+- `BETTER_AUTH_URL=http://localhost:7741`
+- `BETTER_AUTH_SECRET=sandbox-agent-foundry-development-only-change-me`
+- `GITHUB_REDIRECT_URI=http://localhost:7741/v1/auth/callback/github`
+
+These should be treated as development-only values.
+
+## Production Environment
+
+For production or self-hosting, set these as real environment variables in your deployment platform. Do not rely on dotenv file loading.
+
+### App/Auth
+
+| Variable | Required | Notes |
+|---|---:|---|
+| `APP_URL` | Yes | Public frontend origin |
+| `BETTER_AUTH_URL` | Yes | Public auth base URL |
+| `BETTER_AUTH_SECRET` | Yes | Strong random secret for auth/session signing |
+
+### GitHub OAuth
+
+| Variable | Required | Notes |
+|---|---:|---|
+| `GITHUB_CLIENT_ID` | Yes | GitHub OAuth app client id |
+| `GITHUB_CLIENT_SECRET` | Yes | GitHub OAuth app client secret |
+| `GITHUB_REDIRECT_URI` | Yes | GitHub OAuth callback URL |
+
+Use GitHub OAuth for:
+
+- user sign-in
+- user identity
+- org selection
+- access to the signed-in user’s GitHub context
+
+## GitHub App
+
+If your Foundry deployment uses GitHub App-backed organization install and repo import, also configure:
+
+| Variable | Required | Notes |
+|---|---:|---|
+| `GITHUB_APP_ID` | Yes | GitHub App id |
+| `GITHUB_APP_CLIENT_ID` | Yes | GitHub App client id |
+| `GITHUB_APP_CLIENT_SECRET` | Yes | GitHub App client secret |
+| `GITHUB_APP_PRIVATE_KEY` | Yes | PEM private key for installation auth |
+
+For `.env.development` and `.env.development.local`, store `GITHUB_APP_PRIVATE_KEY` as a quoted single-line value with `\n` escapes instead of raw multi-line PEM text.
+
+Recommended GitHub App permissions:
+
+- Repository `Metadata: Read`
+- Repository `Contents: Read & Write`
+- Repository `Pull requests: Read & Write`
+- Repository `Checks: Read`
+- Repository `Commit statuses: Read`
+
+Set the webhook URL to `https://<your-backend-host>/v1/webhooks/github` and generate a webhook secret. Store the secret as `GITHUB_WEBHOOK_SECRET`.
+
+This is required, not optional. Foundry depends on GitHub App webhook delivery for installation lifecycle changes, repo access changes, and ongoing repo / pull request sync. If the GitHub App is not installed for the workspace, or webhook delivery is misconfigured, Foundry will remain in an install / reconnect state and core GitHub-backed functionality will not work correctly.
+
+Recommended webhook subscriptions:
+
+- `installation`
+- `installation_repositories`
+- `pull_request`
+- `pull_request_review`
+- `pull_request_review_comment`
+- `push`
+- `create`
+- `delete`
+- `check_suite`
+- `check_run`
+- `status`
+
+Use the GitHub App for:
+
+- installation/reconnect state
+- org repo import
+- repository sync
+- PR creation and updates
+
+Use GitHub OAuth for:
+
+- who the user is
+- which orgs they can choose
+
+## Stripe
+
+For live billing, configure:
+
+| Variable | Required | Notes |
+|---|---:|---|
+| `STRIPE_SECRET_KEY` | Yes | Server-side Stripe secret key |
+| `STRIPE_PUBLISHABLE_KEY` | Yes | Client-side Stripe publishable key |
+| `STRIPE_WEBHOOK_SECRET` | Yes | Signing secret for billing webhooks |
+| `STRIPE_PRICE_TEAM` | Yes | Stripe price id for the Team plan checkout session |
+
+Stripe should own:
+
+- hosted checkout
+- billing portal
+- subscription status
+- invoice history
+- webhook-driven state sync
+
+## Mock Invariant
+
+Foundry’s mock client path should continue to work end to end even when the real auth/GitHub/Stripe path exists.
+
+That includes:
+
+- sign-in
+- org selection/import
+- settings
+- billing UI
+- workspace/task/session flow
+- seat accrual
+
+Use mock mode for deterministic UI review and local product development. Use the real env-backed path for integration and self-hosting.

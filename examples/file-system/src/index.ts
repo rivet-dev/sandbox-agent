@@ -24,10 +24,7 @@ console.log("Uploading files via batch tar...");
 const client = await SandboxAgent.connect({ baseUrl });
 
 const tarPath = path.join(tmpDir, "upload.tar");
-await tar.create(
-  { file: tarPath, cwd: tmpDir },
-  ["my-project"],
-);
+await tar.create({ file: tarPath, cwd: tmpDir }, ["my-project"]);
 const tarBuffer = await fs.promises.readFile(tarPath);
 const uploadResult = await client.uploadFsBatch(tarBuffer, { path: "/opt" });
 console.log(`  Uploaded ${uploadResult.paths.length} files: ${uploadResult.paths.join(", ")}`);
@@ -54,4 +51,7 @@ console.log('  Try: "read the README in /opt/my-project"');
 console.log("  Press Ctrl+C to stop.");
 
 const keepAlive = setInterval(() => {}, 60_000);
-process.on("SIGINT", () => { clearInterval(keepAlive); cleanup().then(() => process.exit(0)); });
+process.on("SIGINT", () => {
+  clearInterval(keepAlive);
+  cleanup().then(() => process.exit(0));
+});

@@ -60,8 +60,6 @@ describe("OpenCode-compatible Model API", () => {
     expect(providerIds.has("claude")).toBe(true);
     expect(providerIds.has("codex")).toBe(true);
     expect(providerIds.has("pi")).toBe(true);
-    expect(
-      providerIds.has("opencode") || Array.from(providerIds).some((id) => id.startsWith("opencode:"))
-    ).toBe(true);
+    expect(providerIds.has("opencode") || Array.from(providerIds).some((id) => id.startsWith("opencode:"))).toBe(true);
   });
 });

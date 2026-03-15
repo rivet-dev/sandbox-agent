@@ -10,11 +10,7 @@ type McpEntry = {
 
 const MCP_DIRECTORY_STORAGE_KEY = "sandbox-agent-inspector-mcp-directory";
 
-const McpTab = ({
-  getClient,
-}: {
-  getClient: () => SandboxAgent;
-}) => {
+const McpTab = ({ getClient }: { getClient: () => SandboxAgent }) => {
   const [directory, setDirectory] = useState(() => {
     if (typeof window === "undefined") return "/";
     try {
@@ -35,28 +31,29 @@ const McpTab = ({
   const [editError, setEditError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  const loadAll = useCallback(async (dir: string) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const configPath = `${dir === "/" ? "" : dir}/.sandbox-agent/config/mcp.json`;
-      const bytes = await getClient().readFsFile({ path: configPath });
-      const text = new TextDecoder().decode(bytes);
-      if (!text.trim()) {
+  const loadAll = useCallback(
+    async (dir: string) => {
+      setLoading(true);
+      setError(null);
+      try {
+        const configPath = `${dir === "/" ? "" : dir}/.sandbox-agent/config/mcp.json`;
+        const bytes = await getClient().readFsFile({ path: configPath });
+        const text = new TextDecoder().decode(bytes);
+        if (!text.trim()) {
+          setEntries([]);
+          return;
+        }
+        const map = JSON.parse(text) as Record<string, Record<string, unknown>>;
+        setEntries(Object.entries(map).map(([name, config]) => ({ name, config })));
+      } catch {
+        // File doesn't exist yet or is empty — that's fine
         setEntries([]);
-        return;
+      } finally {
+        setLoading(false);
       }
-      const map = JSON.parse(text) as Record<string, Record<string, unknown>>;
-      setEntries(
-        Object.entries(map).map(([name, config]) => ({ name, config })),
-      );
-    } catch {
-      // File doesn't exist yet or is empty — that's fine
-      setEntries([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [getClient]);
+    },
+    [getClient],
+  );
 
   useEffect(() => {
     loadAll(directory);
@@ -106,10 +103,7 @@ const McpTab = ({
     setSaving(true);
     setEditError(null);
     try {
-      await getClient().setMcpConfig(
-        { directory, mcpName: name },
-        parsed as Parameters<SandboxAgent["setMcpConfig"]>[1],
-      );
+      await getClient().setMcpConfig({ directory, mcpName: name }, parsed as Parameters<SandboxAgent["setMcpConfig"]>[1]);
       cancelEdit();
       await loadAll(directory);
     } catch (err) {
@@ -159,26 +153,34 @@ const McpTab = ({
       {editing && (
         <div className="card" style={{ marginBottom: 12 }}>
           <div className="card-header">
-            <span className="card-title">
-              {editName ? `Edit: ${editName}` : "Add MCP Server"}
-            </span>
+            <span className="card-title">{editName ? `Edit: ${editName}` : "Add MCP Server"}</span>
           </div>
           <div style={{ marginTop: 8 }}>
             <input
               className="setup-input"
               value={editName}
-              onChange={(e) => { setEditName(e.target.value); setEditError(null); }}
+              onChange={(e) => {
+                setEditName(e.target.value);
+                setEditError(null);
+              }}
               placeholder="server-name"
               style={{ marginBottom: 8, width: "100%", boxSizing: "border-box" }}
             />
             <textarea
               className="setup-input mono"
               value={editJson}
-              onChange={(e) => { setEditJson(e.target.value); setEditError(null); }}
+              onChange={(e) => {
+                setEditJson(e.target.value);
+                setEditError(null);
+              }}
               rows={6}
               style={{ width: "100%", boxSizing: "border-box", fontFamily: "monospace", fontSize: 11, resize: "vertical" }}
             />
-            {editError && <div className="banner error" style={{ marginTop: 4 }}>{editError}</div>}
+            {editError && (
+              <div className="banner error" style={{ marginTop: 4 }}>
+                {editError}
+              </div>
+            )}
           </div>
           <div className="card-actions">
             <button className="button primary small" onClick={save} disabled={saving}>
@@ -192,11 +194,7 @@ const McpTab = ({
         </div>
       )}
 
-      {entries.length === 0 && !editing && !loading && (
-        <div className="card-meta">
-          No MCP servers configured in this directory.
-        </div>
-      )}
+      {entries.length === 0 && !editing && !loading && <div className="card-meta">No MCP servers configured in this directory.</div>}
 
       {entries.map((entry) => {
         const isCollapsed = collapsedServers[entry.name] ?? true;
@@ -215,15 +213,8 @@ const McpTab = ({
                 <span className="card-title">{entry.name}</span>
               </div>
               <div className="card-header-pills">
-                <span className="pill accent">
-                  {(entry.config as { type?: string }).type ?? "unknown"}
-                </span>
-                <button
-                  className="button ghost small"
-                  onClick={() => remove(entry.name)}
-                  title="Remove"
-                  style={{ padding: "2px 4px" }}
-                >
+                <span className="pill accent">{(entry.config as { type?: string }).type ?? "unknown"}</span>
+                <button className="button ghost small" onClick={() => remove(entry.name)} title="Remove" style={{ padding: "2px 4px" }}>
                   <Trash2 size={12} />
                 </button>
               </div>

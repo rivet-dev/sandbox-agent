@@ -7,14 +7,14 @@
     --header-height: 3.5rem;
 
     /* Theme colors (HSL for flexibility) */
-    --background: 20 14.3% 4.1%;
-    --foreground: 60 9.1% 97.8%;
-    --primary: 18.5 100% 50%;
-    --primary-foreground: 60 9.1% 97.8%;
-    --muted: 34 10% 10%;
-    --muted-foreground: 24 5.4% 63.9%;
-    --border: 12 6.5% 15.1%;
-    --card: 0 9.09% 6.47%;
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 100%;
+    --primary: 18 100% 50%;
+    --primary-foreground: 0 0% 100%;
+    --muted: 240 5% 7%;
+    --muted-foreground: 240 4% 66%;
+    --border: 0 0% 100% / 0.10;
+    --card: 240 6% 4%;
 
     /* Shiki syntax highlighting */
     --shiki-color-text: theme('colors.white');
@@ -34,8 +34,9 @@
   }
 
   body {
-    @apply bg-black text-white antialiased;
-    font-family: 'Open Sans', system-ui, sans-serif;
+    @apply bg-[#09090b] text-white antialiased;
+    font-family: 'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif;
+    font-weight: 400;
   }
 
   /* Text selection - matches rivet.dev */
@@ -123,7 +124,7 @@
   }
 
   .glass-strong {
-    @apply bg-black/95 backdrop-blur-lg border border-white/10;
+    @apply bg-[#09090b]/95 backdrop-blur-lg border border-white/10;
   }
 
   /* Bento box card effects */
@@ -178,11 +179,11 @@
 
   /* Glow effect for buttons and interactive elements */
   .glow-accent {
-    box-shadow: 0 0 20px rgba(255, 69, 0, 0.3);
+    box-shadow: 0 0 20px rgba(255, 79, 0, 0.3);
   }
 
   .glow-accent-hover:hover {
-    box-shadow: 0 0 30px rgba(255, 69, 0, 0.5);
+    box-shadow: 0 0 30px rgba(255, 79, 0, 0.5);
   }
 
   /* Code highlight styling */
@@ -195,7 +196,7 @@
   }
 
   .code-highlight-ref.is-active {
-    background-color: rgba(255, 69, 0, 0.1);
+    background-color: rgba(255, 79, 0, 0.1);
   }
 
   .code-highlight-ref.is-active::before {
@@ -205,7 +206,7 @@
     top: 0;
     bottom: 0;
     width: 2px;
-    background-color: #ff4500;
+    background-color: #ff4f00;
   }
 
   /* Hide scrollbar */
@@ -227,12 +228,12 @@
 
   /* Backdrop with blur */
   .backdrop-glow {
-    @apply backdrop-blur-lg bg-black/80;
+    @apply backdrop-blur-lg bg-[#09090b]/80;
   }
 
   /* Better focus ring */
   .focus-ring {
-    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-black;
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-[#09090b];
   }
 }
 

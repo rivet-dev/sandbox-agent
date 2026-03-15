@@ -14,7 +14,7 @@ const AgentsTab = ({
   onRefresh,
   onInstall,
   loading,
-  error
+  error,
 }: {
   agents: AgentInfo[];
   defaultAgents: string[];
@@ -60,9 +60,7 @@ const AgentsTab = ({
       </div>
 
       {error && <div className="banner error">{error}</div>}
-      {!loading && agents.length === 0 && (
-        <div className="card-meta">No agents reported. Click refresh to check.</div>
-      )}
+      {!loading && agents.length === 0 && <div className="card-meta">No agents reported. Click refresh to check.</div>}
 
       {(agents.length
         ? agents
@@ -73,16 +71,15 @@ const AgentsTab = ({
             version: undefined as string | undefined,
             path: undefined as string | undefined,
             capabilities: emptyFeatureCoverage as AgentInfo["capabilities"],
-          }))).map((agent) => {
+          }))
+      ).map((agent) => {
         const isInstalling = installingAgent === agent.id;
         return (
           <div key={agent.id} className="card">
             <div className="card-header">
               <span className="card-title">{agent.id}</span>
               <div className="card-header-pills">
-                <span className={`pill ${agent.installed ? "success" : "danger"}`}>
-                  {agent.installed ? "Installed" : "Missing"}
-                </span>
+                <span className={`pill ${agent.installed ? "success" : "danger"}`}>{agent.installed ? "Installed" : "Missing"}</span>
                 <span className={`pill ${agent.credentialsAvailable ? "success" : "warning"}`}>
                   {agent.credentialsAvailable ? "Authenticated" : "No Credentials"}
                 </span>
@@ -90,7 +87,11 @@ const AgentsTab = ({
             </div>
             <div className="card-meta">
               {agent.version ?? "Version unknown"}
-              {agent.path && <span className="mono muted" style={{ marginLeft: 8 }}>{agent.path}</span>}
+              {agent.path && (
+                <span className="mono muted" style={{ marginLeft: 8 }}>
+                  {agent.path}
+                </span>
+              )}
             </div>
             <div className="card-meta" style={{ marginTop: 8 }}>
               Feature coverage
@@ -104,16 +105,8 @@ const AgentsTab = ({
               </div>
             )}
             <div className="card-actions">
-              <button
-                className="button secondary small"
-                onClick={() => handleInstall(agent.id, agent.installed)}
-                disabled={isInstalling}
-              >
-                {isInstalling ? (
-                  <Loader2 className="button-icon spinner-icon" />
-                ) : (
-                  <Download className="button-icon" />
-                )}
+              <button className="button secondary small" onClick={() => handleInstall(agent.id, agent.installed)} disabled={isInstalling}>
+                {isInstalling ? <Loader2 className="button-icon spinner-icon" /> : <Download className="button-icon" />}
                 {isInstalling ? "Installing..." : agent.installed ? "Reinstall" : "Install"}
               </button>
             </div>

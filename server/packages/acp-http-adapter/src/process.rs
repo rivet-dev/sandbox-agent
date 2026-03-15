@@ -16,6 +16,7 @@ use tokio_stream::wrappers::BroadcastStream;
 use crate::registry::LaunchSpec;
 
 const RING_BUFFER_SIZE: usize = 1024;
+const STDERR_TAIL_SIZE: usize = 16;
 
 #[derive(Debug, Error)]
 pub enum AdapterError {
@@ -33,6 +34,11 @@ pub enum AdapterError {
     Serialize(serde_json::Error),
     #[error("failed to write subprocess stdin: {0}")]
     Write(std::io::Error),
+    #[error("agent process exited before responding")]
+    Exited {
+        exit_code: Option<i32>,
+        stderr: Option<String>,
+    },
     #[error("timeout waiting for response")]
     Timeout,
 }
@@ -61,6 +67,7 @@ pub struct AdapterRuntime {
     shutting_down: AtomicBool,
     spawned_at: Instant,
     first_stdout: Arc<AtomicBool>,
+    stderr_tail: Arc<Mutex<VecDeque<String>>>,
 }
 
 impl AdapterRuntime {
@@ -120,6 +127,7 @@ impl AdapterRuntime {
             shutting_down: AtomicBool::new(false),
             spawned_at: spawn_start,
             first_stdout: Arc::new(AtomicBool::new(false)),
+            stderr_tail: Arc::new(Mutex::new(VecDeque::with_capacity(STDERR_TAIL_SIZE))),
         };
 
         runtime.spawn_stdout_loop(stdout);
@@ -198,6 +206,16 @@ impl AdapterRuntime {
                         "post: response channel dropped (agent process may have exited)"
                     );
                     self.pending.lock().await.remove(&key);
+                    if let Some((exit_code, stderr)) = self.try_process_exit_info().await {
+                        tracing::error!(
+                            method = %method,
+                            id = %key,
+                            exit_code = ?exit_code,
+                            stderr = ?stderr,
+                            "post: agent process exited before response channel completed"
+                        );
+                        return Err(AdapterError::Exited { exit_code, stderr });
+                    }
                     Err(AdapterError::Timeout)
                 }
                 Err(_) => {
@@ -213,6 +231,16 @@ impl AdapterRuntime {
                         "post: TIMEOUT waiting for agent response"
                     );
                     self.pending.lock().await.remove(&key);
+                    if let Some((exit_code, stderr)) = self.try_process_exit_info().await {
+                        tracing::error!(
+                            method = %method,
+                            id = %key,
+                            exit_code = ?exit_code,
+                            stderr = ?stderr,
+                            "post: agent process exited before timeout completed"
+                        );
+                        return Err(AdapterError::Exited { exit_code, stderr });
+                    }
                     Err(AdapterError::Timeout)
                 }
             }
@@ -445,6 +473,7 @@ impl AdapterRuntime {
 
     fn spawn_stderr_loop(&self, stderr: tokio::process::ChildStderr) {
         let spawned_at = self.spawned_at;
+        let stderr_tail = self.stderr_tail.clone();
 
         tokio::spawn(async move {
             let mut lines = BufReader::new(stderr).lines();
@@ -452,6 +481,13 @@ impl AdapterRuntime {
 
             while let Ok(Some(line)) = lines.next_line().await {
                 line_count += 1;
+                {
+                    let mut tail = stderr_tail.lock().await;
+                    tail.push_back(line.clone());
+                    while tail.len() > STDERR_TAIL_SIZE {
+                        tail.pop_front();
+                    }
+                }
                 tracing::info!(
                     line_number = line_count,
                     age_ms = spawned_at.elapsed().as_millis() as u64,
@@ -559,6 +595,28 @@ impl AdapterRuntime {
 
         tracing::debug!(method = method, id = %id, "stdin: write+flush complete");
         Ok(())
+    }
+
+    async fn try_process_exit_info(&self) -> Option<(Option<i32>, Option<String>)> {
+        let mut child = self.child.lock().await;
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let exit_code = status.code();
+                drop(child);
+                let stderr = self.stderr_tail_summary().await;
+                Some((exit_code, stderr))
+            }
+            Ok(None) => None,
+            Err(_) => None,
+        }
+    }
+
+    async fn stderr_tail_summary(&self) -> Option<String> {
+        let tail = self.stderr_tail.lock().await;
+        if tail.is_empty() {
+            return None;
+        }
+        Some(tail.iter().cloned().collect::<Vec<_>>().join("\n"))
     }
 }
 

@@ -1,0 +1,26 @@
+{
+  "name": "@sandbox-agent/foundry-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:e2e:full": "HF_ENABLE_DAEMON_FULL_E2E=1 vitest run test/e2e/full-integration-e2e.test.ts",
+    "test:e2e:workbench": "HF_ENABLE_DAEMON_WORKBENCH_E2E=1 vitest run test/e2e/workbench-e2e.test.ts",
+    "test:e2e:workbench-load": "HF_ENABLE_DAEMON_WORKBENCH_LOAD_E2E=1 vitest run test/e2e/workbench-load-e2e.test.ts"
+  },
+  "dependencies": {
+    "@sandbox-agent/foundry-shared": "workspace:*",
+    "react": "^19.1.1",
+    "rivetkit": "2.1.6",
+    "sandbox-agent": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.12",
+    "tsup": "^8.5.0"
+  }
+}

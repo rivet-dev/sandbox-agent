@@ -21,10 +21,7 @@ describe("OpenCode-compatible Event Streaming", () => {
     return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   }
 
-  async function initSessionViaHttp(
-    sessionId: string,
-    body: Record<string, unknown>
-  ): Promise<void> {
+  async function initSessionViaHttp(sessionId: string, body: Record<string, unknown>): Promise<void> {
     const response = await fetch(`${handle.baseUrl}/opencode/session/${sessionId}/init`, {
       method: "POST",
       headers: {
@@ -113,10 +110,7 @@ describe("OpenCode-compatible Event Streaming", () => {
             for await (const event of (eventStream as any).stream) {
               events.push(event);
               // Look for message part updates or completion
-              if (
-                event.type === "message.part.updated" ||
-                event.type === "session.idle"
-              ) {
+              if (event.type === "message.part.updated" || event.type === "session.idle") {
                 if (events.length >= 3) {
                   clearTimeout(timeout);
                   resolve();
@@ -175,10 +169,7 @@ describe("OpenCode-compatible Event Streaming", () => {
       const statuses: string[] = [];
 
       const collectIdle = new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(
-          () => reject(new Error("Timed out waiting for session.idle")),
-          15_000
-        );
+        const timeout = setTimeout(() => reject(new Error("Timed out waiting for session.idle")), 15_000);
         (async () => {
           try {
             for await (const event of (eventStream as any).stream) {
@@ -223,10 +214,7 @@ describe("OpenCode-compatible Event Streaming", () => {
       let busySnapshot: string | undefined;
 
       const waitForIdle = new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(
-          () => reject(new Error("Timed out waiting for busy status snapshot + session.idle")),
-          15_000
-        );
+        const timeout = setTimeout(() => reject(new Error("Timed out waiting for busy status snapshot + session.idle")), 15_000);
         (async () => {
           try {
             for await (const event of (eventStream as any).stream) {
@@ -276,10 +264,7 @@ describe("OpenCode-compatible Event Streaming", () => {
       const idles: any[] = [];
 
       const collectErrorAndIdle = new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(
-          () => reject(new Error("Timed out waiting for session.error + session.idle")),
-          15_000
-        );
+        const timeout = setTimeout(() => reject(new Error("Timed out waiting for session.error + session.idle")), 15_000);
         (async () => {
           try {
             for await (const event of (eventStream as any).stream) {
@@ -428,9 +413,7 @@ describe("OpenCode-compatible Event Streaming", () => {
       expect(idleEvents.length).toBe(1);
 
       // All tool parts should have been emitted before idle
-      const toolParts = allEvents.filter(
-        (e) => e.type === "message.part.updated" && e.properties?.part?.type === "tool"
-      );
+      const toolParts = allEvents.filter((e) => e.type === "message.part.updated" && e.properties?.part?.type === "tool");
       expect(toolParts.length).toBeGreaterThan(0);
     });
 
@@ -459,12 +442,7 @@ describe("OpenCode-compatible Event Streaming", () => {
                 if (!targetMessageId && partType === "tool" && typeof messageId === "string") {
                   targetMessageId = messageId;
                 }
-                if (
-                  targetMessageId &&
-                  messageId === targetMessageId &&
-                  typeof partId === "string" &&
-                  !seenPartIds.includes(partId)
-                ) {
+                if (targetMessageId && messageId === targetMessageId && typeof partId === "string" && !seenPartIds.includes(partId)) {
                   seenPartIds.push(partId);
                 }
               }
@@ -497,17 +475,12 @@ describe("OpenCode-compatible Event Streaming", () => {
       expect(targetMessageId).toBeTruthy();
       expect(seenPartIds.length).toBeGreaterThan(0);
 
-      const response = await fetch(
-        `${handle.baseUrl}/opencode/session/${sessionId}/message/${targetMessageId}`,
-        {
-          headers: { Authorization: `Bearer ${handle.token}` },
-        }
-      );
+      const response = await fetch(`${handle.baseUrl}/opencode/session/${sessionId}/message/${targetMessageId}`, {
+        headers: { Authorization: `Bearer ${handle.token}` },
+      });
       expect(response.ok).toBe(true);
       const message = (await response.json()) as any;
-      const returnedPartIds = (message?.parts ?? [])
-        .map((part: any) => part?.id)
-        .filter((id: any) => typeof id === "string");
+      const returnedPartIds = (message?.parts ?? []).map((part: any) => part?.id).filter((id: any) => typeof id === "string");
 
       const expectedSet = new Set(seenPartIds);
       const returnedFiltered = returnedPartIds.filter((id: string) => expectedSet.has(id));

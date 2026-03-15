@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { Copy, CheckCircle2 } from 'lucide-react';
+import { useState } from "react";
+import { Copy, CheckCircle2 } from "lucide-react";
 
 interface CopyButtonProps {
   text: string;
@@ -17,16 +17,8 @@ export function CopyButton({ text }: CopyButtonProps) {
   };
 
   return (
-    <button
-      onClick={handleCopy}
-      className="p-2 hover:bg-white/10 rounded-md transition-colors text-zinc-500 hover:text-white"
-      aria-label="Copy to clipboard"
-    >
-      {copied ? (
-        <CheckCircle2 className="w-4 h-4 text-green-400" />
-      ) : (
-        <Copy className="w-4 h-4" />
-      )}
+    <button onClick={handleCopy} className="p-2 hover:bg-white/10 rounded-md transition-colors text-zinc-500 hover:text-white" aria-label="Copy to clipboard">
+      {copied ? <CheckCircle2 className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
     </button>
   );
 }

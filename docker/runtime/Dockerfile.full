@@ -1,0 +1,162 @@
+# syntax=docker/dockerfile:1.10.0
+
+# ============================================================================
+# Build inspector frontend
+# ============================================================================
+FROM node:22-alpine AS inspector-build
+WORKDIR /app
+RUN npm install -g pnpm
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY frontend/packages/inspector/package.json ./frontend/packages/inspector/
+COPY sdks/cli-shared/package.json ./sdks/cli-shared/
+COPY sdks/acp-http-client/package.json ./sdks/acp-http-client/
+COPY sdks/persist-indexeddb/package.json ./sdks/persist-indexeddb/
+COPY sdks/react/package.json ./sdks/react/
+COPY sdks/typescript/package.json ./sdks/typescript/
+
+RUN pnpm install --filter @sandbox-agent/inspector...
+
+COPY docs/openapi.json ./docs/
+COPY sdks/cli-shared ./sdks/cli-shared
+COPY sdks/acp-http-client ./sdks/acp-http-client
+COPY sdks/persist-indexeddb ./sdks/persist-indexeddb
+COPY sdks/react ./sdks/react
+COPY sdks/typescript ./sdks/typescript
+
+RUN cd sdks/cli-shared && pnpm exec tsup
+RUN cd sdks/acp-http-client && pnpm exec tsup
+RUN cd sdks/typescript && SKIP_OPENAPI_GEN=1 pnpm exec tsup
+RUN cd sdks/persist-indexeddb && pnpm exec tsup
+RUN cd sdks/react && pnpm exec tsup
+
+COPY frontend/packages/inspector ./frontend/packages/inspector
+RUN cd frontend/packages/inspector && pnpm exec vite build
+
+# ============================================================================
+# AMD64 Builder - Uses cross-tools musl toolchain
+# ============================================================================
+FROM --platform=linux/amd64 rust:1.88.0 AS builder-amd64
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y \
+    musl-tools \
+    musl-dev \
+    llvm-14-dev \
+    libclang-14-dev \
+    clang-14 \
+    libssl-dev \
+    pkg-config \
+    ca-certificates \
+    g++ \
+    g++-multilib \
+    git \
+    curl \
+    wget && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN wget -q https://github.com/cross-tools/musl-cross/releases/latest/download/x86_64-unknown-linux-musl.tar.xz && \
+    tar -xf x86_64-unknown-linux-musl.tar.xz -C /opt/ && \
+    rm x86_64-unknown-linux-musl.tar.xz && \
+    rustup target add x86_64-unknown-linux-musl
+
+ENV PATH="/opt/x86_64-unknown-linux-musl/bin:$PATH" \
+    LIBCLANG_PATH=/usr/lib/llvm-14/lib \
+    CLANG_PATH=/usr/bin/clang-14 \
+    CC_x86_64_unknown_linux_musl=x86_64-unknown-linux-musl-gcc \
+    CXX_x86_64_unknown_linux_musl=x86_64-unknown-linux-musl-g++ \
+    AR_x86_64_unknown_linux_musl=x86_64-unknown-linux-musl-ar \
+    CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=x86_64-unknown-linux-musl-gcc \
+    CARGO_INCREMENTAL=0 \
+    CARGO_NET_GIT_FETCH_WITH_CLI=true
+
+ENV SSL_VER=1.1.1w
+RUN wget https://www.openssl.org/source/openssl-$SSL_VER.tar.gz && \
+    tar -xzf openssl-$SSL_VER.tar.gz && \
+    cd openssl-$SSL_VER && \
+    ./Configure no-shared no-async --prefix=/musl --openssldir=/musl/ssl linux-x86_64 && \
+    make -j$(nproc) && \
+    make install_sw && \
+    cd .. && \
+    rm -rf openssl-$SSL_VER*
+
+ENV OPENSSL_DIR=/musl \
+    OPENSSL_INCLUDE_DIR=/musl/include \
+    OPENSSL_LIB_DIR=/musl/lib \
+    PKG_CONFIG_ALLOW_CROSS=1 \
+    RUSTFLAGS="-C target-feature=+crt-static -C link-arg=-static-libgcc"
+
+WORKDIR /build
+COPY . .
+
+COPY --from=inspector-build /app/frontend/packages/inspector/dist ./frontend/packages/inspector/dist
+
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/build/target \
+    cargo build -p sandbox-agent --release --target x86_64-unknown-linux-musl && \
+    cp target/x86_64-unknown-linux-musl/release/sandbox-agent /sandbox-agent
+
+# ============================================================================
+# ARM64 Builder - Uses Alpine with native musl
+# ============================================================================
+FROM --platform=linux/arm64 rust:1.88-alpine AS builder-arm64
+
+RUN apk add --no-cache \
+    musl-dev \
+    clang \
+    llvm-dev \
+    openssl-dev \
+    openssl-libs-static \
+    pkgconfig \
+    git \
+    curl \
+    build-base
+
+RUN rustup target add aarch64-unknown-linux-musl
+
+ENV CARGO_INCREMENTAL=0 \
+    CARGO_NET_GIT_FETCH_WITH_CLI=true \
+    RUSTFLAGS="-C target-feature=+crt-static"
+
+WORKDIR /build
+COPY . .
+
+COPY --from=inspector-build /app/frontend/packages/inspector/dist ./frontend/packages/inspector/dist
+
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/build/target \
+    cargo build -p sandbox-agent --release --target aarch64-unknown-linux-musl && \
+    cp target/aarch64-unknown-linux-musl/release/sandbox-agent /sandbox-agent
+
+# ============================================================================
+# Select the appropriate builder based on target architecture
+# ============================================================================
+ARG TARGETARCH
+FROM builder-${TARGETARCH} AS builder
+
+# Runtime stage - full image with all supported agents preinstalled
+FROM node:22-bookworm-slim
+
+RUN apt-get update && apt-get install -y \
+    bash \
+    ca-certificates \
+    curl \
+    git && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /sandbox-agent /usr/local/bin/sandbox-agent
+RUN chmod +x /usr/local/bin/sandbox-agent
+
+RUN useradd -m -s /bin/bash sandbox
+USER sandbox
+WORKDIR /home/sandbox
+
+RUN sandbox-agent install-agent --all
+
+EXPOSE 2468
+
+ENTRYPOINT ["sandbox-agent"]
+CMD ["server", "--host", "0.0.0.0", "--port", "2468"]

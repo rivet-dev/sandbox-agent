@@ -1,0 +1,131 @@
+name: foundry
+
+services:
+  backend:
+    build:
+      context: ..
+      dockerfile: foundry/docker/backend.dev.Dockerfile
+    image: foundry-backend-dev
+    working_dir: /app
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      HF_BACKEND_HOST: "0.0.0.0"
+      HF_BACKEND_PORT: "7741"
+      RIVETKIT_STORAGE_PATH: "/root/.local/share/foundry/rivetkit"
+      RIVET_LOG_ERROR_STACK: "${RIVET_LOG_ERROR_STACK:-1}"
+      RIVET_LOG_LEVEL: "${RIVET_LOG_LEVEL:-debug}"
+      RIVET_LOG_TIMESTAMP: "${RIVET_LOG_TIMESTAMP:-1}"
+      FOUNDRY_LOG_LEVEL: "${FOUNDRY_LOG_LEVEL:-debug}"
+      # Pass through credentials needed for agent execution + PR creation in dev/e2e.
+      # Do not hardcode secrets; set these in your environment when starting compose.
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      CLAUDE_API_KEY: "${CLAUDE_API_KEY:-${ANTHROPIC_API_KEY:-}}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      # sandbox-agent codex plugin currently expects CODEX_API_KEY. Map from OPENAI_API_KEY for convenience.
+      CODEX_API_KEY: "${CODEX_API_KEY:-${OPENAI_API_KEY:-}}"
+      # Support either GITHUB_TOKEN or GITHUB_PAT in local env files.
+      GITHUB_TOKEN: "${GITHUB_TOKEN:-${GITHUB_PAT:-}}"
+      GH_TOKEN: "${GH_TOKEN:-${GITHUB_TOKEN:-${GITHUB_PAT:-}}}"
+      APP_URL: "${APP_URL:-}"
+      BETTER_AUTH_URL: "${BETTER_AUTH_URL:-}"
+      BETTER_AUTH_SECRET: "${BETTER_AUTH_SECRET:-}"
+      GITHUB_CLIENT_ID: "${GITHUB_CLIENT_ID:-}"
+      GITHUB_CLIENT_SECRET: "${GITHUB_CLIENT_SECRET:-}"
+      GITHUB_REDIRECT_URI: "${GITHUB_REDIRECT_URI:-}"
+      GITHUB_APP_ID: "${GITHUB_APP_ID:-}"
+      GITHUB_APP_CLIENT_ID: "${GITHUB_APP_CLIENT_ID:-}"
+      GITHUB_APP_CLIENT_SECRET: "${GITHUB_APP_CLIENT_SECRET:-}"
+      GITHUB_APP_PRIVATE_KEY: "${GITHUB_APP_PRIVATE_KEY:-}"
+      GITHUB_WEBHOOK_SECRET: "${GITHUB_WEBHOOK_SECRET:-${GITHUB_APP_WEBHOOK_SECRET:-}}"
+      STRIPE_PUBLISHABLE_KEY: "${STRIPE_PUBLISHABLE_KEY:-}"
+      STRIPE_SECRET_KEY: "${STRIPE_SECRET_KEY:-}"
+      STRIPE_WEBHOOK_SECRET: "${STRIPE_WEBHOOK_SECRET:-}"
+      STRIPE_PRICE_TEAM: "${STRIPE_PRICE_TEAM:-}"
+      FOUNDRY_SANDBOX_PROVIDER: "${FOUNDRY_SANDBOX_PROVIDER:-local}"
+      E2B_API_KEY: "${E2B_API_KEY:-}"
+      E2B_TEMPLATE: "${E2B_TEMPLATE:-}"
+      HF_E2B_TEMPLATE: "${HF_E2B_TEMPLATE:-${E2B_TEMPLATE:-}}"
+      DAYTONA_ENDPOINT: "${DAYTONA_ENDPOINT:-}"
+      DAYTONA_API_KEY: "${DAYTONA_API_KEY:-}"
+      HF_DAYTONA_ENDPOINT: "${HF_DAYTONA_ENDPOINT:-}"
+      HF_DAYTONA_API_KEY: "${HF_DAYTONA_API_KEY:-}"
+    ports:
+      - "6420:6420"
+      - "7741:7741"
+    volumes:
+      - "..:/app"
+      # The linked RivetKit checkout resolves from Foundry packages to /task/rivet-checkout in-container.
+      - "../../../task/rivet-checkout:/task/rivet-checkout:ro"
+      # Reuse the host Codex auth profile for local sandbox-agent Codex sessions in dev.
+      - "${HOME}/.codex:/root/.codex"
+      - "/var/run/docker.sock:/var/run/docker.sock"
+      # Keep backend dependency installs Linux-native instead of using host node_modules.
+      - "foundry_backend_root_node_modules:/app/node_modules"
+      - "foundry_backend_backend_node_modules:/app/foundry/packages/backend/node_modules"
+      - "foundry_backend_shared_node_modules:/app/foundry/packages/shared/node_modules"
+      - "foundry_backend_persist_rivet_node_modules:/app/sdks/persist-rivet/node_modules"
+      - "foundry_backend_typescript_node_modules:/app/sdks/typescript/node_modules"
+      - "foundry_backend_pnpm_store:/root/.local/share/pnpm/store"
+      # Persist RivetKit local storage across container restarts.
+      - "foundry_rivetkit_storage:/root/.local/share/foundry/rivetkit"
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: foundry/docker/frontend.dev.Dockerfile
+    working_dir: /app
+    depends_on:
+      - backend
+    environment:
+      HOME: "/tmp"
+      HF_BACKEND_HTTP: "http://backend:7741"
+    ports:
+      - "4173:4173"
+    volumes:
+      - "..:/app"
+      # Ensure logs in .foundry/ persist on the host even if we change source mounts later.
+      - "./.foundry:/app/foundry/.foundry"
+      - "../../../task/rivet-checkout:/task/rivet-checkout:ro"
+      # Use Linux-native repo dependencies inside the container instead of host node_modules.
+      - "foundry_node_modules:/app/node_modules"
+      - "foundry_client_node_modules:/app/foundry/packages/client/node_modules"
+      - "foundry_frontend_node_modules:/app/foundry/packages/frontend/node_modules"
+      - "foundry_shared_node_modules:/app/foundry/packages/shared/node_modules"
+      - "foundry_pnpm_store:/tmp/.local/share/pnpm/store"
+
+  smee:
+    image: node:20-alpine
+    depends_on:
+      - backend
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      SMEE_URL: "${SMEE_URL:-}"
+      SMEE_TARGET: "${SMEE_TARGET:-http://backend:7741/v1/webhooks/github}"
+    command:
+      - /bin/sh
+      - -lc
+      - |
+        if [ -z "$SMEE_URL" ]; then
+          echo "SMEE_URL is required for local GitHub webhook forwarding" >&2
+          exit 1
+        fi
+        exec npx --yes smee-client --url "$SMEE_URL" --target "$SMEE_TARGET"
+    restart: unless-stopped
+
+volumes:
+  foundry_backend_root_node_modules: {}
+  foundry_backend_backend_node_modules: {}
+  foundry_backend_shared_node_modules: {}
+  foundry_backend_persist_rivet_node_modules: {}
+  foundry_backend_typescript_node_modules: {}
+  foundry_backend_pnpm_store: {}
+  foundry_rivetkit_storage: {}
+  foundry_node_modules: {}
+  foundry_client_node_modules: {}
+  foundry_frontend_node_modules: {}
+  foundry_shared_node_modules: {}
+  foundry_pnpm_store: {}

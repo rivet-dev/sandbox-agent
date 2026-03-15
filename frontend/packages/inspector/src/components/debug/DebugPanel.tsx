@@ -1,15 +1,17 @@
-import { ChevronLeft, ChevronRight, Cloud, PlayCircle, Server, Terminal, Wrench } from "lucide-react";
+import { ChevronLeft, ChevronRight, Cloud, Play, PlayCircle, Server, Terminal, Wrench } from "lucide-react";
 import type { AgentInfo, SandboxAgent, SessionEvent } from "sandbox-agent";
 
 type AgentModeInfo = { id: string; name: string; description: string };
 import AgentsTab from "./AgentsTab";
 import EventsTab from "./EventsTab";
 import McpTab from "./McpTab";
+import ProcessesTab from "./ProcessesTab";
+import ProcessRunTab from "./ProcessRunTab";
 import SkillsTab from "./SkillsTab";
 import RequestLogTab from "./RequestLogTab";
 import type { RequestLog } from "../../types/requestLog";
 
-export type DebugTab = "log" | "events" | "agents" | "mcp" | "skills";
+export type DebugTab = "log" | "events" | "agents" | "mcp" | "skills" | "processes" | "run-process";
 
 const DebugPanel = ({
   debugTab,
@@ -57,11 +59,7 @@ const DebugPanel = ({
   return (
     <div className={`debug-panel ${collapsed ? "collapsed" : ""}`}>
       <div className="debug-tabs">
-        <button
-          className="debug-collapse-btn"
-          onClick={onToggleCollapse}
-          title={collapsed ? "Expand panel" : "Collapse panel"}
-        >
+        <button className="debug-collapse-btn" onClick={onToggleCollapse} title={collapsed ? "Expand panel" : "Collapse panel"}>
           {collapsed ? <ChevronLeft size={14} /> : <ChevronRight size={14} />}
         </button>
         <button className={`debug-tab ${debugTab === "events" ? "active" : ""}`} onClick={() => onDebugTabChange("events")}>
@@ -81,6 +79,14 @@ const DebugPanel = ({
           <Server className="button-icon" style={{ marginRight: 4, width: 12, height: 12 }} />
           MCP
         </button>
+        <button className={`debug-tab ${debugTab === "processes" ? "active" : ""}`} onClick={() => onDebugTabChange("processes")}>
+          <Terminal className="button-icon" style={{ marginRight: 4, width: 12, height: 12 }} />
+          Processes
+        </button>
+        <button className={`debug-tab ${debugTab === "run-process" ? "active" : ""}`} onClick={() => onDebugTabChange("run-process")}>
+          <Play className="button-icon" style={{ marginRight: 4, width: 12, height: 12 }} />
+          Run Once
+        </button>
         <button className={`debug-tab ${debugTab === "skills" ? "active" : ""}`} onClick={() => onDebugTabChange("skills")}>
           <Wrench className="button-icon" style={{ marginRight: 4, width: 12, height: 12 }} />
           Skills
@@ -88,22 +94,10 @@ const DebugPanel = ({
       </div>
 
       <div className="debug-content">
-        {debugTab === "log" && (
-          <RequestLogTab
-            requestLog={requestLog}
-            copiedLogId={copiedLogId}
-            onClear={onClearRequestLog}
-            onCopy={onCopyRequestLog}
-          />
-        )}
+        {debugTab === "log" && <RequestLogTab requestLog={requestLog} copiedLogId={copiedLogId} onClear={onClearRequestLog} onCopy={onCopyRequestLog} />}
 
         {debugTab === "events" && (
-          <EventsTab
-            events={events}
-            onClear={onResetEvents}
-            highlightedEventId={highlightedEventId}
-            onClearHighlight={onClearHighlight}
-          />
+          <EventsTab events={events} onClear={onResetEvents} highlightedEventId={highlightedEventId} onClearHighlight={onClearHighlight} />
         )}
 
         {debugTab === "agents" && (
@@ -118,13 +112,13 @@ const DebugPanel = ({
           />
         )}
 
-        {debugTab === "mcp" && (
-          <McpTab getClient={getClient} />
-        )}
+        {debugTab === "mcp" && <McpTab getClient={getClient} />}
 
-        {debugTab === "skills" && (
-          <SkillsTab getClient={getClient} />
-        )}
+        {debugTab === "processes" && <ProcessesTab getClient={getClient} />}
+
+        {debugTab === "run-process" && <ProcessRunTab getClient={getClient} />}
+
+        {debugTab === "skills" && <SkillsTab getClient={getClient} />}
       </div>
     </div>
   );

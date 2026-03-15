@@ -1,12 +1,5 @@
 import { Pool, type PoolConfig } from "pg";
-import type {
-  ListEventsRequest,
-  ListPage,
-  ListPageRequest,
-  SessionEvent,
-  SessionPersistDriver,
-  SessionRecord,
-} from "sandbox-agent";
+import type { ListEventsRequest, ListPage, ListPageRequest, SessionEvent, SessionPersistDriver, SessionRecord } from "sandbox-agent";
 
 const DEFAULT_LIST_LIMIT = 100;
 
@@ -122,10 +115,9 @@ export class PostgresSessionPersistDriver implements SessionPersistDriver {
       [request.sessionId, limit, offset],
     );
 
-    const countResult = await this.pool.query<{ count: string }>(
-      `SELECT COUNT(*) AS count FROM ${this.table("events")} WHERE session_id = $1`,
-      [request.sessionId],
-    );
+    const countResult = await this.pool.query<{ count: string }>(`SELECT COUNT(*) AS count FROM ${this.table("events")} WHERE session_id = $1`, [
+      request.sessionId,
+    ]);
     const total = parseInteger(countResult.rows[0]?.count ?? "0");
     const nextOffset = offset + rowsResult.rows.length;
 
@@ -149,15 +141,7 @@ export class PostgresSessionPersistDriver implements SessionPersistDriver {
         connection_id = EXCLUDED.connection_id,
         sender = EXCLUDED.sender,
         payload_json = EXCLUDED.payload_json`,
-      [
-        event.id,
-        event.eventIndex,
-        event.sessionId,
-        event.createdAt,
-        event.connectionId,
-        event.sender,
-        event.payload,
-      ],
+      [event.id, event.eventIndex, event.sessionId, event.createdAt, event.connectionId, event.sender, event.payload],
     );
   }
 

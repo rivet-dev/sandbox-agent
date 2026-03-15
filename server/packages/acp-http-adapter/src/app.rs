@@ -93,6 +93,20 @@ fn map_error(err: AdapterError) -> Response {
             "timeout",
             "timed out waiting for agent response",
         ),
+        AdapterError::Exited { exit_code, stderr } => {
+            let detail = if let Some(stderr) = stderr {
+                format!(
+                    "agent process exited before responding (exit_code: {:?}, stderr: {})",
+                    exit_code, stderr
+                )
+            } else {
+                format!(
+                    "agent process exited before responding (exit_code: {:?})",
+                    exit_code
+                )
+            };
+            problem(StatusCode::BAD_GATEWAY, "agent_exited", &detail)
+        }
         AdapterError::Write(write) => problem(
             StatusCode::BAD_GATEWAY,
             "write_failed",

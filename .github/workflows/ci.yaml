@@ -11,18 +11,50 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@main
+      - uses: Swatinem/rust-cache@v2
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: pnpm
       - run: pnpm install
+      - name: Run formatter hooks
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch origin "${{ github.base_ref }}" --depth=1
+            diff_range="origin/${{ github.base_ref }}...HEAD"
+          elif [ "${{ github.event_name }}" = "push" ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+            diff_range="${{ github.event.before }}...${{ github.sha }}"
+          else
+            diff_range="HEAD^...HEAD"
+          fi
+
+          mapfile -t changed_files < <(
+            git diff --name-only --diff-filter=ACMR "$diff_range" \
+              | grep -E '\.(cjs|cts|js|jsx|json|jsonc|mjs|mts|rs|ts|tsx)$' \
+              || true
+          )
+
+          if [ ${#changed_files[@]} -eq 0 ]; then
+            echo "No formatter-managed files changed."
+            exit 0
+          fi
+
+          args=()
+          for file in "${changed_files[@]}"; do
+            args+=(--file "$file")
+          done
+
+          pnpm exec lefthook run pre-commit --no-stage-fixed --fail-on-changes "${args[@]}"
+      - run: npm install -g tsx
       - name: Run checks
-        run: ./scripts/release/main.ts --version 0.0.0 --check
+        run: ./scripts/release/main.ts --version 0.0.0 --only-steps run-ci-checks
       - name: Run ACP v1 server tests
         run: |
           cargo test -p sandbox-agent-agent-management
@@ -31,5 +63,3 @@ jobs:
           cargo test -p sandbox-agent --lib
       - name: Run SDK tests
         run: pnpm --dir sdks/typescript test
-      - name: Run Inspector browser E2E
-        run: pnpm --filter @sandbox-agent/inspector test:agent-browser

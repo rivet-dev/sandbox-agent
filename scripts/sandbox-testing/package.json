@@ -1,21 +1,21 @@
 {
-	"name": "@sandbox-agent/testing",
-	"private": true,
-	"type": "module",
-	"scripts": {
-		"test": "tsx test-sandbox.ts",
-		"test:docker": "tsx test-sandbox.ts docker",
-		"test:daytona": "tsx test-sandbox.ts daytona",
-		"test:mock": "tsx test-sandbox.ts docker --agent=mock",
-		"test:verbose": "tsx test-sandbox.ts docker --verbose"
-	},
-	"dependencies": {
-		"@daytonaio/sdk": "latest",
-		"@e2b/code-interpreter": "latest"
-	},
-	"devDependencies": {
-		"@types/node": "latest",
-		"tsx": "latest",
-		"typescript": "latest"
-	}
+  "name": "@sandbox-agent/testing",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "tsx test-sandbox.ts",
+    "test:docker": "tsx test-sandbox.ts docker",
+    "test:daytona": "tsx test-sandbox.ts daytona",
+    "test:mock": "tsx test-sandbox.ts docker --agent=mock",
+    "test:verbose": "tsx test-sandbox.ts docker --verbose"
+  },
+  "dependencies": {
+    "@daytonaio/sdk": "latest",
+    "@e2b/code-interpreter": "latest"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "tsx": "latest",
+    "typescript": "latest"
+  }
 }

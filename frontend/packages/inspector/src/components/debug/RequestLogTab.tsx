@@ -8,7 +8,7 @@ const RequestLogTab = ({
   requestLog,
   copiedLogId,
   onClear,
-  onCopy
+  onCopy,
 }: {
   requestLog: RequestLog[];
   copiedLogId: number | null;
@@ -49,16 +49,16 @@ const RequestLogTab = ({
                   <div className="event-summary-main">
                     <div className="event-title-row">
                       <span className="log-method">{entry.method}</span>
-                      <span className="log-url text-truncate" style={{ flex: 1 }}>{entry.url}</span>
+                      <span className="log-url text-truncate" style={{ flex: 1 }}>
+                        {entry.url}
+                      </span>
                     </div>
                     <div className="event-id">
                       {entry.time}
                       {entry.error && ` - ${entry.error}`}
                     </div>
                   </div>
-                  <span className={`log-status ${entry.status && entry.status < 400 ? "ok" : "error"}`}>
-                    {entry.status || "ERR"}
-                  </span>
+                  <span className={`log-status ${entry.status && entry.status < 400 ? "ok" : "error"}`}>{entry.status || "ERR"}</span>
                   <span
                     className="copy-button"
                     onClick={(e) => {
@@ -77,18 +77,18 @@ const RequestLogTab = ({
                     <Clipboard size={14} />
                     {copiedLogId === entry.id ? "Copied" : "curl"}
                   </span>
-                  {hasDetails && (
-                    <span className="event-chevron">
-                      {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                    </span>
-                  )}
+                  {hasDetails && <span className="event-chevron">{isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</span>}
                 </button>
                 {isExpanded && (
                   <div className="event-payload" style={{ padding: "8px 12px" }}>
                     {entry.headers && Object.keys(entry.headers).length > 0 && (
                       <div style={{ marginBottom: 8 }}>
                         <div className="part-title">Request Headers</div>
-                        <pre className="code-block">{Object.entries(entry.headers).map(([k, v]) => `${k}: ${v}`).join("\n")}</pre>
+                        <pre className="code-block">
+                          {Object.entries(entry.headers)
+                            .map(([k, v]) => `${k}: ${v}`)
+                            .join("\n")}
+                        </pre>
                       </div>
                     )}
                     {entry.body && (

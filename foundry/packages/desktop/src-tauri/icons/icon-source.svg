@@ -1,0 +1,130 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- macOS squircle clip path (continuous corner radius ~22.37% = 229px) -->
+    <clipPath id="squircle-clip">
+      <path d="
+        M 229 0
+        H 795
+        C 921.5 0 1024 102.5 1024 229
+        V 795
+        C 1024 921.5 921.5 1024 795 1024
+        H 229
+        C 102.5 1024 0 921.5 0 795
+        V 229
+        C 0 102.5 102.5 0 229 0
+        Z
+      "/>
+    </clipPath>
+
+    <!-- macOS squircle shape for stroke -->
+    <path id="squircle-path" d="
+      M 229 0
+      H 795
+      C 921.5 0 1024 102.5 1024 229
+      V 795
+      C 1024 921.5 921.5 1024 795 1024
+      H 229
+      C 102.5 1024 0 921.5 0 795
+      V 229
+      C 0 102.5 102.5 0 229 0
+      Z
+    "/>
+
+    <!-- Base dark gradient with subtle depth -->
+    <linearGradient id="base-gradient" x1="0" y1="0" x2="1024" y2="1024" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1A1A1A"/>
+      <stop offset="0.5" stop-color="#0F0F0F"/>
+      <stop offset="1" stop-color="#0A0A0A"/>
+    </linearGradient>
+
+    <!-- Glass highlight overlay (top-left lighter) -->
+    <linearGradient id="glass-overlay" x1="0" y1="0" x2="1024" y2="1024" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="white" stop-opacity="0.12"/>
+      <stop offset="0.35" stop-color="white" stop-opacity="0.04"/>
+      <stop offset="0.65" stop-color="white" stop-opacity="0"/>
+      <stop offset="1" stop-color="black" stop-opacity="0.15"/>
+    </linearGradient>
+
+    <!-- Top edge highlight (light reflection) -->
+    <linearGradient id="top-highlight" x1="256" y1="0" x2="768" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="white" stop-opacity="0"/>
+      <stop offset="0.2" stop-color="white" stop-opacity="0.4"/>
+      <stop offset="0.5" stop-color="white" stop-opacity="0.6"/>
+      <stop offset="0.8" stop-color="white" stop-opacity="0.4"/>
+      <stop offset="1" stop-color="white" stop-opacity="0"/>
+    </linearGradient>
+
+    <!-- Inner border glow -->
+    <filter id="inner-border-glow" x="-10%" y="-10%" width="120%" height="120%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="6" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- Subtle inner shadow for depth -->
+    <radialGradient id="vignette" cx="0.5" cy="0.4" r="0.65" fx="0.5" fy="0.35">
+      <stop offset="0" stop-color="white" stop-opacity="0.03"/>
+      <stop offset="0.7" stop-color="black" stop-opacity="0"/>
+      <stop offset="1" stop-color="black" stop-opacity="0.2"/>
+    </radialGradient>
+
+    <!-- Inner rounded rect for the border -->
+    <rect id="inner-border-rect" x="152" y="152" width="720" height="720" rx="205"/>
+
+    <!-- Glow filter for inner border -->
+    <filter id="glow" x="-5%" y="-5%" width="110%" height="110%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="8" result="blur"/>
+      <feFlood flood-color="#F0F0F0" flood-opacity="0.15" result="color"/>
+      <feComposite in="color" in2="blur" operator="in" result="glow"/>
+      <feMerge>
+        <feMergeNode in="glow"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- Specular highlight on the Y mark -->
+    <linearGradient id="logo-gradient" x1="380" y1="340" x2="640" y2="730" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="0.6" stop-color="#F0F0F0"/>
+      <stop offset="1" stop-color="#E0E0E0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Outer squircle shape -->
+  <g clip-path="url(#squircle-clip)">
+    <!-- Base fill with gradient -->
+    <use href="#squircle-path" fill="url(#base-gradient)"/>
+
+    <!-- Vignette/radial depth -->
+    <use href="#squircle-path" fill="url(#vignette)"/>
+
+    <!-- Glass overlay -->
+    <use href="#squircle-path" fill="url(#glass-overlay)"/>
+
+    <!-- Inner rounded border with glow -->
+    <g filter="url(#glow)">
+      <rect x="152" y="152" width="720" height="720" rx="205"
+            fill="none" stroke="#F0F0F0" stroke-width="67" stroke-opacity="0.9"/>
+    </g>
+
+    <!-- Y-shaped / triskelion logo mark, scaled from 130x128 to fit ~1024 -->
+    <!-- Original viewBox was 130x128, scaling factor ~7.87. Centered in the icon. -->
+    <g transform="translate(512, 512) scale(7.87) translate(-65, -64)">
+      <path fill-rule="evenodd" clip-rule="evenodd"
+            d="M88.0429 44.2658C89.3803 43.625 90.8907 44.1955 91.5731 45.3776C92.2556 46.5596 91.9945 48.1529 90.7709 48.9907L72.3923 62.885C71.8013 63.2262 71.4248 63.7062 71.1029 64.2861C70.781 64.8659 70.5554 65.3922 70.5443 66.0553L67.7403 88.9495C67.521 90.3894 66.4114 91.423 64.9867 91.4576C63.5619 91.4922 62.3731 90.3429 62.24 88.9751L59.3859 66.0642C59.3971 65.4011 59.2126 64.8489 58.8714 64.2579C58.5302 63.6669 58.1442 63.231 57.5643 62.9091L39.15 48.9819C38.032 48.1828 37.6311 46.5786 38.3734 45.362C39.1157 44.1454 40.5656 43.7013 41.9223 44.2314L63.1512 53.2502C63.731 53.5721 64.2996 53.6398 64.9627 53.651C65.6259 53.6622 66.2298 53.5761 66.8208 53.2349L88.0429 44.2658Z"
+            fill="url(#logo-gradient)"/>
+    </g>
+  </g>
+
+  <!-- Outer squircle border (subtle) -->
+  <use href="#squircle-path" fill="none" stroke="#333333" stroke-width="1.5" stroke-opacity="0.5"/>
+
+  <!-- Top edge highlight reflection -->
+  <path d="
+    M 229 2
+    H 795
+    C 920 2 1022 103 1022 229
+  " fill="none" stroke="url(#top-highlight)" stroke-width="2" stroke-linecap="round"/>
+</svg>

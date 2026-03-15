@@ -66,18 +66,11 @@ function findRepoRoot(root: string): string {
 }
 
 function resolveTsconfig(root: string): string | undefined {
-  const candidates = [
-    join(root, "tsconfig.json"),
-    join(root, "tsconfig.base.json"),
-    join(root, "packages", "coding-agent", "tsconfig.json"),
-  ];
+  const candidates = [join(root, "tsconfig.json"), join(root, "tsconfig.base.json"), join(root, "packages", "coding-agent", "tsconfig.json")];
   return candidates.find((path) => existsSync(path));
 }
 
-function generateDefinitions(
-  rpcTypesPath: string,
-  tsconfigPath?: string
-): Record<string, JSONSchema7> {
+function generateDefinitions(rpcTypesPath: string, tsconfigPath?: string): Record<string, JSONSchema7> {
   const definitions: Record<string, JSONSchema7> = {};
 
   for (const typeName of TARGET_TYPES) {
@@ -96,11 +89,7 @@ function generateDefinitions(
   return definitions;
 }
 
-function mergeDefinitions(
-  target: Record<string, JSONSchema7>,
-  schema: JSONSchema7,
-  typeName: string
-): void {
+function mergeDefinitions(target: Record<string, JSONSchema7>, schema: JSONSchema7, typeName: string): void {
   if (schema.definitions) {
     for (const [name, def] of Object.entries(schema.definitions)) {
       target[name] = def as JSONSchema7;

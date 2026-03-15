@@ -5,12 +5,7 @@ import { setupComputeSdkSandboxAgent } from "../src/computesdk.ts";
 const hasModal = Boolean(process.env.MODAL_TOKEN_ID && process.env.MODAL_TOKEN_SECRET);
 const hasVercel = Boolean(process.env.VERCEL_TOKEN || process.env.VERCEL_OIDC_TOKEN);
 const hasProviderKey = Boolean(
-  process.env.BLAXEL_API_KEY ||
-    process.env.CSB_API_KEY ||
-    process.env.DAYTONA_API_KEY ||
-    process.env.E2B_API_KEY ||
-    hasModal ||
-    hasVercel
+  process.env.BLAXEL_API_KEY || process.env.CSB_API_KEY || process.env.DAYTONA_API_KEY || process.env.E2B_API_KEY || hasModal || hasVercel,
 );
 
 const shouldRun = Boolean(process.env.COMPUTESDK_API_KEY) && hasProviderKey;
@@ -34,6 +29,6 @@ describe("computesdk example", () => {
         await cleanup();
       }
     },
-    timeoutMs
+    timeoutMs,
   );
 });

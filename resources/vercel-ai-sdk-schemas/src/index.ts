@@ -1,13 +1,4 @@
-import {
-  mkdtempSync,
-  mkdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-  existsSync,
-  appendFileSync,
-  statSync,
-} from "fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync, appendFileSync, statSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { createGenerator, type Config } from "ts-json-schema-generator";
@@ -117,15 +108,8 @@ function packageDirFor(name: string, nodeModulesDir: string): string {
   return join(nodeModulesDir, ...parts);
 }
 
-async function installPackage(
-  name: string,
-  versionRange: string,
-  nodeModulesDir: string,
-  installed: Set<string>
-): Promise<void> {
-  const encodedName = name.startsWith("@")
-    ? `@${encodeURIComponent(name.slice(1))}`
-    : encodeURIComponent(name);
+async function installPackage(name: string, versionRange: string, nodeModulesDir: string, installed: Set<string>): Promise<void> {
+  const encodedName = name.startsWith("@") ? `@${encodeURIComponent(name.slice(1))}` : encodeURIComponent(name);
   const registryUrl = `https://registry.npmjs.org/${encodedName}`;
   const registry = await fetchRegistry(registryUrl);
   const version = resolveVersionFromRange(registry, versionRange);
@@ -208,10 +192,7 @@ function patchValueOfAlias(nodeModulesDir: string): void {
     log("  [warn] ValueOf alias declaration not found");
   }
 
-  let patched = contents.replace(
-    /ObjectType\\s*\\[\\s*ValueType\\s*\\]/,
-    "ObjectType[string]"
-  );
+  let patched = contents.replace(/ObjectType\\s*\\[\\s*ValueType\\s*\\]/, "ObjectType[string]");
 
   if (patched !== contents) {
     writeFileSync(aiTypesPath, patched);
@@ -220,8 +201,7 @@ function patchValueOfAlias(nodeModulesDir: string): void {
   }
 
   const valueOfIndex = contents.indexOf("ValueOf");
-  const preview =
-    valueOfIndex === -1 ? contents.slice(0, 200) : contents.slice(valueOfIndex, valueOfIndex + 200);
+  const preview = valueOfIndex === -1 ? contents.slice(0, 200) : contents.slice(valueOfIndex, valueOfIndex + 200);
   log("  [warn] ValueOf alias not found in ai types");
   log(`  [debug] ai types path: ${aiTypesPath}`);
   log(`  [debug] preview: ${preview.replace(/\\s+/g, " ").slice(0, 200)}`);
@@ -318,7 +298,7 @@ function patchUiMessageTypes(nodeModulesDir: string): void {
 
   const dataReplaced = replaceAlias(
     "DataUIPart",
-    "type DataUIPart<DATA_TYPES extends UIDataTypes> = {\\n    type: `data-${string}`;\\n    id?: string;\\n    data: unknown;\\n};"
+    "type DataUIPart<DATA_TYPES extends UIDataTypes> = {\\n    type: `data-${string}`;\\n    id?: string;\\n    data: unknown;\\n};",
   );
   if (dataReplaced) {
     log("  [patch] Simplified DataUIPart to avoid indexed access");
@@ -326,7 +306,7 @@ function patchUiMessageTypes(nodeModulesDir: string): void {
 
   const toolReplaced = replaceAlias(
     "ToolUIPart",
-    "type ToolUIPart<TOOLS extends UITools = UITools> = {\\n    type: `tool-${string}`;\\n} & UIToolInvocation<UITool>;"
+    "type ToolUIPart<TOOLS extends UITools = UITools> = {\\n    type: `tool-${string}`;\\n} & UIToolInvocation<UITool>;",
   );
   if (toolReplaced) {
     log("  [patch] Simplified ToolUIPart to avoid indexed access");

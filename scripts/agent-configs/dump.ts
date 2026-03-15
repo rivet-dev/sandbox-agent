@@ -1,5 +1,6 @@
 /**
- * Fetches model/mode lists from agent backends and writes them to resources/.
+ * Fetches model/mode/thought-level lists from agent backends and writes them
+ * to resources/.
  *
  * Usage:
  *   npx tsx dump.ts                      # Dump all agents
@@ -10,10 +11,23 @@
  *   Claude  — Anthropic API (GET /v1/models?beta=true). Extracts API key from
  *             ANTHROPIC_API_KEY env. Falls back to aliases (default, sonnet, opus, haiku)
  *             on 401/403 or missing credentials.
+ *             Modes are hardcoded (discovered by ACP session/set_mode probing).
+ *             Claude does not implement session/set_config_option at all.
  *   Codex   — Codex app-server JSON-RPC (model/list over stdio, paginated).
+ *             Modes and thought levels are hardcoded (discovered from Codex's
+ *             ACP session/new configOptions response).
  *   OpenCode — OpenCode HTTP server (GET {base_url}/config/providers, fallback /provider).
- *             Model IDs formatted as {provider_id}/{model_id}.
+ *             Model IDs formatted as {provider_id}/{model_id}. Modes hardcoded.
  *   Cursor  — `cursor-agent models` CLI command. Parses the text output.
+ *
+ * Derivation of hardcoded values:
+ *   When agents don't expose modes/thought levels through their model listing
+ *   APIs, we discover them by ACP probing against a running sandbox-agent server:
+ *   1. Create an ACP session via session/new and inspect the configOptions and
+ *      modes fields in the response.
+ *   2. Test session/set_mode with candidate mode IDs.
+ *   3. Test session/set_config_option with candidate config IDs and values.
+ *   See /tmp/probe-agents.sh or /tmp/probe-agents.ts for example probe scripts.
  *
  * Output goes to resources/ alongside this script. These JSON files are committed
  * to the repo and included in the sandbox-agent binary at compile time via include_str!.
@@ -37,11 +51,19 @@ interface ModeEntry {
   description?: string;
 }
 
+interface ThoughtLevelEntry {
+  id: string;
+  name: string;
+  description?: string;
+}
+
 interface AgentModelList {
   defaultModel: string;
   models: ModelEntry[];
   defaultMode?: string;
   modes?: ModeEntry[];
+  defaultThoughtLevel?: string;
+  thoughtLevels?: ThoughtLevelEntry[];
 }
 
 // ─── CLI ──────────────────────────────────────────────────────────────────────
@@ -65,9 +87,7 @@ for (let i = 0; i < args.length; i++) {
 }
 
 const RESOURCES_DIR = path.join(__dirname, "resources");
-const agents = agentFilter.length
-  ? agentFilter
-  : ["claude", "codex", "opencode", "cursor"];
+const agents = agentFilter.length ? agentFilter : ["claude", "codex", "opencode", "cursor"];
 
 async function main() {
   fs.mkdirSync(RESOURCES_DIR, { recursive: true });
@@ -100,9 +120,9 @@ function writeList(agent: string, list: AgentModelList) {
   const filePath = path.join(RESOURCES_DIR, `${agent}.json`);
   fs.writeFileSync(filePath, JSON.stringify(list, null, 2) + "\n");
   const modeCount = list.modes?.length ?? 0;
-  console.log(
-    `  Wrote ${list.models.length} models${modeCount ? `, ${modeCount} modes` : ""} to ${filePath} (default: ${list.defaultModel})`
-  );
+  const thoughtCount = list.thoughtLevels?.length ?? 0;
+  const extras = [modeCount ? `${modeCount} modes` : null, thoughtCount ? `${thoughtCount} thought levels` : null].filter(Boolean).join(", ");
+  console.log(`  Wrote ${list.models.length} models${extras ? `, ${extras}` : ""} to ${filePath} (default: ${list.defaultModel})`);
 }
 
 // ─── Claude ───────────────────────────────────────────────────────────────────
@@ -110,13 +130,27 @@ function writeList(agent: string, list: AgentModelList) {
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/models?beta=true";
 const ANTHROPIC_VERSION = "2023-06-01";
 
+// Claude v0.20.0 (@zed-industries/claude-agent-acp) returns configOptions and
+// modes from session/new. Models and modes below match the ACP adapter source.
+// Note: `opus` is gated by subscription — it may not appear in session/new for
+// all credentials, but exists in the SDK model list. Thought levels are supported
+// by the Claude SDK (effort levels: low/medium/high/max for opus-4-6 and
+// sonnet-4-6) but the ACP adapter does not expose them as configOptions yet.
 const CLAUDE_FALLBACK: AgentModelList = {
   defaultModel: "default",
   models: [
-    { id: "default", name: "Default (recommended)" },
-    { id: "opus", name: "Opus" },
+    { id: "default", name: "Default" },
     { id: "sonnet", name: "Sonnet" },
+    { id: "opus", name: "Opus" },
     { id: "haiku", name: "Haiku" },
+  ],
+  defaultMode: "default",
+  modes: [
+    { id: "default", name: "Default" },
+    { id: "acceptEdits", name: "Accept Edits" },
+    { id: "plan", name: "Plan" },
+    { id: "dontAsk", name: "Don't Ask" },
+    { id: "bypassPermissions", name: "Bypass Permissions" },
   ],
 };
 
@@ -136,16 +170,12 @@ async function dumpClaude() {
 
   const response = await fetch(ANTHROPIC_API_URL, { headers });
   if (response.status === 401 || response.status === 403) {
-    console.log(
-      `  API returned ${response.status}, using fallback aliases`
-    );
+    console.log(`  API returned ${response.status}, using fallback aliases`);
     writeList("claude", CLAUDE_FALLBACK);
     return;
   }
   if (!response.ok) {
-    throw new Error(
-      `Anthropic API returned ${response.status}: ${await response.text()}`
-    );
+    throw new Error(`Anthropic API returned ${response.status}: ${await response.text()}`);
   }
 
   const body = (await response.json()) as {
@@ -185,6 +215,9 @@ async function dumpClaude() {
   writeList("claude", {
     defaultModel: defaultModel ?? models[0]?.id ?? "default",
     models,
+    // Modes from Claude ACP adapter v0.20.0 session/new response.
+    defaultMode: "default",
+    modes: CLAUDE_FALLBACK.modes,
   });
 }
 
@@ -277,16 +310,43 @@ async function dumpCodex() {
 
   models.sort((a, b) => a.id.localeCompare(b.id));
 
+  // Codex modes and thought levels come from its ACP session/new configOptions
+  // response (category: "mode" and category: "thought_level"). The model/list
+  // RPC only returns models, so modes/thought levels are hardcoded here based
+  // on probing Codex's session/new response.
   writeList("codex", {
     defaultModel: defaultModel ?? models[0]?.id ?? "",
     models,
+    defaultMode: "read-only",
+    modes: [
+      {
+        id: "read-only",
+        name: "Read Only",
+        description: "Codex can read files in the current workspace. Approval is required to edit files or access the internet.",
+      },
+      {
+        id: "auto",
+        name: "Default",
+        description:
+          "Codex can read and edit files in the current workspace, and run commands. Approval is required to access the internet or edit other files.",
+      },
+      {
+        id: "full-access",
+        name: "Full Access",
+        description: "Codex can edit files outside this workspace and access the internet without asking for approval.",
+      },
+    ],
+    defaultThoughtLevel: "high",
+    thoughtLevels: [
+      { id: "low", name: "Low", description: "Fast responses with lighter reasoning" },
+      { id: "medium", name: "Medium", description: "Balances speed and reasoning depth for everyday tasks" },
+      { id: "high", name: "High", description: "Greater reasoning depth for complex problems" },
+      { id: "xhigh", name: "Xhigh", description: "Extra high reasoning depth for complex problems" },
+    ],
   });
 }
 
-function readLineWithTimeout(
-  rl: readline.Interface,
-  timeoutMs: number
-): Promise<string> {
+function readLineWithTimeout(rl: readline.Interface, timeoutMs: number): Promise<string> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       reject(new Error("readline timeout"));
@@ -307,17 +367,12 @@ function readLineWithTimeout(
 async function dumpOpencode() {
   const baseUrl = opencodeUrl ?? process.env.OPENCODE_URL;
   if (!baseUrl) {
-    console.log(
-      "  Skipped: --opencode-url not provided (set OPENCODE_URL or pass --opencode-url)"
-    );
+    console.log("  Skipped: --opencode-url not provided (set OPENCODE_URL or pass --opencode-url)");
     return;
   }
   console.log(`Fetching OpenCode models from ${baseUrl}...`);
 
-  const endpoints = [
-    `${baseUrl}/config/providers`,
-    `${baseUrl}/provider`,
-  ];
+  const endpoints = [`${baseUrl}/config/providers`, `${baseUrl}/provider`];
 
   for (const url of endpoints) {
     try {
@@ -341,16 +396,14 @@ async function dumpOpencode() {
   throw new Error("OpenCode model endpoints unavailable");
 }
 
-function parseOpencodeProviders(
-  value: Record<string, unknown>
-): AgentModelList | null {
-  const providers = (
-    (value.providers as unknown[]) ?? (value.all as unknown[])
-  ) as Array<{
-    id: string;
-    name?: string;
-    models?: Record<string, { id?: string; name?: string }>;
-  }> | undefined;
+function parseOpencodeProviders(value: Record<string, unknown>): AgentModelList | null {
+  const providers = ((value.providers as unknown[]) ?? (value.all as unknown[])) as
+    | Array<{
+        id: string;
+        name?: string;
+        models?: Record<string, { id?: string; name?: string }>;
+      }>
+    | undefined;
   if (!providers) return null;
 
   const defaultMap = (value.default as Record<string, string>) ?? {};
@@ -394,8 +447,7 @@ function parseOpencodeProviders(
       {
         id: "build",
         name: "Build",
-        description:
-          "The default agent. Executes tools based on configured permissions.",
+        description: "The default agent. Executes tools based on configured permissions.",
       },
       {
         id: "plan",
@@ -412,9 +464,7 @@ async function dumpCursor() {
   console.log("Fetching Cursor models...");
   const binary = cursorPath ?? findBinary("cursor-agent");
   if (!binary) {
-    throw new Error(
-      "cursor-agent binary not found (set --cursor-path or add to PATH)"
-    );
+    throw new Error("cursor-agent binary not found (set --cursor-path or add to PATH)");
   }
   console.log(`  Using binary: ${binary}`);
 
@@ -430,9 +480,7 @@ async function dumpCursor() {
   for (const rawLine of output.split("\n")) {
     // Strip ANSI escape codes
     const line = rawLine.replace(/\x1b\[[0-9;]*[A-Za-z]|\x1b\[?[0-9;]*[A-Za-z]/g, "").trim();
-    const match = line.match(
-      /^(\S+)\s+-\s+(.+?)(?:\s+\((current|default)\))?$/
-    );
+    const match = line.match(/^(\S+)\s+-\s+(.+?)(?:\s+\((current|default)\))?$/);
     if (!match) continue;
     const [, id, name, tag] = match;
     models.push({ id, name: name.trim() });
@@ -442,9 +490,7 @@ async function dumpCursor() {
   }
 
   if (models.length === 0) {
-    throw new Error(
-      "cursor-agent models returned no parseable models"
-    );
+    throw new Error("cursor-agent models returned no parseable models");
   }
 
   writeList("cursor", {
@@ -457,13 +503,7 @@ async function dumpCursor() {
 
 function findBinary(name: string): string | null {
   // Check sandbox-agent install dir
-  const installDir = path.join(
-    process.env.HOME ?? "",
-    ".local",
-    "share",
-    "sandbox-agent",
-    "bin"
-  );
+  const installDir = path.join(process.env.HOME ?? "", ".local", "share", "sandbox-agent", "bin");
   const installed = path.join(installDir, name);
   if (fs.existsSync(installed)) return installed;
 

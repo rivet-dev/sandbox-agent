@@ -58,17 +58,13 @@ async function main() {
 
   // Use the locally built binary, not the installed one
   const binaryPath = new URL("../../target/release/sandbox-agent", import.meta.url).pathname;
-  const child: ChildProcess = spawn(
-    binaryPath,
-    ["server", "--host", host, "--port", String(port), "--token", token],
-    {
-      stdio: "pipe",
-      env: {
-        ...process.env,
-        SANDBOX_AGENT_SKIP_INSPECTOR: "1",
-      },
-    }
-  );
+  const child: ChildProcess = spawn(binaryPath, ["server", "--host", host, "--port", String(port), "--token", token], {
+    stdio: "pipe",
+    env: {
+      ...process.env,
+      SANDBOX_AGENT_SKIP_INSPECTOR: "1",
+    },
+  });
 
   let stderr = "";
   child.stderr?.on("data", (chunk) => {
@@ -205,9 +201,7 @@ async function main() {
 
     // Filter session events
     const sessionEvents = allEvents.filter(
-      (e) =>
-        e.properties?.sessionID === sessionId ||
-        (e.type === "session.created" && e.properties?.info?.id === sessionId)
+      (e) => e.properties?.sessionID === sessionId || (e.type === "session.created" && e.properties?.info?.id === sessionId),
     );
     saveJson("session-events", sessionEvents);
 
@@ -221,12 +215,7 @@ async function main() {
   }
 }
 
-async function waitForIdle(
-  opencodeUrl: string,
-  sessionId: string,
-  headers: Record<string, string>,
-  timeoutMs: number
-): Promise<void> {
+async function waitForIdle(opencodeUrl: string, sessionId: string, headers: Record<string, string>, timeoutMs: number): Promise<void> {
   const start = Date.now();
   await new Promise((r) => setTimeout(r, 500));
   while (Date.now() - start < timeoutMs) {

@@ -14,10 +14,7 @@ function findBinary(): string | null {
   }
 
   // Check cargo build output
-  const cargoPaths = [
-    resolve(__dirname, "../../../target/debug/sandbox-agent"),
-    resolve(__dirname, "../../../target/release/sandbox-agent"),
-  ];
+  const cargoPaths = [resolve(__dirname, "../../../target/debug/sandbox-agent"), resolve(__dirname, "../../../target/release/sandbox-agent")];
 
   for (const p of cargoPaths) {
     if (existsSync(p)) {

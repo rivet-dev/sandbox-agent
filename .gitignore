@@ -15,6 +15,9 @@ yarn.lock
 .astro/
 *.tsbuildinfo
 .turbo/
+**/.turbo/
+.pnpm-store/
+coverage/
 
 # Environment
 .env
@@ -48,6 +51,11 @@ Cargo.lock
 # Example temp files
 .tmp-upload/
 *.db
+.foundry/
 
 # CLI binaries (downloaded during npm publish)
 sdks/cli/platforms/*/bin/
+
+# Foundry desktop app build artifacts
+foundry/packages/desktop/frontend-dist/
+foundry/packages/desktop/src-tauri/sidecars/

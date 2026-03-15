@@ -37,9 +37,7 @@
         },
         "error": {}
       },
-      "required": [
-        "type"
-      ]
+      "required": ["type"]
     },
     "RpcMessage": {
       "type": "object",
@@ -96,9 +94,7 @@
         "data": {},
         "error": {}
       },
-      "required": [
-        "type"
-      ]
+      "required": ["type"]
     },
     "RpcCommand": {
       "type": "object",
@@ -115,10 +111,7 @@
         },
         "params": {}
       },
-      "required": [
-        "type",
-        "command"
-      ]
+      "required": ["type", "command"]
     }
   }
 }

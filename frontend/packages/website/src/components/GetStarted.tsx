@@ -1,8 +1,8 @@
-'use client';
+"use client";
 
-import { motion } from 'framer-motion';
-import { Code, Server, GitBranch } from 'lucide-react';
-import { CopyButton } from './ui/CopyButton';
+import { motion } from "framer-motion";
+import { Code, Server, GitBranch } from "lucide-react";
+import { CopyButton } from "./ui/CopyButton";
 
 const sdkCodeRaw = `import { SandboxAgent } from "sandbox-agent";
 
@@ -87,7 +87,7 @@ function SdkCodeHighlighted() {
   );
 }
 
-const sandboxCommand = `curl -fsSL https://releases.rivet.dev/sandbox-agent/0.2.x/install.sh | sh`;
+const sandboxCommand = `curl -fsSL https://releases.rivet.dev/sandbox-agent/0.3.x/install.sh | sh`;
 
 const sourceCommands = `git clone https://github.com/rivet-dev/sandbox-agent
 cd sandbox-agent
@@ -126,7 +126,7 @@ export function GetStarted() {
           className="grid grid-cols-1 gap-4 md:grid-cols-3"
         >
           {/* Option 1: SDK */}
-          <div className="group flex flex-col rounded-2xl border border-white/10 bg-white/[0.02] p-6 transition-colors hover:border-white/20">
+          <div className="group flex flex-col rounded-xl border border-white/10 bg-white/[0.02] p-6 transition-colors hover:border-white/20">
             <div className="mb-4 flex items-center gap-3">
               <div className="text-zinc-500">
                 <Code className="h-4 w-4" />
@@ -142,7 +142,7 @@ export function GetStarted() {
             </p>
 
             <div className="flex-1 flex flex-col">
-              <div className="overflow-hidden rounded-lg border border-white/10 bg-black/50 flex-1 flex flex-col">
+              <div className="overflow-hidden rounded-lg border border-white/10 bg-[#0c0c0e] flex-1 flex flex-col">
                 <div className="flex items-center justify-between border-b border-white/10 bg-white/5 px-3 py-2">
                   <span className="text-[10px] font-medium text-zinc-500">example.ts</span>
                   <CopyButton text={sdkCodeRaw} />
@@ -153,7 +153,7 @@ export function GetStarted() {
           </div>
 
           {/* Option 2: HTTP API */}
-          <div className="group flex flex-col rounded-2xl border border-white/10 bg-white/[0.02] p-6 transition-colors hover:border-white/20">
+          <div className="group flex flex-col rounded-xl border border-white/10 bg-white/[0.02] p-6 transition-colors hover:border-white/20">
             <div className="mb-4 flex items-center gap-3">
               <div className="text-zinc-500">
                 <Server className="h-4 w-4" />
@@ -169,7 +169,7 @@ export function GetStarted() {
             </p>
 
             <div className="flex-1 flex flex-col">
-              <div className="overflow-hidden rounded-lg border border-white/10 bg-black/50 flex-1 flex flex-col">
+              <div className="overflow-hidden rounded-lg border border-white/10 bg-[#0c0c0e] flex-1 flex flex-col">
                 <div className="flex items-center justify-between border-b border-white/10 bg-white/5 px-3 py-2">
                   <span className="text-[10px] font-medium text-zinc-500">terminal</span>
                   <CopyButton text={sandboxCommand} />
@@ -180,7 +180,7 @@ export function GetStarted() {
                     <span className="text-zinc-300">curl -fsSL \</span>
                     {"\n"}
                     <span className="text-zinc-300">{"    "}</span>
-                    <span className="text-green-400">https://releases.rivet.dev/sandbox-agent/0.2.x/install.sh</span>
+                    <span className="text-green-400">https://releases.rivet.dev/sandbox-agent/0.3.x/install.sh</span>
                     <span className="text-zinc-300"> | </span>
                     <span className="text-blue-400">sh</span>
                   </code>
@@ -190,7 +190,7 @@ export function GetStarted() {
           </div>
 
           {/* Option 3: Open Source */}
-          <div className="group flex flex-col rounded-2xl border border-white/10 bg-white/[0.02] p-6 transition-colors hover:border-white/20">
+          <div className="group flex flex-col rounded-xl border border-white/10 bg-white/[0.02] p-6 transition-colors hover:border-white/20">
             <div className="mb-4 flex items-center gap-3">
               <div className="text-zinc-500">
                 <GitBranch className="h-4 w-4" />
@@ -206,7 +206,7 @@ export function GetStarted() {
             </p>
 
             <div className="flex-1 flex flex-col">
-              <div className="overflow-hidden rounded-lg border border-white/10 bg-black/50 flex-1 flex flex-col">
+              <div className="overflow-hidden rounded-lg border border-white/10 bg-[#0c0c0e] flex-1 flex flex-col">
                 <div className="flex items-center justify-between border-b border-white/10 bg-white/5 px-3 py-2">
                   <span className="text-[10px] font-medium text-zinc-500">terminal</span>
                   <CopyButton text={sourceCommands} />

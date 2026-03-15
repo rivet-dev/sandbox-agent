@@ -94,10 +94,7 @@ async function main() {
     console.log("Native OpenCode server is healthy!");
 
     // 1. Capture initial metadata
-    const [agentRes, configRes] = await Promise.all([
-      fetch(`${baseUrl}/agent`).then((r) => r.json()),
-      fetch(`${baseUrl}/config`).then((r) => r.json()),
-    ]);
+    const [agentRes, configRes] = await Promise.all([fetch(`${baseUrl}/agent`).then((r) => r.json()), fetch(`${baseUrl}/config`).then((r) => r.json())]);
     saveJson("metadata-agent", agentRes);
     saveJson("metadata-config", configRes);
 
@@ -186,9 +183,7 @@ async function main() {
     await new Promise((r) => setTimeout(r, 1000));
 
     // 5. Get messages after first request
-    const messagesAfter1 = await fetch(`${baseUrl}/session/${sessionId}/message`).then((r) =>
-      r.json()
-    );
+    const messagesAfter1 = await fetch(`${baseUrl}/session/${sessionId}/message`).then((r) => r.json());
     saveJson("messages-after-1", messagesAfter1);
     console.log(`  Got ${messagesAfter1.length} messages after msg 1`);
 
@@ -218,9 +213,7 @@ async function main() {
     await new Promise((r) => setTimeout(r, 2000));
 
     // 7. Get messages after second request
-    const messagesAfter2 = await fetch(`${baseUrl}/session/${sessionId}/message`).then((r) =>
-      r.json()
-    );
+    const messagesAfter2 = await fetch(`${baseUrl}/session/${sessionId}/message`).then((r) => r.json());
     saveJson("messages-after-2", messagesAfter2);
     console.log(`  Got ${messagesAfter2.length} messages after msg 2`);
 
@@ -239,8 +232,7 @@ async function main() {
 
     // Filter events for this session
     const sessionEvents = allEvents.filter(
-      (e) => e.properties?.sessionID === sessionId ||
-             (e.type === "session.created" && e.properties?.info?.id === sessionId)
+      (e) => e.properties?.sessionID === sessionId || (e.type === "session.created" && e.properties?.info?.id === sessionId),
     );
     saveJson("session-events", sessionEvents);
 

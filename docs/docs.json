@@ -1,128 +1,119 @@
 {
-	"$schema": "https://mintlify.com/docs.json",
-	"theme": "willow",
-	"name": "Sandbox Agent SDK",
-	"appearance": {
-		"default": "dark",
-		"strict": true
-	},
-	"colors": {
-		"primary": "#ff4f00",
-		"light": "#ff4f00",
-		"dark": "#ff4f00"
-	},
-	"favicon": "/favicon.svg",
-	"logo": {
-		"light": "/logo/light.svg",
-		"dark": "/logo/dark.svg"
-	},
-	"integrations": {
-		"posthog": {
-			"apiKey": "phc_6kfTNEAVw7rn1LA51cO3D69FefbKupSWFaM7OUgEpEo",
-			"apiHost": "https://ph.rivet.gg",
-			"sessionRecording": true
-		}
-	},
-	"navbar": {
-		"links": [
-			{
-				"label": "Gigacode",
-				"icon": "terminal",
-				"href": "https://github.com/rivet-dev/sandbox-agent/tree/main/gigacode"
-			},
-			{
-				"label": "Discord",
-				"icon": "discord",
-				"href": "https://discord.gg/auCecybynK"
-			},
-			{
-				"type": "github",
-				"href": "https://github.com/rivet-dev/sandbox-agent"
-			}
-		]
-	},
-	"navigation": {
-		"tabs": [
-			{
-				"tab": "Documentation",
-				"pages": [
-					{
-						"group": "Getting started",
-						"pages": [
-							"quickstart",
-							"sdk-overview",
-							{
-								"group": "Deploy",
-								"icon": "server",
-								"pages": [
-									"deploy/local",
-									"deploy/computesdk",
-									"deploy/e2b",
-									"deploy/daytona",
-									"deploy/vercel",
-									"deploy/cloudflare",
-									"deploy/docker"
-								]
-							}
-						]
-					},
-					{
-						"group": "Agent",
-						"pages": [
-							"agent-sessions",
-							"attachments",
-							"skills-config",
-							"mcp-config",
-							"custom-tools"
-						]
-					},
-					{
-						"group": "System",
-						"pages": ["file-system"]
-					},
-					{
-						"group": "Orchestration",
-						"pages": [
-							"architecture",
-							"session-persistence",
-							"observability",
-							"multiplayer",
-							"security"
-						]
-					},
-					{
-						"group": "Reference",
-						"pages": [
-							"cli",
-							"inspector",
-							"opencode-compatibility",
-							{
-								"group": "More",
-								"pages": [
-									"credentials",
-									"daemon",
-									"cors",
-									"session-restoration",
-									"telemetry",
-									{
-										"group": "AI",
-										"pages": ["ai/skill", "ai/llms-txt"]
-									}
-								]
-							}
-						]
-					}
-				]
-			},
-			{
-				"tab": "HTTP API",
-				"pages": [
-					{
-						"group": "HTTP Reference",
-						"openapi": "openapi.json"
-					}
-				]
-			}
-		]
-	}
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "willow",
+  "name": "Sandbox Agent SDK",
+  "appearance": {
+    "default": "dark",
+    "strict": true
+  },
+  "colors": {
+    "primary": "#ff4f00",
+    "light": "#ff4f00",
+    "dark": "#ff4f00"
+  },
+  "favicon": "/favicon.svg",
+  "logo": {
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg"
+  },
+  "integrations": {
+    "posthog": {
+      "apiKey": "phc_6kfTNEAVw7rn1LA51cO3D69FefbKupSWFaM7OUgEpEo",
+      "apiHost": "https://ph.rivet.gg",
+      "sessionRecording": true
+    }
+  },
+  "navbar": {
+    "links": [
+      {
+        "label": "Gigacode",
+        "icon": "terminal",
+        "href": "https://github.com/rivet-dev/sandbox-agent/tree/main/gigacode"
+      },
+      {
+        "label": "Discord",
+        "icon": "discord",
+        "href": "https://discord.gg/auCecybynK"
+      },
+      {
+        "type": "github",
+        "href": "https://github.com/rivet-dev/sandbox-agent"
+      }
+    ]
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "pages": [
+          {
+            "group": "Getting started",
+            "pages": [
+              "quickstart",
+              "sdk-overview",
+              "llm-credentials",
+              "react-components",
+              {
+                "group": "Deploy",
+                "icon": "server",
+                "pages": [
+                  "deploy/local",
+                  "deploy/computesdk",
+                  "deploy/e2b",
+                  "deploy/daytona",
+                  "deploy/vercel",
+                  "deploy/cloudflare",
+                  "deploy/docker",
+                  "deploy/boxlite"
+                ]
+              }
+            ]
+          },
+          {
+            "group": "Agent",
+            "pages": ["agent-sessions", "attachments", "skills-config", "mcp-config", "custom-tools"]
+          },
+          {
+            "group": "System",
+            "pages": ["file-system", "processes"]
+          },
+          {
+            "group": "Orchestration",
+            "pages": ["architecture", "session-persistence", "observability", "multiplayer", "security"]
+          },
+          {
+            "group": "Reference",
+            "pages": [
+              "agent-capabilities",
+              "cli",
+              "inspector",
+              "opencode-compatibility",
+              {
+                "group": "More",
+                "pages": [
+                  "daemon",
+                  "cors",
+                  "session-restoration",
+                  "telemetry",
+                  {
+                    "group": "AI",
+                    "pages": ["ai/skill", "ai/llms-txt"]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "HTTP API",
+        "pages": [
+          {
+            "group": "HTTP Reference",
+            "openapi": "openapi.json"
+          }
+        ]
+      }
+    ]
+  }
 }

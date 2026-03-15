@@ -68,12 +68,14 @@ async function main() {
   const referenceMap = buildReferenceMap(references);
   const template = await fsp.readFile(TEMPLATE_PATH, "utf8");
 
-  const skillFile = template
-    .replace("{{QUICKSTART}}", quickstartContent)
-    .replace("{{REFERENCE_MAP}}", referenceMap);
+  const skillFile = template.replace("{{QUICKSTART}}", quickstartContent).replace("{{REFERENCE_MAP}}", referenceMap);
 
-  await fsp.writeFile(path.join(OUTPUT_ROOT, "SKILL.md"), `${skillFile.trim()}
-`, "utf8");
+  await fsp.writeFile(
+    path.join(OUTPUT_ROOT, "SKILL.md"),
+    `${skillFile.trim()}
+`,
+    "utf8",
+  );
 
   console.log(`Generated skill files in ${OUTPUT_ROOT}`);
 }
@@ -188,7 +190,10 @@ function buildReferenceMap(references) {
 
   for (const group of sortedGroups) {
     lines.push(`### ${formatSegment(group)}`, "");
-    const items = grouped.get(group).slice().sort((a, b) => a.title.localeCompare(b.title));
+    const items = grouped
+      .get(group)
+      .slice()
+      .sort((a, b) => a.title.localeCompare(b.title));
     for (const item of items) {
       lines.push(`- [${item.title}](${item.referencePath})`);
     }
@@ -281,9 +286,7 @@ function normalizeCodeBlock(block) {
   const opening = lines[0].trim();
   const closing = lines[lines.length - 1].trim();
   const contentLines = lines.slice(1, -1);
-  const indents = contentLines
-    .filter((line) => line.trim() !== "")
-    .map((line) => line.match(/^\s*/)?.[0].length ?? 0);
+  const indents = contentLines.filter((line) => line.trim() !== "").map((line) => line.match(/^\s*/)?.[0].length ?? 0);
   const minIndent = indents.length ? Math.min(...indents) : 0;
   const normalizedContent = contentLines.map((line) => line.slice(minIndent));
 
@@ -344,7 +347,10 @@ function getAttributeValue(attrs, name) {
 }
 
 function stripHtml(value) {
-  return value.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  return value
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function collapseWhitespace(value) {

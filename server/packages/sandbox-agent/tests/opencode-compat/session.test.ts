@@ -55,10 +55,7 @@ describe("OpenCode-compatible Session API", () => {
     return (sessions ?? []).find((item: any) => item.id === sessionId);
   }
 
-  async function initSessionViaHttp(
-    sessionId: string,
-    body: Record<string, unknown> = {}
-  ): Promise<{ response: Response; data: any }> {
+  async function initSessionViaHttp(sessionId: string, body: Record<string, unknown> = {}): Promise<{ response: Response; data: any }> {
     const response = await fetch(`${handle.baseUrl}/opencode/session/${sessionId}/init`, {
       method: "POST",
       headers: {
@@ -300,7 +297,7 @@ describe("OpenCode-compatible Session API", () => {
       });
       expect(changed.response.status).toBe(400);
       expect(changed.data?.errors?.[0]?.message).toBe(
-        "OpenCode compatibility currently does not support changing the model after creating a session. Export with /export and load in to a new session."
+        "OpenCode compatibility currently does not support changing the model after creating a session. Export with /export and load in to a new session.",
       );
     });
 
@@ -337,9 +334,7 @@ describe("OpenCode-compatible Session API", () => {
 
     it("should keep session.get available during first prompt after /new-style creation", async () => {
       const providers = await getProvidersViaHttp();
-      const providerId = providers.connected.find(
-        (provider) => provider !== "mock" && typeof providers.default?.[provider] === "string"
-      );
+      const providerId = providers.connected.find((provider) => provider !== "mock" && typeof providers.default?.[provider] === "string");
       if (!providerId) {
         return;
       }
@@ -478,7 +473,7 @@ describe("OpenCode-compatible Session API", () => {
 
         expect(response.status).toBe(400);
         expect(data?.errors?.[0]?.message).toBe(
-          "OpenCode compatibility currently does not support changing the model after creating a session. Export with /export and load in to a new session."
+          "OpenCode compatibility currently does not support changing the model after creating a session. Export with /export and load in to a new session.",
         );
       }
     });
@@ -511,7 +506,7 @@ describe("OpenCode-compatible Session API", () => {
 
       expect(response.status).toBe(400);
       expect(data?.errors?.[0]?.message).toBe(
-        "OpenCode compatibility currently does not support changing the model after creating a session. Export with /export and load in to a new session."
+        "OpenCode compatibility currently does not support changing the model after creating a session. Export with /export and load in to a new session.",
       );
     });
   });

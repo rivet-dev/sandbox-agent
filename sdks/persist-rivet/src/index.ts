@@ -1,11 +1,4 @@
-import type {
-  ListEventsRequest,
-  ListPage,
-  ListPageRequest,
-  SessionEvent,
-  SessionPersistDriver,
-  SessionRecord,
-} from "sandbox-agent";
+import type { ListEventsRequest, ListPage, ListPageRequest, SessionEvent, SessionPersistDriver, SessionRecord } from "sandbox-agent";
 
 /** Structural type compatible with rivetkit's ActorContext without importing it. */
 export interface ActorContextLike {
@@ -44,10 +37,7 @@ export class RivetSessionPersistDriver implements SessionPersistDriver {
   constructor(ctx: ActorContextLike, options: RivetSessionPersistDriverOptions = {}) {
     this.ctx = ctx;
     this.maxSessions = normalizeCap(options.maxSessions, DEFAULT_MAX_SESSIONS);
-    this.maxEventsPerSession = normalizeCap(
-      options.maxEventsPerSession,
-      DEFAULT_MAX_EVENTS_PER_SESSION,
-    );
+    this.maxEventsPerSession = normalizeCap(options.maxEventsPerSession, DEFAULT_MAX_EVENTS_PER_SESSION);
     this.stateKey = options.stateKey ?? DEFAULT_STATE_KEY;
 
     // Auto-initialize if absent; preserve existing data on actor wake.
@@ -137,9 +127,7 @@ export class RivetSessionPersistDriver implements SessionPersistDriver {
 function cloneSessionRecord(session: SessionRecord): SessionRecord {
   return {
     ...session,
-    sessionInit: session.sessionInit
-      ? (JSON.parse(JSON.stringify(session.sessionInit)) as SessionRecord["sessionInit"])
-      : undefined,
+    sessionInit: session.sessionInit ? (JSON.parse(JSON.stringify(session.sessionInit)) as SessionRecord["sessionInit"]) : undefined,
   };
 }
 

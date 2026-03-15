@@ -33,10 +33,7 @@ function findBinary(): string | null {
   }
 
   // Check cargo build outputs (relative to tests/opencode-compat/helpers)
-  const cargoPaths = [
-    resolve(__dirname, "../../../../../../target/debug/sandbox-agent"),
-    resolve(__dirname, "../../../../../../target/release/sandbox-agent"),
-  ];
+  const cargoPaths = [resolve(__dirname, "../../../../../../target/debug/sandbox-agent"), resolve(__dirname, "../../../../../../target/release/sandbox-agent")];
 
   for (const p of cargoPaths) {
     if (existsSync(p)) {
@@ -65,12 +62,7 @@ async function getFreePort(host: string): Promise<number> {
 /**
  * Wait for the server to become healthy
  */
-async function waitForHealth(
-  baseUrl: string,
-  token: string,
-  timeoutMs: number,
-  child: ChildProcess
-): Promise<void> {
+async function waitForHealth(baseUrl: string, token: string, timeoutMs: number, child: ChildProcess): Promise<void> {
   const start = Date.now();
   let lastError: string | undefined;
 
@@ -130,9 +122,7 @@ export interface SpawnOptions {
 export async function spawnSandboxAgent(options: SpawnOptions = {}): Promise<SandboxAgentHandle> {
   const binaryPath = findBinary();
   if (!binaryPath) {
-    throw new Error(
-      "sandbox-agent binary not found. Run 'cargo build -p sandbox-agent' first or set SANDBOX_AGENT_BIN."
-    );
+    throw new Error("sandbox-agent binary not found. Run 'cargo build -p sandbox-agent' first or set SANDBOX_AGENT_BIN.");
   }
 
   const host = options.host ?? "127.0.0.1";
@@ -222,7 +212,7 @@ export async function buildSandboxAgent(): Promise<void> {
 
   console.log("Building sandbox-agent...");
   const projectRoot = resolve(__dirname, "../../../../../..");
-  
+
   return new Promise((resolve, reject) => {
     const proc = spawn("cargo", ["build", "-p", "sandbox-agent"], {
       cwd: projectRoot,

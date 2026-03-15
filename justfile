@@ -91,3 +91,99 @@ install-release:
     pnpm build --filter @sandbox-agent/inspector...
     cargo install --path server/packages/sandbox-agent
     cargo install --path gigacode
+
+# =============================================================================
+# Foundry
+# =============================================================================
+
+[group('foundry')]
+foundry-deps:
+	pnpm install
+
+[group('foundry')]
+foundry-install:
+	pnpm install
+	pnpm -w build
+
+[group('foundry')]
+foundry-typecheck:
+	pnpm -w typecheck
+
+[group('foundry')]
+foundry-build:
+	pnpm -w build
+
+[group('foundry')]
+foundry-test:
+	pnpm -w test
+
+[group('foundry')]
+foundry-check:
+	pnpm -w typecheck
+	pnpm -w build
+	pnpm -w test
+
+[group('foundry')]
+foundry-dev:
+	pnpm install
+	mkdir -p foundry/.foundry/logs
+	HF_DOCKER_UID="$(id -u)" HF_DOCKER_GID="$(id -g)" docker compose --env-file .env -f foundry/compose.dev.yaml up --build --force-recreate -d
+
+[group('foundry')]
+foundry-preview:
+	pnpm install
+	mkdir -p foundry/.foundry/logs
+	HF_DOCKER_UID="$(id -u)" HF_DOCKER_GID="$(id -g)" docker compose --env-file .env -f foundry/compose.preview.yaml up --build --force-recreate -d
+
+[group('foundry')]
+foundry-frontend-dev host='127.0.0.1' port='4173' backend='http://127.0.0.1:7741/api/rivet':
+	pnpm install
+	VITE_HF_BACKEND_ENDPOINT="{{backend}}" pnpm --filter @sandbox-agent/foundry-frontend dev -- --host {{host}} --port {{port}}
+
+[group('foundry')]
+foundry-dev-mock host='127.0.0.1' port='4174':
+	pnpm install
+	FOUNDRY_FRONTEND_CLIENT_MODE=mock pnpm --filter @sandbox-agent/foundry-frontend dev -- --host {{host}} --port {{port}}
+
+[group('foundry')]
+foundry-mock:
+	pnpm install
+	mkdir -p foundry/.foundry/logs
+	docker compose -f foundry/compose.mock.yaml up --build --force-recreate -d
+
+[group('foundry')]
+foundry-mock-down:
+	docker compose -f foundry/compose.mock.yaml down
+
+[group('foundry')]
+foundry-mock-logs:
+	docker compose -f foundry/compose.mock.yaml logs -f --tail=200
+
+[group('foundry')]
+foundry-dev-turbo:
+	pnpm exec turbo run dev --parallel --filter=@sandbox-agent/foundry-*
+
+[group('foundry')]
+foundry-dev-down:
+	docker compose --env-file .env -f foundry/compose.dev.yaml down
+
+[group('foundry')]
+foundry-dev-logs:
+	docker compose --env-file .env -f foundry/compose.dev.yaml logs -f --tail=200
+
+[group('foundry')]
+foundry-preview-down:
+	docker compose --env-file .env -f foundry/compose.preview.yaml down
+
+[group('foundry')]
+foundry-preview-logs:
+	docker compose --env-file .env -f foundry/compose.preview.yaml logs -f --tail=200
+
+[group('foundry')]
+foundry-format:
+	prettier --write foundry
+
+[group('foundry')]
+foundry-docker-build tag='foundry:local':
+	docker build -f foundry/docker/backend.Dockerfile -t {{tag}} .
+

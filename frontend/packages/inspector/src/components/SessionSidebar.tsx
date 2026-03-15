@@ -20,7 +20,7 @@ const agentLabels: Record<string, string> = {
   opencode: "OpenCode",
   amp: "Amp",
   pi: "Pi",
-  cursor: "Cursor"
+  cursor: "Cursor",
 };
 const persistenceDocsUrl = "https://sandboxagent.dev/docs/session-persistence";
 const MIN_REFRESH_SPIN_MS = 350;
@@ -64,9 +64,7 @@ const SessionSidebar = ({
   const activeSessions = sessions.filter((session) => !session.archived);
   const archivedSessions = sessions.filter((session) => session.archived);
   const visibleSessions = showArchived ? archivedSessions : activeSessions;
-  const orderedVisibleSessions = showArchived
-    ? [...visibleSessions].sort((a, b) => Number(a.ended) - Number(b.ended))
-    : visibleSessions;
+  const orderedVisibleSessions = showArchived ? [...visibleSessions].sort((a, b) => Number(a.ended) - Number(b.ended)) : visibleSessions;
 
   useEffect(() => {
     if (!showMenu) return;
@@ -114,27 +112,14 @@ const SessionSidebar = ({
               onClick={() => setShowArchived((value) => !value)}
               title={showArchived ? "Hide archived sessions" : `Show archived sessions (${archivedCount})`}
             >
-              {showArchived ? (
-                <ArrowLeft size={12} className="button-icon" />
-              ) : (
-                <Archive size={12} className="button-icon" />
-              )}
+              {showArchived ? <ArrowLeft size={12} className="button-icon" /> : <Archive size={12} className="button-icon" />}
             </button>
           )}
-          <button
-            className="button secondary small"
-            onClick={() => void handleRefresh()}
-            title="Refresh sessions"
-            disabled={sessionsLoading || refreshing}
-          >
+          <button className="button secondary small" onClick={() => void handleRefresh()} title="Refresh sessions" disabled={sessionsLoading || refreshing}>
             <RefreshCw size={12} className={`button-icon ${sessionsLoading || refreshing ? "spinner-icon" : ""}`} />
           </button>
           <div className="sidebar-add-menu-wrapper" ref={menuRef}>
-            <button
-              className="sidebar-add-btn"
-              onClick={() => setShowMenu((value) => !value)}
-              title="New session"
-            >
+            <button className="sidebar-add-btn" onClick={() => setShowMenu((value) => !value)} title="New session">
               <Plus size={14} />
             </button>
             <SessionCreateMenu
@@ -164,31 +149,27 @@ const SessionSidebar = ({
           <>
             {showArchived && <div className="sidebar-empty">Archived Sessions</div>}
             {orderedVisibleSessions.map((session) => (
-                <div
-                  key={session.sessionId}
-                  className={`session-item ${session.sessionId === selectedSessionId ? "active" : ""} ${session.ended ? "ended" : ""} ${session.archived ? "ended" : ""}`}
-                >
-                  <button
-                    className="session-item-content"
-                    onClick={() => onSelectSession(session)}
-                  >
-                    <div className="session-item-id" title={session.sessionId}>
-                      {formatShortId(session.sessionId)}
-                    </div>
-                    <div className="session-item-meta">
-                      <span className="session-item-agent">
-                        {agentLabels[session.agent] ?? session.agent}
-                      </span>
-                      {(session.archived || session.ended) && <span className="session-item-ended">ended</span>}
-                    </div>
-                  </button>
-                </div>
-              ))}
+              <div
+                key={session.sessionId}
+                className={`session-item ${session.sessionId === selectedSessionId ? "active" : ""} ${session.ended ? "ended" : ""} ${session.archived ? "ended" : ""}`}
+              >
+                <button className="session-item-content" onClick={() => onSelectSession(session)}>
+                  <div className="session-item-id" title={session.sessionId}>
+                    {formatShortId(session.sessionId)}
+                  </div>
+                  <div className="session-item-meta">
+                    <span className="session-item-agent">{agentLabels[session.agent] ?? session.agent}</span>
+                    {(session.archived || session.ended) && <span className="session-item-ended">ended</span>}
+                  </div>
+                </button>
+              </div>
+            ))}
           </>
         )}
       </div>
       <div className="session-persistence-note">
-        Sessions are persisted in your browser using IndexedDB. These sessions are only from your browser; your SDK sessions are separate. Adding inspector support for SDK soon.{" "}
+        Sessions are persisted in your browser using IndexedDB. These sessions are only from your browser; your SDK sessions are separate. Adding inspector
+        support for SDK soon.{" "}
         <a href={persistenceDocsUrl} target="_blank" rel="noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
           Configure persistence
           <ArrowUpRight size={10} />

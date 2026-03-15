@@ -71,7 +71,7 @@ export function App() {
           if (event.type === "permission.requested") {
             const data = event.data as PermissionEventData;
             log(`[Auto-approved] ${data.action}`);
-            await client.replyPermission(sessionIdRef.current, data.permission_id, { reply: "once" });
+            await client.respondPermission(sessionIdRef.current, data.permission_id, { reply: "once" });
           }
 
           // Reject questions (don't support interactive input)
@@ -128,7 +128,7 @@ export function App() {
         console.error("Event stream error:", err);
       }
     },
-    [log]
+    [log],
   );
 
   const send = useCallback(async () => {
@@ -162,12 +162,7 @@ export function App() {
         <div style={styles.connectForm}>
           <label style={styles.label}>
             Sandbox name:
-            <input
-              style={styles.input}
-              value={sandboxName}
-              onChange={(e) => setSandboxName(e.target.value)}
-              placeholder="demo"
-            />
+            <input style={styles.input} value={sandboxName} onChange={(e) => setSandboxName(e.target.value)} placeholder="demo" />
           </label>
           <button style={styles.button} onClick={connect}>
             Connect

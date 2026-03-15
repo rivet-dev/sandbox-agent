@@ -14,10 +14,7 @@ function findBinary(): string | null {
     return process.env.SANDBOX_AGENT_BIN;
   }
 
-  const cargoPaths = [
-    resolve(__dirname, "../../../target/debug/sandbox-agent"),
-    resolve(__dirname, "../../../target/release/sandbox-agent"),
-  ];
+  const cargoPaths = [resolve(__dirname, "../../../target/debug/sandbox-agent"), resolve(__dirname, "../../../target/release/sandbox-agent")];
 
   for (const p of cargoPaths) {
     if (existsSync(p)) {
@@ -30,9 +27,7 @@ function findBinary(): string | null {
 
 const BINARY_PATH = findBinary();
 if (!BINARY_PATH) {
-  throw new Error(
-    "sandbox-agent binary not found. Build it (cargo build -p sandbox-agent) or set SANDBOX_AGENT_BIN.",
-  );
+  throw new Error("sandbox-agent binary not found. Build it (cargo build -p sandbox-agent) or set SANDBOX_AGENT_BIN.");
 }
 if (!process.env.SANDBOX_AGENT_BIN) {
   process.env.SANDBOX_AGENT_BIN = BINARY_PATH;
@@ -42,11 +37,7 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function waitFor<T>(
-  fn: () => T | undefined | null,
-  timeoutMs = 5000,
-  stepMs = 25,
-): Promise<T> {
+async function waitFor<T>(fn: () => T | undefined | null, timeoutMs = 5000, stepMs = 25): Promise<T> {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
     const value = fn();
@@ -74,6 +65,10 @@ describe("AcpHttpClient integration", () => {
       timeoutMs: 30000,
       env: {
         XDG_DATA_HOME: dataHome,
+        HOME: dataHome,
+        USERPROFILE: dataHome,
+        APPDATA: join(dataHome, "AppData", "Roaming"),
+        LOCALAPPDATA: join(dataHome, "AppData", "Local"),
       },
     });
     baseUrl = handle.baseUrl;
@@ -133,6 +128,56 @@ describe("AcpHttpClient integration", () => {
         .join("");
       return text.includes("mock: acp package integration") ? text : undefined;
     });
+
+    await client.disconnect();
+  });
+
+  it("answers session/request_permission while session/prompt is still in flight", async () => {
+    const permissionRequests: Array<{ sessionId: string; title?: string | null }> = [];
+    const serverId = `acp-http-client-permissions-${Date.now().toString(36)}`;
+
+    const client = new AcpHttpClient({
+      baseUrl,
+      token,
+      transport: {
+        path: `/v1/acp/${encodeURIComponent(serverId)}`,
+        bootstrapQuery: { agent: "mock" },
+      },
+      client: {
+        requestPermission: async (request) => {
+          permissionRequests.push({
+            sessionId: request.sessionId,
+            title: request.toolCall.title,
+          });
+          return {
+            outcome: {
+              outcome: "selected",
+              optionId: "reject-once",
+            },
+          };
+        },
+      },
+    });
+
+    await client.initialize();
+
+    const session = await client.newSession({
+      cwd: process.cwd(),
+      mcpServers: [],
+    });
+
+    const prompt = await client.prompt({
+      sessionId: session.sessionId,
+      prompt: [{ type: "text", text: "please trigger permission" }],
+    });
+
+    expect(prompt.stopReason).toBe("end_turn");
+    expect(permissionRequests).toEqual([
+      {
+        sessionId: session.sessionId,
+        title: "Write mock.txt",
+      },
+    ]);
 
     await client.disconnect();
   });

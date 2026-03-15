@@ -23,10 +23,7 @@ console.log("Uploading MCP server bundle...");
 const client = await SandboxAgent.connect({ baseUrl });
 
 const bundle = await fs.promises.readFile(serverFile);
-const written = await client.writeFsFile(
-  { path: "/opt/mcp/custom-tools/mcp-server.cjs" },
-  bundle,
-);
+const written = await client.writeFsFile({ path: "/opt/mcp/custom-tools/mcp-server.cjs" }, bundle);
 console.log(`  Written: ${written.path} (${written.bytesWritten} bytes)`);
 
 // Create a session with the uploaded MCP server as a local command.
@@ -35,12 +32,14 @@ const session = await client.createSession({
   agent: detectAgent(),
   sessionInit: {
     cwd: "/root",
-    mcpServers: [{
-      name: "customTools",
-      command: "node",
-      args: ["/opt/mcp/custom-tools/mcp-server.cjs"],
-      env: [],
-    }],
+    mcpServers: [
+      {
+        name: "customTools",
+        command: "node",
+        args: ["/opt/mcp/custom-tools/mcp-server.cjs"],
+        env: [],
+      },
+    ],
   },
 });
 const sessionId = session.id;
@@ -49,4 +48,7 @@ console.log('  Try: "generate a random number between 1 and 100"');
 console.log("  Press Ctrl+C to stop.");
 
 const keepAlive = setInterval(() => {}, 60_000);
-process.on("SIGINT", () => { clearInterval(keepAlive); cleanup().then(() => process.exit(0)); });
+process.on("SIGINT", () => {
+  clearInterval(keepAlive);
+  cleanup().then(() => process.exit(0));
+});

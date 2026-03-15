@@ -32,6 +32,7 @@ async fn main() {
 }
 
 async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let started = std::time::Instant::now();
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -41,6 +42,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .init();
 
     let cli = Cli::parse();
+    tracing::info!(
+        host = %cli.host,
+        port = cli.port,
+        startup_ms = started.elapsed().as_millis() as u64,
+        "acp-http-adapter.run: starting server"
+    );
     run_server(ServerConfig {
         host: cli.host,
         port: cli.port,

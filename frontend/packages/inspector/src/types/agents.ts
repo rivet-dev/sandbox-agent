@@ -41,5 +41,5 @@ export const emptyFeatureCoverage: FeatureCoverageView = {
   streamingDeltas: false,
   itemStarted: false,
   variants: false,
-  sharedProcess: false
+  sharedProcess: false,
 };

@@ -125,12 +125,15 @@ const EventsTab = ({
   const handleCopy = () => {
     const text = JSON.stringify(events, null, 2);
     if (navigator.clipboard && window.isSecureContext) {
-      navigator.clipboard.writeText(text).then(() => {
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-      }).catch(() => {
-        fallbackCopy(text);
-      });
+      navigator.clipboard
+        .writeText(text)
+        .then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 2000);
+        })
+        .catch(() => {
+          fallbackCopy(text);
+        });
     } else {
       fallbackCopy(text);
     }
@@ -188,13 +191,7 @@ const EventsTab = ({
       <div className="inline-row" style={{ marginBottom: 12, justifyContent: "space-between" }}>
         <span className="card-meta">{events.length} events</span>
         <div className="inline-row">
-          <button
-            type="button"
-            className="button ghost small"
-            onClick={handleCopy}
-            disabled={events.length === 0}
-            title="Copy all events as JSON"
-          >
+          <button type="button" className="button ghost small" onClick={handleCopy} disabled={events.length === 0} title="Copy all events as JSON">
             {copied ? "Copied" : "Copy JSON"}
           </button>
           <button className="button ghost small" onClick={onClear}>
@@ -204,9 +201,7 @@ const EventsTab = ({
       </div>
 
       {events.length === 0 ? (
-        <div className="card-meta">
-          No events yet. Create a session and send a message.
-        </div>
+        <div className="card-meta">No events yet. Create a session and send a message.</div>
       ) : (
         <div className="event-list">
           {[...events].reverse().map((event) => {
@@ -215,7 +210,7 @@ const EventsTab = ({
             const toggleCollapsed = () =>
               setCollapsedEvents((prev) => ({
                 ...prev,
-                [eventKey]: !(prev[eventKey] ?? true)
+                [eventKey]: !(prev[eventKey] ?? true),
               }));
             const method = getMethod(event);
             const payload = event.payload as Record<string, unknown>;
@@ -231,30 +226,21 @@ const EventsTab = ({
                 id={`event-${event.id}`}
                 className={`event-item ${isCollapsed ? "collapsed" : "expanded"} ${isHighlighted ? "highlighted" : ""}`}
               >
-                <button
-                  className="event-summary"
-                  type="button"
-                  onClick={toggleCollapsed}
-                  title={isCollapsed ? "Expand payload" : "Collapse payload"}
-                >
+                <button className="event-summary" type="button" onClick={toggleCollapsed} title={isCollapsed ? "Expand payload" : "Collapse payload"}>
                   <span className={`event-icon ${category}`}>
                     <Icon size={14} />
                   </span>
                   <div className="event-summary-main">
                     <div className="event-title-row">
                       <span className={`event-type ${category}`}>{method}</span>
-                      <span className={`pill ${senderClass === "client" ? "accent" : "success"}`}>
-                        {event.sender}
-                      </span>
+                      <span className={`pill ${senderClass === "client" ? "accent" : "success"}`}>{event.sender}</span>
                       <span className="event-time">{time}</span>
                     </div>
                     <div className="event-id" title={event.id}>
                       {formatShortId(event.id)}
                     </div>
                   </div>
-                  <span className="event-chevron">
-                    {isCollapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
-                  </span>
+                  <span className="event-chevron">{isCollapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}</span>
                 </button>
                 {!isCollapsed && <pre className="code-block event-payload">{formatJson(event.payload)}</pre>}
               </div>

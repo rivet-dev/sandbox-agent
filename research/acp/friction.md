@@ -218,6 +218,26 @@ Update this file continuously during the migration.
 - Status: resolved
 - Links: `server/packages/sandbox-agent/src/router.rs`, `server/packages/sandbox-agent/src/acp_runtime/mod.rs`, `server/packages/sandbox-agent/tests/v1_api/acp_transport.rs`, `docs/advanced/acp-http-client.mdx`
 
+- Date: 2026-03-13
+- Area: Actor runtime shutdown and draining
+- Issue: Actors can continue receiving or finishing action work after shutdown has started, while actor cleanup clears runtime resources such as the database handle. In RivetKit this can surface as `Database not enabled` from `c.db` even when the actor definition correctly includes `db`.
+- Impact: User requests can fail with misleading internal errors during runner eviction or shutdown, and long-lived request paths can bubble up as HTTP 502/timeout failures instead of a clear retryable stopping/draining signal.
+- Proposed direction: Add a real runner draining state so actors stop receiving traffic before shutdown, and ensure actor cleanup does not clear `#db` until in-flight actions are fully quiesced or aborted. App-side request paths should also avoid waiting inline on long actor workflows when possible.
+- Decision: Open.
+- Owner: Unassigned.
+- Status: open
+- Links: `foundry/packages/backend/src/actors/workspace/app-shell.ts`, `/Users/nathan/rivet/rivetkit-typescript/packages/rivetkit/src/actor/instance/mod.ts`, `/Users/nathan/rivet/rivetkit-typescript/packages/rivetkit/src/drivers/engine/actor-driver.ts`
+
+- Date: 2026-03-12
+- Area: Foundry RivetKit serverless routing on Railway
+- Issue: Moving Foundry from `/api/rivet` to `/v1/rivet` exposed three RivetKit deployment couplings: `serverless.basePath` had to be updated explicitly for metadata/start routes, `configureRunnerPool` could not be used in production because the current Rivet token lacked permission to list datacenters, and wrapping `registry.handler(c.req.raw)` inside Hono route handlers produced unstable serverless runner startup under Railway until `/v1/rivet` was dispatched directly from `Bun.serve`.
+- Impact: `GET /v1/rivet/metadata` initially returned 404, app-shell actor creation failed during OAuth/session bootstrap, and Foundry sign-in blocked on `500` from `/v1/app/snapshot` and `/v1/auth/github/start`.
+- Proposed direction: Treat RivetKit serverless base path as an explicit deployment config when versioning routes, avoid relying on runner-pool auto-configuration unless the production token has the required Rivet control-plane permissions, and prefer direct top-level dispatch for RivetKit serverless routes instead of routing them through higher-level Hono middleware.
+- Decision: Accepted and implemented for Foundry. The backend now sets `serverless.basePath` to `/v1/rivet`, leaves runner-pool config to infrastructure, and serves RivetKit directly from the Bun server for `/v1/rivet`.
+- Owner: Unassigned.
+- Status: resolved
+- Links: `foundry/packages/backend/src/actors/index.ts`, `foundry/packages/backend/src/index.ts`
+
 - Date: 2026-02-10
 - Area: Agent selection contract for ACP bootstrap/session creation
 - Issue: `x-acp-agent` bound agent selection to transport bootstrap, which conflicted with Sandbox Agent meta-session goals where one client can manage sessions across multiple agents.
@@ -247,3 +267,13 @@ Update this file continuously during the migration.
 - Owner: Unassigned.
 - Status: in_progress
 - Links: `research/acp/simplify-server.md`, `docs/mcp-config.mdx`, `docs/skills-config.mdx`
+
+- Date: 2026-03-10
+- Area: ACP HTTP client transport reentrancy for human-in-the-loop requests
+- Issue: The TypeScript `acp-http-client` serialized the full lifetime of each POST on a single write queue. A long-running `session/prompt` request therefore blocked the client from POSTing a response to an agent-initiated `session/request_permission`, deadlocking permission approval flows.
+- Impact: Permission requests arrived over SSE, but replying to them never resumed the original prompt turn. This blocked Claude and any other ACP agent using `session/request_permission`.
+- Proposed direction: Make the HTTP transport fire POSTs asynchronously after preserving outbound ordering at enqueue time, rather than waiting for the entire HTTP response before the next write can begin. Keep response bodies routed back into the readable stream so request promises still resolve normally.
+- Decision: Accepted and implemented in `acp-http-client`.
+- Owner: Unassigned.
+- Status: resolved
+- Links: `sdks/acp-http-client/src/index.ts`, `sdks/acp-http-client/tests/smoke.test.ts`, `sdks/typescript/tests/integration.test.ts`

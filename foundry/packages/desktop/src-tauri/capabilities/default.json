@@ -1,0 +1,30 @@
+{
+  "identifier": "default",
+  "description": "Default capability for Foundry desktop",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "shell:allow-open",
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        {
+          "name": "sidecars/foundry-backend",
+          "sidecar": true,
+          "args": true
+        }
+      ]
+    },
+    {
+      "identifier": "shell:allow-spawn",
+      "allow": [
+        {
+          "name": "sidecars/foundry-backend",
+          "sidecar": true,
+          "args": true
+        }
+      ]
+    }
+  ]
+}

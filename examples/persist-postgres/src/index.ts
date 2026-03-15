@@ -16,21 +16,47 @@ if (process.env.DATABASE_URL) {
   connectionString = process.env.DATABASE_URL;
 } else {
   const name = `persist-example-${randomUUID().slice(0, 8)}`;
-  containerId = execFileSync("docker", [
-    "run", "-d", "--rm", "--name", name,
-    "-e", "POSTGRES_USER=postgres", "-e", "POSTGRES_PASSWORD=postgres", "-e", "POSTGRES_DB=sandbox",
-    "-p", "127.0.0.1::5432", "postgres:16-alpine",
-  ], { encoding: "utf8" }).trim();
+  containerId = execFileSync(
+    "docker",
+    [
+      "run",
+      "-d",
+      "--rm",
+      "--name",
+      name,
+      "-e",
+      "POSTGRES_USER=postgres",
+      "-e",
+      "POSTGRES_PASSWORD=postgres",
+      "-e",
+      "POSTGRES_DB=sandbox",
+      "-p",
+      "127.0.0.1::5432",
+      "postgres:16-alpine",
+    ],
+    { encoding: "utf8" },
+  ).trim();
   const port = execFileSync("docker", ["port", containerId, "5432/tcp"], { encoding: "utf8" })
-    .trim().split("\n")[0]?.match(/:(\d+)$/)?.[1];
+    .trim()
+    .split("\n")[0]
+    ?.match(/:(\d+)$/)?.[1];
   connectionString = `postgres://postgres:postgres@127.0.0.1:${port}/sandbox`;
   console.log(`Postgres on port ${port}`);
 
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
     const c = new Client({ connectionString });
-    try { await c.connect(); await c.query("SELECT 1"); await c.end(); break; }
-    catch { try { await c.end(); } catch {} await delay(250); }
+    try {
+      await c.connect();
+      await c.query("SELECT 1");
+      await c.end();
+      break;
+    } catch {
+      try {
+        await c.end();
+      } catch {}
+      await delay(250);
+    }
   }
 }
 
@@ -40,10 +66,6 @@ try {
   console.log("Starting sandbox...");
   const sandbox = await startDockerSandbox({
     port: 3000,
-    setupCommands: [
-      "sandbox-agent install-agent claude",
-      "sandbox-agent install-agent codex",
-    ],
   });
 
   const sdk = await SandboxAgent.connect({ baseUrl: sandbox.baseUrl, persist });
@@ -71,6 +93,8 @@ try {
   await sandbox.cleanup();
 } finally {
   if (containerId) {
-    try { execFileSync("docker", ["rm", "-f", containerId], { stdio: "ignore" }); } catch {}
+    try {
+      execFileSync("docker", ["rm", "-f", containerId], { stdio: "ignore" });
+    } catch {}
   }
 }

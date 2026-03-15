@@ -17,6 +17,7 @@ pub enum ErrorType {
     PermissionDenied,
     NotAcceptable,
     UnsupportedMediaType,
+    NotFound,
     SessionNotFound,
     SessionAlreadyExists,
     ModeNotSupported,
@@ -37,6 +38,7 @@ impl ErrorType {
             Self::PermissionDenied => "urn:sandbox-agent:error:permission_denied",
             Self::NotAcceptable => "urn:sandbox-agent:error:not_acceptable",
             Self::UnsupportedMediaType => "urn:sandbox-agent:error:unsupported_media_type",
+            Self::NotFound => "urn:sandbox-agent:error:not_found",
             Self::SessionNotFound => "urn:sandbox-agent:error:session_not_found",
             Self::SessionAlreadyExists => "urn:sandbox-agent:error:session_already_exists",
             Self::ModeNotSupported => "urn:sandbox-agent:error:mode_not_supported",
@@ -57,6 +59,7 @@ impl ErrorType {
             Self::PermissionDenied => "Permission Denied",
             Self::NotAcceptable => "Not Acceptable",
             Self::UnsupportedMediaType => "Unsupported Media Type",
+            Self::NotFound => "Not Found",
             Self::SessionNotFound => "Session Not Found",
             Self::SessionAlreadyExists => "Session Already Exists",
             Self::ModeNotSupported => "Mode Not Supported",
@@ -77,6 +80,7 @@ impl ErrorType {
             Self::PermissionDenied => 403,
             Self::NotAcceptable => 406,
             Self::UnsupportedMediaType => 415,
+            Self::NotFound => 404,
             Self::SessionNotFound => 404,
             Self::SessionAlreadyExists => 409,
             Self::ModeNotSupported => 400,
@@ -155,6 +159,8 @@ pub enum SandboxError {
     NotAcceptable { message: String },
     #[error("unsupported media type: {message}")]
     UnsupportedMediaType { message: String },
+    #[error("not found: {resource} {id}")]
+    NotFound { resource: String, id: String },
     #[error("session not found: {session_id}")]
     SessionNotFound { session_id: String },
     #[error("session already exists: {session_id}")]
@@ -180,6 +186,7 @@ impl SandboxError {
             Self::PermissionDenied { .. } => ErrorType::PermissionDenied,
             Self::NotAcceptable { .. } => ErrorType::NotAcceptable,
             Self::UnsupportedMediaType { .. } => ErrorType::UnsupportedMediaType,
+            Self::NotFound { .. } => ErrorType::NotFound,
             Self::SessionNotFound { .. } => ErrorType::SessionNotFound,
             Self::SessionAlreadyExists { .. } => ErrorType::SessionAlreadyExists,
             Self::ModeNotSupported { .. } => ErrorType::ModeNotSupported,
@@ -262,6 +269,12 @@ impl SandboxError {
             Self::UnsupportedMediaType { message } => {
                 let mut map = Map::new();
                 map.insert("message".to_string(), Value::String(message.clone()));
+                (None, None, Some(Value::Object(map)))
+            }
+            Self::NotFound { resource, id } => {
+                let mut map = Map::new();
+                map.insert("resource".to_string(), Value::String(resource.clone()));
+                map.insert("id".to_string(), Value::String(id.clone()));
                 (None, None, Some(Value::Object(map)))
             }
             Self::SessionNotFound { session_id } => (None, Some(session_id.clone()), None),

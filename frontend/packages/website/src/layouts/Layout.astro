@@ -4,29 +4,30 @@ interface Props {
   description?: string;
 }
 
-const { title, description = "Universal SDK for coding agents. Control Claude Code, Codex, OpenCode, Amp, and Pi with unified events and sessions." } = Astro.props;
-const canonicalURL = new URL(Astro.url.pathname, 'https://sandbox-agent.dev');
-const ogImageURL = new URL('/og.png', 'https://sandbox-agent.dev');
+const { title, description = "Universal SDK for coding agents. Control Claude Code, Codex, OpenCode, Amp, and Pi with unified events and sessions." } =
+  Astro.props;
+const canonicalURL = new URL(Astro.url.pathname, "https://sandbox-agent.dev");
+const ogImageURL = new URL("/og.png", "https://sandbox-agent.dev");
 
 const structuredData = {
   "@context": "https://schema.org",
   "@type": "SoftwareApplication",
-  "name": "Sandbox Agent SDK",
-  "applicationCategory": "DeveloperApplication",
-  "operatingSystem": "Linux, macOS, Windows",
-  "description": description,
-  "url": "https://sandbox-agent.dev",
-  "author": {
+  name: "Sandbox Agent SDK",
+  applicationCategory: "DeveloperApplication",
+  operatingSystem: "Linux, macOS, Windows",
+  description: description,
+  url: "https://sandbox-agent.dev",
+  author: {
     "@type": "Organization",
-    "name": "Rivet",
-    "url": "https://rivet.dev"
+    name: "Rivet",
+    url: "https://rivet.dev",
   },
-  "offers": {
+  offers: {
     "@type": "Offer",
-    "price": "0",
-    "priceCurrency": "USD"
+    price: "0",
+    priceCurrency: "USD",
   },
-  "keywords": "coding agents, AI SDK, Claude Code, Codex, OpenCode, Amp, sandbox, remote code execution, developer tools"
+  keywords: "coding agents, AI SDK, Claude Code, Codex, OpenCode, Amp, sandbox, remote code execution, developer tools",
 };
 ---
 
@@ -39,20 +40,16 @@ const structuredData = {
     <meta name="keywords" content="coding agents, AI SDK, Claude Code, Codex, OpenCode, Amp, Pi, sandbox, remote code execution, developer tools, AI coding assistant, code automation" />
     <meta name="author" content="Rivet" />
     <meta name="robots" content="index, follow" />
-    <meta name="theme-color" content="#000000" />
+    <meta name="theme-color" content="#09090b" />
     <link rel="canonical" href={canonicalURL} />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 
     <!-- Preconnect to font providers -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link rel="preconnect" href="https://api.fontshare.com" crossorigin />
 
-    <!-- Satoshi for headings (from Fontshare) -->
-    <link href="https://api.fontshare.com/v2/css?f[]=satoshi@700,900&display=swap" rel="stylesheet" />
-
-    <!-- Open Sans + JetBrains Mono (from Google Fonts) -->
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Open+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <!-- IBM Plex Sans + IBM Plex Mono (from Google Fonts) -->
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
 
     <title>{title}</title>
 

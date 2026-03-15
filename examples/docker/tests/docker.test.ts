@@ -23,6 +23,6 @@ describe("docker example", () => {
         await cleanup();
       }
     },
-    timeoutMs
+    timeoutMs,
   );
 });

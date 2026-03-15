@@ -23,6 +23,6 @@ describe("vercel example", () => {
         await cleanup();
       }
     },
-    timeoutMs
+    timeoutMs,
   );
 });

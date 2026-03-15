@@ -18,7 +18,7 @@ const agentLabels: Record<string, string> = {
   opencode: "OpenCode",
   amp: "Amp",
   pi: "Pi",
-  cursor: "Cursor"
+  cursor: "Cursor",
 };
 
 const agentLogos: Record<string, string> = {
@@ -39,7 +39,7 @@ const SessionCreateMenu = ({
   onCreateSession,
   onSelectAgent,
   open,
-  onClose
+  onClose,
 }: {
   agents: AgentInfo[];
   agentsLoading: boolean;
@@ -157,54 +157,45 @@ const SessionCreateMenu = ({
       <div className="session-create-menu">
         {agentsLoading && <div className="sidebar-add-status">Loading agents...</div>}
         {agentsError && <div className="sidebar-add-status error">{agentsError}</div>}
-        {!agentsLoading && !agentsError && agents.length === 0 && (
-          <div className="sidebar-add-status">No agents available.</div>
-        )}
-        {!agentsLoading && !agentsError && (() => {
-          const codingAgents = agents.filter((a) => a.id !== "mock");
-          const mockAgent = agents.find((a) => a.id === "mock");
-          return (
-            <>
-              {codingAgents.map((agent) => (
-                <button
-                  key={agent.id}
-                  className="sidebar-add-option"
-                  onClick={() => handleAgentClick(agent.id)}
-                >
-                  <div className="agent-option-left">
-                    {agentLogos[agent.id] && (
-                      <img src={agentLogos[agent.id]} alt="" className="agent-option-logo" />
-                    )}
-                    <span className="agent-option-name">{agentLabels[agent.id] ?? agent.id}</span>
-                    {agent.version && <span className="agent-option-version">{agent.version}</span>}
-                  </div>
-                  <div className="agent-option-badges">
-                    {agent.installed && <span className="agent-badge installed">Installed</span>}
-                    <ArrowRight size={12} className="agent-option-arrow" />
-                  </div>
-                </button>
-              ))}
-              {mockAgent && (
-                <>
-                  <div className="agent-divider" />
-                  <button
-                    className="sidebar-add-option"
-                    onClick={() => handleAgentClick(mockAgent.id)}
-                  >
+        {!agentsLoading && !agentsError && agents.length === 0 && <div className="sidebar-add-status">No agents available.</div>}
+        {!agentsLoading &&
+          !agentsError &&
+          (() => {
+            const codingAgents = agents.filter((a) => a.id !== "mock");
+            const mockAgent = agents.find((a) => a.id === "mock");
+            return (
+              <>
+                {codingAgents.map((agent) => (
+                  <button key={agent.id} className="sidebar-add-option" onClick={() => handleAgentClick(agent.id)}>
                     <div className="agent-option-left">
-                      <span className="agent-option-name">{agentLabels[mockAgent.id] ?? mockAgent.id}</span>
-                      {mockAgent.version && <span className="agent-option-version">{mockAgent.version}</span>}
+                      {agentLogos[agent.id] && <img src={agentLogos[agent.id]} alt="" className="agent-option-logo" />}
+                      <span className="agent-option-name">{agentLabels[agent.id] ?? agent.id}</span>
+                      {agent.version && <span className="agent-option-version">{agent.version}</span>}
                     </div>
                     <div className="agent-option-badges">
-                      {mockAgent.installed && <span className="agent-badge installed">Installed</span>}
+                      {agent.installed && <span className="agent-badge installed">Installed</span>}
                       <ArrowRight size={12} className="agent-option-arrow" />
                     </div>
                   </button>
-                </>
-              )}
-            </>
-          );
-        })()}
+                ))}
+                {mockAgent && (
+                  <>
+                    <div className="agent-divider" />
+                    <button className="sidebar-add-option" onClick={() => handleAgentClick(mockAgent.id)}>
+                      <div className="agent-option-left">
+                        <span className="agent-option-name">{agentLabels[mockAgent.id] ?? mockAgent.id}</span>
+                        {mockAgent.version && <span className="agent-option-version">{mockAgent.version}</span>}
+                      </div>
+                      <div className="agent-option-badges">
+                        {mockAgent.installed && <span className="agent-badge installed">Installed</span>}
+                        <ArrowRight size={12} className="agent-option-arrow" />
+                      </div>
+                    </button>
+                  </>
+                )}
+              </>
+            );
+          })()}
       </div>
     );
   }
@@ -237,12 +228,7 @@ const SessionCreateMenu = ({
               autoFocus
             />
           ) : (
-            <select
-              className="setup-select"
-              value={selectedModel}
-              onChange={(e) => handleModelSelectChange(e.target.value)}
-              title="Model"
-            >
+            <select className="setup-select" value={selectedModel} onChange={(e) => handleModelSelectChange(e.target.value)} title="Model">
               {activeModels.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.name || m.id}
@@ -258,9 +244,7 @@ const SessionCreateMenu = ({
                 setIsCustomModel(false);
                 setCustomModel("");
                 const defaultModel = defaultModelByAgent[selectedAgent];
-                setSelectedModel(
-                  defaultModel || (activeModels.length > 0 ? activeModels[0].id : "")
-                );
+                setSelectedModel(defaultModel || (activeModels.length > 0 ? activeModels[0].id : ""));
               }}
               title="Back to model list"
               type="button"
@@ -272,12 +256,7 @@ const SessionCreateMenu = ({
         {activeModes.length > 0 && (
           <div className="setup-field">
             <span className="setup-label">Mode</span>
-            <select
-              className="setup-select"
-              value={agentMode}
-              onChange={(e) => setAgentMode(e.target.value)}
-              title="Mode"
-            >
+            <select className="setup-select" value={agentMode} onChange={(e) => setAgentMode(e.target.value)} title="Mode">
               {activeModes.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.name || m.id}

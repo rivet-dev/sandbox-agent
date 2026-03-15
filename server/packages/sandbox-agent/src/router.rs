@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, HashMap};
+use std::convert::Infallible;
 use std::fs;
 use std::io::Cursor;
 use std::path::{Path as StdPath, PathBuf};
@@ -6,6 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use axum::body::Bytes;
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderMap, Request, StatusCode};
 use axum::middleware::Next;
@@ -13,6 +15,8 @@ use axum::response::sse::KeepAlive;
 use axum::response::{IntoResponse, Response, Sse};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
+use futures::stream;
+use futures::StreamExt;
 use sandbox_agent_agent_management::agents::{
     AgentId, AgentManager, InstallOptions, InstallResult, InstallSource, InstalledArtifactKind,
 };
@@ -27,11 +31,16 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tar::Archive;
+use tokio_stream::wrappers::BroadcastStream;
 use tower_http::trace::TraceLayer;
 use tracing::Span;
 use utoipa::{Modify, OpenApi, ToSchema};
 
 use crate::acp_proxy_runtime::{AcpProxyRuntime, ProxyPostOutcome};
+use crate::process_runtime::{
+    decode_input_bytes, ProcessLogFilter, ProcessLogFilterStream, ProcessRuntime,
+    ProcessRuntimeConfig, ProcessSnapshot, ProcessStartSpec, ProcessStatus, ProcessStream, RunSpec,
+};
 use crate::ui;
 
 mod support;
@@ -77,6 +86,7 @@ pub struct AppState {
     agent_manager: Arc<AgentManager>,
     acp_proxy: Arc<AcpProxyRuntime>,
     opencode_server_manager: Arc<OpenCodeServerManager>,
+    process_runtime: Arc<ProcessRuntime>,
     pub(crate) branding: BrandingMode,
     version_cache: Mutex<HashMap<AgentId, CachedAgentVersion>>,
 }
@@ -100,11 +110,13 @@ impl AppState {
                 auto_restart: true,
             },
         ));
+        let process_runtime = Arc::new(ProcessRuntime::new());
         Self {
             auth,
             agent_manager,
             acp_proxy,
             opencode_server_manager,
+            process_runtime,
             branding,
             version_cache: Mutex::new(HashMap::new()),
         }
@@ -120,6 +132,10 @@ impl AppState {
 
     pub(crate) fn opencode_server_manager(&self) -> Arc<OpenCodeServerManager> {
         self.opencode_server_manager.clone()
+    }
+
+    pub(crate) fn process_runtime(&self) -> Arc<ProcessRuntime> {
+        self.process_runtime.clone()
     }
 
     pub(crate) fn purge_version_cache(&self, agent: AgentId) {
@@ -166,6 +182,28 @@ pub fn build_router_with_state(shared: Arc<AppState>) -> (Router, Arc<AppState>)
         .route("/fs/move", post(post_v1_fs_move))
         .route("/fs/stat", get(get_v1_fs_stat))
         .route("/fs/upload-batch", post(post_v1_fs_upload_batch))
+        .route(
+            "/processes/config",
+            get(get_v1_processes_config).post(post_v1_processes_config),
+        )
+        .route("/processes", get(get_v1_processes).post(post_v1_processes))
+        .route("/processes/run", post(post_v1_processes_run))
+        .route(
+            "/processes/:id",
+            get(get_v1_process).delete(delete_v1_process),
+        )
+        .route("/processes/:id/stop", post(post_v1_process_stop))
+        .route("/processes/:id/kill", post(post_v1_process_kill))
+        .route("/processes/:id/logs", get(get_v1_process_logs))
+        .route("/processes/:id/input", post(post_v1_process_input))
+        .route(
+            "/processes/:id/terminal/resize",
+            post(post_v1_process_terminal_resize),
+        )
+        .route(
+            "/processes/:id/terminal/ws",
+            get(get_v1_process_terminal_ws),
+        )
         .route(
             "/config/mcp",
             get(get_v1_config_mcp)
@@ -295,6 +333,19 @@ pub async fn shutdown_servers(state: &Arc<AppState>) {
         post_v1_fs_move,
         get_v1_fs_stat,
         post_v1_fs_upload_batch,
+        get_v1_processes_config,
+        post_v1_processes_config,
+        post_v1_processes,
+        post_v1_processes_run,
+        get_v1_processes,
+        get_v1_process,
+        post_v1_process_stop,
+        post_v1_process_kill,
+        delete_v1_process,
+        get_v1_process_logs,
+        post_v1_process_input,
+        post_v1_process_terminal_resize,
+        get_v1_process_terminal_ws,
         get_v1_config_mcp,
         put_v1_config_mcp,
         delete_v1_config_mcp,
@@ -329,6 +380,22 @@ pub async fn shutdown_servers(state: &Arc<AppState>) {
             FsMoveResponse,
             FsActionResponse,
             FsUploadBatchResponse,
+            ProcessConfig,
+            ProcessCreateRequest,
+            ProcessRunRequest,
+            ProcessRunResponse,
+            ProcessState,
+            ProcessInfo,
+            ProcessListResponse,
+            ProcessLogsStream,
+            ProcessLogsQuery,
+            ProcessLogEntry,
+            ProcessLogsResponse,
+            ProcessInputRequest,
+            ProcessInputResponse,
+            ProcessSignalQuery,
+            ProcessTerminalResizeRequest,
+            ProcessTerminalResizeResponse,
             AcpPostQuery,
             AcpServerInfo,
             AcpServerListResponse,
@@ -361,12 +428,21 @@ impl Modify for ServerAddon {
 pub enum ApiError {
     #[error(transparent)]
     Sandbox(#[from] SandboxError),
+    #[error("problem: {0:?}")]
+    Problem(ProblemDetails),
+}
+
+impl From<ProblemDetails> for ApiError {
+    fn from(value: ProblemDetails) -> Self {
+        Self::Problem(value)
+    }
 }
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let problem = match &self {
             ApiError::Sandbox(error) => problem_from_sandbox_error(error),
+            ApiError::Problem(problem) => problem.clone(),
         };
         let status =
             StatusCode::from_u16(problem.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
@@ -1075,6 +1151,678 @@ async fn post_v1_fs_upload_batch(
     }))
 }
 
+/// Get process runtime configuration.
+///
+/// Returns the current runtime configuration for the process management API,
+/// including limits for concurrency, timeouts, and buffer sizes.
+#[utoipa::path(
+    get,
+    path = "/v1/processes/config",
+    tag = "v1",
+    responses(
+        (status = 200, description = "Current runtime process config", body = ProcessConfig),
+        (status = 501, description = "Process API unsupported on this platform", body = ProblemDetails)
+    )
+)]
+async fn get_v1_processes_config(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<ProcessConfig>, ApiError> {
+    if !process_api_supported() {
+        return Err(process_api_not_supported().into());
+    }
+
+    let config = state.process_runtime().get_config().await;
+    Ok(Json(map_process_config(config)))
+}
+
+/// Update process runtime configuration.
+///
+/// Replaces the runtime configuration for the process management API.
+/// Validates that all values are non-zero and clamps default timeout to max.
+#[utoipa::path(
+    post,
+    path = "/v1/processes/config",
+    tag = "v1",
+    request_body = ProcessConfig,
+    responses(
+        (status = 200, description = "Updated runtime process config", body = ProcessConfig),
+        (status = 400, description = "Invalid config", body = ProblemDetails),
+        (status = 501, description = "Process API unsupported on this platform", body = ProblemDetails)
+    )
+)]
+async fn post_v1_processes_config(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<ProcessConfig>,
+) -> Result<Json<ProcessConfig>, ApiError> {
+    if !process_api_supported() {
+        return Err(process_api_not_supported().into());
+    }
+
+    let runtime = state.process_runtime();
+    let updated = runtime
+        .set_config(into_runtime_process_config(body))
+        .await?;
+    Ok(Json(map_process_config(updated)))
+}
+
+/// Create a long-lived managed process.
+///
+/// Spawns a new process with the given command and arguments. Supports both
+/// pipe-based and PTY (tty) modes. Returns the process descriptor on success.
+#[utoipa::path(
+    post,
+    path = "/v1/processes",
+    tag = "v1",
+    request_body = ProcessCreateRequest,
+    responses(
+        (status = 200, description = "Started process", body = ProcessInfo),
+        (status = 400, description = "Invalid request", body = ProblemDetails),
+        (status = 409, description = "Process limit or state conflict", body = ProblemDetails),
+        (status = 501, description = "Process API unsupported on this platform", body = ProblemDetails)
+    )
+)]
+async fn post_v1_processes(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<ProcessCreateRequest>,
+) -> Result<Json<ProcessInfo>, ApiError> {
+    if !process_api_supported() {
+        return Err(process_api_not_supported().into());
+    }
+
+    let runtime = state.process_runtime();
+    let snapshot = runtime
+        .start_process(ProcessStartSpec {
+            command: body.command,
+            args: body.args,
+            cwd: body.cwd,
+            env: body.env.into_iter().collect(),
+            tty: body.tty,
+            interactive: body.interactive,
+        })
+        .await?;
+
+    Ok(Json(map_process_snapshot(snapshot)))
+}
+
+/// Run a one-shot command.
+///
+/// Executes a command to completion and returns its stdout, stderr, exit code,
+/// and duration. Supports configurable timeout and output size limits.
+#[utoipa::path(
+    post,
+    path = "/v1/processes/run",
+    tag = "v1",
+    request_body = ProcessRunRequest,
+    responses(
+        (status = 200, description = "One-off command result", body = ProcessRunResponse),
+        (status = 400, description = "Invalid request", body = ProblemDetails),
+        (status = 501, description = "Process API unsupported on this platform", body = ProblemDetails)
+    )
+)]
+async fn post_v1_processes_run(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<ProcessRunRequest>,
+) -> Result<Json<ProcessRunResponse>, ApiError> {
+    if !process_api_supported() {
+        return Err(process_api_not_supported().into());
+    }
+
+    let runtime = state.process_runtime();
+    let output = runtime
+        .run_once(RunSpec {
+            command: body.command,
+            args: body.args,
+            cwd: body.cwd,
+            env: body.env.into_iter().collect(),
+            timeout_ms: body.timeout_ms,
+            max_output_bytes: body.max_output_bytes,
+        })
+        .await?;
+
+    Ok(Json(ProcessRunResponse {
+        exit_code: output.exit_code,
+        timed_out: output.timed_out,
+        stdout: output.stdout,
+        stderr: output.stderr,
+        stdout_truncated: output.stdout_truncated,
+        stderr_truncated: output.stderr_truncated,
+        duration_ms: output.duration_ms,
+    }))
+}
+
+/// List all managed processes.
+///
+/// Returns a list of all processes (running and exited) currently tracked
+/// by the runtime, sorted by process ID.
+#[utoipa::path(
+    get,
+    path = "/v1/processes",
+    tag = "v1",
+    responses(
+        (status = 200, description = "List processes", body = ProcessListResponse),
+        (status = 501, description = "Process API unsupported on this platform", body = ProblemDetails)
+    )
+)]
+async fn get_v1_processes(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<ProcessListResponse>, ApiError> {
+    if !process_api_supported() {
+        return Err(process_api_not_supported().into());
+    }
+
+    let snapshots = state.process_runtime().list_processes().await;
+    Ok(Json(ProcessListResponse {
+        processes: snapshots.into_iter().map(map_process_snapshot).collect(),
+    }))
+}
+
+/// Get a single process by ID.
+///
+/// Returns the current state of a managed process including its status,
+/// PID, exit code, and creation/exit timestamps.
+#[utoipa::path(
+    get,
+    path = "/v1/processes/{id}",
+    tag = "v1",
+    params(
+        ("id" = String, Path, description = "Process ID")
+    ),
+    responses(
+        (status = 200, description = "Process details", body = ProcessInfo),
+        (status = 404, description = "Unknown process", body = ProblemDetails),
+        (status = 501, description = "Process API unsupported on this platform", body = ProblemDetails)
+    )
+)]
+async fn get_v1_process(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<ProcessInfo>, ApiError> {
+    if !process_api_supported() {
+        return Err(process_api_not_supported().into());
+    }
+
+    let snapshot = state.process_runtime().snapshot(&id).await?;
+    Ok(Json(map_process_snapshot(snapshot)))
+}
+
+/// Send SIGTERM to a process.
+///
+/// Sends SIGTERM to the process and optionally waits up to `waitMs`
+/// milliseconds for the process to exit before returning.
+#[utoipa::path(
+    post,
+    path = "/v1/processes/{id}/stop",
+    tag = "v1",
+    params(
+        ("id" = String, Path, description = "Process ID"),
+        ("waitMs" = Option<u64>, Query, description = "Wait up to N ms for process to exit")
+    ),
+    responses(
+        (status = 200, description = "Stop signal sent", body = ProcessInfo),
+        (status = 404, description = "Unknown process", body = ProblemDetails),
+        (status = 501, description = "Process API unsupported on this platform", body = ProblemDetails)
+    )
+)]
+async fn post_v1_process_stop(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Query(query): Query<ProcessSignalQuery>,
+) -> Result<Json<ProcessInfo>, ApiError> {
+    if !process_api_supported() {
+        return Err(process_api_not_supported().into());
+    }
+
+    let snapshot = state
+        .process_runtime()
+        .stop_process(&id, query.wait_ms)
+        .await?;
+    Ok(Json(map_process_snapshot(snapshot)))
+}
+
+/// Send SIGKILL to a process.
+///
+/// Sends SIGKILL to the process and optionally waits up to `waitMs`
+/// milliseconds for the process to exit before returning.
+#[utoipa::path(
+    post,
+    path = "/v1/processes/{id}/kill",
+    tag = "v1",
+    params(
+        ("id" = String, Path, description = "Process ID"),
+        ("waitMs" = Option<u64>, Query, description = "Wait up to N ms for process to exit")
+    ),
+    responses(
+        (status = 200, description = "Kill signal sent", body = ProcessInfo),
+        (status = 404, description = "Unknown process", body = ProblemDetails),
+        (status = 501, description = "Process API unsupported on this platform", body = ProblemDetails)
+    )
+)]
+async fn post_v1_process_kill(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Query(query): Query<ProcessSignalQuery>,
+) -> Result<Json<ProcessInfo>, ApiError> {
+    if !process_api_supported() {
+        return Err(process_api_not_supported().into());
+    }
+
+    let snapshot = state
+        .process_runtime()
+        .kill_process(&id, query.wait_ms)
+        .await?;
+    Ok(Json(map_process_snapshot(snapshot)))
+}
+
+/// Delete a process record.
+///
+/// Removes a stopped process from the runtime. Returns 409 if the process
+/// is still running; stop or kill it first.
+#[utoipa::path(
+    delete,
+    path = "/v1/processes/{id}",
+    tag = "v1",
+    params(
+        ("id" = String, Path, description = "Process ID")
+    ),
+    responses(
+        (status = 204, description = "Process deleted"),
+        (status = 404, description = "Unknown process", body = ProblemDetails),
+        (status = 409, description = "Process is still running", body = ProblemDetails),
+        (status = 501, description = "Process API unsupported on this platform", body = ProblemDetails)
+    )
+)]
+async fn delete_v1_process(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    if !process_api_supported() {
+        return Err(process_api_not_supported().into());
+    }
+
+    state.process_runtime().delete_process(&id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Fetch process logs.
+///
+/// Returns buffered log entries for a process. Supports filtering by stream
+/// type, tail count, and sequence-based resumption. When `follow=true`,
+/// returns an SSE stream that replays buffered entries then streams live output.
+#[utoipa::path(
+    get,
+    path = "/v1/processes/{id}/logs",
+    tag = "v1",
+    params(
+        ("id" = String, Path, description = "Process ID"),
+        ("stream" = Option<ProcessLogsStream>, Query, description = "stdout|stderr|combined|pty"),
+        ("tail" = Option<usize>, Query, description = "Tail N entries"),
+        ("follow" = Option<bool>, Query, description = "Follow via SSE"),
+        ("since" = Option<u64>, Query, description = "Only entries with sequence greater than this")
+    ),
+    responses(
+        (status = 200, description = "Process logs", body = ProcessLogsResponse),
+        (status = 404, description = "Unknown process", body = ProblemDetails),
+        (status = 501, description = "Process API unsupported on this platform", body = ProblemDetails)
+    )
+)]
+async fn get_v1_process_logs(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    Query(query): Query<ProcessLogsQuery>,
+) -> Result<Response, ApiError> {
+    if !process_api_supported() {
+        return Err(process_api_not_supported().into());
+    }
+
+    let runtime = state.process_runtime();
+    let default_stream = if runtime.is_tty(&id).await? {
+        ProcessLogsStream::Pty
+    } else {
+        ProcessLogsStream::Combined
+    };
+    let requested_stream = query.stream.unwrap_or(default_stream);
+    let since = match (query.since, parse_last_event_id(&headers)?) {
+        (Some(query_since), Some(last_event_id)) => Some(query_since.max(last_event_id)),
+        (Some(query_since), None) => Some(query_since),
+        (None, Some(last_event_id)) => Some(last_event_id),
+        (None, None) => None,
+    };
+    let filter = ProcessLogFilter {
+        stream: into_runtime_log_stream(requested_stream),
+        tail: query.tail,
+        since,
+    };
+
+    let entries = runtime.logs(&id, filter).await?;
+    let response_entries: Vec<ProcessLogEntry> =
+        entries.iter().cloned().map(map_process_log_line).collect();
+
+    if query.follow.unwrap_or(false) {
+        let rx = runtime.subscribe_logs(&id).await?;
+        let replay_stream = stream::iter(response_entries.into_iter().map(|entry| {
+            Ok::<axum::response::sse::Event, Infallible>(
+                axum::response::sse::Event::default()
+                    .event("log")
+                    .id(entry.sequence.to_string())
+                    .data(serde_json::to_string(&entry).unwrap_or_else(|_| "{}".to_string())),
+            )
+        }));
+
+        let requested_stream_copy = requested_stream;
+        let follow_stream = BroadcastStream::new(rx).filter_map(move |item| {
+            let requested_stream_copy = requested_stream_copy;
+            async move {
+                match item {
+                    Ok(line) => {
+                        let entry = map_process_log_line(line);
+                        if process_log_matches(&entry, requested_stream_copy) {
+                            Some(Ok(axum::response::sse::Event::default()
+                                .event("log")
+                                .id(entry.sequence.to_string())
+                                .data(
+                                    serde_json::to_string(&entry)
+                                        .unwrap_or_else(|_| "{}".to_string()),
+                                )))
+                        } else {
+                            None
+                        }
+                    }
+                    Err(_) => None,
+                }
+            }
+        });
+
+        let stream = replay_stream.chain(follow_stream);
+        let response =
+            Sse::new(stream).keep_alive(KeepAlive::new().interval(Duration::from_secs(15)));
+        return Ok(response.into_response());
+    }
+
+    Ok(Json(ProcessLogsResponse {
+        process_id: id,
+        stream: requested_stream,
+        entries: response_entries,
+    })
+    .into_response())
+}
+
+/// Write input to a process.
+///
+/// Sends data to a process's stdin (pipe mode) or PTY writer (tty mode).
+/// Data can be encoded as base64, utf8, or text. Returns 413 if the decoded
+/// payload exceeds the configured `maxInputBytesPerRequest` limit.
+#[utoipa::path(
+    post,
+    path = "/v1/processes/{id}/input",
+    tag = "v1",
+    params(
+        ("id" = String, Path, description = "Process ID")
+    ),
+    request_body = ProcessInputRequest,
+    responses(
+        (status = 200, description = "Input accepted", body = ProcessInputResponse),
+        (status = 400, description = "Invalid request", body = ProblemDetails),
+        (status = 413, description = "Input exceeds configured limit", body = ProblemDetails),
+        (status = 409, description = "Process not writable", body = ProblemDetails),
+        (status = 501, description = "Process API unsupported on this platform", body = ProblemDetails)
+    )
+)]
+async fn post_v1_process_input(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(body): Json<ProcessInputRequest>,
+) -> Result<Json<ProcessInputResponse>, ApiError> {
+    if !process_api_supported() {
+        return Err(process_api_not_supported().into());
+    }
+
+    let encoding = body.encoding.unwrap_or_else(|| "base64".to_string());
+    let input = decode_input_bytes(&body.data, &encoding)?;
+    let runtime = state.process_runtime();
+    let max_input = runtime.max_input_bytes().await;
+    if input.len() > max_input {
+        return Err(SandboxError::InvalidRequest {
+            message: format!("input payload exceeds maxInputBytesPerRequest ({max_input})"),
+        }
+        .into());
+    }
+
+    let bytes_written = runtime.write_input(&id, &input).await?;
+    Ok(Json(ProcessInputResponse { bytes_written }))
+}
+
+/// Resize a process terminal.
+///
+/// Sets the PTY window size (columns and rows) for a tty-mode process and
+/// sends SIGWINCH so the child process can adapt.
+#[utoipa::path(
+    post,
+    path = "/v1/processes/{id}/terminal/resize",
+    tag = "v1",
+    params(
+        ("id" = String, Path, description = "Process ID")
+    ),
+    request_body = ProcessTerminalResizeRequest,
+    responses(
+        (status = 200, description = "Resize accepted", body = ProcessTerminalResizeResponse),
+        (status = 400, description = "Invalid request", body = ProblemDetails),
+        (status = 404, description = "Unknown process", body = ProblemDetails),
+        (status = 409, description = "Not a terminal process", body = ProblemDetails),
+        (status = 501, description = "Process API unsupported on this platform", body = ProblemDetails)
+    )
+)]
+async fn post_v1_process_terminal_resize(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(body): Json<ProcessTerminalResizeRequest>,
+) -> Result<Json<ProcessTerminalResizeResponse>, ApiError> {
+    if !process_api_supported() {
+        return Err(process_api_not_supported().into());
+    }
+
+    state
+        .process_runtime()
+        .resize_terminal(&id, body.cols, body.rows)
+        .await?;
+    Ok(Json(ProcessTerminalResizeResponse {
+        cols: body.cols,
+        rows: body.rows,
+    }))
+}
+
+/// Open an interactive WebSocket terminal session.
+///
+/// Upgrades the connection to a WebSocket for bidirectional PTY I/O. Accepts
+/// `access_token` query param for browser-based auth (WebSocket API cannot
+/// send custom headers). Streams raw PTY output as binary frames and accepts
+/// JSON control frames for input, resize, and close.
+#[utoipa::path(
+    get,
+    path = "/v1/processes/{id}/terminal/ws",
+    tag = "v1",
+    params(
+        ("id" = String, Path, description = "Process ID"),
+        ("access_token" = Option<String>, Query, description = "Bearer token alternative for WS auth")
+    ),
+    responses(
+        (status = 101, description = "WebSocket upgraded"),
+        (status = 400, description = "Invalid websocket frame or upgrade request", body = ProblemDetails),
+        (status = 404, description = "Unknown process", body = ProblemDetails),
+        (status = 409, description = "Not a terminal process", body = ProblemDetails),
+        (status = 501, description = "Process API unsupported on this platform", body = ProblemDetails)
+    )
+)]
+async fn get_v1_process_terminal_ws(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Query(_query): Query<ProcessWsQuery>,
+    ws: WebSocketUpgrade,
+) -> Result<Response, ApiError> {
+    if !process_api_supported() {
+        return Err(process_api_not_supported().into());
+    }
+
+    let runtime = state.process_runtime();
+    if !runtime.is_tty(&id).await? {
+        return Err(SandboxError::Conflict {
+            message: "process is not running in tty mode".to_string(),
+        }
+        .into());
+    }
+
+    Ok(ws
+        .on_upgrade(move |socket| process_terminal_ws_session(socket, runtime, id))
+        .into_response())
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+enum TerminalClientFrame {
+    Input {
+        data: String,
+        #[serde(default)]
+        encoding: Option<String>,
+    },
+    Resize {
+        cols: u16,
+        rows: u16,
+    },
+    Close,
+}
+
+async fn process_terminal_ws_session(
+    mut socket: WebSocket,
+    runtime: Arc<ProcessRuntime>,
+    id: String,
+) {
+    let _ = send_ws_json(
+        &mut socket,
+        json!({
+            "type": "ready",
+            "processId": &id,
+        }),
+    )
+    .await;
+
+    let mut log_rx = match runtime.subscribe_logs(&id).await {
+        Ok(rx) => rx,
+        Err(err) => {
+            let _ = send_ws_error(&mut socket, &err.to_string()).await;
+            let _ = socket.close().await;
+            return;
+        }
+    };
+    let mut exit_poll = tokio::time::interval(Duration::from_millis(150));
+
+    loop {
+        tokio::select! {
+            ws_in = socket.recv() => {
+                match ws_in {
+                    Some(Ok(Message::Binary(_))) => {
+                        let _ = send_ws_error(&mut socket, "binary input is not supported; use text JSON frames").await;
+                    }
+                    Some(Ok(Message::Text(text))) => {
+                        let parsed = serde_json::from_str::<TerminalClientFrame>(&text);
+                        match parsed {
+                            Ok(TerminalClientFrame::Input { data, encoding }) => {
+                                let input = match decode_input_bytes(&data, encoding.as_deref().unwrap_or("utf8")) {
+                                    Ok(input) => input,
+                                    Err(err) => {
+                                        let _ = send_ws_error(&mut socket, &err.to_string()).await;
+                                        continue;
+                                    }
+                                };
+                                let max_input = runtime.max_input_bytes().await;
+                                if input.len() > max_input {
+                                    let _ = send_ws_error(&mut socket, &format!("input payload exceeds maxInputBytesPerRequest ({max_input})")).await;
+                                    continue;
+                                }
+                                if let Err(err) = runtime.write_input(&id, &input).await {
+                                    let _ = send_ws_error(&mut socket, &err.to_string()).await;
+                                }
+                            }
+                            Ok(TerminalClientFrame::Resize { cols, rows }) => {
+                                if let Err(err) = runtime.resize_terminal(&id, cols, rows).await {
+                                    let _ = send_ws_error(&mut socket, &err.to_string()).await;
+                                }
+                            }
+                            Ok(TerminalClientFrame::Close) => {
+                                let _ = socket.close().await;
+                                break;
+                            }
+                            Err(err) => {
+                                let _ = send_ws_error(&mut socket, &format!("invalid terminal frame: {err}")).await;
+                            }
+                        }
+                    }
+                    Some(Ok(Message::Ping(payload))) => {
+                        let _ = socket.send(Message::Pong(payload)).await;
+                    }
+                    Some(Ok(Message::Close(_))) | None => break,
+                    Some(Ok(Message::Pong(_))) => {}
+                    Some(Err(_)) => break,
+                }
+            }
+            log_in = log_rx.recv() => {
+                match log_in {
+                    Ok(line) => {
+                        if line.stream != ProcessStream::Pty {
+                            continue;
+                        }
+                        let bytes = {
+                            use base64::engine::general_purpose::STANDARD as BASE64_ENGINE;
+                            use base64::Engine;
+                            BASE64_ENGINE.decode(&line.data).unwrap_or_default()
+                        };
+                        if socket.send(Message::Binary(bytes)).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+            }
+            _ = exit_poll.tick() => {
+                if let Ok(snapshot) = runtime.snapshot(&id).await {
+                    if snapshot.status == ProcessStatus::Exited {
+                        let _ = send_ws_json(
+                            &mut socket,
+                            json!({
+                                "type": "exit",
+                                "exitCode": snapshot.exit_code,
+                            }),
+                        )
+                        .await;
+                        let _ = socket.close().await;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+}
+
+async fn send_ws_json(socket: &mut WebSocket, payload: Value) -> Result<(), ()> {
+    socket
+        .send(Message::Text(
+            serde_json::to_string(&payload).map_err(|_| ())?,
+        ))
+        .await
+        .map_err(|_| ())
+}
+
+async fn send_ws_error(socket: &mut WebSocket, message: &str) -> Result<(), ()> {
+    send_ws_json(
+        socket,
+        json!({
+            "type": "error",
+            "message": message,
+        }),
+    )
+    .await
+}
+
 #[utoipa::path(
     get,
     path = "/v1/config/mcp",
@@ -1384,6 +2132,96 @@ async fn delete_v1_acp(
 ) -> Result<StatusCode, ApiError> {
     state.acp_proxy().delete(&server_id).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+fn process_api_supported() -> bool {
+    !cfg!(windows)
+}
+
+fn process_api_not_supported() -> ProblemDetails {
+    ProblemDetails {
+        type_: ErrorType::InvalidRequest.as_urn().to_string(),
+        title: "Not Implemented".to_string(),
+        status: 501,
+        detail: Some("process API is not implemented on Windows".to_string()),
+        instance: None,
+        extensions: serde_json::Map::new(),
+    }
+}
+
+fn map_process_config(config: ProcessRuntimeConfig) -> ProcessConfig {
+    ProcessConfig {
+        max_concurrent_processes: config.max_concurrent_processes,
+        default_run_timeout_ms: config.default_run_timeout_ms,
+        max_run_timeout_ms: config.max_run_timeout_ms,
+        max_output_bytes: config.max_output_bytes,
+        max_log_bytes_per_process: config.max_log_bytes_per_process,
+        max_input_bytes_per_request: config.max_input_bytes_per_request,
+    }
+}
+
+fn into_runtime_process_config(config: ProcessConfig) -> ProcessRuntimeConfig {
+    ProcessRuntimeConfig {
+        max_concurrent_processes: config.max_concurrent_processes,
+        default_run_timeout_ms: config.default_run_timeout_ms,
+        max_run_timeout_ms: config.max_run_timeout_ms,
+        max_output_bytes: config.max_output_bytes,
+        max_log_bytes_per_process: config.max_log_bytes_per_process,
+        max_input_bytes_per_request: config.max_input_bytes_per_request,
+    }
+}
+
+fn map_process_snapshot(snapshot: ProcessSnapshot) -> ProcessInfo {
+    ProcessInfo {
+        id: snapshot.id,
+        command: snapshot.command,
+        args: snapshot.args,
+        cwd: snapshot.cwd,
+        tty: snapshot.tty,
+        interactive: snapshot.interactive,
+        status: match snapshot.status {
+            ProcessStatus::Running => ProcessState::Running,
+            ProcessStatus::Exited => ProcessState::Exited,
+        },
+        pid: snapshot.pid,
+        exit_code: snapshot.exit_code,
+        created_at_ms: snapshot.created_at_ms,
+        exited_at_ms: snapshot.exited_at_ms,
+    }
+}
+
+fn into_runtime_log_stream(stream: ProcessLogsStream) -> ProcessLogFilterStream {
+    match stream {
+        ProcessLogsStream::Stdout => ProcessLogFilterStream::Stdout,
+        ProcessLogsStream::Stderr => ProcessLogFilterStream::Stderr,
+        ProcessLogsStream::Combined => ProcessLogFilterStream::Combined,
+        ProcessLogsStream::Pty => ProcessLogFilterStream::Pty,
+    }
+}
+
+fn map_process_log_line(line: crate::process_runtime::ProcessLogLine) -> ProcessLogEntry {
+    ProcessLogEntry {
+        sequence: line.sequence,
+        stream: match line.stream {
+            ProcessStream::Stdout => ProcessLogsStream::Stdout,
+            ProcessStream::Stderr => ProcessLogsStream::Stderr,
+            ProcessStream::Pty => ProcessLogsStream::Pty,
+        },
+        timestamp_ms: line.timestamp_ms,
+        data: line.data,
+        encoding: line.encoding.to_string(),
+    }
+}
+
+fn process_log_matches(entry: &ProcessLogEntry, stream: ProcessLogsStream) -> bool {
+    match stream {
+        ProcessLogsStream::Stdout => entry.stream == ProcessLogsStream::Stdout,
+        ProcessLogsStream::Stderr => entry.stream == ProcessLogsStream::Stderr,
+        ProcessLogsStream::Combined => {
+            entry.stream == ProcessLogsStream::Stdout || entry.stream == ProcessLogsStream::Stderr
+        }
+        ProcessLogsStream::Pty => entry.stream == ProcessLogsStream::Pty,
+    }
 }
 
 fn validate_named_query(value: &str, field_name: &str) -> Result<(), SandboxError> {

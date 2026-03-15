@@ -5,9 +5,9 @@ const target = resolve(process.cwd(), "src/generated/openapi.ts");
 let source = readFileSync(target, "utf8");
 
 const replacements = [
-  ["components[\"schemas\"][\"McpCommand\"]", "string"],
-  ["components[\"schemas\"][\"McpOAuthConfigOrDisabled\"]", "Record<string, unknown> | null"],
-  ["components[\"schemas\"][\"McpRemoteTransport\"]", "string"],
+  ['components["schemas"]["McpCommand"]', "string"],
+  ['components["schemas"]["McpOAuthConfigOrDisabled"]', "Record<string, unknown> | null"],
+  ['components["schemas"]["McpRemoteTransport"]', "string"],
 ];
 
 for (const [from, to] of replacements) {

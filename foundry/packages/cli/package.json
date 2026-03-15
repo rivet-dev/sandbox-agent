@@ -1,0 +1,26 @@
+{
+  "name": "@sandbox-agent/foundry-cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "hf": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsup --config tsup.config.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@iarna/toml": "^2.2.5",
+    "@opentui/core": "^0.1.77",
+    "@sandbox-agent/foundry-client": "workspace:*",
+    "@sandbox-agent/foundry-shared": "workspace:*",
+    "zod": "^4.1.5"
+  },
+  "devDependencies": {
+    "tsup": "^8.5.0"
+  }
+}

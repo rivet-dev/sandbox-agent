@@ -15,11 +15,7 @@
 
 import { describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
 import { createOpencodeClient, type OpencodeClient } from "@opencode-ai/sdk";
-import {
-  spawnSandboxAgent,
-  buildSandboxAgent,
-  type SandboxAgentHandle,
-} from "./helpers/spawn";
+import { spawnSandboxAgent, buildSandboxAgent, type SandboxAgentHandle } from "./helpers/spawn";
 
 const MODEL = process.env.TEST_AGENT_MODEL;
 
@@ -62,22 +58,11 @@ describe.skipIf(!MODEL)("Real agent round-trip", () => {
    * Uses a manual iterator to avoid closing the stream (for-await-of calls
    * iterator.return() on early exit, which would close the SSE connection).
    */
-  function collectUntilIdle(
-    iter: AsyncIterator<any>,
-    timeoutMs = 30_000,
-  ): Promise<{ events: any[]; text: string }> {
+  function collectUntilIdle(iter: AsyncIterator<any>, timeoutMs = 30_000): Promise<{ events: any[]; text: string }> {
     const events: any[] = [];
     let text = "";
     return new Promise((resolve, reject) => {
-      const timeout = setTimeout(
-        () =>
-          reject(
-            new Error(
-              `Timed out after ${timeoutMs}ms. Events: ${JSON.stringify(events.map((e) => e.type))}`,
-            ),
-          ),
-        timeoutMs,
-      );
+      const timeout = setTimeout(() => reject(new Error(`Timed out after ${timeoutMs}ms. Events: ${JSON.stringify(events.map((e) => e.type))}`)), timeoutMs);
       (async () => {
         try {
           while (true) {
@@ -88,10 +73,7 @@ describe.skipIf(!MODEL)("Real agent round-trip", () => {
               return;
             }
             events.push(event);
-            if (
-              event.type === "message.part.updated" &&
-              event.properties?.part?.type === "text"
-            ) {
+            if (event.type === "message.part.updated" && event.properties?.part?.type === "text") {
               // Prefer the delta (chunk) if present; otherwise use the full
               // accumulated part.text (for non-streaming single-shot events).
               text += event.properties.delta ?? event.properties.part.text ?? "";
@@ -103,11 +85,7 @@ describe.skipIf(!MODEL)("Real agent round-trip", () => {
             }
             if (event.type === "session.error") {
               clearTimeout(timeout);
-              reject(
-                new Error(
-                  `session.error: ${JSON.stringify(event.properties?.error)}`,
-                ),
-              );
+              reject(new Error(`session.error: ${JSON.stringify(event.properties?.error)}`));
               return;
             }
           }

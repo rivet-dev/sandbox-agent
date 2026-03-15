@@ -23,6 +23,6 @@ describe("e2b example", () => {
         await cleanup();
       }
     },
-    timeoutMs
+    timeoutMs,
   );
 });

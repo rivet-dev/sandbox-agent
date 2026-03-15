@@ -1,0 +1,1332 @@
+{
+  "pulledAt": "2026-03-14T03:31:52.336Z",
+  "login": "rivet-dev",
+  "id": 57733614,
+  "name": "Rivet",
+  "description": "Helping developers build and scale stateful workloads",
+  "email": null,
+  "blog": "https://rivet.dev",
+  "avatarUrl": "https://avatars.githubusercontent.com/u/57733614?v=4",
+  "repos": [
+    {
+      "fullName": "rivet-dev/rivet",
+      "cloneUrl": "https://github.com/rivet-dev/rivet.git",
+      "description": "Rivet Actors are the primitive for stateful workloads. Built for AI agents, collaborative apps, and durable execution.",
+      "language": "Rust",
+      "stars": 5223,
+      "updatedAt": "2026-03-13T21:02:54Z"
+    },
+    {
+      "fullName": "rivet-dev/sandbox-agent",
+      "cloneUrl": "https://github.com/rivet-dev/sandbox-agent.git",
+      "description": "Run Coding Agents in Sandboxes. Control Them Over HTTP. Supports Claude Code, Codex, OpenCode, and Amp.",
+      "language": "TypeScript",
+      "stars": 1075,
+      "updatedAt": "2026-03-14T00:48:35Z"
+    },
+    {
+      "fullName": "rivet-dev/vbare",
+      "cloneUrl": "https://github.com/rivet-dev/vbare.git",
+      "description": "Versioned Binary Application Record Encoding",
+      "language": "Rust",
+      "stars": 11,
+      "updatedAt": "2026-01-20T05:14:00Z"
+    },
+    {
+      "fullName": "rivet-dev/proposal-stateful-serverless-api",
+      "cloneUrl": "https://github.com/rivet-dev/proposal-stateful-serverless-api.git",
+      "description": "https://rivet.gg/blog/2025-03-23-what-would-a-w3c-standard-look-like-for-stateful-serverless-",
+      "language": "HTML",
+      "stars": 11,
+      "updatedAt": "2025-10-05T03:06:18Z"
+    },
+    {
+      "fullName": "rivet-dev/skills",
+      "cloneUrl": "https://github.com/rivet-dev/skills.git",
+      "description": "Generated skill files for Rivet AI integrations",
+      "language": null,
+      "stars": 7,
+      "updatedAt": "2026-03-13T21:07:08Z"
+    },
+    {
+      "fullName": "rivet-dev/godot-docker",
+      "cloneUrl": "https://github.com/rivet-dev/godot-docker.git",
+      "description": "Dockerfiles to help containerize Godot 4",
+      "language": "Dockerfile",
+      "stars": 4,
+      "updatedAt": "2025-04-23T20:39:29Z"
+    },
+    {
+      "fullName": "rivet-dev/template-railway",
+      "cloneUrl": "https://github.com/rivet-dev/template-railway.git",
+      "description": null,
+      "language": "TypeScript",
+      "stars": 3,
+      "updatedAt": "2026-02-23T10:55:48Z"
+    },
+    {
+      "fullName": "rivet-dev/preview-namespace-action",
+      "cloneUrl": "https://github.com/rivet-dev/preview-namespace-action.git",
+      "description": "Automatically create Rivet namespaces for Vercel preview deployments",
+      "language": "TypeScript",
+      "stars": 2,
+      "updatedAt": "2026-02-06T00:57:17Z"
+    },
+    {
+      "fullName": "rivet-dev/template-vercel",
+      "cloneUrl": "https://github.com/rivet-dev/template-vercel.git",
+      "description": "Next.js template with RivetKit integration for Vercel deployment",
+      "language": "TypeScript",
+      "stars": 2,
+      "updatedAt": "2026-02-06T00:47:13Z"
+    },
+    {
+      "fullName": "rivet-dev/.github",
+      "cloneUrl": "https://github.com/rivet-dev/.github.git",
+      "description": null,
+      "language": null,
+      "stars": 1,
+      "updatedAt": "2026-02-24T08:32:42Z"
+    },
+    {
+      "fullName": "rivet-dev/rivetkit-swift",
+      "cloneUrl": "https://github.com/rivet-dev/rivetkit-swift.git",
+      "description": "Swift SDK for Rivet Actors.",
+      "language": "Swift",
+      "stars": 1,
+      "updatedAt": "2026-01-28T14:19:11Z"
+    },
+    {
+      "fullName": "rivet-dev/opengb",
+      "cloneUrl": "https://github.com/rivet-dev/opengb.git",
+      "description": "Moved to https://github.com/rivet-gg/toolchain",
+      "language": null,
+      "stars": 1,
+      "updatedAt": "2025-02-14T00:41:22Z"
+    },
+    {
+      "fullName": "rivet-dev/plugin-colyseus-server",
+      "cloneUrl": "https://github.com/rivet-dev/plugin-colyseus-server.git",
+      "description": null,
+      "language": "TypeScript",
+      "stars": 1,
+      "updatedAt": "2023-04-03T22:30:41Z"
+    },
+    {
+      "fullName": "rivet-dev/deploy-action",
+      "cloneUrl": "https://github.com/rivet-dev/deploy-action.git",
+      "description": null,
+      "language": "TypeScript",
+      "stars": 0,
+      "updatedAt": "2026-03-13T19:21:43Z"
+    },
+    {
+      "fullName": "rivet-dev/vite-plugin-srvx",
+      "cloneUrl": "https://github.com/rivet-dev/vite-plugin-srvx.git",
+      "description": null,
+      "language": "TypeScript",
+      "stars": 0,
+      "updatedAt": "2026-02-10T01:50:44Z"
+    },
+    {
+      "fullName": "rivet-dev/template-railway-multiregion",
+      "cloneUrl": "https://github.com/rivet-dev/template-railway-multiregion.git",
+      "description": "Railway template with multi-region serverless configuration",
+      "language": "TypeScript",
+      "stars": 0,
+      "updatedAt": "2026-01-14T19:33:47Z"
+    },
+    {
+      "fullName": "rivet-dev/template-aws-ecs",
+      "cloneUrl": "https://github.com/rivet-dev/template-aws-ecs.git",
+      "description": null,
+      "language": "TypeScript",
+      "stars": 0,
+      "updatedAt": "2026-01-05T23:46:47Z"
+    },
+    {
+      "fullName": "rivet-dev/template-freestyle",
+      "cloneUrl": "https://github.com/rivet-dev/template-freestyle.git",
+      "description": null,
+      "language": "TypeScript",
+      "stars": 0,
+      "updatedAt": "2025-12-11T01:04:22Z"
+    },
+    {
+      "fullName": "rivet-dev/rivet-term",
+      "cloneUrl": "https://github.com/rivet-dev/rivet-term.git",
+      "description": null,
+      "language": "Rust",
+      "stars": 0,
+      "updatedAt": "2025-05-30T21:59:40Z"
+    },
+    {
+      "fullName": "rivet-dev/nomad-client",
+      "cloneUrl": "https://github.com/rivet-dev/nomad-client.git",
+      "description": null,
+      "language": "Rust",
+      "stars": 0,
+      "updatedAt": "2024-01-17T20:53:39Z"
+    },
+    {
+      "fullName": "rivet-dev/cloud-benchmarks",
+      "cloneUrl": "https://github.com/rivet-dev/cloud-benchmarks.git",
+      "description": null,
+      "language": "HCL",
+      "stars": 0,
+      "updatedAt": "2023-06-20T18:47:22Z"
+    },
+    {
+      "fullName": "rivet-dev/terraform-generic-server",
+      "cloneUrl": "https://github.com/rivet-dev/terraform-generic-server.git",
+      "description": null,
+      "language": "HCL",
+      "stars": 0,
+      "updatedAt": "2023-06-20T01:40:11Z"
+    },
+    {
+      "fullName": "rivet-dev/service-client-documentation-generator",
+      "cloneUrl": "https://github.com/rivet-dev/service-client-documentation-generator.git",
+      "description": null,
+      "language": "JavaScript",
+      "stars": 0,
+      "updatedAt": "2022-07-09T02:41:26Z"
+    }
+  ],
+  "members": [
+    {
+      "id": "3322446",
+      "login": "NathanFlurry",
+      "avatarUrl": "https://avatars.githubusercontent.com/u/3322446?v=4",
+      "role": "member"
+    },
+    {
+      "id": "28816635",
+      "login": "NicholasKissel",
+      "avatarUrl": "https://avatars.githubusercontent.com/u/28816635?v=4",
+      "role": "member"
+    }
+  ],
+  "openPullRequests": [
+    {
+      "number": 4423,
+      "title": "fix(pegboard): unwrap actor name metadata",
+      "state": "open",
+      "draft": false,
+      "headRefName": "metadata-double-nesting",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-03-14T00:41:44Z"
+    },
+    {
+      "number": 4422,
+      "title": "docs: clarify service keys vs admin tokens for actor management",
+      "state": "open",
+      "draft": false,
+      "headRefName": "fix-cloud-token-docs",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-03-13T22:04:18Z"
+    },
+    {
+      "number": 4421,
+      "title": "fix: ignore invalid base64 input",
+      "state": "open",
+      "draft": false,
+      "headRefName": "03-13-fix_ignore_invalid_base64_input",
+      "author": "MasterPtato",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-03-13T23:51:56Z"
+    },
+    {
+      "number": 4420,
+      "title": "feat(actor): add metadata patching and projection",
+      "state": "open",
+      "draft": false,
+      "headRefName": "actor-metadata-api",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-03-13T21:55:58Z"
+    },
+    {
+      "number": 4419,
+      "title": "feat(rivetkit): add support for tanstack query",
+      "state": "open",
+      "draft": false,
+      "headRefName": "feat/react-query",
+      "author": "jog1t",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-03-13T21:13:07Z"
+    },
+    {
+      "number": 4417,
+      "title": "fix(rivetkit): validate runner version fits in u32",
+      "state": "open",
+      "draft": false,
+      "headRefName": "fix/runner-version-u32-validation",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-03-13T09:40:35Z"
+    },
+    {
+      "number": 4414,
+      "title": "Add inspector SQLite shell and property bindings",
+      "state": "open",
+      "draft": false,
+      "headRefName": "wider-inspector-shots",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-03-13T04:54:56Z"
+    },
+    {
+      "number": 4413,
+      "title": "Add workflow try helpers and visualizer support",
+      "state": "open",
+      "draft": false,
+      "headRefName": "workflow-try-step-api",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-03-13T05:49:52Z"
+    },
+    {
+      "number": 4411,
+      "title": "Add workflow rerun controls to RivetKit Inspector",
+      "state": "open",
+      "draft": false,
+      "headRefName": "workflow-step-resume",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-03-13T19:54:15Z"
+    },
+    {
+      "number": 4410,
+      "title": "Add inspector SQLite shell and property bindings",
+      "state": "open",
+      "draft": false,
+      "headRefName": "inspector-sqlite-shell",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-03-13T17:44:43Z"
+    },
+    {
+      "number": 4409,
+      "title": "fix(rivetkit): pack inspector in pkg-pr-new",
+      "state": "open",
+      "draft": false,
+      "headRefName": "fix-pkg-prp-inspector",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-03-13T05:19:49Z"
+    },
+    {
+      "number": 4401,
+      "title": "chore(deps): bump the cargo group across 1 directory with 4 updates",
+      "state": "open",
+      "draft": false,
+      "headRefName": "dependabot/cargo/cargo-5ada01758a",
+      "author": "dependabot[bot]",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-03-11T00:20:45Z"
+    },
+    {
+      "number": 4400,
+      "title": "Add actor reschedule endpoint",
+      "state": "open",
+      "draft": false,
+      "headRefName": "actor-reschedule-endpoint",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-03-11T00:03:30Z"
+    },
+    {
+      "number": 4397,
+      "title": "feat: dynamic actors",
+      "state": "open",
+      "draft": false,
+      "headRefName": "03-08-feat_rivetkit_dynamic_actors",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-03-12T05:47:58Z"
+    },
+    {
+      "number": 4396,
+      "title": "Fix mcp-hub to serve built docs metadata",
+      "state": "open",
+      "draft": false,
+      "headRefName": "docs-mcp-server-plan",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-03-10T18:08:58Z"
+    },
+    {
+      "number": 4395,
+      "title": "feat: dynamic actors",
+      "state": "open",
+      "draft": false,
+      "headRefName": "feat/dynamic-actors",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-03-10T16:27:33Z"
+    },
+    {
+      "number": 4389,
+      "title": "Add Cloudflare migration cookbook and evals",
+      "state": "open",
+      "draft": false,
+      "headRefName": "cf-cookbook",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-03-12T07:05:32Z"
+    },
+    {
+      "number": 4388,
+      "title": "fix(gasoline): fix postgres contention and stuck workflow race condition",
+      "state": "open",
+      "draft": true,
+      "headRefName": "fix/gasoline-postgres-contention",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-03-09T16:48:33Z"
+    },
+    {
+      "number": 4384,
+      "title": "Use KV range ops in workflow, queue, and SQLite",
+      "state": "open",
+      "draft": false,
+      "headRefName": "kv-range-opportunities",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-03-08T07:54:26Z"
+    },
+    {
+      "number": 4375,
+      "title": "feat(frontend): local-first onboarding flow",
+      "state": "open",
+      "draft": false,
+      "headRefName": "NicholasKissel/onboarding-local-first",
+      "author": "NicholasKissel",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-03-07T20:15:13Z"
+    },
+    {
+      "number": 4356,
+      "title": "fix: prevent white background flash on docs redirect pages",
+      "state": "open",
+      "draft": false,
+      "headRefName": "NicholasKissel/fix-docs-redirect-flash",
+      "author": "NicholasKissel",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-03-13T20:56:00Z"
+    },
+    {
+      "number": 4355,
+      "title": "Add Render connect guide for RivetKit applications",
+      "state": "open",
+      "draft": false,
+      "headRefName": "main",
+      "author": "ojusave",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-03-05T04:21:54Z"
+    },
+    {
+      "number": 4354,
+      "title": "Add Render connect guide for RivetKit applications",
+      "state": "open",
+      "draft": false,
+      "headRefName": "add-render-connect-guide",
+      "author": "ojusave",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-03-04T21:40:54Z"
+    },
+    {
+      "number": 4352,
+      "title": "fix(website): use PostHog React hook instead of direct import",
+      "state": "open",
+      "draft": false,
+      "headRefName": "NicholasKissel/fix-posthog-forms",
+      "author": "NicholasKissel",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-03-12T18:20:51Z"
+    },
+    {
+      "number": 4348,
+      "title": "refactor: redesign landing hero with animated benchmark",
+      "state": "open",
+      "draft": false,
+      "headRefName": "NathanFlurry/landing-hero-update",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-03-04T03:30:19Z"
+    },
+    {
+      "number": 4345,
+      "title": "fix(website): eliminate sidebar and tab flicker on docs navigation",
+      "state": "open",
+      "draft": false,
+      "headRefName": "fix/docs-sidebar-flicker",
+      "author": "bohdanbirdie",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-03-03T23:32:21Z"
+    },
+    {
+      "number": 4339,
+      "title": "chore: update wording",
+      "state": "open",
+      "draft": false,
+      "headRefName": "chore-udpate-wording",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-03-13T20:57:10Z"
+    },
+    {
+      "number": 4331,
+      "title": "chore: move ActorDefinition and ActorInstance to interfaces",
+      "state": "open",
+      "draft": false,
+      "headRefName": "chore-move-actordefinition-and",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-03-13T19:09:34Z"
+    },
+    {
+      "number": 4330,
+      "title": "feat: dynamic actors",
+      "state": "open",
+      "draft": true,
+      "headRefName": "feat-dynamic-actors",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-03-13T18:40:20Z"
+    },
+    {
+      "number": 4325,
+      "title": "feat: dev toolbar",
+      "state": "open",
+      "draft": false,
+      "headRefName": "02-27-feat_dev_toolbar",
+      "author": "jog1t",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-03-13T20:02:23Z"
+    },
+    {
+      "number": 4323,
+      "title": "fix(frontend): fix inspector public path",
+      "state": "open",
+      "draft": false,
+      "headRefName": "02-20-fix_frontend_fix_inspector_public_path",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-03-13T08:49:55Z"
+    },
+    {
+      "number": 4322,
+      "title": "chore(website): add troubleshooting doc",
+      "state": "open",
+      "draft": false,
+      "headRefName": "chore-website-add",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-03-07T20:08:33Z"
+    },
+    {
+      "number": 4321,
+      "title": "fix(rivetkit0: fix wf history diverged bug",
+      "state": "open",
+      "draft": true,
+      "headRefName": "02-26-fix_rivetkit0_fix_wf_history_diverged_bug",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-03-07T00:46:20Z"
+    },
+    {
+      "number": 4312,
+      "title": "feat: add @rivetkit/effect package",
+      "state": "open",
+      "draft": false,
+      "headRefName": "feat/rivetkit-effect",
+      "author": "Makisuo",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-02-27T16:18:18Z"
+    },
+    {
+      "number": 4289,
+      "title": "feat(rust/engine-runner): minimal rust engine runner",
+      "state": "open",
+      "draft": true,
+      "headRefName": "02-23-feat_rust_engine-runner_feature_parity_with_typescript",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-03-07T21:33:09Z"
+    },
+    {
+      "number": 4245,
+      "title": "feat(inspector): expose http api for inspector",
+      "state": "open",
+      "draft": false,
+      "headRefName": "02-20-feat_inspector_expose_http_api_for_inspector",
+      "author": "jog1t",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-03-12T11:21:50Z"
+    },
+    {
+      "number": 4177,
+      "title": "chore(site): adjusted photos and seo",
+      "state": "open",
+      "draft": true,
+      "headRefName": "02-10-chore_site_adjusted_photos_and_seo",
+      "author": "NicholasKissel",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-03-14T01:08:34Z"
+    },
+    {
+      "number": 4172,
+      "title": "feat: better charts",
+      "state": "open",
+      "draft": true,
+      "headRefName": "02-11-feat_better_charts",
+      "author": "jog1t",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-03-13T16:00:09Z"
+    },
+    {
+      "number": 4152,
+      "title": "chore(site): weekly changelog",
+      "state": "open",
+      "draft": true,
+      "headRefName": "02-06-chore_site_weekly_changelog",
+      "author": "NicholasKissel",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-03-13T11:29:50Z"
+    },
+    {
+      "number": 4141,
+      "title": "chore(site): weekly changelog 2026-06",
+      "state": "open",
+      "draft": false,
+      "headRefName": "changelog-2026-06",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-03-13T15:30:07Z"
+    },
+    {
+      "number": 4136,
+      "title": "chore: route sentry through caddy",
+      "state": "open",
+      "draft": false,
+      "headRefName": "02-05-chore_route_sentry_through_caddy",
+      "author": "jog1t",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-02-18T03:26:14Z"
+    },
+    {
+      "number": 4096,
+      "title": "feat(examples): add tanstack start on cloudflare example",
+      "state": "open",
+      "draft": false,
+      "headRefName": "02-03-feat_examples_add_tanstack_start_on_cloudflare_example",
+      "author": "jog1t",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-03-13T14:03:45Z"
+    },
+    {
+      "number": 4095,
+      "title": "feat(examples): add tanstack start example",
+      "state": "open",
+      "draft": false,
+      "headRefName": "02-02-feat_examples_add_tanstack_start_example",
+      "author": "jog1t",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-03-13T15:51:26Z"
+    },
+    {
+      "number": 4065,
+      "title": "fix(ci): copy skills to skills/ directory instead of repo root",
+      "state": "open",
+      "draft": false,
+      "headRefName": "fix/skills-workflow-path",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-03-13T03:23:11Z"
+    },
+    {
+      "number": 4064,
+      "title": "feat(rivetkit): add runner override option to getOrCreate and create",
+      "state": "open",
+      "draft": false,
+      "headRefName": "feat/runner-override-options",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-03-13T20:07:23Z"
+    },
+    {
+      "number": 4063,
+      "title": "fix(rivetkit): deserialize actor keys properly in manager router",
+      "state": "open",
+      "draft": false,
+      "headRefName": "fix/actor-keys-array",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-01-29T12:15:23Z"
+    },
+    {
+      "number": 4062,
+      "title": "fix(rivetkit): shorten local dev client retry backoff",
+      "state": "open",
+      "draft": false,
+      "headRefName": "fix/local-dev-backoff",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-01-29T12:16:02Z"
+    },
+    {
+      "number": 4040,
+      "title": "Enforce browser/node code boundaries with linter and build plugin",
+      "state": "open",
+      "draft": false,
+      "headRefName": "claude/vite-detection-library-trZOL",
+      "author": "jog1t",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-01-26T18:45:23Z"
+    },
+    {
+      "number": 4031,
+      "title": "fix(rivetkit): use localhost instead of 127.0.0.1 to fix wsl support",
+      "state": "open",
+      "draft": false,
+      "headRefName": "01-24-fix_rivetkit_use_localhost_instead_of_127.0.0.1_to_fix_wsl_support",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-03-13T20:12:56Z"
+    },
+    {
+      "number": 4018,
+      "title": "feat(rivetkit): convex support",
+      "state": "open",
+      "draft": false,
+      "headRefName": "convex-adapter",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-02-17T08:58:33Z"
+    },
+    {
+      "number": 4008,
+      "title": "feat(examples): effect",
+      "state": "open",
+      "draft": true,
+      "headRefName": "01-21-feat_examples_effect",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-03-13T01:49:01Z"
+    },
+    {
+      "number": 4004,
+      "title": "feat(rivetkit): add clearAlarm",
+      "state": "open",
+      "draft": true,
+      "headRefName": "01-21-feat_rivetkit_add_clearalarm",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-02-19T19:47:34Z"
+    },
+    {
+      "number": 3972,
+      "title": "fix(website): output raw MDX for docs markdown",
+      "state": "open",
+      "draft": false,
+      "headRefName": "codex/render-raw-.mdx-files-without-modification",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-01-18T23:15:32Z"
+    },
+    {
+      "number": 3971,
+      "title": "fix(website): align Typesense env var to PUBLIC_TYPESENSE_API_KEY",
+      "state": "open",
+      "draft": false,
+      "headRefName": "codex/fix-search-box-after-astro-migration",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-03-13T13:51:36Z"
+    },
+    {
+      "number": 3968,
+      "title": "chore: fix /api routing for dev with new examples",
+      "state": "open",
+      "draft": false,
+      "headRefName": "01-16-chore_fix__api_routing_for_dev_with_new_examples",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-03-13T14:37:46Z"
+    },
+    {
+      "number": 3967,
+      "title": "feat(examples): better vercel support",
+      "state": "open",
+      "draft": false,
+      "headRefName": "01-17-feat_examples_better_vercel_support",
+      "author": "jog1t",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-01-17T06:05:14Z"
+    },
+    {
+      "number": 3900,
+      "title": "chore(site): add auto-generated og image",
+      "state": "open",
+      "draft": true,
+      "headRefName": "01-14-chore_site_add_auto-generated_og_image",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-03-13T20:48:15Z"
+    },
+    {
+      "number": 3890,
+      "title": "DO NOT MERGE: cloudflare w/o do support",
+      "state": "open",
+      "draft": true,
+      "headRefName": "01-13-do_not_merge_cloudflare_w_o_do_support",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-03-13T23:18:34Z"
+    },
+    {
+      "number": 3832,
+      "title": "Add import conditions to prevent node dependencies in client bundle",
+      "state": "open",
+      "draft": false,
+      "headRefName": "claude/add-import-conditions-Iu81W",
+      "author": "jog1t",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-03-01T23:59:27Z"
+    },
+    {
+      "number": 3746,
+      "title": "Add deploy template support for serverless examples (FRONT-908)",
+      "state": "open",
+      "draft": true,
+      "headRefName": "copilot/add-deploy-template-front-908",
+      "author": "Copilot",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-01-05T17:44:40Z"
+    },
+    {
+      "number": 3740,
+      "title": "chore: update engine-full sdk",
+      "state": "open",
+      "draft": false,
+      "headRefName": "01-02-chore_update_engine-full_sdk",
+      "author": "jog1t",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-01-09T00:04:24Z"
+    },
+    {
+      "number": 3736,
+      "title": "Adopt unified endpoint format in UI and environment variables",
+      "state": "open",
+      "draft": true,
+      "headRefName": "copilot/update-ui-env-vars-unified-endpoint-front-904",
+      "author": "Copilot",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-01-05T14:36:11Z"
+    },
+    {
+      "number": 3718,
+      "title": "chore(scripts): add --reuse-engine & validate provided engine version",
+      "state": "open",
+      "draft": true,
+      "headRefName": "12-29-chore_scripts_add_--reuse-engine_validate_provided_engine_version",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2025-12-29T19:44:14Z"
+    },
+    {
+      "number": 3714,
+      "title": "Add \"Show metadata\" action to runner list",
+      "state": "open",
+      "draft": true,
+      "headRefName": "copilot/add-show-metadata-to-runner-list-rvt-5040",
+      "author": "Copilot",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2025-12-28T19:39:47Z"
+    },
+    {
+      "number": 3662,
+      "title": "feat(examples): pong & agario examples",
+      "state": "open",
+      "draft": true,
+      "headRefName": "12-20-feat_examples_pong_agario_examples",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2025-12-20T20:05:58Z"
+    },
+    {
+      "number": 3645,
+      "title": "Add GitHub Copilot instructions with separate sections for engine, rivetkit, frontend, and website",
+      "state": "open",
+      "draft": true,
+      "headRefName": "copilot/setup-copilot-instructions",
+      "author": "Copilot",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2025-12-12T22:51:20Z"
+    },
+    {
+      "number": 3640,
+      "title": "feat(rivetkit): configure server port via env (for serverless auto-start)",
+      "state": "open",
+      "draft": false,
+      "headRefName": "12-12-feat_rivetkit_configure_server_port_via_env_for_serverless_auto-start_",
+      "author": "abcxff",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2025-12-12T03:07:38Z"
+    },
+    {
+      "number": 3627,
+      "title": "Add KV inspector backend endpoints and WebSocket protocol support",
+      "state": "open",
+      "draft": true,
+      "headRefName": "copilot/add-kv-inspector-feature",
+      "author": "Copilot",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2026-01-17T01:37:38Z"
+    },
+    {
+      "number": 3617,
+      "title": "feat(examples): ai-ap-builder-freestyle",
+      "state": "open",
+      "draft": true,
+      "headRefName": "12-09-feat_examples_ai-ap-builder-freestyle",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2025-12-12T00:49:19Z"
+    },
+    {
+      "number": 3418,
+      "title": "docs: rebrand examples and docs to rivet",
+      "state": "open",
+      "draft": false,
+      "headRefName": "docs/examples-rivet-rebrand",
+      "author": "atqamz",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2025-11-08T17:18:37Z"
+    },
+    {
+      "number": 3297,
+      "title": "chore(deps): bump the cargo group across 1 directory with 2 updates",
+      "state": "open",
+      "draft": false,
+      "headRefName": "dependabot/cargo/cargo-56740afe0f",
+      "author": "dependabot[bot]",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2025-12-02T05:18:18Z"
+    },
+    {
+      "number": 3264,
+      "title": "chore(rivetkit-typescript): remove dependency on node modules",
+      "state": "open",
+      "draft": true,
+      "headRefName": "10-25-chore_rivetkit-typescript_remove_dependency_on_node_modules",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2025-11-07T04:48:58Z"
+    },
+    {
+      "number": 3218,
+      "title": "chore(main): release 25.8.1",
+      "state": "open",
+      "draft": false,
+      "headRefName": "release-please--branches--main",
+      "author": "github-actions[bot]",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2025-10-22T06:31:57Z"
+    },
+    {
+      "number": 3161,
+      "title": "chore(sdk): fix cjs support",
+      "state": "open",
+      "draft": true,
+      "headRefName": "10-12-chore_sdk_fix_cjs_support",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2025-10-12T17:50:53Z"
+    },
+    {
+      "number": 2930,
+      "title": "chore: clean up tests",
+      "state": "open",
+      "draft": true,
+      "headRefName": "09-17-chore_clean_up_tests",
+      "author": "abcxff",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2025-09-24T19:51:14Z"
+    },
+    {
+      "number": 2888,
+      "title": "chore(deps-dev): bump esbuild from 0.19.12 to 0.25.0 in /sdks/typescript/api-full in the npm_and_yarn group across 1 directory",
+      "state": "open",
+      "draft": false,
+      "headRefName": "dependabot/npm_and_yarn/sdks/typescript/api-full/npm_and_yarn-392d5e510b",
+      "author": "dependabot[bot]",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2025-10-14T04:20:28Z"
+    },
+    {
+      "number": 2775,
+      "title": "feat(studio): db",
+      "state": "open",
+      "draft": true,
+      "headRefName": "05-12-feat_studio_db",
+      "author": "jog1t",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2025-07-20T22:01:19Z"
+    },
+    {
+      "number": 2603,
+      "title": "fix(site): break long code snippets",
+      "state": "open",
+      "draft": true,
+      "headRefName": "06-14-fix_site_break_long_code_snippets",
+      "author": "jog1t",
+      "repoFullName": "rivet-dev/rivet",
+      "updatedAt": "2025-09-08T07:21:21Z"
+    },
+    {
+      "number": 249,
+      "title": "Consolidate example install commands",
+      "state": "open",
+      "draft": false,
+      "headRefName": "extract-install-command",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/sandbox-agent",
+      "updatedAt": "2026-03-13T20:51:01Z"
+    },
+    {
+      "number": 246,
+      "title": "Add Foundry mobile layout with Tauri iOS/Android support",
+      "state": "open",
+      "draft": false,
+      "headRefName": "NicholasKissel/foundry-mobile-layout",
+      "author": "NicholasKissel",
+      "repoFullName": "rivet-dev/sandbox-agent",
+      "updatedAt": "2026-03-13T07:42:38Z"
+    },
+    {
+      "number": 230,
+      "title": "fix: update Rivet doc examples and peer dep",
+      "state": "open",
+      "draft": false,
+      "headRefName": "NathanFlurry/fix-rivet-docs",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/sandbox-agent",
+      "updatedAt": "2026-03-12T04:23:48Z"
+    },
+    {
+      "number": 227,
+      "title": "fix: normalize Pi ACP bootstrap payloads",
+      "state": "open",
+      "draft": false,
+      "headRefName": "NathanFlurry/pi-bootstrap-fix",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/sandbox-agent",
+      "updatedAt": "2026-03-12T22:16:40Z"
+    },
+    {
+      "number": 226,
+      "title": "Expand desktop computer-use APIs with recording, streaming, and Docker tests",
+      "state": "open",
+      "draft": false,
+      "headRefName": "desktop-computer-use",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/sandbox-agent",
+      "updatedAt": "2026-03-14T02:29:04Z"
+    },
+    {
+      "number": 225,
+      "title": "feat: add hooks example for Claude, Codex, and OpenCode",
+      "state": "open",
+      "draft": false,
+      "headRefName": "hooks-example",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/sandbox-agent",
+      "updatedAt": "2026-03-11T05:13:06Z"
+    },
+    {
+      "number": 223,
+      "title": "feat: auto-inject builtin agent skills and CLAUDE.md at startup",
+      "state": "open",
+      "draft": false,
+      "headRefName": "feat/builtin-agent-skills",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/sandbox-agent",
+      "updatedAt": "2026-03-12T22:26:44Z"
+    },
+    {
+      "number": 222,
+      "title": "Recover wellington organization state",
+      "state": "open",
+      "draft": false,
+      "headRefName": "recovery/wellington-20260309",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/sandbox-agent",
+      "updatedAt": "2026-03-12T19:06:08Z"
+    },
+    {
+      "number": 220,
+      "title": "Recover lisbon organization state",
+      "state": "open",
+      "draft": false,
+      "headRefName": "recovery/lisbon-20260309",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/sandbox-agent",
+      "updatedAt": "2026-03-12T12:49:52Z"
+    },
+    {
+      "number": 219,
+      "title": "Recover karachi-v2 organization state",
+      "state": "open",
+      "draft": false,
+      "headRefName": "recovery/karachi-v2-20260309",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/sandbox-agent",
+      "updatedAt": "2026-03-12T04:15:49Z"
+    },
+    {
+      "number": 218,
+      "title": "Recover hamburg organization state",
+      "state": "open",
+      "draft": false,
+      "headRefName": "recovery/hamburg-20260309",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/sandbox-agent",
+      "updatedAt": "2026-03-12T07:03:12Z"
+    },
+    {
+      "number": 217,
+      "title": "Recover geneva organization state",
+      "state": "open",
+      "draft": false,
+      "headRefName": "recovery/geneva-20260309",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/sandbox-agent",
+      "updatedAt": "2026-03-11T17:56:48Z"
+    },
+    {
+      "number": 216,
+      "title": "Recover edinburgh organization state",
+      "state": "open",
+      "draft": false,
+      "headRefName": "recovery/edinburgh-20260309",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/sandbox-agent",
+      "updatedAt": "2026-03-11T05:13:06Z"
+    },
+    {
+      "number": 211,
+      "title": "Add desktop APIs and Docker-backed integration tests",
+      "state": "open",
+      "draft": false,
+      "headRefName": "desktop-use",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/sandbox-agent",
+      "updatedAt": "2026-03-12T05:48:24Z"
+    },
+    {
+      "number": 209,
+      "title": "Fix inspector CWD handling",
+      "state": "open",
+      "draft": false,
+      "headRefName": "fix-inspector-cwd",
+      "author": "svetly",
+      "repoFullName": "rivet-dev/sandbox-agent",
+      "updatedAt": "2026-03-11T05:13:06Z"
+    },
+    {
+      "number": 202,
+      "title": "feat: add configuration for model, mode, and thought level",
+      "state": "open",
+      "draft": false,
+      "headRefName": "effort-level-validation",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/sandbox-agent",
+      "updatedAt": "2026-03-11T20:29:01Z"
+    },
+    {
+      "number": 200,
+      "title": "feat: add configuration for model, mode, and thought level",
+      "state": "open",
+      "draft": false,
+      "headRefName": "feat-add-configuration-for-model",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/sandbox-agent",
+      "updatedAt": "2026-03-11T05:13:06Z"
+    },
+    {
+      "number": 197,
+      "title": "Add support for image content blocks in agent messages",
+      "state": "open",
+      "draft": false,
+      "headRefName": "claude/add-image-support-MjMZz",
+      "author": "Glavin001",
+      "repoFullName": "rivet-dev/sandbox-agent",
+      "updatedAt": "2026-03-11T05:13:06Z"
+    },
+    {
+      "number": 196,
+      "title": "Add image support to ACP agent message handling",
+      "state": "open",
+      "draft": false,
+      "headRefName": "claude/add-image-support-sandbox-MdKa0",
+      "author": "Glavin001",
+      "repoFullName": "rivet-dev/sandbox-agent",
+      "updatedAt": "2026-03-11T05:13:06Z"
+    },
+    {
+      "number": 192,
+      "title": "Add modal sandbox support",
+      "state": "open",
+      "draft": false,
+      "headRefName": "walter/modal-support",
+      "author": "waltertang27",
+      "repoFullName": "rivet-dev/sandbox-agent",
+      "updatedAt": "2026-03-11T05:13:06Z"
+    },
+    {
+      "number": 190,
+      "title": "feat: download batch",
+      "state": "open",
+      "draft": true,
+      "headRefName": "02-23-feat_download_batch",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/sandbox-agent",
+      "updatedAt": "2026-03-10T21:24:06Z"
+    },
+    {
+      "number": 175,
+      "title": "chore: migrate skill generator to TypeScript",
+      "state": "open",
+      "draft": false,
+      "headRefName": "chore/skill-generator-typescript",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/sandbox-agent",
+      "updatedAt": "2026-03-11T05:13:06Z"
+    },
+    {
+      "number": 174,
+      "title": "chore: improve error output",
+      "state": "open",
+      "draft": false,
+      "headRefName": "fix/mcp-skills-examples-working",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/sandbox-agent",
+      "updatedAt": "2026-03-14T00:57:25Z"
+    },
+    {
+      "number": 173,
+      "title": "fix: fix missing permissions handler",
+      "state": "open",
+      "draft": false,
+      "headRefName": "02-11-fix_fix_missing_permissions_handler",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/sandbox-agent",
+      "updatedAt": "2026-03-12T15:23:44Z"
+    },
+    {
+      "number": 172,
+      "title": "chore: improve error output",
+      "state": "open",
+      "draft": false,
+      "headRefName": "02-11-chore_improve_error_output",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/sandbox-agent",
+      "updatedAt": "2026-03-11T05:13:06Z"
+    },
+    {
+      "number": 163,
+      "title": "fix: ensure sandbox-agent is on PATH in Compute SDK sandbox",
+      "state": "open",
+      "draft": false,
+      "headRefName": "computesdk-example",
+      "author": "kisernl",
+      "repoFullName": "rivet-dev/sandbox-agent",
+      "updatedAt": "2026-03-11T05:13:06Z"
+    },
+    {
+      "number": 64,
+      "title": "feat: add Docker Sandbox deployment support",
+      "state": "open",
+      "draft": true,
+      "headRefName": "feat/docker-sandbox",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/sandbox-agent",
+      "updatedAt": "2026-03-13T14:42:49Z"
+    },
+    {
+      "number": 2,
+      "title": "feat(vbare-compiler): emit schema version metadata",
+      "state": "open",
+      "draft": false,
+      "headRefName": "schema-version-output",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/vbare",
+      "updatedAt": "2026-03-08T21:55:34Z"
+    },
+    {
+      "number": 1,
+      "title": "simplify spec",
+      "state": "open",
+      "draft": true,
+      "headRefName": "simplify-spec",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/proposal-stateful-serverless-api",
+      "updatedAt": "2025-03-25T23:51:12Z"
+    },
+    {
+      "number": 1,
+      "title": "chore: upgrade rivetkit",
+      "state": "open",
+      "draft": false,
+      "headRefName": "chore-upgrade-rivetkit",
+      "author": "abcxff",
+      "repoFullName": "rivet-dev/template-railway",
+      "updatedAt": "2026-03-09T22:39:31Z"
+    },
+    {
+      "number": 8,
+      "title": "feat: add serverRoutes option for SPA support",
+      "state": "open",
+      "draft": false,
+      "headRefName": "feat/server-routes-spa-support",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/vite-plugin-srvx",
+      "updatedAt": "2026-01-20T01:32:38Z"
+    },
+    {
+      "number": 7,
+      "title": "fix: fix default path to api/idnex.ts",
+      "state": "open",
+      "draft": false,
+      "headRefName": "01-16-fix_fix_default_path_to_api_idnex.ts",
+      "author": "NathanFlurry",
+      "repoFullName": "rivet-dev/vite-plugin-srvx",
+      "updatedAt": "2026-01-17T05:56:11Z"
+    },
+    {
+      "number": 6,
+      "title": "feat: add prefix opt",
+      "state": "open",
+      "draft": false,
+      "headRefName": "01-17-feat_add_prefix_opt",
+      "author": "jog1t",
+      "repoFullName": "rivet-dev/vite-plugin-srvx",
+      "updatedAt": "2026-01-17T05:56:03Z"
+    },
+    {
+      "number": 5,
+      "title": "fix: vercel build",
+      "state": "open",
+      "draft": true,
+      "headRefName": "01-17-fix_vercel_build",
+      "author": "jog1t",
+      "repoFullName": "rivet-dev/vite-plugin-srvx",
+      "updatedAt": "2026-01-17T05:05:49Z"
+    }
+  ]
+}

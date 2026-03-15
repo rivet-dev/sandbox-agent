@@ -5,9 +5,7 @@ import { startDockerSandbox } from "@sandbox-agent/example-shared/docker";
 console.log("Starting sandbox...");
 const { baseUrl, cleanup } = await startDockerSandbox({
   port: 3002,
-  setupCommands: [
-    "npm install -g --silent @modelcontextprotocol/server-everything@2026.1.26",
-  ],
+  setupCommands: ["npm install -g --silent @modelcontextprotocol/server-everything@2026.1.26"],
 });
 
 console.log("Creating session with everything MCP server...");
@@ -16,12 +14,14 @@ const session = await client.createSession({
   agent: detectAgent(),
   sessionInit: {
     cwd: "/root",
-    mcpServers: [{
-      name: "everything",
-      command: "mcp-server-everything",
-      args: [],
-      env: [],
-    }],
+    mcpServers: [
+      {
+        name: "everything",
+        command: "mcp-server-everything",
+        args: [],
+        env: [],
+      },
+    ],
   },
 });
 const sessionId = session.id;
@@ -30,4 +30,7 @@ console.log('  Try: "generate a random number between 1 and 100"');
 console.log("  Press Ctrl+C to stop.");
 
 const keepAlive = setInterval(() => {}, 60_000);
-process.on("SIGINT", () => { clearInterval(keepAlive); cleanup().then(() => process.exit(0)); });
+process.on("SIGINT", () => {
+  clearInterval(keepAlive);
+  cleanup().then(() => process.exit(0));
+});

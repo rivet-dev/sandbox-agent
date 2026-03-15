@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <script type="module">
+      if (import.meta.env.DEV) {
+        import("react-grab");
+        import("@react-grab/mcp/client");
+      }
+    </script>
+    <script>if(window.__TAURI_INTERNALS__)document.documentElement.dataset.tauri="1"</script>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Foundry</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script src="/__foundry_runtime_config.js"></script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

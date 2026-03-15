@@ -1,0 +1,23 @@
+{
+  "name": "@sandbox-agent/foundry-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "build:sidecar": "tsx scripts/build-sidecar.ts",
+    "build:frontend": "tsx scripts/build-frontend.ts",
+    "build:all": "pnpm build:sidecar && pnpm build:frontend && pnpm build",
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "tsx": "^4"
+  },
+  "dependencies": {
+    "@sandbox-agent/foundry-shared": "workspace:*",
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-shell": "^2"
+  }
+}

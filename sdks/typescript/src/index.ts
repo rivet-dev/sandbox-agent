@@ -1,8 +1,13 @@
 export {
   LiveAcpConnection,
+  ProcessTerminalSession,
   SandboxAgent,
   SandboxAgentError,
   Session,
+  UnsupportedPermissionReplyError,
+  UnsupportedSessionCategoryError,
+  UnsupportedSessionConfigOptionError,
+  UnsupportedSessionValueError,
 } from "./client.ts";
 
 export { AcpRpcError } from "acp-http-client";
@@ -10,25 +15,36 @@ export { AcpRpcError } from "acp-http-client";
 export { buildInspectorUrl } from "./inspector.ts";
 
 export type {
+  SandboxAgentHealthWaitOptions,
+  AgentQueryOptions,
+  ProcessLogFollowQuery,
+  ProcessLogListener,
+  ProcessLogSubscription,
+  ProcessTerminalConnectOptions,
+  ProcessTerminalSessionOptions,
+  ProcessTerminalWebSocketUrlOptions,
   SandboxAgentConnectOptions,
   SandboxAgentStartOptions,
   SessionCreateRequest,
   SessionResumeOrCreateRequest,
   SessionSendOptions,
   SessionEventListener,
+  PermissionReply,
+  PermissionRequestListener,
+  SessionPermissionRequest,
+  SessionPermissionRequestOption,
 } from "./client.ts";
 
 export type { InspectorUrlOptions } from "./inspector.ts";
 
-export {
-  InMemorySessionPersistDriver,
-} from "./types.ts";
+export { InMemorySessionPersistDriver } from "./types.ts";
 
 export type {
   AcpEnvelope,
   AcpServerInfo,
   AcpServerListResponse,
   AgentInfo,
+  AgentQuery,
   AgentInstallRequest,
   AgentInstallResponse,
   AgentListResponse,
@@ -51,11 +67,37 @@ export type {
   McpConfigQuery,
   McpServerConfig,
   ProblemDetails,
+  ProcessConfig,
+  ProcessCreateRequest,
+  ProcessInfo,
+  ProcessInputRequest,
+  ProcessInputResponse,
+  ProcessListResponse,
+  ProcessLogEntry,
+  ProcessLogsQuery,
+  ProcessLogsResponse,
+  ProcessLogsStream,
+  ProcessRunRequest,
+  ProcessRunResponse,
+  ProcessSignalQuery,
+  ProcessState,
+  ProcessTerminalClientFrame,
+  ProcessTerminalErrorFrame,
+  ProcessTerminalExitFrame,
+  ProcessTerminalReadyFrame,
+  ProcessTerminalResizeRequest,
+  ProcessTerminalResizeResponse,
+  ProcessTerminalServerFrame,
   SessionEvent,
   SessionPersistDriver,
   SessionRecord,
   SkillsConfig,
   SkillsConfigQuery,
+  TerminalErrorStatus,
+  TerminalExitStatus,
+  TerminalReadyStatus,
+  TerminalResizePayload,
+  TerminalStatusMessage,
 } from "./types.ts";
 
 export type {

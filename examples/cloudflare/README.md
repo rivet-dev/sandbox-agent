@@ -39,12 +39,44 @@ curl http://localhost:8787
 Test prompt routing through the SDK with a custom sandbox fetch handler:
 
 ```bash
-curl -X POST "http://localhost:8787/sandbox/demo/prompt" \
+curl -N -X POST "http://localhost:8787/sandbox/demo/prompt" \
   -H "Content-Type: application/json" \
+  -H "Accept: text/event-stream" \
   -d '{"agent":"codex","prompt":"Reply with one short sentence."}'
 ```
 
-The response includes `events`, an array of all recorded session events for that prompt.
+The response is an SSE stream with events:
+- `session.created`
+- `session.event`
+- `prompt.completed`
+- `done`
+
+### Troubleshooting: only two events
+
+If you only see:
+- outbound `session/prompt`
+- inbound prompt result with `stopReason: "end_turn"`
+
+then ACP `session/update` notifications are not flowing. In Cloudflare sandbox paths this can happen if you forward `AbortSignal` from SDK fetch init into `containerFetch(...)` for long-lived ACP SSE requests.
+
+Use:
+
+```ts
+const sdk = await SandboxAgent.connect({
+  fetch: (input, init) =>
+    sandbox.containerFetch(
+      input as Request | string | URL,
+      {
+        ...(init ?? {}),
+        // Avoid passing AbortSignal through containerFetch; it can drop ACP SSE updates.
+        signal: undefined,
+      },
+      PORT,
+    ),
+});
+```
+
+Without `session/update` events, assistant text/tool deltas will not appear in UI streams.
 
 ## Deploy
 

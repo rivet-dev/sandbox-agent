@@ -1,9 +1,6 @@
 import type { ChildProcess } from "node:child_process";
 import type { AddressInfo } from "node:net";
-import {
-  assertExecutable,
-  formatNonExecutableBinaryMessage,
-} from "@sandbox-agent/cli-shared";
+import { assertExecutable, formatNonExecutableBinaryMessage } from "@sandbox-agent/cli-shared";
 
 export type SandboxAgentSpawnLogMode = "inherit" | "pipe" | "silent";
 
@@ -40,17 +37,12 @@ export function isNodeRuntime(): boolean {
   return typeof process !== "undefined" && !!process.versions?.node;
 }
 
-export async function spawnSandboxAgent(
-  options: SandboxAgentSpawnOptions,
-  fetcher?: typeof fetch,
-): Promise<SandboxAgentSpawnHandle> {
+export async function spawnSandboxAgent(options: SandboxAgentSpawnOptions, fetcher?: typeof fetch): Promise<SandboxAgentSpawnHandle> {
   if (!isNodeRuntime()) {
     throw new Error("Autospawn requires a Node.js runtime.");
   }
 
-  const {
-    spawn,
-  } = await import("node:child_process");
+  const { spawn } = await import("node:child_process");
   const crypto = await import("node:crypto");
   const fs = await import("node:fs");
   const path = await import("node:path");
@@ -82,17 +74,11 @@ export async function spawnSandboxAgent(
         bunInstallBlocks: [
           {
             label: "Project install",
-            commands: [
-              `bun pm trust ${TRUST_PACKAGES}`,
-              "bun add sandbox-agent",
-            ],
+            commands: [`bun pm trust ${TRUST_PACKAGES}`, "bun add sandbox-agent"],
           },
           {
             label: "Global install",
-            commands: [
-              `bun pm -g trust ${TRUST_PACKAGES}`,
-              "bun add -g sandbox-agent",
-            ],
+            commands: [`bun pm -g trust ${TRUST_PACKAGES}`, "bun add -g sandbox-agent"],
           },
         ],
       }),
@@ -189,13 +175,7 @@ async function getFreePort(net: typeof import("node:net"), host: string): Promis
   });
 }
 
-async function waitForHealth(
-  baseUrl: string,
-  fetcher: typeof fetch | undefined,
-  timeoutMs: number,
-  child: ChildProcess,
-  token: string,
-): Promise<void> {
+async function waitForHealth(baseUrl: string, fetcher: typeof fetch | undefined, timeoutMs: number, child: ChildProcess, token: string): Promise<void> {
   if (!fetcher) {
     throw new Error("Fetch API is not available; provide a fetch implementation.");
   }

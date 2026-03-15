@@ -1,11 +1,4 @@
-import type {
-  ListEventsRequest,
-  ListPage,
-  ListPageRequest,
-  SessionEvent,
-  SessionPersistDriver,
-  SessionRecord,
-} from "sandbox-agent";
+import type { ListEventsRequest, ListPage, ListPageRequest, SessionEvent, SessionPersistDriver, SessionRecord } from "sandbox-agent";
 
 const DEFAULT_DB_NAME = "sandbox-agent-session-store";
 const DEFAULT_DB_VERSION = 2;
@@ -40,9 +33,7 @@ export class IndexedDbSessionPersistDriver implements SessionPersistDriver {
 
   async getSession(id: string): Promise<SessionRecord | null> {
     const db = await this.dbPromise;
-    const row = await requestToPromise<IDBValidKey | SessionRow | undefined>(
-      db.transaction(SESSIONS_STORE, "readonly").objectStore(SESSIONS_STORE).get(id),
-    );
+    const row = await requestToPromise<IDBValidKey | SessionRow | undefined>(db.transaction(SESSIONS_STORE, "readonly").objectStore(SESSIONS_STORE).get(id));
     if (!row || typeof row !== "object") {
       return null;
     }
@@ -80,9 +71,7 @@ export class IndexedDbSessionPersistDriver implements SessionPersistDriver {
 
   async listEvents(request: ListEventsRequest): Promise<ListPage<SessionEvent>> {
     const db = await this.dbPromise;
-    const rows = (await getAllRows<EventRow>(db, EVENTS_STORE))
-      .filter((row) => row.sessionId === request.sessionId)
-      .sort(compareEventRowsByOrder);
+    const rows = (await getAllRows<EventRow>(db, EVENTS_STORE)).filter((row) => row.sessionId === request.sessionId).sort(compareEventRowsByOrder);
 
     const offset = parseCursor(request.cursor);
     const limit = normalizeLimit(request.limit);
@@ -264,12 +253,7 @@ function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
   });
 }
 
-function transactionPromise<T>(
-  db: IDBDatabase,
-  stores: string[],
-  mode: IDBTransactionMode,
-  run: (tx: IDBTransaction) => T | Promise<T>,
-): Promise<T> {
+function transactionPromise<T>(db: IDBDatabase, stores: string[], mode: IDBTransactionMode, run: (tx: IDBTransaction) => T | Promise<T>): Promise<T> {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(stores, mode);
     let settled = false;

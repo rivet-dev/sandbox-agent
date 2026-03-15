@@ -1,12 +1,5 @@
 import Database from "better-sqlite3";
-import type {
-  ListEventsRequest,
-  ListPage,
-  ListPageRequest,
-  SessionEvent,
-  SessionPersistDriver,
-  SessionRecord,
-} from "sandbox-agent";
+import type { ListEventsRequest, ListPage, ListPageRequest, SessionEvent, SessionPersistDriver, SessionRecord } from "sandbox-agent";
 
 const DEFAULT_LIST_LIMIT = 100;
 
@@ -98,9 +91,7 @@ export class SQLiteSessionPersistDriver implements SessionPersistDriver {
       )
       .all(request.sessionId, limit, offset) as EventRow[];
 
-    const countRow = this.db
-      .prepare(`SELECT COUNT(*) as count FROM events WHERE session_id = ?`)
-      .get(request.sessionId) as { count: number };
+    const countRow = this.db.prepare(`SELECT COUNT(*) as count FROM events WHERE session_id = ?`).get(request.sessionId) as { count: number };
 
     const nextOffset = offset + rows.length;
 
@@ -124,15 +115,7 @@ export class SQLiteSessionPersistDriver implements SessionPersistDriver {
           sender = excluded.sender,
           payload_json = excluded.payload_json`,
       )
-      .run(
-        event.id,
-        event.eventIndex,
-        event.sessionId,
-        event.createdAt,
-        event.connectionId,
-        event.sender,
-        JSON.stringify(event.payload),
-      );
+      .run(event.id, event.eventIndex, event.sessionId, event.createdAt, event.connectionId, event.sender, JSON.stringify(event.payload));
   }
 
   close(): void {
@@ -266,9 +249,7 @@ function decodeSessionRow(row: SessionRow): SessionRecord {
     lastConnectionId: row.last_connection_id,
     createdAt: row.created_at,
     destroyedAt: row.destroyed_at ?? undefined,
-    sessionInit: row.session_init_json
-      ? (JSON.parse(row.session_init_json) as SessionRecord["sessionInit"])
-      : undefined,
+    sessionInit: row.session_init_json ? (JSON.parse(row.session_init_json) as SessionRecord["sessionInit"]) : undefined,
   };
 }
 

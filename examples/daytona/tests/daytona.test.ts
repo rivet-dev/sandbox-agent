@@ -23,6 +23,6 @@ describe("daytona example", () => {
         await cleanup();
       }
     },
-    timeoutMs
+    timeoutMs,
   );
 });

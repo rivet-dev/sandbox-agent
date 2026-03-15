@@ -9,11 +9,15 @@ build/
 # Cache
 .cache/
 .turbo/
+**/.turbo/
 *.tsbuildinfo
+.pnpm-store/
+coverage/
 
 # Environment
 .env
 .env.*
+.foundry/
 
 # IDE
 .idea/
@@ -24,3 +28,7 @@ build/
 
 # Git
 .git/
+
+# Tests
+**/test/
+**/tests/

@@ -2,7 +2,7 @@ export const askForLocalNetworkAccess = async (): Promise<boolean> => {
   try {
     const status = await navigator.permissions.query({
       // @ts-expect-error - local-network-access is not in standard types
-      name: "local-network-access"
+      name: "local-network-access",
     });
     if (status.state === "granted") {
       return true;

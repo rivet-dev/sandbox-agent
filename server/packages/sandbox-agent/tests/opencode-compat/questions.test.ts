@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
-import { createOpencodeClient, type OpencodeClient } from "@opencode-ai/sdk/v1";
+import { createOpencodeClient, type OpencodeClient } from "@opencode-ai/sdk";
 import { spawnSandboxAgent, buildSandboxAgent, type SandboxAgentHandle } from "./helpers/spawn";
 
 describe("OpenCode-compatible Question API", () => {

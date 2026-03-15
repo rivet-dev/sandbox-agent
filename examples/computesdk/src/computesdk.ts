@@ -10,13 +10,12 @@ import {
   type ProviderName,
 } from "computesdk";
 import { SandboxAgent } from "sandbox-agent";
-import { detectAgent, buildInspectorUrl, waitForHealth } from "@sandbox-agent/example-shared";
+import { detectAgent, buildInspectorUrl } from "@sandbox-agent/example-shared";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 
 const PORT = 3000;
-const REQUEST_TIMEOUT_MS =
-  Number.parseInt(process.env.COMPUTESDK_TIMEOUT_MS || "", 10) || 120_000;
+const REQUEST_TIMEOUT_MS = Number.parseInt(process.env.COMPUTESDK_TIMEOUT_MS || "", 10) || 120_000;
 
 /**
  * Detects and validates the provider to use.
@@ -24,28 +23,22 @@ const REQUEST_TIMEOUT_MS =
  */
 function resolveProvider(): ProviderName {
   const providerOverride = process.env.COMPUTESDK_PROVIDER;
-  
+
   if (providerOverride) {
     if (!isValidProvider(providerOverride)) {
-      throw new Error(
-        `Unsupported ComputeSDK provider "${providerOverride}". Supported providers: ${PROVIDER_NAMES.join(", ")}`
-      );
+      throw new Error(`Unsupported ComputeSDK provider "${providerOverride}". Supported providers: ${PROVIDER_NAMES.join(", ")}`);
     }
     if (!isProviderAuthComplete(providerOverride)) {
       const missing = getMissingEnvVars(providerOverride);
-      throw new Error(
-        `Missing credentials for provider "${providerOverride}". Set: ${missing.join(", ")}`
-      );
+      throw new Error(`Missing credentials for provider "${providerOverride}". Set: ${missing.join(", ")}`);
     }
     console.log(`Using ComputeSDK provider: ${providerOverride} (explicit)`);
     return providerOverride as ProviderName;
   }
-  
+
   const detected = detectProvider();
   if (!detected) {
-    throw new Error(
-      `No provider credentials found. Set one of: ${PROVIDER_NAMES.map((p) => getMissingEnvVars(p).join(", ")).join(" | ")}`
-    );
+    throw new Error(`No provider credentials found. Set one of: ${PROVIDER_NAMES.map((p) => getMissingEnvVars(p).join(", ")).join(" | ")}`);
   }
   console.log(`Using ComputeSDK provider: ${detected} (auto-detected)`);
   return detected as ProviderName;
@@ -53,20 +46,19 @@ function resolveProvider(): ProviderName {
 
 function configureComputeSDK(): void {
   const provider = resolveProvider();
-  
+
   const config: ExplicitComputeConfig = {
     provider,
     computesdkApiKey: process.env.COMPUTESDK_API_KEY,
     requestTimeoutMs: REQUEST_TIMEOUT_MS,
   };
-  
+
   const providerConfig = getProviderConfigFromEnv(provider);
   if (Object.keys(providerConfig).length > 0) {
-    const configWithProvider =
-      config as ExplicitComputeConfig & Record<ProviderName, Record<string, string>>;
+    const configWithProvider = config as ExplicitComputeConfig & Record<ProviderName, Record<string, string>>;
     configWithProvider[provider] = providerConfig;
   }
-  
+
   compute.setConfig(config);
 }
 
@@ -116,9 +108,6 @@ export async function setupComputeSdkSandboxAgent(): Promise<{
 
   const baseUrl = await sandbox.getUrl({ port: PORT });
 
-  console.log("Waiting for server...");
-  await waitForHealth({ baseUrl });
-
   const cleanup = async () => {
     try {
       await sandbox.destroy();
@@ -152,9 +141,7 @@ export async function runComputeSdkExample(): Promise<void> {
   await new Promise(() => {});
 }
 
-const isDirectRun = Boolean(
-  process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)
-);
+const isDirectRun = Boolean(process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url));
 
 if (isDirectRun) {
   runComputeSdkExample().catch((error) => {

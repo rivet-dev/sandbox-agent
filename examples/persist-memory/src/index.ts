@@ -7,10 +7,6 @@ const persist = new InMemorySessionPersistDriver();
 console.log("Starting sandbox...");
 const sandbox = await startDockerSandbox({
   port: 3000,
-  setupCommands: [
-    "sandbox-agent install-agent claude",
-    "sandbox-agent install-agent codex",
-  ],
 });
 
 const sdk = await SandboxAgent.connect({ baseUrl: sandbox.baseUrl, persist });

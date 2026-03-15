@@ -1,0 +1,11 @@
+{
+  auto_https off
+}
+
+:{$PORT:80} {
+  root * /srv
+  encode gzip zstd
+  header /__foundry_runtime_config.js Cache-Control "no-store"
+  try_files {path} /index.html
+  file_server
+}

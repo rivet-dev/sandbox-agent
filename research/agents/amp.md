@@ -251,7 +251,7 @@ Amp also uses additional models for specific subtasks:
 | Librarian subagent | Claude Sonnet 4.5 | External code research |
 | Image/PDF analysis | Gemini 3 Flash | Multimodal input processing |
 | Content generation | Gemini 3 Pro Image (Painter) | Image generation |
-| Handoff (context) | Gemini 2.5 Flash | Context management |
+| Task (context) | Gemini 2.5 Flash | Context management |
 | Thread categorization | Gemini 2.5 Flash-Lite | Thread organization |
 | Title generation | Claude Haiku 4.5 | Thread title generation |
 
