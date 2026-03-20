@@ -6,6 +6,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use time::OffsetDateTime;
 
+#[cfg(target_os = "macos")]
+use std::process::Command;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProviderCredentials {
     pub api_key: String,
@@ -90,25 +93,70 @@ pub fn extract_claude_credentials(
                 Some(value) => value,
                 None => continue,
             };
-            let access = read_string_field(&data, &["claudeAiOauth", "accessToken"]);
-            if let Some(token) = access {
-                if let Some(expires_at) = read_string_field(&data, &["claudeAiOauth", "expiresAt"])
-                {
-                    if is_expired_rfc3339(&expires_at) {
-                        continue;
-                    }
-                }
-                return Some(ProviderCredentials {
-                    api_key: token,
-                    source: "claude-code".to_string(),
-                    auth_type: AuthType::Oauth,
-                    provider: "anthropic".to_string(),
-                });
+            if let Some(cred) = extract_claude_oauth_from_json(&data) {
+                return Some(cred);
+            }
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            if let Some(cred) = extract_claude_oauth_from_keychain() {
+                return Some(cred);
             }
         }
     }
 
     None
+}
+
+fn extract_claude_oauth_from_json(data: &Value) -> Option<ProviderCredentials> {
+    let access = read_string_field(data, &["claudeAiOauth", "accessToken"])?;
+    if access.is_empty() {
+        return None;
+    }
+
+    // Check expiry — the field can be an RFC 3339 string or an epoch-millis number
+    if let Some(expires_str) = read_string_field(data, &["claudeAiOauth", "expiresAt"]) {
+        if is_expired_rfc3339(&expires_str) {
+            return None;
+        }
+    } else if let Some(expires_ms) = data
+        .get("claudeAiOauth")
+        .and_then(|v| v.get("expiresAt"))
+        .and_then(Value::as_i64)
+    {
+        if expires_ms < current_epoch_millis() {
+            return None;
+        }
+    }
+
+    Some(ProviderCredentials {
+        api_key: access,
+        source: "claude-code".to_string(),
+        auth_type: AuthType::Oauth,
+        provider: "anthropic".to_string(),
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn extract_claude_oauth_from_keychain() -> Option<ProviderCredentials> {
+    let output = Command::new("security")
+        .args([
+            "find-generic-password",
+            "-s",
+            "Claude Code-credentials",
+            "-w",
+        ])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let json_str = String::from_utf8(output.stdout).ok()?;
+    let data: Value = serde_json::from_str(json_str.trim()).ok()?;
+    extract_claude_oauth_from_json(&data)
 }
 
 pub fn extract_codex_credentials(
@@ -498,6 +546,106 @@ mod tests {
                 );
             },
         );
+    }
+
+    #[test]
+    fn extract_claude_oauth_from_json_with_epoch_millis_expiry() {
+        let future_ms = current_epoch_millis() + 3_600_000; // 1 hour from now
+        let data = serde_json::json!({
+            "claudeAiOauth": {
+                "accessToken": "sk-ant-oat01-test-token",
+                "expiresAt": future_ms,
+            }
+        });
+        let cred = extract_claude_oauth_from_json(&data).expect("should extract valid oauth");
+        assert_eq!(cred.api_key, "sk-ant-oat01-test-token");
+        assert_eq!(cred.source, "claude-code");
+        assert_eq!(cred.auth_type, AuthType::Oauth);
+        assert_eq!(cred.provider, "anthropic");
+    }
+
+    #[test]
+    fn extract_claude_oauth_from_json_expired_epoch_millis() {
+        let past_ms = current_epoch_millis() - 3_600_000; // 1 hour ago
+        let data = serde_json::json!({
+            "claudeAiOauth": {
+                "accessToken": "sk-ant-oat01-expired",
+                "expiresAt": past_ms,
+            }
+        });
+        assert!(
+            extract_claude_oauth_from_json(&data).is_none(),
+            "should reject expired token"
+        );
+    }
+
+    #[test]
+    fn extract_claude_oauth_from_json_with_rfc3339_expiry() {
+        let data = serde_json::json!({
+            "claudeAiOauth": {
+                "accessToken": "sk-ant-oat01-rfc-token",
+                "expiresAt": "2099-01-01T00:00:00Z",
+            }
+        });
+        let cred = extract_claude_oauth_from_json(&data).expect("should extract valid oauth");
+        assert_eq!(cred.api_key, "sk-ant-oat01-rfc-token");
+    }
+
+    #[test]
+    fn extract_claude_oauth_from_json_expired_rfc3339() {
+        let data = serde_json::json!({
+            "claudeAiOauth": {
+                "accessToken": "sk-ant-oat01-old",
+                "expiresAt": "2020-01-01T00:00:00Z",
+            }
+        });
+        assert!(
+            extract_claude_oauth_from_json(&data).is_none(),
+            "should reject expired rfc3339 token"
+        );
+    }
+
+    #[test]
+    fn extract_claude_oauth_from_json_empty_access_token() {
+        let data = serde_json::json!({
+            "claudeAiOauth": {
+                "accessToken": "",
+                "expiresAt": 9999999999999_i64,
+            }
+        });
+        assert!(
+            extract_claude_oauth_from_json(&data).is_none(),
+            "should reject empty access token"
+        );
+    }
+
+    #[test]
+    fn extract_claude_oauth_from_json_no_expiry() {
+        let data = serde_json::json!({
+            "claudeAiOauth": {
+                "accessToken": "sk-ant-oat01-no-expiry",
+            }
+        });
+        let cred =
+            extract_claude_oauth_from_json(&data).expect("should accept token without expiry");
+        assert_eq!(cred.api_key, "sk-ant-oat01-no-expiry");
+    }
+
+    #[test]
+    fn extract_claude_oauth_from_json_with_extra_fields() {
+        let future_ms = current_epoch_millis() + 3_600_000;
+        let data = serde_json::json!({
+            "claudeAiOauth": {
+                "accessToken": "sk-ant-oat01-full",
+                "refreshToken": "sk-ant-ort01-refresh",
+                "expiresAt": future_ms,
+                "scopes": ["user:inference"],
+                "subscriptionType": "max",
+            },
+            "mcpOAuth": {}
+        });
+        let cred = extract_claude_oauth_from_json(&data).expect("should extract oauth");
+        assert_eq!(cred.api_key, "sk-ant-oat01-full");
     }
 
     #[test]
