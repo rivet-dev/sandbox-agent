@@ -284,7 +284,11 @@ fn parse_agent_config(json_str: &str) -> Vec<Value> {
         }));
     }
 
-    if let Some(thought_levels) = config.thought_levels {
+    if let Some(mut thought_levels) = config.thought_levels {
+        // Sort thought levels by predefined logical order: low < medium < high < xhigh
+        let order = ["low", "medium", "high", "xhigh"];
+        thought_levels.sort_by_key(|t| order.iter().position(|&o| o == t.id).unwrap_or(order.len()));
+
         options.push(json!({
             "id": "thought_level",
             "name": "Thought Level",
