@@ -3968,41 +3968,126 @@ async fn translate_session_update(
     }
 
     match kind {
-        // ── Text / thought chunk ───────────────────────────────────────
+        // ── Text / thought / image chunk ──────────────────────────────
         "agent_message_chunk" | "agent_thought_chunk" => {
-            // ContentChunk.content is a ContentBlock; for text it has { type: "text", text: "…" }
-            let chunk = update
-                .pointer("/content/text")
+            let content_type = update
+                .pointer("/content/type")
                 .and_then(Value::as_str)
-                .unwrap_or("");
-            if chunk.is_empty() {
-                return;
-            }
+                .unwrap_or("text");
 
-            // Accumulate into a single part — reuse the same part ID so the
-            // UI updates in-place instead of creating a new line per chunk.
-            text_accum.push_str(chunk);
-            let part_id = text_part_id.get_or_insert_with(|| {
-                let id = format!("part_{message_id}_{part_counter}");
-                *part_counter += 1;
-                id
-            });
-            let part = json!({
-                "id": *part_id,
-                "sessionID": session_id,
-                "messageID": message_id,
-                "type": "text",
-                "text": *text_accum,
-            });
-            state.emit_event(json!({
-                "type":"message.part.updated",
-                "properties":{
-                    "sessionID": session_id,
-                    "messageID": message_id,
-                    "part": part,
-                    "delta": chunk
+            match content_type {
+                "image" => {
+                    // ACP image content: { type: "image", data: "<base64>", mimeType: "image/png", uri?: "..." }
+                    let data = update
+                        .pointer("/content/data")
+                        .and_then(Value::as_str)
+                        .unwrap_or("");
+                    let mime_type = update
+                        .pointer("/content/mimeType")
+                        .and_then(Value::as_str)
+                        .unwrap_or("image/png");
+                    let uri = update
+                        .pointer("/content/uri")
+                        .and_then(Value::as_str);
+
+                    if data.is_empty() && uri.is_none() {
+                        return;
+                    }
+
+                    // Finalize any accumulated text part before the image.
+                    if let Some(tid) = text_part_id.take() {
+                        let part = json!({
+                            "id": tid,
+                            "sessionID": session_id,
+                            "messageID": message_id,
+                            "type": "text",
+                            "text": *text_accum,
+                        });
+                        let env = json!({
+                            "jsonrpc":"2.0",
+                            "method":"_sandboxagent/opencode/message",
+                            "params":{"message":{"info":{"id": message_id},"parts":[part]}}
+                        });
+                        if let Err(err) = state.persist_event(session_id, "agent", &env).await {
+                            warn!(?err, "failed to persist ACP text part before image");
+                        }
+                        text_accum.clear();
+                    }
+
+                    let part_id = format!("part_{message_id}_{part_counter}");
+                    *part_counter += 1;
+
+                    // Build a file part with the image data.  If we have a URI,
+                    // use it directly; otherwise embed the base64 data as a data-URI.
+                    let url = if let Some(u) = uri {
+                        u.to_string()
+                    } else {
+                        format!("data:{};base64,{}", mime_type, data)
+                    };
+
+                    let part = json!({
+                        "id": part_id,
+                        "sessionID": session_id,
+                        "messageID": message_id,
+                        "type": "file",
+                        "mime": mime_type,
+                        "url": url,
+                        "filename": format!("image.{}", mime_extension(mime_type)),
+                    });
+
+                    let env = json!({
+                        "jsonrpc":"2.0",
+                        "method":"_sandboxagent/opencode/message",
+                        "params":{"message":{"info":{"id": message_id},"parts":[part.clone()]}}
+                    });
+                    if let Err(err) = state.persist_event(session_id, "agent", &env).await {
+                        warn!(?err, "failed to persist ACP image part");
+                    }
+                    state.emit_event(json!({
+                        "type":"message.part.updated",
+                        "properties":{
+                            "sessionID": session_id,
+                            "messageID": message_id,
+                            "part": part
+                        }
+                    }));
                 }
-            }));
+                _ => {
+                    // ContentChunk.content is a ContentBlock; for text it has { type: "text", text: "…" }
+                    let chunk = update
+                        .pointer("/content/text")
+                        .and_then(Value::as_str)
+                        .unwrap_or("");
+                    if chunk.is_empty() {
+                        return;
+                    }
+
+                    // Accumulate into a single part — reuse the same part ID so the
+                    // UI updates in-place instead of creating a new line per chunk.
+                    text_accum.push_str(chunk);
+                    let part_id = text_part_id.get_or_insert_with(|| {
+                        let id = format!("part_{message_id}_{part_counter}");
+                        *part_counter += 1;
+                        id
+                    });
+                    let part = json!({
+                        "id": *part_id,
+                        "sessionID": session_id,
+                        "messageID": message_id,
+                        "type": "text",
+                        "text": *text_accum,
+                    });
+                    state.emit_event(json!({
+                        "type":"message.part.updated",
+                        "properties":{
+                            "sessionID": session_id,
+                            "messageID": message_id,
+                            "part": part,
+                            "delta": chunk
+                        }
+                    }));
+                }
+            }
         }
 
         // ── Tool call initiation ───────────────────────────────────────
@@ -4119,6 +4204,17 @@ async fn translate_session_update(
                 "translate_session_update: unhandled sessionUpdate kind"
             );
         }
+    }
+}
+
+fn mime_extension(mime: &str) -> &str {
+    match mime {
+        "image/png" => "png",
+        "image/jpeg" => "jpg",
+        "image/gif" => "gif",
+        "image/webp" => "webp",
+        "image/svg+xml" => "svg",
+        _ => "png",
     }
 }
 
