@@ -180,7 +180,7 @@ async function updateVersionReferences(opts: ReleaseOpts, oldVersion: string, ol
   }
 
   if (modifiedFiles.length > 0) {
-    await $({ cwd: opts.root })`git add ${modifiedFiles}`;
+    await $({ cwd: opts.root })`git add -f ${modifiedFiles}`;
     console.log(`\nUpdated ${modifiedFiles.length} files with version references.`);
   } else {
     console.log(`\nNo version reference files needed updates.`);

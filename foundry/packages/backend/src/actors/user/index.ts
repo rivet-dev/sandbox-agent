@@ -3,6 +3,7 @@ import { userDb } from "./db/db.js";
 import { betterAuthActions } from "./actions/better-auth.js";
 import { userActions } from "./actions/user.js";
 
+// @ts-expect-error TS2589: rivetkit actor() type instantiation too deep for TS6
 export const user = actor({
   db: userDb,
   options: {
