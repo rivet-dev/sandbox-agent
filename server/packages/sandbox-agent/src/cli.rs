@@ -1192,6 +1192,7 @@ fn summarize_credential(credential: &ProviderCredentials, reveal: bool) -> Crede
         auth_type: match credential.auth_type {
             AuthType::ApiKey => "api_key".to_string(),
             AuthType::Oauth => "oauth".to_string(),
+            AuthType::ApiKeyHelper => "api_key_helper".to_string(),
         },
         api_key,
         redacted: !reveal,

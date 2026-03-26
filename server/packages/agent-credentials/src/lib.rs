@@ -22,6 +22,7 @@ pub struct ProviderCredentials {
 pub enum AuthType {
     ApiKey,
     Oauth,
+    ApiKeyHelper,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -102,6 +103,22 @@ pub fn extract_claude_credentials(
         {
             if let Some(cred) = extract_claude_oauth_from_keychain() {
                 return Some(cred);
+            }
+        }
+    }
+
+    // Check for apiKeyHelper in Claude Code settings — if configured, Claude Code
+    // can obtain credentials dynamically via an external command (e.g. a corporate proxy)
+    let settings_path = home_dir.join(".claude").join("settings.json");
+    if let Some(settings) = read_json_file(&settings_path) {
+        if let Some(helper) = read_string_field(&settings, &["apiKeyHelper"]) {
+            if !helper.is_empty() {
+                return Some(ProviderCredentials {
+                    api_key: String::new(),
+                    source: "claude-code-api-key-helper".to_string(),
+                    auth_type: AuthType::ApiKeyHelper,
+                    provider: "anthropic".to_string(),
+                });
             }
         }
     }
@@ -407,7 +424,11 @@ pub fn get_openai_api_key(options: &CredentialExtractionOptions) -> Option<Strin
 
 pub fn set_credentials_as_env_vars(credentials: &ExtractedCredentials) {
     if let Some(cred) = &credentials.anthropic {
-        std::env::set_var("ANTHROPIC_API_KEY", &cred.api_key);
+        // ApiKeyHelper credentials don't have a static key to set —
+        // the agent obtains its own token via the helper command
+        if cred.auth_type != AuthType::ApiKeyHelper {
+            std::env::set_var("ANTHROPIC_API_KEY", &cred.api_key);
+        }
     }
     if let Some(cred) = &credentials.openai {
         std::env::set_var("OPENAI_API_KEY", &cred.api_key);
@@ -646,6 +667,74 @@ mod tests {
         });
         let cred = extract_claude_oauth_from_json(&data).expect("should extract oauth");
         assert_eq!(cred.api_key, "sk-ant-oat01-full");
+    }
+
+    #[test]
+    fn extract_claude_credentials_detects_api_key_helper() {
+        with_env(
+            &[
+                ("ANTHROPIC_API_KEY", None),
+                ("CLAUDE_API_KEY", None),
+                ("CLAUDE_CODE_OAUTH_TOKEN", None),
+                ("ANTHROPIC_AUTH_TOKEN", None),
+            ],
+            || {
+                let home = empty_home_dir();
+                let claude_dir = home.join(".claude");
+                fs::create_dir_all(&claude_dir).unwrap();
+                fs::write(
+                    claude_dir.join("settings.json"),
+                    r#"{"apiKeyHelper": "/opt/dev/bin/user/devx llm-gateway print-token --key"}"#,
+                )
+                .unwrap();
+
+                let options = CredentialExtractionOptions {
+                    home_dir: Some(home),
+                    include_oauth: true,
+                };
+                let creds = extract_all_credentials(&options);
+                let anthropic = creds
+                    .anthropic
+                    .expect("expected anthropic credentials from apiKeyHelper");
+
+                assert_eq!(anthropic.source, "claude-code-api-key-helper");
+                assert_eq!(anthropic.auth_type, AuthType::ApiKeyHelper);
+                assert_eq!(anthropic.provider, "anthropic");
+                assert!(anthropic.api_key.is_empty());
+            },
+        );
+    }
+
+    #[test]
+    fn extract_claude_credentials_ignores_empty_api_key_helper() {
+        with_env(
+            &[
+                ("ANTHROPIC_API_KEY", None),
+                ("CLAUDE_API_KEY", None),
+                ("CLAUDE_CODE_OAUTH_TOKEN", None),
+                ("ANTHROPIC_AUTH_TOKEN", None),
+            ],
+            || {
+                let home = empty_home_dir();
+                let claude_dir = home.join(".claude");
+                fs::create_dir_all(&claude_dir).unwrap();
+                fs::write(
+                    claude_dir.join("settings.json"),
+                    r#"{"apiKeyHelper": ""}"#,
+                )
+                .unwrap();
+
+                let options = CredentialExtractionOptions {
+                    home_dir: Some(home),
+                    include_oauth: true,
+                };
+                let creds = extract_all_credentials(&options);
+                assert!(
+                    creds.anthropic.is_none(),
+                    "empty apiKeyHelper should not produce credentials"
+                );
+            },
+        );
     }
 
     #[test]
