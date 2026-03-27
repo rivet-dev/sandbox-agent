@@ -7,7 +7,11 @@ use utoipa::OpenApi;
 
 fn main() {
     emit_stdout("cargo:rerun-if-changed=../sandbox-agent/src/router.rs");
+    emit_stdout("cargo:rerun-if-changed=../sandbox-agent/src/router/types.rs");
+    emit_stdout("cargo:rerun-if-changed=../sandbox-agent/src/desktop_types.rs");
+    emit_stdout("cargo:rerun-if-changed=../sandbox-agent/src/universal_events.rs");
     emit_stdout("cargo:rerun-if-changed=../sandbox-agent/src/lib.rs");
+    emit_stdout("cargo:rerun-if-changed=../error/src/lib.rs");
 
     let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR not set");
     let out_path = Path::new(&out_dir).join("openapi.json");

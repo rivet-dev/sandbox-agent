@@ -463,6 +463,7 @@ pub struct ProcessListResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema, IntoParams)]
 #[serde(rename_all = "camelCase")]
 pub struct ProcessListQuery {
+    /// Filter processes by owner (user, desktop, or system).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub owner: Option<ProcessOwner>,
 }

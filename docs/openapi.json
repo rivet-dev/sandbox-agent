@@ -1,26 +1,32 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "title": "sandbox-agent",
-    "description": "Universal API for automatic coding agents in sandboxes. Supports Claude Code, Codex, OpenCode, and Amp.",
+    "title": "Sandbox Agent",
+    "description": "HTTP API for Sandbox Agent, a universal runtime for AI coding agents. Provides sandbox filesystem, process, desktop, and configuration management alongside an ACP proxy for agent communication.",
     "contact": {
-      "name": "Rivet Gaming, LLC",
-      "email": "developer@rivet.gg"
+      "name": "Sandbox Agent",
+      "url": "https://sandboxagent.dev"
     },
     "license": {
-      "name": "Apache-2.0"
+      "name": "Apache-2.0",
+      "url": "https://www.apache.org/licenses/LICENSE-2.0"
     },
     "version": "0.4.2"
   },
   "servers": [
     {
-      "url": "http://localhost:2468"
+      "url": "http://localhost:2468",
+      "description": "Local development server"
     }
   ],
   "paths": {
     "/v1/acp": {
       "get": {
-        "tags": ["v1"],
+        "tags": [
+          "acp"
+        ],
+        "summary": "List active ACP server instances.",
+        "description": "Returns all currently running ACP proxy server instances with their\nbound agent and creation timestamp.",
         "operationId": "get_v1_acp_servers",
         "responses": {
           "200": {
@@ -38,7 +44,11 @@
     },
     "/v1/acp/{server_id}": {
       "get": {
-        "tags": ["v1"],
+        "tags": [
+          "acp"
+        ],
+        "summary": "Open an SSE stream for an ACP server.",
+        "description": "Returns a Server-Sent Events stream carrying JSON-RPC envelopes from\nthe agent process. Requires `Accept: text/event-stream`.",
         "operationId": "get_v1_acp",
         "parameters": [
           {
@@ -53,7 +63,14 @@
         ],
         "responses": {
           "200": {
-            "description": "SSE stream of ACP envelopes"
+            "description": "SSE stream of ACP envelopes",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid request",
@@ -88,7 +105,11 @@
         }
       },
       "post": {
-        "tags": ["v1"],
+        "tags": [
+          "acp"
+        ],
+        "summary": "Send a JSON-RPC envelope to an ACP server.",
+        "description": "Posts a JSON-RPC request or notification to the specified ACP server\ninstance. The first POST to a new server_id must include the `agent`\nquery parameter to bind the server to an agent.",
         "operationId": "post_v1_acp",
         "parameters": [
           {
@@ -198,7 +219,11 @@
         }
       },
       "delete": {
-        "tags": ["v1"],
+        "tags": [
+          "acp"
+        ],
+        "summary": "Close an ACP server instance.",
+        "description": "Terminates the ACP proxy server and its associated agent process.",
         "operationId": "delete_v1_acp",
         "parameters": [
           {
@@ -220,7 +245,11 @@
     },
     "/v1/agents": {
       "get": {
-        "tags": ["v1"],
+        "tags": [
+          "agents"
+        ],
+        "summary": "List available agents.",
+        "description": "Returns all known agents with their installation status, credential\navailability, and optionally their version and configuration options.",
         "operationId": "get_v1_agents",
         "parameters": [
           {
@@ -246,7 +275,7 @@
         ],
         "responses": {
           "200": {
-            "description": "List of v1 agents",
+            "description": "List of agents",
             "content": {
               "application/json": {
                 "schema": {
@@ -270,7 +299,11 @@
     },
     "/v1/agents/{agent}": {
       "get": {
-        "tags": ["v1"],
+        "tags": [
+          "agents"
+        ],
+        "summary": "Get a single agent.",
+        "description": "Returns detailed information for one agent, including installation status,\ncredential availability, and optionally version and configuration options.",
         "operationId": "get_v1_agent",
         "parameters": [
           {
@@ -339,7 +372,11 @@
     },
     "/v1/agents/{agent}/install": {
       "post": {
-        "tags": ["v1"],
+        "tags": [
+          "agents"
+        ],
+        "summary": "Install or reinstall an agent.",
+        "description": "Downloads and installs the agent binary and its process wrapper. Returns\nthe list of installed artifacts and whether the agent was already present.",
         "operationId": "post_v1_agent_install",
         "parameters": [
           {
@@ -398,7 +435,11 @@
     },
     "/v1/config/mcp": {
       "get": {
-        "tags": ["v1"],
+        "tags": [
+          "config"
+        ],
+        "summary": "Get an MCP server configuration entry.",
+        "description": "Reads a single named MCP server entry from the project-scoped\nconfiguration file in the given directory.",
         "operationId": "get_v1_config_mcp",
         "parameters": [
           {
@@ -422,7 +463,7 @@
         ],
         "responses": {
           "200": {
-            "description": "MCP entry",
+            "description": "MCP server configuration entry",
             "content": {
               "application/json": {
                 "schema": {
@@ -444,7 +485,11 @@
         }
       },
       "put": {
-        "tags": ["v1"],
+        "tags": [
+          "config"
+        ],
+        "summary": "Create or update an MCP server configuration entry.",
+        "description": "Writes a named MCP server entry into the project-scoped configuration\nfile, creating the file and parent directories as needed.",
         "operationId": "put_v1_config_mcp",
         "parameters": [
           {
@@ -483,7 +528,11 @@
         }
       },
       "delete": {
-        "tags": ["v1"],
+        "tags": [
+          "config"
+        ],
+        "summary": "Delete an MCP server configuration entry.",
+        "description": "Removes a named MCP server entry from the project-scoped configuration\nfile.",
         "operationId": "delete_v1_config_mcp",
         "parameters": [
           {
@@ -514,7 +563,11 @@
     },
     "/v1/config/skills": {
       "get": {
-        "tags": ["v1"],
+        "tags": [
+          "config"
+        ],
+        "summary": "Get a skills configuration entry.",
+        "description": "Reads a single named skills entry from the project-scoped configuration\nfile in the given directory.",
         "operationId": "get_v1_config_skills",
         "parameters": [
           {
@@ -538,7 +591,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Skills entry",
+            "description": "Skills configuration entry",
             "content": {
               "application/json": {
                 "schema": {
@@ -560,7 +613,11 @@
         }
       },
       "put": {
-        "tags": ["v1"],
+        "tags": [
+          "config"
+        ],
+        "summary": "Create or update a skills configuration entry.",
+        "description": "Writes a named skills entry into the project-scoped configuration file,\ncreating the file and parent directories as needed.",
         "operationId": "put_v1_config_skills",
         "parameters": [
           {
@@ -599,7 +656,11 @@
         }
       },
       "delete": {
-        "tags": ["v1"],
+        "tags": [
+          "config"
+        ],
+        "summary": "Delete a skills configuration entry.",
+        "description": "Removes a named skills entry from the project-scoped configuration file.",
         "operationId": "delete_v1_config_skills",
         "parameters": [
           {
@@ -630,7 +691,9 @@
     },
     "/v1/desktop/clipboard": {
       "get": {
-        "tags": ["v1"],
+        "tags": [
+          "desktop"
+        ],
         "summary": "Read the desktop clipboard.",
         "description": "Returns the current text content of the X11 clipboard.",
         "operationId": "get_v1_desktop_clipboard",
@@ -638,6 +701,7 @@
           {
             "name": "selection",
             "in": "query",
+            "description": "X11 selection name (e.g. \"clipboard\" or \"primary\"). Defaults to \"clipboard\".",
             "required": false,
             "schema": {
               "type": "string",
@@ -679,7 +743,9 @@
         }
       },
       "post": {
-        "tags": ["v1"],
+        "tags": [
+          "desktop"
+        ],
         "summary": "Write to the desktop clipboard.",
         "description": "Sets the text content of the X11 clipboard.",
         "operationId": "post_v1_desktop_clipboard",
@@ -729,7 +795,9 @@
     },
     "/v1/desktop/display/info": {
       "get": {
-        "tags": ["v1"],
+        "tags": [
+          "desktop"
+        ],
         "summary": "Get desktop display information.",
         "description": "Performs a health-gated display query against the managed desktop and\nreturns the current display identifier and resolution.",
         "operationId": "get_v1_desktop_display_info",
@@ -769,7 +837,9 @@
     },
     "/v1/desktop/keyboard/down": {
       "post": {
-        "tags": ["v1"],
+        "tags": [
+          "desktop"
+        ],
         "summary": "Press and hold a desktop keyboard key.",
         "description": "Performs a health-gated `xdotool keydown` operation against the managed\ndesktop.",
         "operationId": "post_v1_desktop_keyboard_down",
@@ -829,7 +899,9 @@
     },
     "/v1/desktop/keyboard/press": {
       "post": {
-        "tags": ["v1"],
+        "tags": [
+          "desktop"
+        ],
         "summary": "Press a desktop keyboard shortcut.",
         "description": "Performs a health-gated `xdotool key` operation against the managed\ndesktop.",
         "operationId": "post_v1_desktop_keyboard_press",
@@ -889,7 +961,9 @@
     },
     "/v1/desktop/keyboard/type": {
       "post": {
-        "tags": ["v1"],
+        "tags": [
+          "desktop"
+        ],
         "summary": "Type desktop keyboard text.",
         "description": "Performs a health-gated `xdotool type` operation against the managed\ndesktop.",
         "operationId": "post_v1_desktop_keyboard_type",
@@ -949,7 +1023,9 @@
     },
     "/v1/desktop/keyboard/up": {
       "post": {
-        "tags": ["v1"],
+        "tags": [
+          "desktop"
+        ],
         "summary": "Release a desktop keyboard key.",
         "description": "Performs a health-gated `xdotool keyup` operation against the managed\ndesktop.",
         "operationId": "post_v1_desktop_keyboard_up",
@@ -1009,7 +1085,9 @@
     },
     "/v1/desktop/launch": {
       "post": {
-        "tags": ["v1"],
+        "tags": [
+          "desktop"
+        ],
         "summary": "Launch a desktop application.",
         "description": "Launches an application by name on the managed desktop, optionally waiting\nfor its window to appear.",
         "operationId": "post_v1_desktop_launch",
@@ -1059,7 +1137,9 @@
     },
     "/v1/desktop/mouse/click": {
       "post": {
-        "tags": ["v1"],
+        "tags": [
+          "desktop"
+        ],
         "summary": "Click on the desktop.",
         "description": "Performs a health-gated pointer move and click against the managed desktop\nand returns the resulting mouse position.",
         "operationId": "post_v1_desktop_mouse_click",
@@ -1119,7 +1199,9 @@
     },
     "/v1/desktop/mouse/down": {
       "post": {
-        "tags": ["v1"],
+        "tags": [
+          "desktop"
+        ],
         "summary": "Press and hold a desktop mouse button.",
         "description": "Performs a health-gated optional pointer move followed by `xdotool mousedown`\nand returns the resulting mouse position.",
         "operationId": "post_v1_desktop_mouse_down",
@@ -1179,7 +1261,9 @@
     },
     "/v1/desktop/mouse/drag": {
       "post": {
-        "tags": ["v1"],
+        "tags": [
+          "desktop"
+        ],
         "summary": "Drag the desktop mouse.",
         "description": "Performs a health-gated drag gesture against the managed desktop and\nreturns the resulting mouse position.",
         "operationId": "post_v1_desktop_mouse_drag",
@@ -1239,7 +1323,9 @@
     },
     "/v1/desktop/mouse/move": {
       "post": {
-        "tags": ["v1"],
+        "tags": [
+          "desktop"
+        ],
         "summary": "Move the desktop mouse.",
         "description": "Performs a health-gated absolute pointer move on the managed desktop and\nreturns the resulting mouse position.",
         "operationId": "post_v1_desktop_mouse_move",
@@ -1299,7 +1385,9 @@
     },
     "/v1/desktop/mouse/position": {
       "get": {
-        "tags": ["v1"],
+        "tags": [
+          "desktop"
+        ],
         "summary": "Get the current desktop mouse position.",
         "description": "Performs a health-gated mouse position query against the managed desktop.",
         "operationId": "get_v1_desktop_mouse_position",
@@ -1339,7 +1427,9 @@
     },
     "/v1/desktop/mouse/scroll": {
       "post": {
-        "tags": ["v1"],
+        "tags": [
+          "desktop"
+        ],
         "summary": "Scroll the desktop mouse wheel.",
         "description": "Performs a health-gated scroll gesture at the requested coordinates and\nreturns the resulting mouse position.",
         "operationId": "post_v1_desktop_mouse_scroll",
@@ -1399,7 +1489,9 @@
     },
     "/v1/desktop/mouse/up": {
       "post": {
-        "tags": ["v1"],
+        "tags": [
+          "desktop"
+        ],
         "summary": "Release a desktop mouse button.",
         "description": "Performs a health-gated optional pointer move followed by `xdotool mouseup`\nand returns the resulting mouse position.",
         "operationId": "post_v1_desktop_mouse_up",
@@ -1459,7 +1551,9 @@
     },
     "/v1/desktop/open": {
       "post": {
-        "tags": ["v1"],
+        "tags": [
+          "desktop"
+        ],
         "summary": "Open a file or URL with the default handler.",
         "description": "Opens a file path or URL using xdg-open on the managed desktop.",
         "operationId": "post_v1_desktop_open",
@@ -1499,7 +1593,9 @@
     },
     "/v1/desktop/recording/start": {
       "post": {
-        "tags": ["v1"],
+        "tags": [
+          "desktop"
+        ],
         "summary": "Start desktop recording.",
         "description": "Starts an ffmpeg x11grab recording against the managed desktop and returns\nthe created recording metadata.",
         "operationId": "post_v1_desktop_recording_start",
@@ -1549,7 +1645,9 @@
     },
     "/v1/desktop/recording/stop": {
       "post": {
-        "tags": ["v1"],
+        "tags": [
+          "desktop"
+        ],
         "summary": "Stop desktop recording.",
         "description": "Stops the active desktop recording and returns the finalized recording\nmetadata.",
         "operationId": "post_v1_desktop_recording_stop",
@@ -1589,7 +1687,9 @@
     },
     "/v1/desktop/recordings": {
       "get": {
-        "tags": ["v1"],
+        "tags": [
+          "desktop"
+        ],
         "summary": "List desktop recordings.",
         "description": "Returns the current desktop recording catalog.",
         "operationId": "get_v1_desktop_recordings",
@@ -1619,7 +1719,9 @@
     },
     "/v1/desktop/recordings/{id}": {
       "get": {
-        "tags": ["v1"],
+        "tags": [
+          "desktop"
+        ],
         "summary": "Get desktop recording metadata.",
         "description": "Returns metadata for a single desktop recording.",
         "operationId": "get_v1_desktop_recording",
@@ -1658,7 +1760,9 @@
         }
       },
       "delete": {
-        "tags": ["v1"],
+        "tags": [
+          "desktop"
+        ],
         "summary": "Delete a desktop recording.",
         "description": "Removes a completed desktop recording and its file from disk.",
         "operationId": "delete_v1_desktop_recording",
@@ -1702,7 +1806,9 @@
     },
     "/v1/desktop/recordings/{id}/download": {
       "get": {
-        "tags": ["v1"],
+        "tags": [
+          "desktop"
+        ],
         "summary": "Download a desktop recording.",
         "description": "Serves the recorded MP4 bytes for a completed desktop recording.",
         "operationId": "get_v1_desktop_recording_download",
@@ -1719,7 +1825,14 @@
         ],
         "responses": {
           "200": {
-            "description": "Desktop recording as MP4 bytes"
+            "description": "Desktop recording as MP4 bytes",
+            "content": {
+              "video/mp4": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "404": {
             "description": "Unknown desktop recording",
@@ -1736,7 +1849,9 @@
     },
     "/v1/desktop/screenshot": {
       "get": {
-        "tags": ["v1"],
+        "tags": [
+          "desktop"
+        ],
         "summary": "Capture a full desktop screenshot.",
         "description": "Performs a health-gated full-frame screenshot of the managed desktop and\nreturns the requested image bytes.",
         "operationId": "get_v1_desktop_screenshot",
@@ -1744,6 +1859,7 @@
           {
             "name": "format",
             "in": "query",
+            "description": "Image format (png, jpeg, or webp). Defaults to png.",
             "required": false,
             "schema": {
               "allOf": [
@@ -1757,6 +1873,7 @@
           {
             "name": "quality",
             "in": "query",
+            "description": "Image quality (0-100). Only applies to jpeg and webp formats.",
             "required": false,
             "schema": {
               "type": "integer",
@@ -1768,6 +1885,7 @@
           {
             "name": "scale",
             "in": "query",
+            "description": "Scale factor for the output image.",
             "required": false,
             "schema": {
               "type": "number",
@@ -1778,6 +1896,7 @@
           {
             "name": "showCursor",
             "in": "query",
+            "description": "Whether to include the mouse cursor in the screenshot.",
             "required": false,
             "schema": {
               "type": "boolean",
@@ -1787,7 +1906,14 @@
         ],
         "responses": {
           "200": {
-            "description": "Desktop screenshot as image bytes"
+            "description": "Desktop screenshot as image bytes",
+            "content": {
+              "image/png": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid screenshot query",
@@ -1824,7 +1950,9 @@
     },
     "/v1/desktop/screenshot/region": {
       "get": {
-        "tags": ["v1"],
+        "tags": [
+          "desktop"
+        ],
         "summary": "Capture a desktop screenshot region.",
         "description": "Performs a health-gated screenshot crop against the managed desktop and\nreturns the requested region image bytes.",
         "operationId": "get_v1_desktop_screenshot_region",
@@ -1832,6 +1960,7 @@
           {
             "name": "x",
             "in": "query",
+            "description": "Left edge of the capture region in pixels.",
             "required": true,
             "schema": {
               "type": "integer",
@@ -1841,6 +1970,7 @@
           {
             "name": "y",
             "in": "query",
+            "description": "Top edge of the capture region in pixels.",
             "required": true,
             "schema": {
               "type": "integer",
@@ -1850,6 +1980,7 @@
           {
             "name": "width",
             "in": "query",
+            "description": "Width of the capture region in pixels.",
             "required": true,
             "schema": {
               "type": "integer",
@@ -1860,6 +1991,7 @@
           {
             "name": "height",
             "in": "query",
+            "description": "Height of the capture region in pixels.",
             "required": true,
             "schema": {
               "type": "integer",
@@ -1870,6 +2002,7 @@
           {
             "name": "format",
             "in": "query",
+            "description": "Image format (png, jpeg, or webp). Defaults to png.",
             "required": false,
             "schema": {
               "allOf": [
@@ -1883,6 +2016,7 @@
           {
             "name": "quality",
             "in": "query",
+            "description": "Image quality (0-100). Only applies to jpeg and webp formats.",
             "required": false,
             "schema": {
               "type": "integer",
@@ -1894,6 +2028,7 @@
           {
             "name": "scale",
             "in": "query",
+            "description": "Scale factor for the output image.",
             "required": false,
             "schema": {
               "type": "number",
@@ -1904,6 +2039,7 @@
           {
             "name": "showCursor",
             "in": "query",
+            "description": "Whether to include the mouse cursor in the screenshot.",
             "required": false,
             "schema": {
               "type": "boolean",
@@ -1913,7 +2049,14 @@
         ],
         "responses": {
           "200": {
-            "description": "Desktop screenshot region as image bytes"
+            "description": "Desktop screenshot region as image bytes",
+            "content": {
+              "image/png": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid screenshot region",
@@ -1950,7 +2093,9 @@
     },
     "/v1/desktop/start": {
       "post": {
-        "tags": ["v1"],
+        "tags": [
+          "desktop"
+        ],
         "summary": "Start the private desktop runtime.",
         "description": "Lazily launches the managed Xvfb/openbox stack, validates display health,\nand returns the resulting desktop status snapshot.",
         "operationId": "post_v1_desktop_start",
@@ -2020,7 +2165,9 @@
     },
     "/v1/desktop/status": {
       "get": {
-        "tags": ["v1"],
+        "tags": [
+          "desktop"
+        ],
         "summary": "Get desktop runtime status.",
         "description": "Returns the current desktop runtime state, dependency status, active\ndisplay metadata, and supervised process information.",
         "operationId": "get_v1_desktop_status",
@@ -2050,7 +2197,9 @@
     },
     "/v1/desktop/stop": {
       "post": {
-        "tags": ["v1"],
+        "tags": [
+          "desktop"
+        ],
         "summary": "Stop the private desktop runtime.",
         "description": "Terminates the managed openbox/Xvfb/dbus processes owned by the desktop\nruntime and returns the resulting status snapshot.",
         "operationId": "post_v1_desktop_stop",
@@ -2080,7 +2229,9 @@
     },
     "/v1/desktop/stream/signaling": {
       "get": {
-        "tags": ["v1"],
+        "tags": [
+          "desktop"
+        ],
         "summary": "Open a desktop WebRTC signaling session.",
         "description": "Upgrades the connection to a WebSocket used for WebRTC signaling between\nthe browser client and the desktop streaming process. Also accepts mouse\nand keyboard input frames as a fallback transport.",
         "operationId": "get_v1_desktop_stream_ws",
@@ -2125,7 +2276,9 @@
     },
     "/v1/desktop/stream/start": {
       "post": {
-        "tags": ["v1"],
+        "tags": [
+          "desktop"
+        ],
         "summary": "Start desktop streaming.",
         "description": "Enables desktop websocket streaming for the managed desktop.",
         "operationId": "post_v1_desktop_stream_start",
@@ -2145,7 +2298,9 @@
     },
     "/v1/desktop/stream/status": {
       "get": {
-        "tags": ["v1"],
+        "tags": [
+          "desktop"
+        ],
         "summary": "Get desktop stream status.",
         "description": "Returns the current state of the desktop WebRTC streaming session.",
         "operationId": "get_v1_desktop_stream_status",
@@ -2165,7 +2320,9 @@
     },
     "/v1/desktop/stream/stop": {
       "post": {
-        "tags": ["v1"],
+        "tags": [
+          "desktop"
+        ],
         "summary": "Stop desktop streaming.",
         "description": "Disables desktop websocket streaming for the managed desktop.",
         "operationId": "post_v1_desktop_stream_stop",
@@ -2185,7 +2342,9 @@
     },
     "/v1/desktop/windows": {
       "get": {
-        "tags": ["v1"],
+        "tags": [
+          "desktop"
+        ],
         "summary": "List visible desktop windows.",
         "description": "Performs a health-gated visible-window enumeration against the managed\ndesktop and returns the current window metadata.",
         "operationId": "get_v1_desktop_windows",
@@ -2225,7 +2384,9 @@
     },
     "/v1/desktop/windows/focused": {
       "get": {
-        "tags": ["v1"],
+        "tags": [
+          "desktop"
+        ],
         "summary": "Get the currently focused desktop window.",
         "description": "Returns information about the window that currently has input focus.",
         "operationId": "get_v1_desktop_windows_focused",
@@ -2265,7 +2426,9 @@
     },
     "/v1/desktop/windows/{id}/focus": {
       "post": {
-        "tags": ["v1"],
+        "tags": [
+          "desktop"
+        ],
         "summary": "Focus a desktop window.",
         "description": "Brings the specified window to the foreground and gives it input focus.",
         "operationId": "post_v1_desktop_window_focus",
@@ -2316,7 +2479,9 @@
     },
     "/v1/desktop/windows/{id}/move": {
       "post": {
-        "tags": ["v1"],
+        "tags": [
+          "desktop"
+        ],
         "summary": "Move a desktop window.",
         "description": "Moves the specified window to the given position.",
         "operationId": "post_v1_desktop_window_move",
@@ -2377,7 +2542,9 @@
     },
     "/v1/desktop/windows/{id}/resize": {
       "post": {
-        "tags": ["v1"],
+        "tags": [
+          "desktop"
+        ],
         "summary": "Resize a desktop window.",
         "description": "Resizes the specified window to the given dimensions.",
         "operationId": "post_v1_desktop_window_resize",
@@ -2438,7 +2605,11 @@
     },
     "/v1/fs/entries": {
       "get": {
-        "tags": ["v1"],
+        "tags": [
+          "filesystem"
+        ],
+        "summary": "List directory entries.",
+        "description": "Returns the immediate children of the specified directory, including\nfile names, sizes, types, and last-modified timestamps.",
         "operationId": "get_v1_fs_entries",
         "parameters": [
           {
@@ -2471,7 +2642,11 @@
     },
     "/v1/fs/entry": {
       "delete": {
-        "tags": ["v1"],
+        "tags": [
+          "filesystem"
+        ],
+        "summary": "Delete a file or directory.",
+        "description": "Removes the entry at the given path. For directories, set `recursive`\nto true to remove contents recursively.",
         "operationId": "delete_v1_fs_entry",
         "parameters": [
           {
@@ -2510,7 +2685,11 @@
     },
     "/v1/fs/file": {
       "get": {
-        "tags": ["v1"],
+        "tags": [
+          "filesystem"
+        ],
+        "summary": "Read a file.",
+        "description": "Returns the raw bytes of the file at the given path.",
         "operationId": "get_v1_fs_file",
         "parameters": [
           {
@@ -2525,12 +2704,23 @@
         ],
         "responses": {
           "200": {
-            "description": "File content"
+            "description": "File content",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           }
         }
       },
       "put": {
-        "tags": ["v1"],
+        "tags": [
+          "filesystem"
+        ],
+        "summary": "Write a file.",
+        "description": "Writes raw bytes to the file at the given path, creating parent\ndirectories as needed. Returns the resolved path and bytes written.",
         "operationId": "put_v1_fs_file",
         "parameters": [
           {
@@ -2546,7 +2736,7 @@
         "requestBody": {
           "description": "Raw file bytes",
           "content": {
-            "text/plain": {
+            "application/octet-stream": {
               "schema": {
                 "type": "string"
               }
@@ -2570,7 +2760,11 @@
     },
     "/v1/fs/mkdir": {
       "post": {
-        "tags": ["v1"],
+        "tags": [
+          "filesystem"
+        ],
+        "summary": "Create a directory.",
+        "description": "Creates the directory at the given path, including any missing parent\ndirectories.",
         "operationId": "post_v1_fs_mkdir",
         "parameters": [
           {
@@ -2599,7 +2793,11 @@
     },
     "/v1/fs/move": {
       "post": {
-        "tags": ["v1"],
+        "tags": [
+          "filesystem"
+        ],
+        "summary": "Move or rename a file or directory.",
+        "description": "Moves the entry from one path to another. Set `overwrite` to true to\nreplace an existing destination.",
         "operationId": "post_v1_fs_move",
         "requestBody": {
           "content": {
@@ -2627,7 +2825,11 @@
     },
     "/v1/fs/stat": {
       "get": {
-        "tags": ["v1"],
+        "tags": [
+          "filesystem"
+        ],
+        "summary": "Get file or directory metadata.",
+        "description": "Returns the type, size, and last-modified timestamp for the entry at\nthe given path.",
         "operationId": "get_v1_fs_stat",
         "parameters": [
           {
@@ -2656,7 +2858,11 @@
     },
     "/v1/fs/upload-batch": {
       "post": {
-        "tags": ["v1"],
+        "tags": [
+          "filesystem"
+        ],
+        "summary": "Upload files as a tar archive.",
+        "description": "Accepts a tar archive body, extracts its contents into the destination\ndirectory, and returns the list of extracted paths.",
         "operationId": "post_v1_fs_upload_batch",
         "parameters": [
           {
@@ -2673,7 +2879,7 @@
         "requestBody": {
           "description": "tar archive body",
           "content": {
-            "text/plain": {
+            "application/x-tar": {
               "schema": {
                 "type": "string"
               }
@@ -2697,7 +2903,11 @@
     },
     "/v1/health": {
       "get": {
-        "tags": ["v1"],
+        "tags": [
+          "health"
+        ],
+        "summary": "Check service health.",
+        "description": "Returns a simple health status indicating the service is running and\nreachable.",
         "operationId": "get_v1_health",
         "responses": {
           "200": {
@@ -2715,7 +2925,9 @@
     },
     "/v1/processes": {
       "get": {
-        "tags": ["v1"],
+        "tags": [
+          "processes"
+        ],
         "summary": "List all managed processes.",
         "description": "Returns a list of all processes (running and exited) currently tracked\nby the runtime, sorted by process ID.",
         "operationId": "get_v1_processes",
@@ -2723,6 +2935,7 @@
           {
             "name": "owner",
             "in": "query",
+            "description": "Filter processes by owner (user, desktop, or system).",
             "required": false,
             "schema": {
               "allOf": [
@@ -2758,7 +2971,9 @@
         }
       },
       "post": {
-        "tags": ["v1"],
+        "tags": [
+          "processes"
+        ],
         "summary": "Create a long-lived managed process.",
         "description": "Spawns a new process with the given command and arguments. Supports both\npipe-based and PTY (tty) modes. Returns the process descriptor on success.",
         "operationId": "post_v1_processes",
@@ -2818,7 +3033,9 @@
     },
     "/v1/processes/config": {
       "get": {
-        "tags": ["v1"],
+        "tags": [
+          "processes"
+        ],
         "summary": "Get process runtime configuration.",
         "description": "Returns the current runtime configuration for the process management API,\nincluding limits for concurrency, timeouts, and buffer sizes.",
         "operationId": "get_v1_processes_config",
@@ -2846,7 +3063,9 @@
         }
       },
       "post": {
-        "tags": ["v1"],
+        "tags": [
+          "processes"
+        ],
         "summary": "Update process runtime configuration.",
         "description": "Replaces the runtime configuration for the process management API.\nValidates that all values are non-zero and clamps default timeout to max.",
         "operationId": "post_v1_processes_config",
@@ -2896,7 +3115,9 @@
     },
     "/v1/processes/run": {
       "post": {
-        "tags": ["v1"],
+        "tags": [
+          "processes"
+        ],
         "summary": "Run a one-shot command.",
         "description": "Executes a command to completion and returns its stdout, stderr, exit code,\nand duration. Supports configurable timeout and output size limits.",
         "operationId": "post_v1_processes_run",
@@ -2946,7 +3167,9 @@
     },
     "/v1/processes/{id}": {
       "get": {
-        "tags": ["v1"],
+        "tags": [
+          "processes"
+        ],
         "summary": "Get a single process by ID.",
         "description": "Returns the current state of a managed process including its status,\nPID, exit code, and creation/exit timestamps.",
         "operationId": "get_v1_process",
@@ -2995,7 +3218,9 @@
         }
       },
       "delete": {
-        "tags": ["v1"],
+        "tags": [
+          "processes"
+        ],
         "summary": "Delete a process record.",
         "description": "Removes a stopped process from the runtime. Returns 409 if the process\nis still running; stop or kill it first.",
         "operationId": "delete_v1_process",
@@ -3049,7 +3274,9 @@
     },
     "/v1/processes/{id}/input": {
       "post": {
-        "tags": ["v1"],
+        "tags": [
+          "processes"
+        ],
         "summary": "Write input to a process.",
         "description": "Sends data to a process's stdin (pipe mode) or PTY writer (tty mode).\nData can be encoded as base64, utf8, or text. Returns 413 if the decoded\npayload exceeds the configured `maxInputBytesPerRequest` limit.",
         "operationId": "post_v1_process_input",
@@ -3130,7 +3357,9 @@
     },
     "/v1/processes/{id}/kill": {
       "post": {
-        "tags": ["v1"],
+        "tags": [
+          "processes"
+        ],
         "summary": "Send SIGKILL to a process.",
         "description": "Sends SIGKILL to the process and optionally waits up to `waitMs`\nmilliseconds for the process to exit before returning.",
         "operationId": "post_v1_process_kill",
@@ -3193,7 +3422,9 @@
     },
     "/v1/processes/{id}/logs": {
       "get": {
-        "tags": ["v1"],
+        "tags": [
+          "processes"
+        ],
         "summary": "Fetch process logs.",
         "description": "Returns buffered log entries for a process. Supports filtering by stream\ntype, tail count, and sequence-based resumption. When `follow=true`,\nreturns an SSE stream that replays buffered entries then streams live output.",
         "operationId": "get_v1_process_logs",
@@ -3291,7 +3522,9 @@
     },
     "/v1/processes/{id}/stop": {
       "post": {
-        "tags": ["v1"],
+        "tags": [
+          "processes"
+        ],
         "summary": "Send SIGTERM to a process.",
         "description": "Sends SIGTERM to the process and optionally waits up to `waitMs`\nmilliseconds for the process to exit before returning.",
         "operationId": "post_v1_process_stop",
@@ -3354,7 +3587,9 @@
     },
     "/v1/processes/{id}/terminal/resize": {
       "post": {
-        "tags": ["v1"],
+        "tags": [
+          "processes"
+        ],
         "summary": "Resize a process terminal.",
         "description": "Sets the PTY window size (columns and rows) for a tty-mode process and\nsends SIGWINCH so the child process can adapt.",
         "operationId": "post_v1_process_terminal_resize",
@@ -3435,7 +3670,9 @@
     },
     "/v1/processes/{id}/terminal/ws": {
       "get": {
-        "tags": ["v1"],
+        "tags": [
+          "processes"
+        ],
         "summary": "Open an interactive WebSocket terminal session.",
         "description": "Upgrades the connection to a WebSocket for bidirectional PTY I/O. Accepts\n`access_token` query param for browser-based auth (WebSocket API cannot\nsend custom headers). Streams raw PTY output as binary frames and accepts\nJSON control frames for input, resize, and close.",
         "operationId": "get_v1_process_terminal_ws",
@@ -3512,7 +3749,9 @@
     "schemas": {
       "AcpEnvelope": {
         "type": "object",
-        "required": ["jsonrpc"],
+        "required": [
+          "jsonrpc"
+        ],
         "properties": {
           "error": {
             "nullable": true
@@ -3535,18 +3774,13 @@
           }
         }
       },
-      "AcpPostQuery": {
-        "type": "object",
-        "properties": {
-          "agent": {
-            "type": "string",
-            "nullable": true
-          }
-        }
-      },
       "AcpServerInfo": {
         "type": "object",
-        "required": ["serverId", "agent", "createdAtMs"],
+        "required": [
+          "serverId",
+          "agent",
+          "createdAtMs"
+        ],
         "properties": {
           "agent": {
             "type": "string"
@@ -3562,7 +3796,9 @@
       },
       "AcpServerListResponse": {
         "type": "object",
-        "required": ["servers"],
+        "required": [
+          "servers"
+        ],
         "properties": {
           "servers": {
             "type": "array",
@@ -3653,7 +3889,12 @@
       },
       "AgentInfo": {
         "type": "object",
-        "required": ["id", "installed", "credentialsAvailable", "capabilities"],
+        "required": [
+          "id",
+          "installed",
+          "credentialsAvailable",
+          "capabilities"
+        ],
         "properties": {
           "capabilities": {
             "$ref": "#/components/schemas/AgentCapabilities"
@@ -3696,7 +3937,11 @@
       },
       "AgentInstallArtifact": {
         "type": "object",
-        "required": ["kind", "path", "source"],
+        "required": [
+          "kind",
+          "path",
+          "source"
+        ],
         "properties": {
           "kind": {
             "type": "string"
@@ -3732,7 +3977,10 @@
       },
       "AgentInstallResponse": {
         "type": "object",
-        "required": ["already_installed", "artifacts"],
+        "required": [
+          "already_installed",
+          "artifacts"
+        ],
         "properties": {
           "already_installed": {
             "type": "boolean"
@@ -3747,7 +3995,9 @@
       },
       "AgentListResponse": {
         "type": "object",
-        "required": ["agents"],
+        "required": [
+          "agents"
+        ],
         "properties": {
           "agents": {
             "type": "array",
@@ -3759,25 +4009,21 @@
       },
       "DesktopActionResponse": {
         "type": "object",
-        "required": ["ok"],
+        "required": [
+          "ok"
+        ],
         "properties": {
           "ok": {
             "type": "boolean"
           }
         }
       },
-      "DesktopClipboardQuery": {
-        "type": "object",
-        "properties": {
-          "selection": {
-            "type": "string",
-            "nullable": true
-          }
-        }
-      },
       "DesktopClipboardResponse": {
         "type": "object",
-        "required": ["text", "selection"],
+        "required": [
+          "text",
+          "selection"
+        ],
         "properties": {
           "selection": {
             "type": "string"
@@ -3789,7 +4035,9 @@
       },
       "DesktopClipboardWriteRequest": {
         "type": "object",
-        "required": ["text"],
+        "required": [
+          "text"
+        ],
         "properties": {
           "selection": {
             "type": "string",
@@ -3802,7 +4050,10 @@
       },
       "DesktopDisplayInfoResponse": {
         "type": "object",
-        "required": ["display", "resolution"],
+        "required": [
+          "display",
+          "resolution"
+        ],
         "properties": {
           "display": {
             "type": "string"
@@ -3814,7 +4065,10 @@
       },
       "DesktopErrorInfo": {
         "type": "object",
-        "required": ["code", "message"],
+        "required": [
+          "code",
+          "message"
+        ],
         "properties": {
           "code": {
             "type": "string"
@@ -3847,7 +4101,9 @@
       },
       "DesktopKeyboardDownRequest": {
         "type": "object",
-        "required": ["key"],
+        "required": [
+          "key"
+        ],
         "properties": {
           "key": {
             "type": "string"
@@ -3856,7 +4112,9 @@
       },
       "DesktopKeyboardPressRequest": {
         "type": "object",
-        "required": ["key"],
+        "required": [
+          "key"
+        ],
         "properties": {
           "key": {
             "type": "string"
@@ -3873,7 +4131,9 @@
       },
       "DesktopKeyboardTypeRequest": {
         "type": "object",
-        "required": ["text"],
+        "required": [
+          "text"
+        ],
         "properties": {
           "delayMs": {
             "type": "integer",
@@ -3888,7 +4148,9 @@
       },
       "DesktopKeyboardUpRequest": {
         "type": "object",
-        "required": ["key"],
+        "required": [
+          "key"
+        ],
         "properties": {
           "key": {
             "type": "string"
@@ -3897,7 +4159,9 @@
       },
       "DesktopLaunchRequest": {
         "type": "object",
-        "required": ["app"],
+        "required": [
+          "app"
+        ],
         "properties": {
           "app": {
             "type": "string"
@@ -3917,7 +4181,9 @@
       },
       "DesktopLaunchResponse": {
         "type": "object",
-        "required": ["processId"],
+        "required": [
+          "processId"
+        ],
         "properties": {
           "pid": {
             "type": "integer",
@@ -3936,11 +4202,18 @@
       },
       "DesktopMouseButton": {
         "type": "string",
-        "enum": ["left", "middle", "right"]
+        "enum": [
+          "left",
+          "middle",
+          "right"
+        ]
       },
       "DesktopMouseClickRequest": {
         "type": "object",
-        "required": ["x", "y"],
+        "required": [
+          "x",
+          "y"
+        ],
         "properties": {
           "button": {
             "allOf": [
@@ -3991,7 +4264,12 @@
       },
       "DesktopMouseDragRequest": {
         "type": "object",
-        "required": ["startX", "startY", "endX", "endY"],
+        "required": [
+          "startX",
+          "startY",
+          "endX",
+          "endY"
+        ],
         "properties": {
           "button": {
             "allOf": [
@@ -4021,7 +4299,10 @@
       },
       "DesktopMouseMoveRequest": {
         "type": "object",
-        "required": ["x", "y"],
+        "required": [
+          "x",
+          "y"
+        ],
         "properties": {
           "x": {
             "type": "integer",
@@ -4035,7 +4316,10 @@
       },
       "DesktopMousePositionResponse": {
         "type": "object",
-        "required": ["x", "y"],
+        "required": [
+          "x",
+          "y"
+        ],
         "properties": {
           "screen": {
             "type": "integer",
@@ -4058,7 +4342,10 @@
       },
       "DesktopMouseScrollRequest": {
         "type": "object",
-        "required": ["x", "y"],
+        "required": [
+          "x",
+          "y"
+        ],
         "properties": {
           "deltaX": {
             "type": "integer",
@@ -4105,7 +4392,9 @@
       },
       "DesktopOpenRequest": {
         "type": "object",
-        "required": ["target"],
+        "required": [
+          "target"
+        ],
         "properties": {
           "target": {
             "type": "string"
@@ -4114,7 +4403,9 @@
       },
       "DesktopOpenResponse": {
         "type": "object",
-        "required": ["processId"],
+        "required": [
+          "processId"
+        ],
         "properties": {
           "pid": {
             "type": "integer",
@@ -4129,7 +4420,10 @@
       },
       "DesktopProcessInfo": {
         "type": "object",
-        "required": ["name", "running"],
+        "required": [
+          "name",
+          "running"
+        ],
         "properties": {
           "logPath": {
             "type": "string",
@@ -4151,7 +4445,13 @@
       },
       "DesktopRecordingInfo": {
         "type": "object",
-        "required": ["id", "status", "fileName", "bytes", "startedAt"],
+        "required": [
+          "id",
+          "status",
+          "fileName",
+          "bytes",
+          "startedAt"
+        ],
         "properties": {
           "bytes": {
             "type": "integer",
@@ -4182,7 +4482,9 @@
       },
       "DesktopRecordingListResponse": {
         "type": "object",
-        "required": ["recordings"],
+        "required": [
+          "recordings"
+        ],
         "properties": {
           "recordings": {
             "type": "array",
@@ -4205,58 +4507,18 @@
       },
       "DesktopRecordingStatus": {
         "type": "string",
-        "enum": ["recording", "completed", "failed"]
-      },
-      "DesktopRegionScreenshotQuery": {
-        "type": "object",
-        "required": ["x", "y", "width", "height"],
-        "properties": {
-          "format": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/DesktopScreenshotFormat"
-              }
-            ],
-            "nullable": true
-          },
-          "height": {
-            "type": "integer",
-            "format": "int32",
-            "minimum": 0
-          },
-          "quality": {
-            "type": "integer",
-            "format": "int32",
-            "nullable": true,
-            "minimum": 0
-          },
-          "scale": {
-            "type": "number",
-            "format": "float",
-            "nullable": true
-          },
-          "showCursor": {
-            "type": "boolean",
-            "nullable": true
-          },
-          "width": {
-            "type": "integer",
-            "format": "int32",
-            "minimum": 0
-          },
-          "x": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "y": {
-            "type": "integer",
-            "format": "int32"
-          }
-        }
+        "enum": [
+          "recording",
+          "completed",
+          "failed"
+        ]
       },
       "DesktopResolution": {
         "type": "object",
-        "required": ["width", "height"],
+        "required": [
+          "width",
+          "height"
+        ],
         "properties": {
           "dpi": {
             "type": "integer",
@@ -4278,35 +4540,11 @@
       },
       "DesktopScreenshotFormat": {
         "type": "string",
-        "enum": ["png", "jpeg", "webp"]
-      },
-      "DesktopScreenshotQuery": {
-        "type": "object",
-        "properties": {
-          "format": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/DesktopScreenshotFormat"
-              }
-            ],
-            "nullable": true
-          },
-          "quality": {
-            "type": "integer",
-            "format": "int32",
-            "nullable": true,
-            "minimum": 0
-          },
-          "scale": {
-            "type": "number",
-            "format": "float",
-            "nullable": true
-          },
-          "showCursor": {
-            "type": "boolean",
-            "nullable": true
-          }
-        }
+        "enum": [
+          "png",
+          "jpeg",
+          "webp"
+        ]
       },
       "DesktopStartRequest": {
         "type": "object",
@@ -4366,11 +4604,20 @@
       },
       "DesktopState": {
         "type": "string",
-        "enum": ["inactive", "install_required", "starting", "active", "stopping", "failed"]
+        "enum": [
+          "inactive",
+          "install_required",
+          "starting",
+          "active",
+          "stopping",
+          "failed"
+        ]
       },
       "DesktopStatusResponse": {
         "type": "object",
-        "required": ["state"],
+        "required": [
+          "state"
+        ],
         "properties": {
           "display": {
             "type": "string",
@@ -4430,7 +4677,9 @@
       },
       "DesktopStreamStatusResponse": {
         "type": "object",
-        "required": ["active"],
+        "required": [
+          "active"
+        ],
         "properties": {
           "active": {
             "type": "boolean"
@@ -4447,7 +4696,15 @@
       },
       "DesktopWindowInfo": {
         "type": "object",
-        "required": ["id", "title", "x", "y", "width", "height", "isActive"],
+        "required": [
+          "id",
+          "title",
+          "x",
+          "y",
+          "width",
+          "height",
+          "isActive"
+        ],
         "properties": {
           "height": {
             "type": "integer",
@@ -4480,7 +4737,9 @@
       },
       "DesktopWindowListResponse": {
         "type": "object",
-        "required": ["windows"],
+        "required": [
+          "windows"
+        ],
         "properties": {
           "windows": {
             "type": "array",
@@ -4492,7 +4751,10 @@
       },
       "DesktopWindowMoveRequest": {
         "type": "object",
-        "required": ["x", "y"],
+        "required": [
+          "x",
+          "y"
+        ],
         "properties": {
           "x": {
             "type": "integer",
@@ -4506,7 +4768,10 @@
       },
       "DesktopWindowResizeRequest": {
         "type": "object",
-        "required": ["width", "height"],
+        "required": [
+          "width",
+          "height"
+        ],
         "properties": {
           "height": {
             "type": "integer",
@@ -4543,38 +4808,23 @@
       },
       "FsActionResponse": {
         "type": "object",
-        "required": ["path"],
+        "required": [
+          "path"
+        ],
         "properties": {
           "path": {
             "type": "string"
-          }
-        }
-      },
-      "FsDeleteQuery": {
-        "type": "object",
-        "required": ["path"],
-        "properties": {
-          "path": {
-            "type": "string"
-          },
-          "recursive": {
-            "type": "boolean",
-            "nullable": true
-          }
-        }
-      },
-      "FsEntriesQuery": {
-        "type": "object",
-        "properties": {
-          "path": {
-            "type": "string",
-            "nullable": true
           }
         }
       },
       "FsEntry": {
         "type": "object",
-        "required": ["name", "path", "entryType", "size"],
+        "required": [
+          "name",
+          "path",
+          "entryType",
+          "size"
+        ],
         "properties": {
           "entryType": {
             "$ref": "#/components/schemas/FsEntryType"
@@ -4598,11 +4848,17 @@
       },
       "FsEntryType": {
         "type": "string",
-        "enum": ["file", "directory"]
+        "enum": [
+          "file",
+          "directory"
+        ]
       },
       "FsMoveRequest": {
         "type": "object",
-        "required": ["from", "to"],
+        "required": [
+          "from",
+          "to"
+        ],
         "properties": {
           "from": {
             "type": "string"
@@ -4618,7 +4874,10 @@
       },
       "FsMoveResponse": {
         "type": "object",
-        "required": ["from", "to"],
+        "required": [
+          "from",
+          "to"
+        ],
         "properties": {
           "from": {
             "type": "string"
@@ -4628,18 +4887,13 @@
           }
         }
       },
-      "FsPathQuery": {
-        "type": "object",
-        "required": ["path"],
-        "properties": {
-          "path": {
-            "type": "string"
-          }
-        }
-      },
       "FsStat": {
         "type": "object",
-        "required": ["path", "entryType", "size"],
+        "required": [
+          "path",
+          "entryType",
+          "size"
+        ],
         "properties": {
           "entryType": {
             "$ref": "#/components/schemas/FsEntryType"
@@ -4658,18 +4912,12 @@
           }
         }
       },
-      "FsUploadBatchQuery": {
-        "type": "object",
-        "properties": {
-          "path": {
-            "type": "string",
-            "nullable": true
-          }
-        }
-      },
       "FsUploadBatchResponse": {
         "type": "object",
-        "required": ["paths", "truncated"],
+        "required": [
+          "paths",
+          "truncated"
+        ],
         "properties": {
           "paths": {
             "type": "array",
@@ -4684,7 +4932,10 @@
       },
       "FsWriteResponse": {
         "type": "object",
-        "required": ["path", "bytesWritten"],
+        "required": [
+          "path",
+          "bytesWritten"
+        ],
         "properties": {
           "bytesWritten": {
             "type": "integer",
@@ -4698,30 +4949,70 @@
       },
       "HealthResponse": {
         "type": "object",
-        "required": ["status"],
+        "required": [
+          "status"
+        ],
         "properties": {
           "status": {
             "type": "string"
           }
         }
       },
-      "McpConfigQuery": {
-        "type": "object",
-        "required": ["directory", "mcpName"],
-        "properties": {
-          "directory": {
+      "McpCommand": {
+        "oneOf": [
+          {
             "type": "string"
           },
-          "mcpName": {
-            "type": "string"
+          {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "McpOAuthConfig": {
+        "type": "object",
+        "properties": {
+          "clientId": {
+            "type": "string",
+            "nullable": true
+          },
+          "clientSecret": {
+            "type": "string",
+            "nullable": true
+          },
+          "scope": {
+            "type": "string",
+            "nullable": true
           }
         }
+      },
+      "McpOAuthConfigOrDisabled": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/McpOAuthConfig"
+          },
+          {
+            "type": "boolean"
+          }
+        ]
+      },
+      "McpRemoteTransport": {
+        "type": "string",
+        "enum": [
+          "http",
+          "sse"
+        ]
       },
       "McpServerConfig": {
         "oneOf": [
           {
             "type": "object",
-            "required": ["command", "type"],
+            "required": [
+              "command",
+              "type"
+            ],
             "properties": {
               "args": {
                 "type": "array",
@@ -4755,13 +5046,18 @@
               },
               "type": {
                 "type": "string",
-                "enum": ["local"]
+                "enum": [
+                  "local"
+                ]
               }
             }
           },
           {
             "type": "object",
-            "required": ["url", "type"],
+            "required": [
+              "url",
+              "type"
+            ],
             "properties": {
               "bearerTokenEnvVar": {
                 "type": "string",
@@ -4809,7 +5105,9 @@
               },
               "type": {
                 "type": "string",
-                "enum": ["remote"]
+                "enum": [
+                  "remote"
+                ]
               },
               "url": {
                 "type": "string"
@@ -4823,7 +5121,11 @@
       },
       "ProblemDetails": {
         "type": "object",
-        "required": ["type", "title", "status"],
+        "required": [
+          "type",
+          "title",
+          "status"
+        ],
         "properties": {
           "detail": {
             "type": "string",
@@ -4849,7 +5151,14 @@
       },
       "ProcessConfig": {
         "type": "object",
-        "required": ["maxConcurrentProcesses", "defaultRunTimeoutMs", "maxRunTimeoutMs", "maxOutputBytes", "maxLogBytesPerProcess", "maxInputBytesPerRequest"],
+        "required": [
+          "maxConcurrentProcesses",
+          "defaultRunTimeoutMs",
+          "maxRunTimeoutMs",
+          "maxOutputBytes",
+          "maxLogBytesPerProcess",
+          "maxInputBytesPerRequest"
+        ],
         "properties": {
           "defaultRunTimeoutMs": {
             "type": "integer",
@@ -4881,7 +5190,9 @@
       },
       "ProcessCreateRequest": {
         "type": "object",
-        "required": ["command"],
+        "required": [
+          "command"
+        ],
         "properties": {
           "args": {
             "type": "array",
@@ -4912,7 +5223,16 @@
       },
       "ProcessInfo": {
         "type": "object",
-        "required": ["id", "command", "args", "tty", "interactive", "owner", "status", "createdAtMs"],
+        "required": [
+          "id",
+          "command",
+          "args",
+          "tty",
+          "interactive",
+          "owner",
+          "status",
+          "createdAtMs"
+        ],
         "properties": {
           "args": {
             "type": "array",
@@ -4966,7 +5286,9 @@
       },
       "ProcessInputRequest": {
         "type": "object",
-        "required": ["data"],
+        "required": [
+          "data"
+        ],
         "properties": {
           "data": {
             "type": "string"
@@ -4979,7 +5301,9 @@
       },
       "ProcessInputResponse": {
         "type": "object",
-        "required": ["bytesWritten"],
+        "required": [
+          "bytesWritten"
+        ],
         "properties": {
           "bytesWritten": {
             "type": "integer",
@@ -4987,22 +5311,11 @@
           }
         }
       },
-      "ProcessListQuery": {
-        "type": "object",
-        "properties": {
-          "owner": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ProcessOwner"
-              }
-            ],
-            "nullable": true
-          }
-        }
-      },
       "ProcessListResponse": {
         "type": "object",
-        "required": ["processes"],
+        "required": [
+          "processes"
+        ],
         "properties": {
           "processes": {
             "type": "array",
@@ -5014,7 +5327,13 @@
       },
       "ProcessLogEntry": {
         "type": "object",
-        "required": ["sequence", "stream", "timestampMs", "data", "encoding"],
+        "required": [
+          "sequence",
+          "stream",
+          "timestampMs",
+          "data",
+          "encoding"
+        ],
         "properties": {
           "data": {
             "type": "string"
@@ -5036,37 +5355,13 @@
           }
         }
       },
-      "ProcessLogsQuery": {
-        "type": "object",
-        "properties": {
-          "follow": {
-            "type": "boolean",
-            "nullable": true
-          },
-          "since": {
-            "type": "integer",
-            "format": "int64",
-            "nullable": true,
-            "minimum": 0
-          },
-          "stream": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ProcessLogsStream"
-              }
-            ],
-            "nullable": true
-          },
-          "tail": {
-            "type": "integer",
-            "nullable": true,
-            "minimum": 0
-          }
-        }
-      },
       "ProcessLogsResponse": {
         "type": "object",
-        "required": ["processId", "stream", "entries"],
+        "required": [
+          "processId",
+          "stream",
+          "entries"
+        ],
         "properties": {
           "entries": {
             "type": "array",
@@ -5084,15 +5379,26 @@
       },
       "ProcessLogsStream": {
         "type": "string",
-        "enum": ["stdout", "stderr", "combined", "pty"]
+        "enum": [
+          "stdout",
+          "stderr",
+          "combined",
+          "pty"
+        ]
       },
       "ProcessOwner": {
         "type": "string",
-        "enum": ["user", "desktop", "system"]
+        "enum": [
+          "user",
+          "desktop",
+          "system"
+        ]
       },
       "ProcessRunRequest": {
         "type": "object",
-        "required": ["command"],
+        "required": [
+          "command"
+        ],
         "properties": {
           "args": {
             "type": "array",
@@ -5128,7 +5434,14 @@
       },
       "ProcessRunResponse": {
         "type": "object",
-        "required": ["timedOut", "stdout", "stderr", "stdoutTruncated", "stderrTruncated", "durationMs"],
+        "required": [
+          "timedOut",
+          "stdout",
+          "stderr",
+          "stdoutTruncated",
+          "stderrTruncated",
+          "durationMs"
+        ],
         "properties": {
           "durationMs": {
             "type": "integer",
@@ -5157,24 +5470,19 @@
           }
         }
       },
-      "ProcessSignalQuery": {
-        "type": "object",
-        "properties": {
-          "waitMs": {
-            "type": "integer",
-            "format": "int64",
-            "nullable": true,
-            "minimum": 0
-          }
-        }
-      },
       "ProcessState": {
         "type": "string",
-        "enum": ["running", "exited"]
+        "enum": [
+          "running",
+          "exited"
+        ]
       },
       "ProcessTerminalResizeRequest": {
         "type": "object",
-        "required": ["cols", "rows"],
+        "required": [
+          "cols",
+          "rows"
+        ],
         "properties": {
           "cols": {
             "type": "integer",
@@ -5190,7 +5498,10 @@
       },
       "ProcessTerminalResizeResponse": {
         "type": "object",
-        "required": ["cols", "rows"],
+        "required": [
+          "cols",
+          "rows"
+        ],
         "properties": {
           "cols": {
             "type": "integer",
@@ -5206,11 +5517,16 @@
       },
       "ServerStatus": {
         "type": "string",
-        "enum": ["running", "stopped"]
+        "enum": [
+          "running",
+          "stopped"
+        ]
       },
       "ServerStatusInfo": {
         "type": "object",
-        "required": ["status"],
+        "required": [
+          "status"
+        ],
         "properties": {
           "status": {
             "$ref": "#/components/schemas/ServerStatus"
@@ -5225,7 +5541,10 @@
       },
       "SkillSource": {
         "type": "object",
-        "required": ["type", "source"],
+        "required": [
+          "type",
+          "source"
+        ],
         "properties": {
           "ref": {
             "type": "string",
@@ -5252,7 +5571,9 @@
       },
       "SkillsConfig": {
         "type": "object",
-        "required": ["sources"],
+        "required": [
+          "sources"
+        ],
         "properties": {
           "sources": {
             "type": "array",
@@ -5261,25 +5582,37 @@
             }
           }
         }
-      },
-      "SkillsConfigQuery": {
-        "type": "object",
-        "required": ["directory", "skillName"],
-        "properties": {
-          "directory": {
-            "type": "string"
-          },
-          "skillName": {
-            "type": "string"
-          }
-        }
       }
     }
   },
   "tags": [
     {
-      "name": "v1",
-      "description": "ACP proxy v1 API"
+      "name": "health",
+      "description": "Service health checks"
+    },
+    {
+      "name": "desktop",
+      "description": "Virtual desktop runtime management, input control, screenshots, recordings, and streaming"
+    },
+    {
+      "name": "agents",
+      "description": "Agent discovery, status, and installation"
+    },
+    {
+      "name": "filesystem",
+      "description": "Sandbox filesystem operations: read, write, delete, move, and batch upload"
+    },
+    {
+      "name": "processes",
+      "description": "Process lifecycle management, logs, input, and terminal access"
+    },
+    {
+      "name": "config",
+      "description": "Project-scoped configuration for MCP servers and skills"
+    },
+    {
+      "name": "acp",
+      "description": "Agent Client Protocol proxy for JSON-RPC communication with agents"
     }
   ]
 }

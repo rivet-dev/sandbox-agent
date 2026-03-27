@@ -93,12 +93,16 @@ pub struct DesktopStartRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema, IntoParams, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct DesktopScreenshotQuery {
+    /// Image format (png, jpeg, or webp). Defaults to png.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub format: Option<DesktopScreenshotFormat>,
+    /// Image quality (0-100). Only applies to jpeg and webp formats.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quality: Option<u8>,
+    /// Scale factor for the output image.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scale: Option<f32>,
+    /// Whether to include the mouse cursor in the screenshot.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub show_cursor: Option<bool>,
 }
@@ -114,16 +118,24 @@ pub enum DesktopScreenshotFormat {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema, IntoParams)]
 #[serde(rename_all = "camelCase")]
 pub struct DesktopRegionScreenshotQuery {
+    /// Left edge of the capture region in pixels.
     pub x: i32,
+    /// Top edge of the capture region in pixels.
     pub y: i32,
+    /// Width of the capture region in pixels.
     pub width: u32,
+    /// Height of the capture region in pixels.
     pub height: u32,
+    /// Image format (png, jpeg, or webp). Defaults to png.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub format: Option<DesktopScreenshotFormat>,
+    /// Image quality (0-100). Only applies to jpeg and webp formats.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quality: Option<u8>,
+    /// Scale factor for the output image.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scale: Option<f32>,
+    /// Whether to include the mouse cursor in the screenshot.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub show_cursor: Option<bool>,
 }
@@ -336,6 +348,7 @@ pub struct DesktopClipboardResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema, IntoParams, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct DesktopClipboardQuery {
+    /// X11 selection name (e.g. "clipboard" or "primary"). Defaults to "clipboard".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selection: Option<String>,
 }

@@ -409,7 +409,9 @@ pub async fn shutdown_servers(state: &Arc<AppState>) {
 #[derive(OpenApi)]
 #[openapi(
     paths(
+        // Health
         get_v1_health,
+        // Desktop
         get_v1_desktop_status,
         post_v1_desktop_start,
         post_v1_desktop_stop,
@@ -446,9 +448,11 @@ pub async fn shutdown_servers(state: &Arc<AppState>) {
         post_v1_desktop_stream_start,
         post_v1_desktop_stream_stop,
         get_v1_desktop_stream_ws,
+        // Agents
         get_v1_agents,
         get_v1_agent,
         post_v1_agent_install,
+        // Filesystem
         get_v1_fs_entries,
         get_v1_fs_file,
         put_v1_fs_file,
@@ -457,6 +461,7 @@ pub async fn shutdown_servers(state: &Arc<AppState>) {
         post_v1_fs_move,
         get_v1_fs_stat,
         post_v1_fs_upload_batch,
+        // Processes
         get_v1_processes_config,
         post_v1_processes_config,
         post_v1_processes,
@@ -470,12 +475,14 @@ pub async fn shutdown_servers(state: &Arc<AppState>) {
         post_v1_process_input,
         post_v1_process_terminal_resize,
         get_v1_process_terminal_ws,
+        // Config
         get_v1_config_mcp,
         put_v1_config_mcp,
         delete_v1_config_mcp,
         get_v1_config_skills,
         put_v1_config_skills,
         delete_v1_config_skills,
+        // ACP
         get_v1_acp_servers,
         post_v1_acp,
         get_v1_acp,
@@ -483,16 +490,16 @@ pub async fn shutdown_servers(state: &Arc<AppState>) {
     ),
     components(
         schemas(
+            // Health
             HealthResponse,
+            // Desktop
             DesktopState,
             DesktopResolution,
             DesktopErrorInfo,
             DesktopProcessInfo,
             DesktopStatusResponse,
             DesktopStartRequest,
-            DesktopScreenshotQuery,
             DesktopScreenshotFormat,
-            DesktopRegionScreenshotQuery,
             DesktopMousePositionResponse,
             DesktopMouseButton,
             DesktopMouseMoveRequest,
@@ -516,7 +523,6 @@ pub async fn shutdown_servers(state: &Arc<AppState>) {
             DesktopRecordingListResponse,
             DesktopStreamStatusResponse,
             DesktopClipboardResponse,
-            DesktopClipboardQuery,
             DesktopClipboardWriteRequest,
             DesktopLaunchRequest,
             DesktopLaunchResponse,
@@ -524,6 +530,7 @@ pub async fn shutdown_servers(state: &Arc<AppState>) {
             DesktopOpenResponse,
             DesktopWindowMoveRequest,
             DesktopWindowResizeRequest,
+            // Agents
             ServerStatus,
             ServerStatusInfo,
             AgentCapabilities,
@@ -532,10 +539,7 @@ pub async fn shutdown_servers(state: &Arc<AppState>) {
             AgentInstallRequest,
             AgentInstallArtifact,
             AgentInstallResponse,
-            FsPathQuery,
-            FsEntriesQuery,
-            FsDeleteQuery,
-            FsUploadBatchQuery,
+            // Filesystem
             FsEntryType,
             FsEntry,
             FsStat,
@@ -544,6 +548,7 @@ pub async fn shutdown_servers(state: &Arc<AppState>) {
             FsMoveResponse,
             FsActionResponse,
             FsUploadBatchResponse,
+            // Processes
             ProcessConfig,
             ProcessOwner,
             ProcessCreateRequest,
@@ -552,31 +557,38 @@ pub async fn shutdown_servers(state: &Arc<AppState>) {
             ProcessState,
             ProcessInfo,
             ProcessListResponse,
-            ProcessListQuery,
             ProcessLogsStream,
-            ProcessLogsQuery,
             ProcessLogEntry,
             ProcessLogsResponse,
             ProcessInputRequest,
             ProcessInputResponse,
-            ProcessSignalQuery,
             ProcessTerminalResizeRequest,
             ProcessTerminalResizeResponse,
-            AcpPostQuery,
-            AcpServerInfo,
-            AcpServerListResponse,
-            McpConfigQuery,
-            SkillsConfigQuery,
+            // Config
             McpServerConfig,
+            McpCommand,
+            McpRemoteTransport,
+            McpOAuthConfig,
+            McpOAuthConfigOrDisabled,
             SkillsConfig,
             SkillSource,
+            // ACP
+            AcpServerInfo,
+            AcpServerListResponse,
+            AcpEnvelope,
+            // Errors
             ProblemDetails,
-            ErrorType,
-            AcpEnvelope
+            ErrorType
         )
     ),
     tags(
-        (name = "v1", description = "ACP proxy v1 API")
+        (name = "health", description = "Service health checks"),
+        (name = "desktop", description = "Virtual desktop runtime management, input control, screenshots, recordings, and streaming"),
+        (name = "agents", description = "Agent discovery, status, and installation"),
+        (name = "filesystem", description = "Sandbox filesystem operations: read, write, delete, move, and batch upload"),
+        (name = "processes", description = "Process lifecycle management, logs, input, and terminal access"),
+        (name = "config", description = "Project-scoped configuration for MCP servers and skills"),
+        (name = "acp", description = "Agent Client Protocol proxy for JSON-RPC communication with agents")
     ),
     modifiers(&ServerAddon)
 )]
@@ -586,7 +598,24 @@ struct ServerAddon;
 
 impl Modify for ServerAddon {
     fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
-        openapi.servers = Some(vec![utoipa::openapi::Server::new("http://localhost:2468")]);
+        openapi.info.title = "Sandbox Agent".to_string();
+        openapi.info.description = Some(
+            "HTTP API for Sandbox Agent, a universal runtime for AI coding agents. \
+             Provides sandbox filesystem, process, desktop, and configuration management \
+             alongside an ACP proxy for agent communication."
+                .to_string(),
+        );
+        if let Some(ref mut license) = openapi.info.license {
+            license.url = Some("https://www.apache.org/licenses/LICENSE-2.0".to_string());
+        }
+        openapi.info.contact = Some(utoipa::openapi::ContactBuilder::new()
+            .name(Some("Sandbox Agent"))
+            .url(Some("https://sandboxagent.dev"))
+            .build());
+        openapi.servers = Some(vec![utoipa::openapi::ServerBuilder::new()
+            .url("http://localhost:2468")
+            .description(Some("Local development server"))
+            .build()]);
     }
 }
 
@@ -634,10 +663,14 @@ async fn get_root() -> Json<Value> {
     }))
 }
 
+/// Check service health.
+///
+/// Returns a simple health status indicating the service is running and
+/// reachable.
 #[utoipa::path(
     get,
     path = "/v1/health",
-    tag = "v1",
+    tag = "health",
     responses(
         (status = 200, description = "Service health response", body = HealthResponse)
     )
@@ -655,7 +688,7 @@ async fn get_v1_health() -> Json<HealthResponse> {
 #[utoipa::path(
     get,
     path = "/v1/desktop/status",
-    tag = "v1",
+    tag = "desktop",
     responses(
         (status = 200, description = "Desktop runtime status", body = DesktopStatusResponse),
         (status = 401, description = "Authentication required", body = ProblemDetails)
@@ -674,7 +707,7 @@ async fn get_v1_desktop_status(
 #[utoipa::path(
     post,
     path = "/v1/desktop/start",
-    tag = "v1",
+    tag = "desktop",
     request_body = DesktopStartRequest,
     responses(
         (status = 200, description = "Desktop runtime status after start", body = DesktopStatusResponse),
@@ -699,7 +732,7 @@ async fn post_v1_desktop_start(
 #[utoipa::path(
     post,
     path = "/v1/desktop/stop",
-    tag = "v1",
+    tag = "desktop",
     responses(
         (status = 200, description = "Desktop runtime status after stop", body = DesktopStatusResponse),
         (status = 409, description = "Desktop runtime is already transitioning", body = ProblemDetails)
@@ -719,10 +752,10 @@ async fn post_v1_desktop_stop(
 #[utoipa::path(
     get,
     path = "/v1/desktop/screenshot",
-    tag = "v1",
+    tag = "desktop",
     params(DesktopScreenshotQuery),
     responses(
-        (status = 200, description = "Desktop screenshot as image bytes"),
+        (status = 200, description = "Desktop screenshot as image bytes", body = String, content_type = "image/png"),
         (status = 400, description = "Invalid screenshot query", body = ProblemDetails),
         (status = 409, description = "Desktop runtime is not ready", body = ProblemDetails),
         (status = 502, description = "Desktop runtime health or screenshot capture failed", body = ProblemDetails)
@@ -747,10 +780,10 @@ async fn get_v1_desktop_screenshot(
 #[utoipa::path(
     get,
     path = "/v1/desktop/screenshot/region",
-    tag = "v1",
+    tag = "desktop",
     params(DesktopRegionScreenshotQuery),
     responses(
-        (status = 200, description = "Desktop screenshot region as image bytes"),
+        (status = 200, description = "Desktop screenshot region as image bytes", body = String, content_type = "image/png"),
         (status = 400, description = "Invalid screenshot region", body = ProblemDetails),
         (status = 409, description = "Desktop runtime is not ready", body = ProblemDetails),
         (status = 502, description = "Desktop runtime health or screenshot capture failed", body = ProblemDetails)
@@ -774,7 +807,7 @@ async fn get_v1_desktop_screenshot_region(
 #[utoipa::path(
     get,
     path = "/v1/desktop/mouse/position",
-    tag = "v1",
+    tag = "desktop",
     responses(
         (status = 200, description = "Desktop mouse position", body = DesktopMousePositionResponse),
         (status = 409, description = "Desktop runtime is not ready", body = ProblemDetails),
@@ -795,7 +828,7 @@ async fn get_v1_desktop_mouse_position(
 #[utoipa::path(
     post,
     path = "/v1/desktop/mouse/move",
-    tag = "v1",
+    tag = "desktop",
     request_body = DesktopMouseMoveRequest,
     responses(
         (status = 200, description = "Desktop mouse position after move", body = DesktopMousePositionResponse),
@@ -819,7 +852,7 @@ async fn post_v1_desktop_mouse_move(
 #[utoipa::path(
     post,
     path = "/v1/desktop/mouse/click",
-    tag = "v1",
+    tag = "desktop",
     request_body = DesktopMouseClickRequest,
     responses(
         (status = 200, description = "Desktop mouse position after click", body = DesktopMousePositionResponse),
@@ -843,7 +876,7 @@ async fn post_v1_desktop_mouse_click(
 #[utoipa::path(
     post,
     path = "/v1/desktop/mouse/down",
-    tag = "v1",
+    tag = "desktop",
     request_body = DesktopMouseDownRequest,
     responses(
         (status = 200, description = "Desktop mouse position after button press", body = DesktopMousePositionResponse),
@@ -867,7 +900,7 @@ async fn post_v1_desktop_mouse_down(
 #[utoipa::path(
     post,
     path = "/v1/desktop/mouse/up",
-    tag = "v1",
+    tag = "desktop",
     request_body = DesktopMouseUpRequest,
     responses(
         (status = 200, description = "Desktop mouse position after button release", body = DesktopMousePositionResponse),
@@ -891,7 +924,7 @@ async fn post_v1_desktop_mouse_up(
 #[utoipa::path(
     post,
     path = "/v1/desktop/mouse/drag",
-    tag = "v1",
+    tag = "desktop",
     request_body = DesktopMouseDragRequest,
     responses(
         (status = 200, description = "Desktop mouse position after drag", body = DesktopMousePositionResponse),
@@ -915,7 +948,7 @@ async fn post_v1_desktop_mouse_drag(
 #[utoipa::path(
     post,
     path = "/v1/desktop/mouse/scroll",
-    tag = "v1",
+    tag = "desktop",
     request_body = DesktopMouseScrollRequest,
     responses(
         (status = 200, description = "Desktop mouse position after scroll", body = DesktopMousePositionResponse),
@@ -939,7 +972,7 @@ async fn post_v1_desktop_mouse_scroll(
 #[utoipa::path(
     post,
     path = "/v1/desktop/keyboard/type",
-    tag = "v1",
+    tag = "desktop",
     request_body = DesktopKeyboardTypeRequest,
     responses(
         (status = 200, description = "Desktop keyboard action result", body = DesktopActionResponse),
@@ -963,7 +996,7 @@ async fn post_v1_desktop_keyboard_type(
 #[utoipa::path(
     post,
     path = "/v1/desktop/keyboard/press",
-    tag = "v1",
+    tag = "desktop",
     request_body = DesktopKeyboardPressRequest,
     responses(
         (status = 200, description = "Desktop keyboard action result", body = DesktopActionResponse),
@@ -987,7 +1020,7 @@ async fn post_v1_desktop_keyboard_press(
 #[utoipa::path(
     post,
     path = "/v1/desktop/keyboard/down",
-    tag = "v1",
+    tag = "desktop",
     request_body = DesktopKeyboardDownRequest,
     responses(
         (status = 200, description = "Desktop keyboard action result", body = DesktopActionResponse),
@@ -1011,7 +1044,7 @@ async fn post_v1_desktop_keyboard_down(
 #[utoipa::path(
     post,
     path = "/v1/desktop/keyboard/up",
-    tag = "v1",
+    tag = "desktop",
     request_body = DesktopKeyboardUpRequest,
     responses(
         (status = 200, description = "Desktop keyboard action result", body = DesktopActionResponse),
@@ -1035,7 +1068,7 @@ async fn post_v1_desktop_keyboard_up(
 #[utoipa::path(
     get,
     path = "/v1/desktop/display/info",
-    tag = "v1",
+    tag = "desktop",
     responses(
         (status = 200, description = "Desktop display information", body = DesktopDisplayInfoResponse),
         (status = 409, description = "Desktop runtime is not ready", body = ProblemDetails),
@@ -1056,7 +1089,7 @@ async fn get_v1_desktop_display_info(
 #[utoipa::path(
     get,
     path = "/v1/desktop/windows",
-    tag = "v1",
+    tag = "desktop",
     responses(
         (status = 200, description = "Visible desktop windows", body = DesktopWindowListResponse),
         (status = 409, description = "Desktop runtime is not ready", body = ProblemDetails),
@@ -1076,7 +1109,7 @@ async fn get_v1_desktop_windows(
 #[utoipa::path(
     get,
     path = "/v1/desktop/windows/focused",
-    tag = "v1",
+    tag = "desktop",
     responses(
         (status = 200, description = "Focused window info", body = DesktopWindowInfo),
         (status = 404, description = "No window is focused", body = ProblemDetails),
@@ -1096,7 +1129,7 @@ async fn get_v1_desktop_windows_focused(
 #[utoipa::path(
     post,
     path = "/v1/desktop/windows/{id}/focus",
-    tag = "v1",
+    tag = "desktop",
     params(
         ("id" = String, Path, description = "X11 window ID")
     ),
@@ -1120,7 +1153,7 @@ async fn post_v1_desktop_window_focus(
 #[utoipa::path(
     post,
     path = "/v1/desktop/windows/{id}/move",
-    tag = "v1",
+    tag = "desktop",
     params(
         ("id" = String, Path, description = "X11 window ID")
     ),
@@ -1146,7 +1179,7 @@ async fn post_v1_desktop_window_move(
 #[utoipa::path(
     post,
     path = "/v1/desktop/windows/{id}/resize",
-    tag = "v1",
+    tag = "desktop",
     params(
         ("id" = String, Path, description = "X11 window ID")
     ),
@@ -1172,7 +1205,7 @@ async fn post_v1_desktop_window_resize(
 #[utoipa::path(
     get,
     path = "/v1/desktop/clipboard",
-    tag = "v1",
+    tag = "desktop",
     params(DesktopClipboardQuery),
     responses(
         (status = 200, description = "Clipboard contents", body = DesktopClipboardResponse),
@@ -1197,7 +1230,7 @@ async fn get_v1_desktop_clipboard(
 #[utoipa::path(
     post,
     path = "/v1/desktop/clipboard",
-    tag = "v1",
+    tag = "desktop",
     request_body = DesktopClipboardWriteRequest,
     responses(
         (status = 200, description = "Clipboard updated", body = DesktopActionResponse),
@@ -1220,7 +1253,7 @@ async fn post_v1_desktop_clipboard(
 #[utoipa::path(
     post,
     path = "/v1/desktop/launch",
-    tag = "v1",
+    tag = "desktop",
     request_body = DesktopLaunchRequest,
     responses(
         (status = 200, description = "Application launched", body = DesktopLaunchResponse),
@@ -1242,7 +1275,7 @@ async fn post_v1_desktop_launch(
 #[utoipa::path(
     post,
     path = "/v1/desktop/open",
-    tag = "v1",
+    tag = "desktop",
     request_body = DesktopOpenRequest,
     responses(
         (status = 200, description = "Target opened", body = DesktopOpenResponse),
@@ -1264,7 +1297,7 @@ async fn post_v1_desktop_open(
 #[utoipa::path(
     post,
     path = "/v1/desktop/recording/start",
-    tag = "v1",
+    tag = "desktop",
     request_body = DesktopRecordingStartRequest,
     responses(
         (status = 200, description = "Desktop recording started", body = DesktopRecordingInfo),
@@ -1287,7 +1320,7 @@ async fn post_v1_desktop_recording_start(
 #[utoipa::path(
     post,
     path = "/v1/desktop/recording/stop",
-    tag = "v1",
+    tag = "desktop",
     responses(
         (status = 200, description = "Desktop recording stopped", body = DesktopRecordingInfo),
         (status = 409, description = "No active desktop recording", body = ProblemDetails),
@@ -1307,7 +1340,7 @@ async fn post_v1_desktop_recording_stop(
 #[utoipa::path(
     get,
     path = "/v1/desktop/recordings",
-    tag = "v1",
+    tag = "desktop",
     responses(
         (status = 200, description = "Desktop recordings", body = DesktopRecordingListResponse),
         (status = 502, description = "Desktop recordings query failed", body = ProblemDetails)
@@ -1326,7 +1359,7 @@ async fn get_v1_desktop_recordings(
 #[utoipa::path(
     get,
     path = "/v1/desktop/recordings/{id}",
-    tag = "v1",
+    tag = "desktop",
     params(
         ("id" = String, Path, description = "Desktop recording ID")
     ),
@@ -1349,12 +1382,12 @@ async fn get_v1_desktop_recording(
 #[utoipa::path(
     get,
     path = "/v1/desktop/recordings/{id}/download",
-    tag = "v1",
+    tag = "desktop",
     params(
         ("id" = String, Path, description = "Desktop recording ID")
     ),
     responses(
-        (status = 200, description = "Desktop recording as MP4 bytes"),
+        (status = 200, description = "Desktop recording as MP4 bytes", body = String, content_type = "video/mp4"),
         (status = 404, description = "Unknown desktop recording", body = ProblemDetails)
     )
 )]
@@ -1377,7 +1410,7 @@ async fn get_v1_desktop_recording_download(
 #[utoipa::path(
     delete,
     path = "/v1/desktop/recordings/{id}",
-    tag = "v1",
+    tag = "desktop",
     params(
         ("id" = String, Path, description = "Desktop recording ID")
     ),
@@ -1401,7 +1434,7 @@ async fn delete_v1_desktop_recording(
 #[utoipa::path(
     post,
     path = "/v1/desktop/stream/start",
-    tag = "v1",
+    tag = "desktop",
     responses(
         (status = 200, description = "Desktop streaming started", body = DesktopStreamStatusResponse)
     )
@@ -1418,7 +1451,7 @@ async fn post_v1_desktop_stream_start(
 #[utoipa::path(
     post,
     path = "/v1/desktop/stream/stop",
-    tag = "v1",
+    tag = "desktop",
     responses(
         (status = 200, description = "Desktop streaming stopped", body = DesktopStreamStatusResponse)
     )
@@ -1435,7 +1468,7 @@ async fn post_v1_desktop_stream_stop(
 #[utoipa::path(
     get,
     path = "/v1/desktop/stream/status",
-    tag = "v1",
+    tag = "desktop",
     responses(
         (status = 200, description = "Desktop stream status", body = DesktopStreamStatusResponse)
     )
@@ -1454,7 +1487,7 @@ async fn get_v1_desktop_stream_status(
 #[utoipa::path(
     get,
     path = "/v1/desktop/stream/signaling",
-    tag = "v1",
+    tag = "desktop",
     params(
         ("access_token" = Option<String>, Query, description = "Bearer token alternative for WS auth")
     ),
@@ -1475,16 +1508,20 @@ async fn get_v1_desktop_stream_ws(
         .into_response())
 }
 
+/// List available agents.
+///
+/// Returns all known agents with their installation status, credential
+/// availability, and optionally their version and configuration options.
 #[utoipa::path(
     get,
     path = "/v1/agents",
-    tag = "v1",
+    tag = "agents",
     params(
         ("config" = Option<bool>, Query, description = "When true, include version/path/configOptions (slower)"),
         ("no_cache" = Option<bool>, Query, description = "When true, bypass version cache")
     ),
     responses(
-        (status = 200, description = "List of v1 agents", body = AgentListResponse),
+        (status = 200, description = "List of agents", body = AgentListResponse),
         (status = 401, description = "Authentication required", body = ProblemDetails)
     )
 )]
@@ -1610,10 +1647,14 @@ async fn get_v1_agents(
     Ok(Json(AgentListResponse { agents }))
 }
 
+/// Get a single agent.
+///
+/// Returns detailed information for one agent, including installation status,
+/// credential availability, and optionally version and configuration options.
 #[utoipa::path(
     get,
     path = "/v1/agents/{agent}",
-    tag = "v1",
+    tag = "agents",
     params(
         ("agent" = String, Path, description = "Agent id"),
         ("config" = Option<bool>, Query, description = "When true, include version/path/configOptions (slower)"),
@@ -1790,10 +1831,14 @@ async fn get_v1_agent(
 //     }
 // }
 
+/// Install or reinstall an agent.
+///
+/// Downloads and installs the agent binary and its process wrapper. Returns
+/// the list of installed artifacts and whether the agent was already present.
 #[utoipa::path(
     post,
     path = "/v1/agents/{agent}/install",
-    tag = "v1",
+    tag = "agents",
     params(
         ("agent" = String, Path, description = "Agent id")
     ),
@@ -1841,10 +1886,14 @@ async fn post_v1_agent_install(
     Ok(Json(map_install_result(install_result)))
 }
 
+/// List directory entries.
+///
+/// Returns the immediate children of the specified directory, including
+/// file names, sizes, types, and last-modified timestamps.
 #[utoipa::path(
     get,
     path = "/v1/fs/entries",
-    tag = "v1",
+    tag = "filesystem",
     params(
         ("path" = Option<String>, Query, description = "Directory path")
     ),
@@ -1894,15 +1943,18 @@ async fn get_v1_fs_entries(
     Ok(Json(entries))
 }
 
+/// Read a file.
+///
+/// Returns the raw bytes of the file at the given path.
 #[utoipa::path(
     get,
     path = "/v1/fs/file",
-    tag = "v1",
+    tag = "filesystem",
     params(
         ("path" = String, Query, description = "File path")
     ),
     responses(
-        (status = 200, description = "File content")
+        (status = 200, description = "File content", body = String, content_type = "application/octet-stream")
     )
 )]
 async fn get_v1_fs_file(Query(query): Query<FsPathQuery>) -> Result<Response, ApiError> {
@@ -1922,14 +1974,18 @@ async fn get_v1_fs_file(Query(query): Query<FsPathQuery>) -> Result<Response, Ap
         .into_response())
 }
 
+/// Write a file.
+///
+/// Writes raw bytes to the file at the given path, creating parent
+/// directories as needed. Returns the resolved path and bytes written.
 #[utoipa::path(
     put,
     path = "/v1/fs/file",
-    tag = "v1",
+    tag = "filesystem",
     params(
         ("path" = String, Query, description = "File path")
     ),
-    request_body(content = String, description = "Raw file bytes"),
+    request_body(content = String, content_type = "application/octet-stream", description = "Raw file bytes"),
     responses(
         (status = 200, description = "Write result", body = FsWriteResponse)
     )
@@ -1949,10 +2005,14 @@ async fn put_v1_fs_file(
     }))
 }
 
+/// Delete a file or directory.
+///
+/// Removes the entry at the given path. For directories, set `recursive`
+/// to true to remove contents recursively.
 #[utoipa::path(
     delete,
     path = "/v1/fs/entry",
-    tag = "v1",
+    tag = "filesystem",
     params(
         ("path" = String, Query, description = "File or directory path"),
         ("recursive" = Option<bool>, Query, description = "Delete directory recursively")
@@ -1980,10 +2040,14 @@ async fn delete_v1_fs_entry(
     }))
 }
 
+/// Create a directory.
+///
+/// Creates the directory at the given path, including any missing parent
+/// directories.
 #[utoipa::path(
     post,
     path = "/v1/fs/mkdir",
-    tag = "v1",
+    tag = "filesystem",
     params(
         ("path" = String, Query, description = "Directory path")
     ),
@@ -2001,10 +2065,14 @@ async fn post_v1_fs_mkdir(
     }))
 }
 
+/// Move or rename a file or directory.
+///
+/// Moves the entry from one path to another. Set `overwrite` to true to
+/// replace an existing destination.
 #[utoipa::path(
     post,
     path = "/v1/fs/move",
-    tag = "v1",
+    tag = "filesystem",
     request_body = FsMoveRequest,
     responses(
         (status = 200, description = "Move result", body = FsMoveResponse)
@@ -2042,10 +2110,14 @@ async fn post_v1_fs_move(
     }))
 }
 
+/// Get file or directory metadata.
+///
+/// Returns the type, size, and last-modified timestamp for the entry at
+/// the given path.
 #[utoipa::path(
     get,
     path = "/v1/fs/stat",
-    tag = "v1",
+    tag = "filesystem",
     params(
         ("path" = String, Query, description = "Path to stat")
     ),
@@ -2073,14 +2145,18 @@ async fn get_v1_fs_stat(Query(query): Query<FsPathQuery>) -> Result<Json<FsStat>
     }))
 }
 
+/// Upload files as a tar archive.
+///
+/// Accepts a tar archive body, extracts its contents into the destination
+/// directory, and returns the list of extracted paths.
 #[utoipa::path(
     post,
     path = "/v1/fs/upload-batch",
-    tag = "v1",
+    tag = "filesystem",
     params(
         ("path" = Option<String>, Query, description = "Destination path")
     ),
-    request_body(content = String, description = "tar archive body"),
+    request_body(content = String, content_type = "application/x-tar", description = "tar archive body"),
     responses(
         (status = 200, description = "Upload/extract result", body = FsUploadBatchResponse)
     )
@@ -2157,7 +2233,7 @@ async fn post_v1_fs_upload_batch(
 #[utoipa::path(
     get,
     path = "/v1/processes/config",
-    tag = "v1",
+    tag = "processes",
     responses(
         (status = 200, description = "Current runtime process config", body = ProcessConfig),
         (status = 501, description = "Process API unsupported on this platform", body = ProblemDetails)
@@ -2181,7 +2257,7 @@ async fn get_v1_processes_config(
 #[utoipa::path(
     post,
     path = "/v1/processes/config",
-    tag = "v1",
+    tag = "processes",
     request_body = ProcessConfig,
     responses(
         (status = 200, description = "Updated runtime process config", body = ProcessConfig),
@@ -2211,7 +2287,7 @@ async fn post_v1_processes_config(
 #[utoipa::path(
     post,
     path = "/v1/processes",
-    tag = "v1",
+    tag = "processes",
     request_body = ProcessCreateRequest,
     responses(
         (status = 200, description = "Started process", body = ProcessInfo),
@@ -2252,7 +2328,7 @@ async fn post_v1_processes(
 #[utoipa::path(
     post,
     path = "/v1/processes/run",
-    tag = "v1",
+    tag = "processes",
     request_body = ProcessRunRequest,
     responses(
         (status = 200, description = "One-off command result", body = ProcessRunResponse),
@@ -2298,7 +2374,7 @@ async fn post_v1_processes_run(
 #[utoipa::path(
     get,
     path = "/v1/processes",
-    tag = "v1",
+    tag = "processes",
     params(ProcessListQuery),
     responses(
         (status = 200, description = "List processes", body = ProcessListResponse),
@@ -2329,7 +2405,7 @@ async fn get_v1_processes(
 #[utoipa::path(
     get,
     path = "/v1/processes/{id}",
-    tag = "v1",
+    tag = "processes",
     params(
         ("id" = String, Path, description = "Process ID")
     ),
@@ -2358,7 +2434,7 @@ async fn get_v1_process(
 #[utoipa::path(
     post,
     path = "/v1/processes/{id}/stop",
-    tag = "v1",
+    tag = "processes",
     params(
         ("id" = String, Path, description = "Process ID"),
         ("waitMs" = Option<u64>, Query, description = "Wait up to N ms for process to exit")
@@ -2392,7 +2468,7 @@ async fn post_v1_process_stop(
 #[utoipa::path(
     post,
     path = "/v1/processes/{id}/kill",
-    tag = "v1",
+    tag = "processes",
     params(
         ("id" = String, Path, description = "Process ID"),
         ("waitMs" = Option<u64>, Query, description = "Wait up to N ms for process to exit")
@@ -2426,7 +2502,7 @@ async fn post_v1_process_kill(
 #[utoipa::path(
     delete,
     path = "/v1/processes/{id}",
-    tag = "v1",
+    tag = "processes",
     params(
         ("id" = String, Path, description = "Process ID")
     ),
@@ -2457,7 +2533,7 @@ async fn delete_v1_process(
 #[utoipa::path(
     get,
     path = "/v1/processes/{id}/logs",
-    tag = "v1",
+    tag = "processes",
     params(
         ("id" = String, Path, description = "Process ID"),
         ("stream" = Option<ProcessLogsStream>, Query, description = "stdout|stderr|combined|pty"),
@@ -2561,7 +2637,7 @@ async fn get_v1_process_logs(
 #[utoipa::path(
     post,
     path = "/v1/processes/{id}/input",
-    tag = "v1",
+    tag = "processes",
     params(
         ("id" = String, Path, description = "Process ID")
     ),
@@ -2605,7 +2681,7 @@ async fn post_v1_process_input(
 #[utoipa::path(
     post,
     path = "/v1/processes/{id}/terminal/resize",
-    tag = "v1",
+    tag = "processes",
     params(
         ("id" = String, Path, description = "Process ID")
     ),
@@ -2646,7 +2722,7 @@ async fn post_v1_process_terminal_resize(
 #[utoipa::path(
     get,
     path = "/v1/processes/{id}/terminal/ws",
-    tag = "v1",
+    tag = "processes",
     params(
         ("id" = String, Path, description = "Process ID"),
         ("access_token" = Option<String>, Query, description = "Bearer token alternative for WS auth")
@@ -2940,16 +3016,20 @@ async fn send_ws_error(socket: &mut WebSocket, message: &str) -> Result<(), ()> 
     .await
 }
 
+/// Get an MCP server configuration entry.
+///
+/// Reads a single named MCP server entry from the project-scoped
+/// configuration file in the given directory.
 #[utoipa::path(
     get,
     path = "/v1/config/mcp",
-    tag = "v1",
+    tag = "config",
     params(
         ("directory" = String, Query, description = "Target directory"),
         ("mcpName" = String, Query, description = "MCP entry name")
     ),
     responses(
-        (status = 200, description = "MCP entry", body = McpServerConfig),
+        (status = 200, description = "MCP server configuration entry", body = McpServerConfig),
         (status = 404, description = "Entry not found", body = ProblemDetails)
     )
 )]
@@ -2971,10 +3051,14 @@ async fn get_v1_config_mcp(
     Ok(Json(value))
 }
 
+/// Create or update an MCP server configuration entry.
+///
+/// Writes a named MCP server entry into the project-scoped configuration
+/// file, creating the file and parent directories as needed.
 #[utoipa::path(
     put,
     path = "/v1/config/mcp",
-    tag = "v1",
+    tag = "config",
     params(
         ("directory" = String, Query, description = "Target directory"),
         ("mcpName" = String, Query, description = "MCP entry name")
@@ -2998,10 +3082,14 @@ async fn put_v1_config_mcp(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Delete an MCP server configuration entry.
+///
+/// Removes a named MCP server entry from the project-scoped configuration
+/// file.
 #[utoipa::path(
     delete,
     path = "/v1/config/mcp",
-    tag = "v1",
+    tag = "config",
     params(
         ("directory" = String, Query, description = "Target directory"),
         ("mcpName" = String, Query, description = "MCP entry name")
@@ -3021,16 +3109,20 @@ async fn delete_v1_config_mcp(Query(query): Query<McpConfigQuery>) -> Result<Sta
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Get a skills configuration entry.
+///
+/// Reads a single named skills entry from the project-scoped configuration
+/// file in the given directory.
 #[utoipa::path(
     get,
     path = "/v1/config/skills",
-    tag = "v1",
+    tag = "config",
     params(
         ("directory" = String, Query, description = "Target directory"),
         ("skillName" = String, Query, description = "Skill entry name")
     ),
     responses(
-        (status = 200, description = "Skills entry", body = SkillsConfig),
+        (status = 200, description = "Skills configuration entry", body = SkillsConfig),
         (status = 404, description = "Entry not found", body = ProblemDetails)
     )
 )]
@@ -3052,10 +3144,14 @@ async fn get_v1_config_skills(
     Ok(Json(value))
 }
 
+/// Create or update a skills configuration entry.
+///
+/// Writes a named skills entry into the project-scoped configuration file,
+/// creating the file and parent directories as needed.
 #[utoipa::path(
     put,
     path = "/v1/config/skills",
-    tag = "v1",
+    tag = "config",
     params(
         ("directory" = String, Query, description = "Target directory"),
         ("skillName" = String, Query, description = "Skill entry name")
@@ -3079,10 +3175,13 @@ async fn put_v1_config_skills(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Delete a skills configuration entry.
+///
+/// Removes a named skills entry from the project-scoped configuration file.
 #[utoipa::path(
     delete,
     path = "/v1/config/skills",
-    tag = "v1",
+    tag = "config",
     params(
         ("directory" = String, Query, description = "Target directory"),
         ("skillName" = String, Query, description = "Skill entry name")
@@ -3104,10 +3203,14 @@ async fn delete_v1_config_skills(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// List active ACP server instances.
+///
+/// Returns all currently running ACP proxy server instances with their
+/// bound agent and creation timestamp.
 #[utoipa::path(
     get,
     path = "/v1/acp",
-    tag = "v1",
+    tag = "acp",
     responses(
         (status = 200, description = "Active ACP server instances", body = AcpServerListResponse)
     )
@@ -3130,10 +3233,15 @@ async fn get_v1_acp_servers(
     Ok(Json(AcpServerListResponse { servers }))
 }
 
+/// Send a JSON-RPC envelope to an ACP server.
+///
+/// Posts a JSON-RPC request or notification to the specified ACP server
+/// instance. The first POST to a new server_id must include the `agent`
+/// query parameter to bind the server to an agent.
 #[utoipa::path(
     post,
     path = "/v1/acp/{server_id}",
-    tag = "v1",
+    tag = "acp",
     params(
         ("server_id" = String, Path, description = "Client-defined ACP server id"),
         ("agent" = Option<String>, Query, description = "Agent id required for first POST")
@@ -3142,11 +3250,11 @@ async fn get_v1_acp_servers(
     responses(
         (status = 200, description = "JSON-RPC response envelope", body = AcpEnvelope),
         (status = 202, description = "JSON-RPC notification accepted"),
-        (status = 406, description = "Client does not accept JSON responses", body = ProblemDetails),
-        (status = 415, description = "Unsupported media type", body = ProblemDetails),
         (status = 400, description = "Invalid ACP envelope", body = ProblemDetails),
         (status = 404, description = "Unknown ACP server", body = ProblemDetails),
+        (status = 406, description = "Client does not accept JSON responses", body = ProblemDetails),
         (status = 409, description = "ACP server bound to different agent", body = ProblemDetails),
+        (status = 415, description = "Unsupported media type", body = ProblemDetails),
         (status = 504, description = "ACP agent process response timeout", body = ProblemDetails)
     )
 )]
@@ -3196,18 +3304,22 @@ async fn post_v1_acp(
     }
 }
 
+/// Open an SSE stream for an ACP server.
+///
+/// Returns a Server-Sent Events stream carrying JSON-RPC envelopes from
+/// the agent process. Requires `Accept: text/event-stream`.
 #[utoipa::path(
     get,
     path = "/v1/acp/{server_id}",
-    tag = "v1",
+    tag = "acp",
     params(
         ("server_id" = String, Path, description = "Client-defined ACP server id")
     ),
     responses(
-        (status = 200, description = "SSE stream of ACP envelopes"),
-        (status = 406, description = "Client does not accept SSE responses", body = ProblemDetails),
+        (status = 200, description = "SSE stream of ACP envelopes", body = String, content_type = "text/event-stream"),
+        (status = 400, description = "Invalid request", body = ProblemDetails),
         (status = 404, description = "Unknown ACP server", body = ProblemDetails),
-        (status = 400, description = "Invalid request", body = ProblemDetails)
+        (status = 406, description = "Client does not accept SSE responses", body = ProblemDetails)
     )
 )]
 async fn get_v1_acp(
@@ -3232,10 +3344,13 @@ async fn get_v1_acp(
     ))
 }
 
+/// Close an ACP server instance.
+///
+/// Terminates the ACP proxy server and its associated agent process.
 #[utoipa::path(
     delete,
     path = "/v1/acp/{server_id}",
-    tag = "v1",
+    tag = "acp",
     params(
         ("server_id" = String, Path, description = "Client-defined ACP server id")
     ),
