@@ -98,9 +98,9 @@ await sdk.destroySandbox(); // provider-defined cleanup + disposes client
 | `sandbox-agent/docker` | Docker container |
 | `sandbox-agent/e2b` | E2B sandbox |
 | `sandbox-agent/daytona` | Daytona workspace |
-| `sandbox-agent/agentcomputer` | Agent Computer managed worker |
 | `sandbox-agent/vercel` | Vercel Sandbox |
 | `sandbox-agent/cloudflare` | Cloudflare Sandbox |
+| `sandbox-agent/agentcomputer` | Agent Computer managed worker |
 
 Use `sdk.dispose()` to disconnect without changing sandbox state, `sdk.pauseSandbox()` for graceful suspension when supported, or `sdk.killSandbox()` for permanent deletion.
 

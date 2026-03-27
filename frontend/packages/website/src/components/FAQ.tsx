@@ -21,12 +21,12 @@ const faqs = [
   },
   {
     question: "Can I run this locally or does it require a sandbox provider?",
-    answer: "Both. Run locally for development, deploy to E2B, Daytona, or Vercel Sandboxes for production.",
+    answer: "Both. Run locally for development, deploy to E2B, Daytona, Vercel, or Agent Computer Sandboxes for production.",
   },
   {
     question: "Does it support [platform]?",
     answer:
-      "The server is a single Rust binary that runs anywhere with a curl install. If your platform can run Linux binaries (Docker, VMs, etc.), it works. See the deployment guides for E2B, Daytona, and Vercel Sandboxes.",
+      "The server is a single Rust binary that runs anywhere with a curl install. If your platform can run Linux binaries (Docker, VMs, etc.), it works. See the deployment guides for E2B, Daytona, Vercel, and Agent Computer Sandboxes.",
   },
   {
     question: "Can I use this with my personal API keys?",
