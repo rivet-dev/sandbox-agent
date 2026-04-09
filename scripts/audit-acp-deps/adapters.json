@@ -6,7 +6,7 @@
     {
       "agentId": "claude",
       "npmPackage": "@zed-industries/claude-agent-acp",
-      "pinnedVersion": "0.20.0"
+      "pinnedVersion": "0.23.1"
     },
     {
       "agentId": "codex",

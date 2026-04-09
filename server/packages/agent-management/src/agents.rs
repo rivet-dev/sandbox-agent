@@ -636,6 +636,10 @@ impl AgentManager {
         install_npm_package(&root, package, agent)?;
         let npm_install_ms = elapsed_ms(npm_install_started);
 
+        if agent == AgentId::Claude {
+            patch_installed_claude_agent_process(&root)?;
+        }
+
         let bin_name = agent.agent_process_binary_hint().ok_or_else(|| {
             AgentError::ExtractFailed(format!(
                 "missing executable hint for agent process package: {agent}"
@@ -1075,6 +1079,156 @@ fn npm_bin_path(root: &Path, bin_name: &str) -> PathBuf {
         path.set_extension("cmd");
     }
     path
+}
+
+fn patch_installed_claude_agent_process(root: &Path) -> Result<(), AgentError> {
+    let package_root = find_installed_claude_agent_package(root).ok_or_else(|| {
+        AgentError::ExtractFailed(format!(
+            "installed Claude ACP package was not found under {}",
+            root.display()
+        ))
+    })?;
+
+    let acp_agent_path = package_root.join("dist").join("acp-agent.js");
+    let original = fs::read_to_string(&acp_agent_path).map_err(|err| {
+        AgentError::ExtractFailed(format!(
+            "failed to read installed Claude ACP adapter at {}: {err}",
+            acp_agent_path.display()
+        ))
+    })?;
+    let patched = patch_claude_agent_process_source(&original)?;
+
+    if patched != original {
+        fs::write(&acp_agent_path, patched).map_err(|err| {
+            AgentError::ExtractFailed(format!(
+                "failed to write patched Claude ACP adapter at {}: {err}",
+                acp_agent_path.display()
+            ))
+        })?;
+    }
+
+    Ok(())
+}
+
+fn find_installed_claude_agent_package(root: &Path) -> Option<PathBuf> {
+    [
+        root.join("node_modules")
+            .join("@zed-industries")
+            .join("claude-agent-acp"),
+        root.join("node_modules")
+            .join("@agentclientprotocol")
+            .join("claude-agent-acp"),
+    ]
+    .into_iter()
+    .find(|path| path.join("dist").join("acp-agent.js").exists())
+}
+
+fn patch_claude_agent_process_source(source: &str) -> Result<String, AgentError> {
+    let mut patched = source.to_string();
+
+    if !patched.contains(r#"CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: "1""#) {
+        let needle = "                ...createEnvForGateway(this.gatewayAuthMeta),\n";
+        let replacement = concat!(
+            "                ...createEnvForGateway(this.gatewayAuthMeta),\n",
+            "                CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: \"1\",\n"
+        );
+
+        if !patched.contains(needle) {
+            return Err(AgentError::ExtractFailed(
+                "unsupported Claude ACP adapter layout: missing env block".to_string(),
+            ));
+        }
+
+        patched = patched.replacen(needle, replacement, 1);
+    }
+
+    if !patched.contains(r#"case "session_state_changed":"#) {
+        let hook_case = r#"                            case "hook_started":"#;
+        let session_state_block = concat!(
+            "                            case \"session_state_changed\": {\n",
+            "                                if (message.state === \"idle\") {\n",
+            "                                    return { stopReason: \"end_turn\", usage: {\n",
+            "                                        inputTokens: session.accumulatedUsage.inputTokens,\n",
+            "                                        outputTokens: session.accumulatedUsage.outputTokens,\n",
+            "                                        cachedReadTokens: session.accumulatedUsage.cachedReadTokens,\n",
+            "                                        cachedWriteTokens: session.accumulatedUsage.cachedWriteTokens,\n",
+            "                                        totalTokens: session.accumulatedUsage.inputTokens +\n",
+            "                                            session.accumulatedUsage.outputTokens +\n",
+            "                                            session.accumulatedUsage.cachedReadTokens +\n",
+            "                                            session.accumulatedUsage.cachedWriteTokens,\n",
+            "                                    } };\n",
+            "                                }\n",
+            "                                break;\n",
+            "                            }\n"
+        );
+
+        if !patched.contains(hook_case) {
+            return Err(AgentError::ExtractFailed(
+                "unsupported Claude ACP adapter layout: missing hook case block".to_string(),
+            ));
+        }
+
+        patched = patched.replacen(hook_case, &format!("{session_state_block}{hook_case}"), 1);
+    }
+
+    if !patched.contains(r#"sessionUpdate: "background_event""#) {
+        let hook_block_start = patched.find(r#"                            case "hook_started":"#)
+            .ok_or_else(|| {
+                AgentError::ExtractFailed(
+                    "unsupported Claude ACP adapter layout: missing background event cases"
+                        .to_string(),
+                )
+            })?;
+
+        let todo_comment_rel = patched[hook_block_start..]
+            .find("// Todo: process via status api:")
+            .ok_or_else(|| {
+                AgentError::ExtractFailed(
+                    "unsupported Claude ACP adapter layout: missing background event TODO"
+                        .to_string(),
+                )
+            })?;
+        let todo_comment_start = hook_block_start + todo_comment_rel;
+
+        let break_rel = patched[todo_comment_start..]
+            .find("                                break;")
+            .ok_or_else(|| {
+                AgentError::ExtractFailed(
+                    "unsupported Claude ACP adapter layout: missing background event break"
+                        .to_string(),
+                )
+            })?;
+        let break_start = todo_comment_start + break_rel;
+        let break_end = patched[break_start..]
+            .find('\n')
+            .map(|idx| break_start + idx + 1)
+            .unwrap_or_else(|| patched.len());
+
+        let replacement = concat!(
+            "                            case \"hook_started\":\n",
+            "                            case \"hook_progress\":\n",
+            "                            case \"hook_response\":\n",
+            "                            case \"files_persisted\":\n",
+            "                            case \"task_started\":\n",
+            "                            case \"task_notification\":\n",
+            "                            case \"task_progress\":\n",
+            "                            case \"elicitation_complete\":\n",
+            "                            case \"api_retry\":\n",
+            "                                await this.client.sessionUpdate({\n",
+            "                                    sessionId: message.session_id ?? params.sessionId,\n",
+            "                                    update: {\n",
+            "                                        sessionUpdate: \"background_event\",\n",
+            "                                        eventType: message.subtype,\n",
+            "                                        data: message,\n",
+            "                                    },\n",
+            "                                });\n",
+            "                                break;\n"
+        );
+
+        patched.replace_range(hook_block_start..break_end, replacement);
+    }
+
+    Ok(patched)
 }
 
 fn write_exec_agent_process_launcher(
@@ -1670,11 +1824,69 @@ while [ "$#" -gt 0 ]; do
 done
 [ -n "$prefix" ] || exit 1
 mkdir -p "$prefix/node_modules/.bin"
-for bin in claude-code-acp codex-acp amp-acp pi-acp cursor-agent-acp; do
+for bin in claude-agent-acp claude-code-acp codex-acp amp-acp pi-acp cursor-agent-acp; do
   echo '#!/usr/bin/env sh' > "$prefix/node_modules/.bin/$bin"
   echo 'exit 0' >> "$prefix/node_modules/.bin/$bin"
   chmod +x "$prefix/node_modules/.bin/$bin"
 done
+exit 0
+"#,
+        );
+    }
+
+    fn write_fake_npm_with_claude_package(path: &Path) {
+        write_exec(
+            path,
+            r#"#!/usr/bin/env sh
+set -e
+prefix=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    install|--no-audit|--no-fund)
+      shift
+      ;;
+    --prefix)
+      prefix="$2"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+[ -n "$prefix" ] || exit 1
+mkdir -p "$prefix/node_modules/.bin"
+mkdir -p "$prefix/node_modules/@zed-industries/claude-agent-acp/dist"
+cat > "$prefix/node_modules/@zed-industries/claude-agent-acp/dist/acp-agent.js" <<'EOF'
+const options = {
+    env: {
+        ...process.env,
+        ...userProvidedOptions?.env,
+        ...createEnvForGateway(this.gatewayAuthMeta),
+    },
+};
+
+switch (message.subtype) {
+    case "hook_started":
+    case "hook_progress":
+    case "hook_response":
+    case "files_persisted":
+    case "task_started":
+    case "task_notification":
+    case "task_progress":
+    case "elicitation_complete":
+        // Todo: process via status api: https://docs.claude.com/en/docs/claude-code/hooks#hook-output
+        break;
+}
+EOF
+cat > "$prefix/node_modules/@zed-industries/claude-agent-acp/package.json" <<'EOF'
+{"name":"@zed-industries/claude-agent-acp","version":"0.22.1"}
+EOF
+cat > "$prefix/node_modules/.bin/claude-agent-acp" <<'EOF'
+#!/usr/bin/env sh
+exit 0
+EOF
+chmod +x "$prefix/node_modules/.bin/claude-agent-acp"
 exit 0
 "#,
         );
@@ -1872,6 +2084,65 @@ exit 0
         assert!(
             launcher.contains("node_modules/.bin/codex-acp"),
             "launcher should invoke installed codex executable"
+        );
+    }
+
+    #[test]
+    fn install_claude_patches_adapter_for_idle_and_background_events() {
+        let _env_lock = env_lock().lock().expect("env lock");
+
+        let temp_dir = tempfile::tempdir().expect("create tempdir");
+        let mut manager = AgentManager::with_platform(temp_dir.path(), Platform::LinuxX64);
+
+        write_exec(
+            &manager.binary_path(AgentId::Claude),
+            "#!/usr/bin/env sh\nexit 0\n",
+        );
+
+        let bin_dir = temp_dir.path().join("bin");
+        fs::create_dir_all(&bin_dir).expect("create bin dir");
+        write_fake_npm_with_claude_package(&bin_dir.join("npm"));
+
+        let original_path = std::env::var_os("PATH").unwrap_or_default();
+        let mut paths = vec![bin_dir.clone()];
+        paths.extend(std::env::split_paths(&original_path));
+        let combined_path = std::env::join_paths(paths).expect("join PATH");
+        let _path_guard = EnvVarGuard::set("PATH", &combined_path);
+
+        manager.registry_url = serve_registry_once(serde_json::json!({ "agents": [] }));
+
+        let result = manager
+            .install(AgentId::Claude, InstallOptions::default())
+            .expect("install succeeds");
+
+        assert!(!result.already_installed);
+
+        let patched = fs::read_to_string(
+            manager
+                .agent_process_storage_dir(AgentId::Claude)
+                .join("node_modules")
+                .join("@zed-industries")
+                .join("claude-agent-acp")
+                .join("dist")
+                .join("acp-agent.js"),
+        )
+        .expect("read patched adapter");
+
+        assert!(
+            patched.contains(r#"CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: "1""#),
+            "patched adapter should opt into idle session state events"
+        );
+        assert!(
+            patched.contains(r#"case "session_state_changed":"#),
+            "patched adapter should handle idle session state transitions"
+        );
+        assert!(
+            patched.contains(r#"sessionUpdate: "background_event""#),
+            "patched adapter should forward background task notifications"
+        );
+        assert!(
+            patched.contains(r#"eventType: message.subtype"#),
+            "patched adapter should include the Claude event subtype"
         );
     }
 
