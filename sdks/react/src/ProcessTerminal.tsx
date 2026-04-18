@@ -3,12 +3,7 @@
 import type { FitAddon as GhosttyFitAddon, Terminal as GhosttyTerminal } from "ghostty-web";
 import type { CSSProperties } from "react";
 import { useEffect, useRef, useState } from "react";
-import type {
-  SandboxAgent,
-  TerminalErrorStatus,
-  TerminalExitStatus,
-  TerminalReadyStatus,
-} from "sandbox-agent";
+import type { SandboxAgent, TerminalErrorStatus, TerminalExitStatus, TerminalReadyStatus } from "sandbox-agent";
 
 type ConnectionState = "connecting" | "ready" | "closed" | "error";
 
