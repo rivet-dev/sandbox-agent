@@ -924,7 +924,50 @@ async fn oc_command_list(State(state): State<Arc<AdapterState>>, headers: Header
     {
         return response;
     }
-    (StatusCode::OK, Json(json!([]))).into_response()
+    // No native OpenCode proxy is available (e.g. Claude Code mode). Previously
+    // this returned `[]`, leaving the built-in TUI commands (compact, clear,
+    // scroll, etc.) undiscoverable via the API. Surface them here so frontends
+    // can render a complete command palette without depending on a native
+    // OpenCode server.
+    (StatusCode::OK, Json(Value::Array(builtin_tui_commands()))).into_response()
+}
+
+/// Built-in TUI commands exposed by the OpenCode TUI client via
+/// `EventTuiCommandExecute` and executable through `POST /tui/execute-command`.
+///
+/// These are actions (not prompt-template commands), so they are returned with
+/// a `type: "builtin"` discriminator alongside the `name`/`description` a
+/// command palette needs, to distinguish them from custom/user commands.
+fn builtin_tui_commands() -> Vec<Value> {
+    const BUILTINS: &[(&str, &str)] = &[
+        ("session.compact", "Compact/summarize context"),
+        ("session.list", "List sessions"),
+        ("session.new", "Create new session"),
+        ("session.share", "Share session"),
+        ("session.interrupt", "Interrupt current generation"),
+        ("prompt.clear", "Clear prompt input"),
+        ("prompt.submit", "Submit prompt"),
+        ("agent.cycle", "Cycle between agents"),
+        ("session.page.up", "Scroll page up"),
+        ("session.page.down", "Scroll page down"),
+        ("session.line.up", "Scroll line up"),
+        ("session.line.down", "Scroll line down"),
+        ("session.half.page.up", "Scroll half page up"),
+        ("session.half.page.down", "Scroll half page down"),
+        ("session.first", "Jump to first message"),
+        ("session.last", "Jump to last message"),
+    ];
+
+    BUILTINS
+        .iter()
+        .map(|(name, description)| {
+            json!({
+                "name": name,
+                "description": description,
+                "type": "builtin",
+            })
+        })
+        .collect()
 }
 
 async fn oc_config_get(State(state): State<Arc<AdapterState>>, headers: HeaderMap) -> Response {
