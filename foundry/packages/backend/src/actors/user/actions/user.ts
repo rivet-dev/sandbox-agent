@@ -1,6 +1,6 @@
 import { eq, and } from "drizzle-orm";
 import { DEFAULT_WORKSPACE_MODEL_ID } from "@sandbox-agent/foundry-shared";
-import { authAccounts, authSessions, authUsers, sessionState, userProfiles, userTaskState } from "../db/schema.js";
+import { authAccounts, authSessions, authUsers, sessionState, userProfiles, userProviderCredentials, userTaskState } from "../db/schema.js";
 import { materializeRow } from "../query-helpers.js";
 
 export const userActions = {
@@ -41,6 +41,49 @@ export const userActions = {
         updatedAt: row.updatedAt,
       })),
     };
+  },
+
+  // --- Provider credential actions ---
+
+  async getProviderCredentialStatus(c) {
+    const rows = await c.db.select({ provider: userProviderCredentials.provider }).from(userProviderCredentials).all();
+    const providers = new Set(rows.map((row: any) => row.provider));
+    return {
+      anthropic: providers.has("anthropic"),
+      openai: providers.has("openai"),
+    };
+  },
+
+  async getProviderCredentials(c) {
+    return await c.db.select().from(userProviderCredentials).all();
+  },
+
+  async upsertProviderCredential(
+    c,
+    input: {
+      provider: string;
+      credentialFileJson: string;
+      filePath: string;
+    },
+  ) {
+    const now = Date.now();
+    await c.db
+      .insert(userProviderCredentials)
+      .values({
+        provider: input.provider,
+        credentialFileJson: input.credentialFileJson,
+        filePath: input.filePath,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: userProviderCredentials.provider,
+        set: {
+          credentialFileJson: input.credentialFileJson,
+          filePath: input.filePath,
+          updatedAt: now,
+        },
+      })
+      .run();
   },
 
   // --- Mutation actions (migrated from queue) ---

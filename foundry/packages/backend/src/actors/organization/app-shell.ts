@@ -12,7 +12,7 @@ import type {
 } from "@sandbox-agent/foundry-shared";
 import { DEFAULT_WORKSPACE_MODEL_ID } from "@sandbox-agent/foundry-shared";
 import { getActorRuntimeContext } from "../context.js";
-import { getOrCreateGithubData, getOrCreateOrganization, selfOrganization } from "../handles.js";
+import { getOrCreateGithubData, getOrCreateOrganization, getOrCreateUser, selfOrganization } from "../handles.js";
 import { GitHubAppError } from "../../services/app-github.js";
 import { getBetterAuthService } from "../../services/better-auth.js";
 import { repoLabelFromRemote } from "../../services/repo.js";
@@ -289,6 +289,16 @@ export async function buildAppSnapshot(c: any, sessionId: string, allowOrganizat
       }
     : null;
 
+  let providerCredentials = { anthropic: false, openai: false };
+  if (user?.id) {
+    try {
+      const userActor = await getOrCreateUser(c, user.id);
+      providerCredentials = await userActor.getProviderCredentialStatus();
+    } catch (error) {
+      logger.warn({ error, sessionId }, "build_app_snapshot_provider_credentials_failed");
+    }
+  }
+
   const activeOrganizationId =
     currentUser &&
     currentSessionState?.activeOrganizationId &&
@@ -313,6 +323,7 @@ export async function buildAppSnapshot(c: any, sessionId: string, allowOrganizat
         skippedAt: profile?.starterRepoSkippedAt ?? null,
       },
     },
+    providerCredentials,
     users: currentUser ? [currentUser] : [],
     organizations,
   };

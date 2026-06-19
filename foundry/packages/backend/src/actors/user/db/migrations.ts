@@ -16,6 +16,12 @@ const journal = {
       tag: "0001_user_task_state",
       breakpoints: true,
     },
+    {
+      idx: 2,
+      when: 1773619200000,
+      tag: "0002_user_provider_credentials",
+      breakpoints: true,
+    },
   ],
 } as const;
 
@@ -101,6 +107,12 @@ CREATE TABLE \`session_state\` (
 	\`draft_updated_at\` integer,
 	\`updated_at\` integer NOT NULL,
 	PRIMARY KEY(\`task_id\`, \`session_id\`)
+);`,
+    m0002: `CREATE TABLE \`user_provider_credentials\` (
+	\`provider\` text PRIMARY KEY NOT NULL,
+	\`credential_file_json\` text NOT NULL,
+	\`file_path\` text NOT NULL,
+	\`updated_at\` integer NOT NULL
 );`,
   } as const,
 };

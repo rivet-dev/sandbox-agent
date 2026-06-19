@@ -20,6 +20,7 @@ class RemoteFoundryAppStore implements FoundryAppClient {
         skippedAt: null,
       },
     },
+    providerCredentials: { anthropic: false, openai: false },
     users: [],
     organizations: [],
   };

@@ -201,6 +201,70 @@ async function injectGitCredentials(sandbox: any, login: string, email: string, 
 }
 
 /**
+ * Provider credential files: well-known paths where CLI tools store auth tokens.
+ */
+const PROVIDER_CREDENTIAL_FILES = [
+  { provider: "anthropic", filePath: ".claude/.credentials.json" },
+  { provider: "openai", filePath: ".codex/auth.json" },
+] as const;
+
+/**
+ * Inject provider credentials (Claude, Codex) into the sandbox filesystem.
+ * Called before agent sessions start so credentials are on disk when the agent reads them.
+ */
+async function injectProviderCredentials(sandbox: any, credentials: Array<{ provider: string; credentialFileJson: string; filePath: string }>): Promise<void> {
+  for (const cred of credentials) {
+    const fullPath = `/home/user/${cred.filePath}`;
+    const dir = dirname(fullPath);
+    const script = [
+      "set -euo pipefail",
+      `mkdir -p ${JSON.stringify(dir)}`,
+      `cat > ${JSON.stringify(fullPath)} << 'CRED_EOF'\n${cred.credentialFileJson}\nCRED_EOF`,
+      `chmod 600 ${JSON.stringify(fullPath)}`,
+    ].join(" && ");
+
+    const result = await sandbox.runProcess({
+      command: "bash",
+      args: ["-lc", script],
+      cwd: "/",
+      timeoutMs: 10_000,
+    });
+    if ((result.exitCode ?? 0) !== 0) {
+      logActorWarning("task", "provider credential injection failed", {
+        provider: cred.provider,
+        exitCode: result.exitCode,
+        output: [result.stdout, result.stderr].filter(Boolean).join(""),
+      });
+    }
+  }
+}
+
+/**
+ * Extract provider credentials from the sandbox filesystem.
+ * Used to capture token refreshes and persist them to the user actor.
+ */
+async function extractProviderCredentials(sandbox: any): Promise<Array<{ provider: string; credentialFileJson: string; filePath: string }>> {
+  const results: Array<{ provider: string; credentialFileJson: string; filePath: string }> = [];
+  for (const file of PROVIDER_CREDENTIAL_FILES) {
+    const fullPath = `/home/user/${file.filePath}`;
+    const result = await sandbox.runProcess({
+      command: "cat",
+      args: [fullPath],
+      cwd: "/",
+      timeoutMs: 5_000,
+    });
+    if ((result.exitCode ?? 0) === 0 && result.stdout?.trim()) {
+      results.push({
+        provider: file.provider,
+        credentialFileJson: result.stdout.trim(),
+        filePath: file.filePath,
+      });
+    }
+  }
+  return results;
+}
+
+/**
  * Resolves the current user's GitHub identity from their auth session.
  * Returns null if the session is invalid or the user has no GitHub account.
  */
@@ -262,7 +326,7 @@ async function resolveGithubIdentity(authSessionId: string): Promise<{
 
 /**
  * Check if the task owner needs to swap, and if so, update the owner record
- * and inject new git credentials into the sandbox.
+ * and inject new git credentials and provider credentials into the sandbox.
  * Returns true if an owner swap occurred.
  */
 async function maybeSwapTaskOwner(c: any, authSessionId: string | null | undefined, sandbox: any | null): Promise<boolean> {
@@ -289,6 +353,19 @@ async function maybeSwapTaskOwner(c: any, authSessionId: string | null | undefin
 
   if (sandbox) {
     await injectGitCredentials(sandbox, identity.login, identity.email, identity.accessToken);
+
+    // Inject provider credentials (Claude, Codex) from the new owner's user actor.
+    try {
+      const user = await getOrCreateUser(c, identity.userId);
+      const credentials = await user.getProviderCredentials();
+      if (credentials.length > 0) {
+        await injectProviderCredentials(sandbox, credentials);
+      }
+    } catch (error) {
+      logActorWarning("task", "provider credential injection on owner swap failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   return true;
@@ -1218,6 +1295,30 @@ export async function refreshWorkspaceDerivedState(c: any): Promise<void> {
   const gitState = await collectWorkspaceGitState(c, record);
   await writeCachedGitState(c, gitState);
   await broadcastTaskUpdate(c);
+
+  // Extract provider credentials from the sandbox and persist to the task owner's user actor.
+  // This captures token refreshes performed by the agent (e.g. Claude CLI refreshing its OAuth token).
+  try {
+    const owner = await readTaskOwner(c);
+    if (owner?.primaryUserId && record.activeSandboxId) {
+      const runtime = await getTaskSandboxRuntime(c, record);
+      const extracted = await extractProviderCredentials(runtime.sandbox);
+      if (extracted.length > 0) {
+        const user = await getOrCreateUser(c, owner.primaryUserId);
+        for (const cred of extracted) {
+          await user.upsertProviderCredential({
+            provider: cred.provider,
+            credentialFileJson: cred.credentialFileJson,
+            filePath: cred.filePath,
+          });
+        }
+      }
+    }
+  } catch (error) {
+    logActorWarning("task", "provider credential extraction failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 export async function refreshWorkspaceSessionTranscript(c: any, sessionId: string): Promise<void> {

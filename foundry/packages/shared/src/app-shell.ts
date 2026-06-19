@@ -4,12 +4,7 @@ export type FoundryBillingPlanId = "free" | "team";
 export type FoundryBillingStatus = "active" | "trialing" | "past_due" | "scheduled_cancel";
 export type FoundryGithubInstallationStatus = "connected" | "install_required" | "reconnect_required";
 export type FoundryGithubSyncStatus = "pending" | "syncing" | "synced" | "error";
-export type FoundryGithubSyncPhase =
-  | "discovering_repositories"
-  | "syncing_repositories"
-  | "syncing_branches"
-  | "syncing_members"
-  | "syncing_pull_requests";
+export type FoundryGithubSyncPhase = "discovering_repositories" | "syncing_repositories" | "syncing_branches" | "syncing_members" | "syncing_pull_requests";
 export type FoundryOrganizationKind = "personal" | "organization";
 export type FoundryStarterRepoStatus = "pending" | "starred" | "skipped";
 
@@ -85,6 +80,11 @@ export interface FoundryOrganization {
   repoCatalog: string[];
 }
 
+export interface FoundryProviderCredentialStatus {
+  anthropic: boolean;
+  openai: boolean;
+}
+
 export interface FoundryAppSnapshot {
   auth: {
     status: "signed_out" | "signed_in";
@@ -100,6 +100,7 @@ export interface FoundryAppSnapshot {
       skippedAt: number | null;
     };
   };
+  providerCredentials: FoundryProviderCredentialStatus;
   users: FoundryUser[];
   organizations: FoundryOrganization[];
 }

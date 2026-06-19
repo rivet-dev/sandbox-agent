@@ -188,10 +188,16 @@ function MemberRow({ member }: { member: FoundryOrganizationMember }) {
   );
 }
 
-export function MockSignInPage() {
+const AUTH_ERROR_MESSAGES: Record<string, string> = {
+  please_restart_the_process: "Sign-in failed. Please try again.",
+  state_mismatch: "Sign-in session expired. Please try again.",
+};
+
+export function MockSignInPage({ error }: { error?: string }) {
   const client = useMockAppClient();
   const navigate = useNavigate();
   const t = useFoundryTokens();
+  const errorMessage = error ? (AUTH_ERROR_MESSAGES[error] ?? `Sign-in error: ${error}`) : undefined;
 
   return (
     <div
@@ -252,6 +258,25 @@ export function MockSignInPage() {
         >
           Connect your GitHub account to get started.
         </p>
+
+        {errorMessage && (
+          <p
+            style={{
+              fontSize: "13px",
+              fontWeight: 500,
+              color: "#f85149",
+              margin: "0 0 16px 0",
+              lineHeight: 1.5,
+              padding: "10px 14px",
+              background: "rgba(248, 81, 73, 0.1)",
+              borderRadius: "8px",
+              width: "100%",
+              textAlign: "center",
+            }}
+          >
+            {errorMessage}
+          </p>
+        )}
 
         {/* GitHub sign-in button */}
         <button
@@ -1172,6 +1197,8 @@ export function MockAccountSettingsPage() {
                 </div>
               </SettingsContentSection>
 
+              <ProviderCredentialsSection />
+
               <SettingsContentSection title="Sessions" description="Manage your active sessions across devices.">
                 <SettingsRow label="Current session" description="This device — signed in via GitHub OAuth." />
               </SettingsContentSection>
@@ -1219,6 +1246,48 @@ export function MockAccountSettingsPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+function ProviderCredentialsSection() {
+  const snapshot = useMockAppSnapshot();
+  const t = useFoundryTokens();
+  const providerCredentials = snapshot.providerCredentials ?? { anthropic: false, openai: false };
+
+  const providers = [
+    {
+      key: "anthropic" as const,
+      label: "Claude",
+      description: "Anthropic's Claude AI assistant.",
+      signedIn: providerCredentials.anthropic,
+    },
+    {
+      key: "openai" as const,
+      label: "Codex",
+      description: "OpenAI's Codex coding agent.",
+      signedIn: providerCredentials.openai,
+    },
+  ];
+
+  return (
+    <SettingsContentSection title="Provider Credentials" description="Sign in to AI providers to use them in your tasks.">
+      {providers.map((provider) => (
+        <SettingsRow
+          key={provider.key}
+          label={provider.label}
+          description={provider.signedIn ? "Signed in" : "Not signed in"}
+          action={
+            provider.signedIn ? (
+              <span style={{ ...badgeStyle(t, "rgba(52, 211, 153, 0.12)", "rgb(52, 211, 153)"), fontSize: "10px" }}>Connected</span>
+            ) : (
+              <button type="button" style={secondaryButtonStyle(t)}>
+                Sign in
+              </button>
+            )
+          }
+        />
+      ))}
+    </SettingsContentSection>
   );
 }
 

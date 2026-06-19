@@ -404,6 +404,7 @@ function signedOutAppSnapshot(): FoundryAppSnapshot {
         skippedAt: null,
       },
     },
+    providerCredentials: { anthropic: false, openai: false },
     users: [],
     organizations: [],
   };

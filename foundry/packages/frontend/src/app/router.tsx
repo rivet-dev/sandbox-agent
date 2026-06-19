@@ -29,6 +29,9 @@ const signInRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/signin",
   component: SignInRoute,
+  validateSearch: (search: Record<string, unknown>): { error?: string } => ({
+    error: typeof search.error === "string" ? search.error : undefined,
+  }),
 });
 
 const accountRoute = createRoute({
@@ -150,6 +153,7 @@ function IndexRoute() {
 
 function SignInRoute() {
   const snapshot = useMockAppSnapshot();
+  const { error } = signInRoute.useSearch();
   if (!isMockFrontendClient && isAppSnapshotBootstrapping(snapshot)) {
     return <AppLoadingScreen label="Restoring Foundry session..." />;
   }
@@ -157,7 +161,7 @@ function SignInRoute() {
     return <IndexRoute />;
   }
 
-  return <MockSignInPage />;
+  return <MockSignInPage error={error} />;
 }
 
 function AccountRoute() {

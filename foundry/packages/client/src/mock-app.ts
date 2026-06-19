@@ -96,6 +96,10 @@ export interface MockFoundryAppSnapshot {
       skippedAt: number | null;
     };
   };
+  providerCredentials: {
+    anthropic: boolean;
+    openai: boolean;
+  };
   users: MockFoundryUser[];
   organizations: MockFoundryOrganization[];
 }
@@ -228,6 +232,10 @@ function buildDefaultSnapshot(): MockFoundryAppSnapshot {
         starredAt: null,
         skippedAt: null,
       },
+    },
+    providerCredentials: {
+      anthropic: false,
+      openai: false,
     },
     users: [
       {
@@ -404,6 +412,10 @@ function parseStoredSnapshot(): MockFoundryAppSnapshot | null {
           starredAt: parsed.onboarding?.starterRepo?.starredAt ?? null,
           skippedAt: parsed.onboarding?.starterRepo?.skippedAt ?? null,
         },
+      },
+      providerCredentials: {
+        anthropic: parsed.providerCredentials?.anthropic ?? false,
+        openai: parsed.providerCredentials?.openai ?? false,
       },
       organizations: (parsed.organizations ?? []).map((organization: MockFoundryOrganization & { repoImportStatus?: string }) => ({
         ...organization,

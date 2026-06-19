@@ -93,6 +93,14 @@ export const sessionState = sqliteTable("session_state", {
   updatedAt: integer("updated_at").notNull(),
 });
 
+/** Custom Foundry table — not part of Better Auth. Stores provider credentials (Claude, Codex) extracted from sandbox filesystems. */
+export const userProviderCredentials = sqliteTable("user_provider_credentials", {
+  provider: text("provider").notNull().primaryKey(), // "anthropic" | "openai"
+  credentialFileJson: text("credential_file_json").notNull(), // raw file contents to write back
+  filePath: text("file_path").notNull(), // e.g. ".claude/.credentials.json"
+  updatedAt: integer("updated_at").notNull(),
+});
+
 /** Custom Foundry table — not part of Better Auth. Stores per-user task/session UI state. */
 export const userTaskState = sqliteTable(
   "user_task_state",

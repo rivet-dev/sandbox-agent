@@ -32,6 +32,7 @@ const EMPTY_APP_SNAPSHOT: FoundryAppSnapshot = {
       skippedAt: null,
     },
   },
+  providerCredentials: { anthropic: false, openai: false },
   users: [],
   organizations: [],
 };
