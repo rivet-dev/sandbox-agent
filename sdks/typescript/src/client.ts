@@ -609,7 +609,9 @@ export class LiveAcpConnection {
       if (replayText) {
         // TODO: Replace this synthesized replay text with ACP-native restore once standardized.
         this.pendingReplayByLocalSessionId.delete(localSessionId);
-        injectReplayPrompt(mappedParams, replayText);
+        prefixPromptText(mappedParams, replayText);
+      } else {
+        prefixPromptText(mappedParams, "msg:");
       }
 
       if (options.notification) {
@@ -2686,12 +2688,29 @@ function mapSessionParams(params: Record<string, unknown>, agentSessionId: strin
   };
 }
 
-function injectReplayPrompt(params: Record<string, unknown>, replayText: string): void {
+function prefixPromptText(params: Record<string, unknown>, prefix: string): void {
   const prompt = Array.isArray(params.prompt) ? [...params.prompt] : [];
-  prompt.unshift({
-    type: "text",
-    text: replayText,
-  });
+  let prefixed = false;
+
+  for (let i = 0; i < prompt.length; i += 1) {
+    const part = prompt[i];
+    if (isRecord(part) && part.type === "text" && typeof part.text === "string") {
+      prompt[i] = {
+        ...part,
+        text: `${prefix}${part.text}`,
+      };
+      prefixed = true;
+      break;
+    }
+  }
+
+  if (!prefixed) {
+    prompt.unshift({
+      type: "text",
+      text: prefix,
+    });
+  }
+
   params.prompt = prompt;
 }
 
@@ -2700,25 +2719,16 @@ function buildReplayText(events: SessionEvent[], maxChars: number): string | nul
     return null;
   }
 
-  const prefix = "Previous session history is replayed below as JSON-RPC envelopes. Use it as context before responding to the latest user prompt.\n";
-  let text = prefix;
-
-  for (const event of events) {
-    const line = JSON.stringify({
-      createdAt: event.createdAt,
-      sender: event.sender,
-      payload: event.payload,
-    });
-
-    if (text.length + line.length + 1 > maxChars) {
-      text += "\n[history truncated]";
-      break;
+  let start = 0;
+  while (start < events.length) {
+    const json = JSON.stringify(events.slice(start));
+    if (json.length <= maxChars) {
+      return `restore-history:${json.length}:${json}`;
     }
-
-    text += `${line}\n`;
+    start += 1;
   }
 
-  return text;
+  return null;
 }
 
 function envelopeMethod(message: AnyMessage): string | null {

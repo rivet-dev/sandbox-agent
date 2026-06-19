@@ -472,6 +472,36 @@ impl AdapterState {
         Ok(())
     }
 
+    async fn persist_replay_event(
+        &self,
+        session_id: &str,
+        created_at: i64,
+        connection_id: &str,
+        sender: &str,
+        payload: &Value,
+    ) -> Result<(), String> {
+        let pool = self.pool().await?;
+        let id = format!("evt_{}", self.next_id(""));
+        sqlx::query(
+            r#"INSERT INTO events (id, session_id, created_at, connection_id, sender, payload_json)
+               VALUES (?1, ?2, ?3, ?4, ?5, ?6)"#,
+        )
+        .bind(id)
+        .bind(session_id)
+        .bind(created_at)
+        .bind(connection_id)
+        .bind(sender)
+        .bind(serde_json::to_string(payload).map_err(|err| err.to_string())?)
+        .execute(pool)
+        .await
+        .map_err(|err| err.to_string())?;
+
+        let mut projection = self.projection.lock().await;
+        apply_envelope(&mut projection, session_id, sender, payload);
+
+        Ok(())
+    }
+
     async fn collect_replay_events(
         &self,
         session_id: &str,
@@ -1946,7 +1976,31 @@ async fn oc_session_prompt(
         meta.agent = agent.clone();
     }
 
-    let parts_input = body.parts.unwrap_or_default();
+    let mut parts_input = body.parts.unwrap_or_default();
+    let mut replay_events: Option<Vec<ReplayHeaderEvent>> = None;
+    if let Some(first_part) = parts_input.first_mut() {
+        if let Some(text) = first_part
+            .get("text")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+        {
+            if !has_messages {
+                if let Some((parsed, remainder)) = parse_replay_header(&text) {
+                    replay_events = Some(parsed);
+                    *first_part = json!({
+                        "type": "text",
+                        "text": remainder,
+                    });
+                }
+            }
+            if replay_events.is_none() && text.starts_with(MSG_PREFIX) {
+                *first_part = json!({
+                    "type": "text",
+                    "text": text.strip_prefix(MSG_PREFIX).unwrap_or(&text),
+                });
+            }
+        }
+    }
     if parts_input.is_empty() {
         return bad_request("parts are required");
     }
@@ -2007,8 +2061,46 @@ async fn oc_session_prompt(
     );
     let user_parts = normalize_parts(&session_id, &user_message_id, &parts_input);
 
+    let mut replay_text: Option<String> = None;
+    if let Some(mut replay_events) = replay_events {
+        if replay_events.len() > state.config.replay_max_events {
+            let start = replay_events.len() - state.config.replay_max_events;
+            replay_events = replay_events.split_off(start);
+        }
+
+        for event in &replay_events {
+            if let Err(err) = state
+                .persist_replay_event(
+                    &session_id,
+                    event.created_at,
+                    event
+                        .connection_id
+                        .as_deref()
+                        .unwrap_or(&meta.last_connection_id),
+                    &event.sender,
+                    &event.payload,
+                )
+                .await
+            {
+                return internal_error(err);
+            }
+        }
+
+        let replay_source = replay_events
+            .iter()
+            .map(|event| {
+                json!({
+                    "createdAt": event.created_at,
+                    "sender": event.sender,
+                    "payload": event.payload,
+                })
+            })
+            .collect::<Vec<_>>();
+        replay_text = build_replay_text(&replay_source, state.config.replay_max_chars);
+    }
+
     let replay_injected = state.pending_replay.lock().await.remove(&session_id);
-    let outbound_prompt_parts = if let Some(replay_text) = replay_injected {
+    let outbound_prompt_parts = if let Some(replay_text) = replay_text.or(replay_injected) {
         let mut prompt = vec![json!({"type":"text", "text": replay_text})];
         prompt.extend(parts_input.clone());
         prompt
@@ -3602,6 +3694,68 @@ fn build_replay_text(events: &[Value], max_chars: usize) -> Option<String> {
     }
 
     Some(text)
+}
+
+const REPLAY_PREFIX: &str = "restore-history:";
+const MSG_PREFIX: &str = "msg:";
+
+struct ReplayHeaderEvent {
+    created_at: i64,
+    sender: String,
+    payload: Value,
+    connection_id: Option<String>,
+}
+
+fn split_utf16_prefix(text: &str, utf16_len: usize) -> Option<(&str, &str)> {
+    if utf16_len == 0 {
+        return Some(("", text));
+    }
+
+    let mut count = 0usize;
+    let mut idx = 0usize;
+    for (byte_idx, ch) in text.char_indices() {
+        let units = ch.len_utf16();
+        if count + units > utf16_len {
+            return None;
+        }
+        count += units;
+        idx = byte_idx + ch.len_utf8();
+        if count == utf16_len {
+            return Some((&text[..idx], &text[idx..]));
+        }
+    }
+
+    None
+}
+
+fn parse_replay_header(text: &str) -> Option<(Vec<ReplayHeaderEvent>, &str)> {
+    let rest = text.strip_prefix(REPLAY_PREFIX)?;
+    let mut splitter = rest.splitn(2, ':');
+    let len_str = splitter.next()?;
+    let payload = splitter.next()?;
+    let expected_len: usize = len_str.parse().ok()?;
+    let (json, remainder) = split_utf16_prefix(payload, expected_len)?;
+
+    let value: Value = serde_json::from_str(json).ok()?;
+    let items = value.as_array()?;
+    let mut events = Vec::with_capacity(items.len());
+    for item in items {
+        let obj = item.as_object()?;
+        let created_at = obj.get("createdAt")?.as_i64()?;
+        let sender = obj.get("sender")?.as_str()?.to_string();
+        let payload = obj.get("payload")?.clone();
+        let connection_id = obj
+            .get("connectionId")
+            .and_then(Value::as_str)
+            .map(|value| value.to_string());
+        events.push(ReplayHeaderEvent {
+            created_at,
+            sender,
+            payload,
+            connection_id,
+        });
+    }
+    Some((events, remainder))
 }
 
 fn parse_last_event_id(headers: &HeaderMap) -> Option<u64> {

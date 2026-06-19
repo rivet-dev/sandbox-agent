@@ -538,7 +538,7 @@ describe("Integration: TypeScript SDK flat session API", () => {
       const params = payload.params as Record<string, unknown> | undefined;
       const prompt = Array.isArray(params?.prompt) ? params?.prompt : [];
       const firstBlock = prompt[0] as Record<string, unknown> | undefined;
-      return method === "session/prompt" && typeof firstBlock?.text === "string" && firstBlock.text.includes("Previous session history is replayed below");
+      return method === "session/prompt" && typeof firstBlock?.text === "string" && firstBlock.text.startsWith("restore-history:");
     });
 
     expect(replayInjected).toBeTruthy();
