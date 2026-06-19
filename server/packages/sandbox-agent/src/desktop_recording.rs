@@ -64,17 +64,13 @@ impl DesktopRecordingManager {
 
         self.ensure_recordings_dir()?;
 
-        {
-            let mut state = self.inner.lock().await;
-            self.refresh_locked(&mut state).await?;
-            if state.current_id.is_some() {
-                return Err(SandboxError::Conflict {
-                    message: "a desktop recording is already active".to_string(),
-                });
-            }
-        }
-
         let mut state = self.inner.lock().await;
+        self.refresh_locked(&mut state).await?;
+        if state.current_id.is_some() {
+            return Err(SandboxError::Conflict {
+                message: "a desktop recording is already active".to_string(),
+            });
+        }
         let id_num = state.next_id + 1;
         state.next_id = id_num;
         let id = format!("rec_{id_num}");

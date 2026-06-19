@@ -25,6 +25,7 @@ export type {
 } from "./ChatComposer.tsx";
 
 export type {
+  DesktopViewerClassNames,
   DesktopViewerClient,
   DesktopViewerProps,
 } from "./DesktopViewer.tsx";

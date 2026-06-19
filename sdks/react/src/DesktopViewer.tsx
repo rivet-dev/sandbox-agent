@@ -8,9 +8,19 @@ type ConnectionState = "connecting" | "ready" | "closed" | "error";
 
 export type DesktopViewerClient = Pick<SandboxAgent, "connectDesktopStream">;
 
+export interface DesktopViewerClassNames {
+  root?: string;
+  statusBar?: string;
+  statusText?: string;
+  statusResolution?: string;
+  viewport?: string;
+  video?: string;
+}
+
 export interface DesktopViewerProps {
   client: DesktopViewerClient;
   className?: string;
+  classNames?: Partial<DesktopViewerClassNames>;
   style?: CSSProperties;
   imageStyle?: CSSProperties;
   height?: number | string;
@@ -20,66 +30,17 @@ export interface DesktopViewerProps {
   onError?: (error: DesktopStreamErrorStatus | Error) => void;
 }
 
-const shellStyle: CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  overflow: "hidden",
-  border: "1px solid rgba(15, 23, 42, 0.14)",
-  borderRadius: 14,
-  background: "linear-gradient(180deg, rgba(248, 250, 252, 0.96) 0%, rgba(226, 232, 240, 0.92) 100%)",
-  boxShadow: "0 20px 40px rgba(15, 23, 42, 0.08)",
-};
-
-const statusBarStyle: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  gap: 12,
-  padding: "10px 14px",
-  borderBottom: "1px solid rgba(15, 23, 42, 0.08)",
-  background: "rgba(255, 255, 255, 0.78)",
-  color: "#0f172a",
-  fontSize: 12,
-  lineHeight: 1.4,
-};
-
-const viewportStyle: CSSProperties = {
-  position: "relative",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  overflow: "hidden",
-  background: "radial-gradient(circle at top, rgba(14, 165, 233, 0.18), transparent 45%), linear-gradient(180deg, #0f172a 0%, #111827 100%)",
-};
-
-const videoBaseStyle: CSSProperties = {
-  display: "block",
-  width: "100%",
-  height: "100%",
-  objectFit: "contain",
-  userSelect: "none",
-};
-
-const hintStyle: CSSProperties = {
-  opacity: 0.66,
-};
-
-const getStatusColor = (state: ConnectionState): string => {
-  switch (state) {
-    case "ready":
-      return "#15803d";
-    case "error":
-      return "#b91c1c";
-    case "closed":
-      return "#b45309";
-    default:
-      return "#475569";
-  }
+const layoutStyles = {
+  shell: { display: "flex", flexDirection: "column", overflow: "hidden" } as CSSProperties,
+  statusBar: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 } as CSSProperties,
+  viewport: { position: "relative", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" } as CSSProperties,
+  video: { display: "block", width: "100%", height: "100%", objectFit: "contain", userSelect: "none" } as CSSProperties,
 };
 
 export const DesktopViewer = ({
   client,
   className,
+  classNames,
   style,
   imageStyle,
   height = 480,
@@ -91,10 +52,17 @@ export const DesktopViewer = ({
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const sessionRef = useRef<ReturnType<DesktopViewerClient["connectDesktopStream"]> | null>(null);
+  const onConnectRef = useRef(onConnect);
+  const onDisconnectRef = useRef(onDisconnect);
+  const onErrorRef = useRef(onError);
   const [connectionState, setConnectionState] = useState<ConnectionState>("connecting");
   const [statusMessage, setStatusMessage] = useState("Starting desktop stream...");
   const [hasVideo, setHasVideo] = useState(false);
   const [resolution, setResolution] = useState<{ width: number; height: number } | null>(null);
+
+  onConnectRef.current = onConnect;
+  onDisconnectRef.current = onDisconnect;
+  onErrorRef.current = onError;
 
   useEffect(() => {
     let cancelled = false;
@@ -112,7 +80,7 @@ export const DesktopViewer = ({
       setConnectionState("ready");
       setStatusMessage("Desktop stream connected.");
       setResolution({ width: status.width, height: status.height });
-      onConnect?.(status);
+      onConnectRef.current?.(status);
     });
     session.onTrack((stream) => {
       if (cancelled) return;
@@ -127,13 +95,13 @@ export const DesktopViewer = ({
       if (cancelled) return;
       setConnectionState("error");
       setStatusMessage(error instanceof Error ? error.message : error.message);
-      onError?.(error);
+      onErrorRef.current?.(error);
     });
     session.onDisconnect(() => {
       if (cancelled) return;
       setConnectionState((current) => (current === "error" ? current : "closed"));
       setStatusMessage((current) => (current === "Desktop stream connected." ? "Desktop stream disconnected." : current));
-      onDisconnect?.();
+      onDisconnectRef.current?.();
     });
 
     return () => {
@@ -146,7 +114,7 @@ export const DesktopViewer = ({
       }
       setHasVideo(false);
     };
-  }, [client, onConnect, onDisconnect, onError]);
+  }, [client]);
 
   const scalePoint = (clientX: number, clientY: number) => {
     const video = videoRef.current;
@@ -204,18 +172,24 @@ export const DesktopViewer = ({
   };
 
   return (
-    <div className={className} style={{ ...shellStyle, ...style }}>
+    <div className={classNames?.root ?? className} data-slot="root" data-state={connectionState} style={{ ...layoutStyles.shell, ...style }}>
       {showStatusBar ? (
-        <div style={statusBarStyle}>
-          <span style={{ color: getStatusColor(connectionState) }}>{statusMessage}</span>
-          <span style={hintStyle}>{resolution ? `${resolution.width}×${resolution.height}` : "Awaiting stream"}</span>
+        <div className={classNames?.statusBar} data-slot="status-bar" style={layoutStyles.statusBar}>
+          <span className={classNames?.statusText} data-slot="status-text" data-state={connectionState}>
+            {statusMessage}
+          </span>
+          <span className={classNames?.statusResolution} data-slot="status-resolution">
+            {resolution ? `${resolution.width}×${resolution.height}` : "Awaiting stream"}
+          </span>
         </div>
       ) : null}
       <div
         ref={wrapperRef}
+        className={classNames?.viewport}
+        data-slot="viewport"
         role="button"
         tabIndex={0}
-        style={{ ...viewportStyle, height }}
+        style={{ ...layoutStyles.viewport, height }}
         onMouseMove={(event) => {
           const point = scalePoint(event.clientX, event.clientY);
           if (!point) {
@@ -259,12 +233,14 @@ export const DesktopViewer = ({
       >
         <video
           ref={videoRef}
+          className={classNames?.video}
+          data-slot="video"
           autoPlay
           playsInline
           muted
           tabIndex={-1}
           draggable={false}
-          style={{ ...videoBaseStyle, ...imageStyle, display: hasVideo ? "block" : "none", pointerEvents: "none" }}
+          style={{ ...layoutStyles.video, ...imageStyle, display: hasVideo ? "block" : "none", pointerEvents: "none" }}
         />
       </div>
     </div>

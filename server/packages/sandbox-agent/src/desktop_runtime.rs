@@ -2036,14 +2036,18 @@ impl DesktopRuntime {
         options: &DesktopScreenshotOptions,
         region_x: i32,
         region_y: i32,
-        _region_width: u32,
-        _region_height: u32,
+        region_width: u32,
+        region_height: u32,
     ) -> Result<Vec<u8>, DesktopProblem> {
         let pos = self.mouse_position_locked(state, ready).await?;
         // Adjust cursor position relative to the region
         let cursor_x = pos.x - region_x;
         let cursor_y = pos.y - region_y;
-        if cursor_x < 0 || cursor_y < 0 {
+        if cursor_x < 0
+            || cursor_y < 0
+            || cursor_x >= region_width as i32
+            || cursor_y >= region_height as i32
+        {
             // Cursor is outside the region, return screenshot as-is
             return Ok(screenshot_bytes);
         }

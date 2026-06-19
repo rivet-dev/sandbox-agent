@@ -12,6 +12,7 @@ Current exports:
 - `ProcessTerminal` for attaching to a running tty process
 - `AgentTranscript` for rendering session/message timelines without bundling any styles
 - `ChatComposer` for a reusable prompt input/send surface
+- `DesktopViewer` for rendering a live desktop stream with mouse and keyboard input
 - `useTranscriptVirtualizer` for wiring large transcript lists to a scroll container
 
 ## Install
@@ -243,3 +244,47 @@ Useful `ChatComposer` props:
 - `allowEmptySubmit` when the submit action is valid without draft text, such as a stop button
 
 Use `transcriptProps` and `composerProps` when you want the shared composition but still need custom rendering or behavior. Use `transcriptClassNames` and `composerClassNames` when you want styling hooks for each subcomponent.
+
+## Desktop viewer
+
+`DesktopViewer` connects to a live desktop stream via WebRTC and renders the video feed with interactive mouse and keyboard input forwarding.
+
+```tsx DesktopPane.tsx
+"use client";
+
+import { useEffect, useState } from "react";
+import { SandboxAgent } from "sandbox-agent";
+import { DesktopViewer } from "@sandbox-agent/react";
+
+export default function DesktopPane() {
+  const [client, setClient] = useState<SandboxAgent | null>(null);
+
+  useEffect(() => {
+    let sdk: SandboxAgent | null = null;
+    const start = async () => {
+      sdk = await SandboxAgent.connect({ baseUrl: "http://127.0.0.1:2468" });
+      await sdk.startDesktop();
+      await sdk.startDesktopStream();
+      setClient(sdk);
+    };
+    void start();
+    return () => { void sdk?.dispose(); };
+  }, []);
+
+  if (!client) return <div>Starting desktop...</div>;
+
+  return <DesktopViewer client={client} height={600} />;
+}
+```
+
+Props:
+
+- `client`: a `SandboxAgent` client (or any object with `connectDesktopStream`)
+- `height`, `style`, `imageStyle`: optional layout overrides
+- `showStatusBar`: toggle the connection status bar (default `true`)
+- `onConnect`, `onDisconnect`, `onError`: optional lifecycle callbacks
+- `className` and `classNames`: external styling hooks
+
+The component is unstyled by default. Use `classNames` slots (`root`, `statusBar`, `statusText`, `statusResolution`, `viewport`, `video`) and `data-slot`/`data-state` attributes for styling from outside the package.
+
+See [Computer Use](/computer-use) for the lower-level desktop APIs.
