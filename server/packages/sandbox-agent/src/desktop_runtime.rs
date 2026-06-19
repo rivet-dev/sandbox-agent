@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::process::{Output, Stdio};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use tokio::process::{Child, Command};
@@ -50,6 +50,7 @@ pub struct DesktopRuntime {
     recording_manager: DesktopRecordingManager,
     streaming_manager: DesktopStreamingManager,
     inner: Arc<Mutex<DesktopRuntimeStateData>>,
+    browser_runtime: Arc<OnceLock<Arc<crate::browser_runtime::BrowserRuntime>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -179,7 +180,15 @@ impl DesktopRuntime {
                 recording_fps: None,
             })),
             config,
+            browser_runtime: Arc::new(OnceLock::new()),
         }
+    }
+
+    pub fn set_browser_runtime(
+        &self,
+        browser_runtime: Arc<crate::browser_runtime::BrowserRuntime>,
+    ) {
+        let _ = self.browser_runtime.set(browser_runtime);
     }
 
     pub async fn status(&self) -> DesktopStatusResponse {
@@ -204,6 +213,14 @@ impl DesktopRuntime {
         &self,
         request: DesktopStartRequest,
     ) -> Result<DesktopStatusResponse, DesktopProblem> {
+        // Check mutual exclusivity with browser runtime
+        if let Some(browser_rt) = self.browser_runtime.get() {
+            let browser_status = browser_rt.status().await;
+            if browser_status.state == crate::browser_types::BrowserState::Active {
+                return Err(DesktopProblem::browser_conflict());
+            }
+        }
+
         let mut state = self.inner.lock().await;
 
         if !self.platform_supported() {

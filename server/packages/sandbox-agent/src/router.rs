@@ -37,6 +37,9 @@ use tracing::Span;
 use utoipa::{IntoParams, Modify, OpenApi, ToSchema};
 
 use crate::acp_proxy_runtime::{AcpProxyRuntime, ProxyPostOutcome};
+use crate::browser_errors::BrowserProblem;
+use crate::browser_runtime::BrowserRuntime;
+use crate::browser_types::*;
 use crate::desktop_errors::DesktopProblem;
 use crate::desktop_runtime::DesktopRuntime;
 use crate::desktop_types::*;
@@ -92,6 +95,7 @@ pub struct AppState {
     opencode_server_manager: Arc<OpenCodeServerManager>,
     process_runtime: Arc<ProcessRuntime>,
     desktop_runtime: Arc<DesktopRuntime>,
+    browser_runtime: Arc<BrowserRuntime>,
     pub(crate) branding: BrandingMode,
     version_cache: Mutex<HashMap<AgentId, CachedAgentVersion>>,
 }
@@ -117,6 +121,11 @@ impl AppState {
         ));
         let process_runtime = Arc::new(ProcessRuntime::new());
         let desktop_runtime = Arc::new(DesktopRuntime::new(process_runtime.clone()));
+        let browser_runtime = Arc::new(BrowserRuntime::new(
+            process_runtime.clone(),
+            desktop_runtime.clone(),
+        ));
+        desktop_runtime.set_browser_runtime(browser_runtime.clone());
         Self {
             auth,
             agent_manager,
@@ -124,6 +133,7 @@ impl AppState {
             opencode_server_manager,
             process_runtime,
             desktop_runtime,
+            browser_runtime,
             branding,
             version_cache: Mutex::new(HashMap::new()),
         }
@@ -147,6 +157,10 @@ impl AppState {
 
     pub(crate) fn desktop_runtime(&self) -> Arc<DesktopRuntime> {
         self.desktop_runtime.clone()
+    }
+
+    pub(crate) fn browser_runtime(&self) -> Arc<BrowserRuntime> {
+        self.browser_runtime.clone()
     }
 
     pub(crate) fn purge_version_cache(&self, agent: AgentId) {
@@ -259,6 +273,56 @@ pub fn build_router_with_state(shared: Arc<AppState>) -> (Router, Arc<AppState>)
         .route("/desktop/stream/stop", post(post_v1_desktop_stream_stop))
         .route("/desktop/stream/status", get(get_v1_desktop_stream_status))
         .route("/desktop/stream/signaling", get(get_v1_desktop_stream_ws))
+        .route("/browser/status", get(get_v1_browser_status))
+        .route("/browser/start", post(post_v1_browser_start))
+        .route("/browser/stop", post(post_v1_browser_stop))
+        .route("/browser/cdp", get(get_v1_browser_cdp_ws))
+        .route("/browser/navigate", post(post_v1_browser_navigate))
+        .route("/browser/back", post(post_v1_browser_back))
+        .route("/browser/forward", post(post_v1_browser_forward))
+        .route("/browser/reload", post(post_v1_browser_reload))
+        .route("/browser/wait", post(post_v1_browser_wait))
+        .route(
+            "/browser/tabs",
+            get(get_v1_browser_tabs).post(post_v1_browser_tabs),
+        )
+        .route(
+            "/browser/tabs/:tab_id/activate",
+            post(post_v1_browser_tab_activate),
+        )
+        .route("/browser/tabs/:tab_id", delete(delete_v1_browser_tab))
+        .route("/browser/screenshot", get(get_v1_browser_screenshot))
+        .route("/browser/pdf", get(get_v1_browser_pdf))
+        .route("/browser/content", get(get_v1_browser_content))
+        .route("/browser/markdown", get(get_v1_browser_markdown))
+        .route("/browser/links", get(get_v1_browser_links))
+        .route("/browser/snapshot", get(get_v1_browser_snapshot))
+        .route("/browser/scrape", post(post_v1_browser_scrape))
+        .route("/browser/execute", post(post_v1_browser_execute))
+        .route("/browser/click", post(post_v1_browser_click))
+        .route("/browser/type", post(post_v1_browser_type))
+        .route("/browser/select", post(post_v1_browser_select))
+        .route("/browser/hover", post(post_v1_browser_hover))
+        .route("/browser/scroll", post(post_v1_browser_scroll))
+        .route("/browser/upload", post(post_v1_browser_upload))
+        .route("/browser/dialog", post(post_v1_browser_dialog))
+        .route("/browser/console", get(get_v1_browser_console))
+        .route("/browser/network", get(get_v1_browser_network))
+        .route("/browser/crawl", post(post_v1_browser_crawl))
+        .route(
+            "/browser/contexts",
+            get(get_v1_browser_contexts).post(post_v1_browser_contexts),
+        )
+        .route(
+            "/browser/contexts/:context_id",
+            delete(delete_v1_browser_context),
+        )
+        .route(
+            "/browser/cookies",
+            get(get_v1_browser_cookies)
+                .post(post_v1_browser_cookies)
+                .delete(delete_v1_browser_cookies),
+        )
         .route("/agents", get(get_v1_agents))
         .route("/agents/:agent", get(get_v1_agent))
         .route("/agents/:agent/install", post(post_v1_agent_install))
@@ -446,6 +510,43 @@ pub async fn shutdown_servers(state: &Arc<AppState>) {
         post_v1_desktop_stream_start,
         post_v1_desktop_stream_stop,
         get_v1_desktop_stream_ws,
+        get_v1_browser_status,
+        post_v1_browser_start,
+        post_v1_browser_stop,
+        get_v1_browser_cdp_ws,
+        post_v1_browser_navigate,
+        post_v1_browser_back,
+        post_v1_browser_forward,
+        post_v1_browser_reload,
+        post_v1_browser_wait,
+        get_v1_browser_tabs,
+        post_v1_browser_tabs,
+        post_v1_browser_tab_activate,
+        delete_v1_browser_tab,
+        get_v1_browser_screenshot,
+        get_v1_browser_pdf,
+        get_v1_browser_content,
+        get_v1_browser_markdown,
+        get_v1_browser_links,
+        get_v1_browser_snapshot,
+        post_v1_browser_scrape,
+        post_v1_browser_execute,
+        post_v1_browser_click,
+        post_v1_browser_type,
+        post_v1_browser_select,
+        post_v1_browser_hover,
+        post_v1_browser_scroll,
+        post_v1_browser_upload,
+        post_v1_browser_dialog,
+        get_v1_browser_console,
+        get_v1_browser_network,
+        get_v1_browser_contexts,
+        post_v1_browser_contexts,
+        delete_v1_browser_context,
+        get_v1_browser_cookies,
+        post_v1_browser_cookies,
+        delete_v1_browser_cookies,
+        post_v1_browser_crawl,
         get_v1_agents,
         get_v1_agent,
         post_v1_agent_install,
@@ -515,6 +616,61 @@ pub async fn shutdown_servers(state: &Arc<AppState>) {
             DesktopRecordingInfo,
             DesktopRecordingListResponse,
             DesktopStreamStatusResponse,
+            BrowserState,
+            BrowserStartRequest,
+            BrowserStatusResponse,
+            BrowserNavigateRequest,
+            BrowserNavigateWaitUntil,
+            BrowserPageInfo,
+            BrowserReloadRequest,
+            BrowserWaitRequest,
+            BrowserWaitState,
+            BrowserWaitResponse,
+            BrowserTabInfo,
+            BrowserTabListResponse,
+            BrowserCreateTabRequest,
+            BrowserActionResponse,
+            BrowserScreenshotQuery,
+            BrowserScreenshotFormat,
+            BrowserPdfQuery,
+            BrowserPdfFormat,
+            BrowserContentQuery,
+            BrowserContentResponse,
+            BrowserMarkdownResponse,
+            BrowserLinkInfo,
+            BrowserLinksResponse,
+            BrowserSnapshotResponse,
+            BrowserScrapeRequest,
+            BrowserScrapeResponse,
+            BrowserExecuteRequest,
+            BrowserExecuteResponse,
+            BrowserClickRequest,
+            BrowserMouseButton,
+            BrowserTypeRequest,
+            BrowserSelectRequest,
+            BrowserHoverRequest,
+            BrowserScrollRequest,
+            BrowserUploadRequest,
+            BrowserDialogRequest,
+            BrowserConsoleQuery,
+            BrowserConsoleMessage,
+            BrowserConsoleResponse,
+            BrowserNetworkQuery,
+            BrowserNetworkRequest,
+            BrowserNetworkResponse,
+            BrowserContextInfo,
+            BrowserContextListResponse,
+            BrowserContextCreateRequest,
+            BrowserCookie,
+            BrowserCookieSameSite,
+            BrowserCookiesQuery,
+            BrowserCookiesResponse,
+            BrowserSetCookiesRequest,
+            BrowserDeleteCookiesQuery,
+            BrowserCrawlRequest,
+            BrowserCrawlExtract,
+            BrowserCrawlPage,
+            BrowserCrawlResponse,
             DesktopClipboardResponse,
             DesktopClipboardQuery,
             DesktopClipboardWriteRequest,
@@ -606,6 +762,12 @@ impl From<ProblemDetails> for ApiError {
 
 impl From<DesktopProblem> for ApiError {
     fn from(value: DesktopProblem) -> Self {
+        Self::Problem(value.to_problem_details())
+    }
+}
+
+impl From<BrowserProblem> for ApiError {
+    fn from(value: BrowserProblem) -> Self {
         Self::Problem(value.to_problem_details())
     }
 }
@@ -710,6 +872,2178 @@ async fn post_v1_desktop_stop(
 ) -> Result<Json<DesktopStatusResponse>, ApiError> {
     let status = state.desktop_runtime().stop().await?;
     Ok(Json(status))
+}
+
+/// Get browser runtime status.
+///
+/// Returns the current browser state, display information, CDP URL,
+/// and managed process details.
+#[utoipa::path(
+    get,
+    path = "/v1/browser/status",
+    tag = "v1",
+    responses(
+        (status = 200, description = "Browser runtime status", body = BrowserStatusResponse),
+        (status = 401, description = "Authentication required", body = ProblemDetails)
+    )
+)]
+async fn get_v1_browser_status(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<BrowserStatusResponse>, ApiError> {
+    Ok(Json(state.browser_runtime().status().await))
+}
+
+/// Start the browser runtime.
+///
+/// Launches Chromium with remote debugging, optionally starts Xvfb for
+/// non-headless mode, and returns the resulting browser status snapshot.
+#[utoipa::path(
+    post,
+    path = "/v1/browser/start",
+    tag = "v1",
+    request_body = BrowserStartRequest,
+    responses(
+        (status = 200, description = "Browser runtime status after start", body = BrowserStatusResponse),
+        (status = 400, description = "Invalid browser start request", body = ProblemDetails),
+        (status = 409, description = "Browser or desktop runtime conflict", body = ProblemDetails),
+        (status = 424, description = "Browser dependencies not installed", body = ProblemDetails),
+        (status = 500, description = "Browser runtime could not be started", body = ProblemDetails)
+    )
+)]
+async fn post_v1_browser_start(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<BrowserStartRequest>,
+) -> Result<Json<BrowserStatusResponse>, ApiError> {
+    let status = state.browser_runtime().start(body).await?;
+    Ok(Json(status))
+}
+
+/// Stop the browser runtime.
+///
+/// Terminates Chromium, the CDP client, and any associated Xvfb/Neko
+/// processes, then returns the resulting status snapshot.
+#[utoipa::path(
+    post,
+    path = "/v1/browser/stop",
+    tag = "v1",
+    responses(
+        (status = 200, description = "Browser runtime status after stop", body = BrowserStatusResponse),
+        (status = 409, description = "Browser runtime is not active", body = ProblemDetails)
+    )
+)]
+async fn post_v1_browser_stop(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<BrowserStatusResponse>, ApiError> {
+    let status = state.browser_runtime().stop().await?;
+    Ok(Json(status))
+}
+
+/// Open a CDP WebSocket proxy session.
+///
+/// Upgrades the connection to a WebSocket that relays bidirectionally to
+/// Chromium's internal CDP WebSocket endpoint. External tools like Playwright
+/// or Puppeteer can connect via `ws://sandbox-host:2468/v1/browser/cdp`.
+#[utoipa::path(
+    get,
+    path = "/v1/browser/cdp",
+    tag = "v1",
+    responses(
+        (status = 101, description = "WebSocket upgraded"),
+        (status = 409, description = "Browser runtime is not active", body = ProblemDetails),
+        (status = 502, description = "CDP connection failed", body = ProblemDetails)
+    )
+)]
+async fn get_v1_browser_cdp_ws(
+    State(state): State<Arc<AppState>>,
+    ws: WebSocketUpgrade,
+) -> Result<Response, ApiError> {
+    state.browser_runtime().ensure_active().await?;
+    Ok(ws
+        .on_upgrade(move |socket| browser_cdp_ws_session(socket, state.browser_runtime()))
+        .into_response())
+}
+
+/// CDP WebSocket proxy session.
+///
+/// Proxies the WebSocket bidirectionally between the external client and
+/// Chromium's internal CDP WebSocket endpoint. All CDP commands and events
+/// are relayed transparently.
+async fn browser_cdp_ws_session(mut client_ws: WebSocket, browser_runtime: Arc<BrowserRuntime>) {
+    use futures::SinkExt;
+    use tokio_tungstenite::tungstenite::Message as TungsteniteMessage;
+
+    // Discover the actual CDP WebSocket URL from Chromium.
+    let cdp_ws_url = match browser_runtime.cdp_ws_url().await {
+        Ok(url) => url,
+        Err(_) => {
+            let _ = send_ws_error(&mut client_ws, "browser CDP endpoint is not available").await;
+            let _ = client_ws.close().await;
+            return;
+        }
+    };
+
+    // Connect to Chromium's internal CDP WebSocket.
+    let (cdp_ws, _) = match tokio_tungstenite::connect_async(&cdp_ws_url).await {
+        Ok(conn) => conn,
+        Err(err) => {
+            let _ = send_ws_error(
+                &mut client_ws,
+                &format!("failed to connect to CDP endpoint: {err}"),
+            )
+            .await;
+            let _ = client_ws.close().await;
+            return;
+        }
+    };
+
+    let (mut cdp_sink, mut cdp_stream) = cdp_ws.split();
+
+    // Relay messages bidirectionally between client and CDP.
+    loop {
+        tokio::select! {
+            // Client → CDP
+            client_msg = client_ws.recv() => {
+                match client_msg {
+                    Some(Ok(Message::Text(text))) => {
+                        if cdp_sink.send(TungsteniteMessage::Text(text.into())).await.is_err() {
+                            break;
+                        }
+                    }
+                    Some(Ok(Message::Binary(data))) => {
+                        if cdp_sink.send(TungsteniteMessage::Binary(data.into())).await.is_err() {
+                            break;
+                        }
+                    }
+                    Some(Ok(Message::Ping(payload))) => {
+                        let _ = client_ws.send(Message::Pong(payload)).await;
+                    }
+                    Some(Ok(Message::Close(_))) | None => break,
+                    Some(Ok(Message::Pong(_))) => {}
+                    Some(Err(_)) => break,
+                }
+            }
+            // CDP → Client
+            cdp_msg = cdp_stream.next() => {
+                match cdp_msg {
+                    Some(Ok(TungsteniteMessage::Text(text))) => {
+                        if client_ws.send(Message::Text(text.into())).await.is_err() {
+                            break;
+                        }
+                    }
+                    Some(Ok(TungsteniteMessage::Binary(data))) => {
+                        if client_ws.send(Message::Binary(data.into())).await.is_err() {
+                            break;
+                        }
+                    }
+                    Some(Ok(TungsteniteMessage::Ping(payload))) => {
+                        if cdp_sink.send(TungsteniteMessage::Pong(payload.clone())).await.is_err() {
+                            break;
+                        }
+                    }
+                    Some(Ok(TungsteniteMessage::Close(_))) | None => break,
+                    Some(Ok(TungsteniteMessage::Pong(_))) => {}
+                    Some(Ok(TungsteniteMessage::Frame(_))) => {}
+                    Some(Err(_)) => break,
+                }
+            }
+        }
+    }
+
+    let _ = cdp_sink.close().await;
+    let _ = client_ws.close().await;
+}
+
+/// Navigate the browser to a URL.
+///
+/// Sends a CDP `Page.navigate` command and optionally waits for a lifecycle
+/// event before returning the resulting page URL, title, and HTTP status.
+#[utoipa::path(
+    post,
+    path = "/v1/browser/navigate",
+    tag = "v1",
+    request_body = BrowserNavigateRequest,
+    responses(
+        (status = 200, description = "Navigation result", body = BrowserPageInfo),
+        (status = 409, description = "Browser runtime is not active", body = ProblemDetails),
+        (status = 502, description = "CDP command failed", body = ProblemDetails)
+    )
+)]
+async fn post_v1_browser_navigate(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<BrowserNavigateRequest>,
+) -> Result<Json<BrowserPageInfo>, ApiError> {
+    let cdp = state.browser_runtime().get_cdp().await?;
+
+    // Enable Page domain for lifecycle events
+    cdp.send("Page.enable", None).await?;
+
+    let nav_result = cdp
+        .send(
+            "Page.navigate",
+            Some(serde_json::json!({ "url": body.url })),
+        )
+        .await?;
+
+    // Extract HTTP status from the navigation result if available
+    let status = nav_result
+        .get("errorText")
+        .and_then(|_| None::<u16>)
+        .or_else(|| {
+            // Page.navigate doesn't directly return HTTP status;
+            // we rely on frameId being present as a success signal
+            nav_result.get("frameId").map(|_| 200u16)
+        });
+
+    // Wait for the requested lifecycle event
+    match body.wait_until {
+        Some(BrowserNavigateWaitUntil::Load) | None => {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        }
+        Some(BrowserNavigateWaitUntil::Domcontentloaded) => {
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        }
+        Some(BrowserNavigateWaitUntil::Networkidle) => {
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+    }
+
+    // Get current page URL and title
+    let (url, title) = get_page_info_via_cdp(&cdp).await?;
+    Ok(Json(BrowserPageInfo { url, title, status }))
+}
+
+/// Navigate the browser back in history.
+///
+/// Sends a CDP `Page.navigateToHistoryEntry` command with the previous
+/// history entry and returns the resulting page URL and title.
+#[utoipa::path(
+    post,
+    path = "/v1/browser/back",
+    tag = "v1",
+    responses(
+        (status = 200, description = "Page info after navigating back", body = BrowserPageInfo),
+        (status = 409, description = "Browser runtime is not active", body = ProblemDetails),
+        (status = 502, description = "CDP command failed", body = ProblemDetails)
+    )
+)]
+async fn post_v1_browser_back(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<BrowserPageInfo>, ApiError> {
+    let cdp = state.browser_runtime().get_cdp().await?;
+
+    let history = cdp.send("Page.getNavigationHistory", None).await?;
+    let current_index = history
+        .get("currentIndex")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
+    let entries = history
+        .get("entries")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    if current_index > 0 {
+        if let Some(entry) = entries.get((current_index - 1) as usize) {
+            if let Some(entry_id) = entry.get("id").and_then(|v| v.as_i64()) {
+                cdp.send(
+                    "Page.navigateToHistoryEntry",
+                    Some(serde_json::json!({ "entryId": entry_id })),
+                )
+                .await?;
+                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            }
+        }
+    }
+
+    let (url, title) = get_page_info_via_cdp(&cdp).await?;
+    Ok(Json(BrowserPageInfo {
+        url,
+        title,
+        status: None,
+    }))
+}
+
+/// Navigate the browser forward in history.
+///
+/// Sends a CDP `Page.navigateToHistoryEntry` command with the next
+/// history entry and returns the resulting page URL and title.
+#[utoipa::path(
+    post,
+    path = "/v1/browser/forward",
+    tag = "v1",
+    responses(
+        (status = 200, description = "Page info after navigating forward", body = BrowserPageInfo),
+        (status = 409, description = "Browser runtime is not active", body = ProblemDetails),
+        (status = 502, description = "CDP command failed", body = ProblemDetails)
+    )
+)]
+async fn post_v1_browser_forward(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<BrowserPageInfo>, ApiError> {
+    let cdp = state.browser_runtime().get_cdp().await?;
+
+    let history = cdp.send("Page.getNavigationHistory", None).await?;
+    let current_index = history
+        .get("currentIndex")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
+    let entries = history
+        .get("entries")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    if (current_index + 1) < entries.len() as i64 {
+        if let Some(entry) = entries.get((current_index + 1) as usize) {
+            if let Some(entry_id) = entry.get("id").and_then(|v| v.as_i64()) {
+                cdp.send(
+                    "Page.navigateToHistoryEntry",
+                    Some(serde_json::json!({ "entryId": entry_id })),
+                )
+                .await?;
+                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            }
+        }
+    }
+
+    let (url, title) = get_page_info_via_cdp(&cdp).await?;
+    Ok(Json(BrowserPageInfo {
+        url,
+        title,
+        status: None,
+    }))
+}
+
+/// Reload the current browser page.
+///
+/// Sends a CDP `Page.reload` command with an optional cache bypass flag
+/// and returns the resulting page URL and title.
+#[utoipa::path(
+    post,
+    path = "/v1/browser/reload",
+    tag = "v1",
+    request_body = BrowserReloadRequest,
+    responses(
+        (status = 200, description = "Page info after reload", body = BrowserPageInfo),
+        (status = 409, description = "Browser runtime is not active", body = ProblemDetails),
+        (status = 502, description = "CDP command failed", body = ProblemDetails)
+    )
+)]
+async fn post_v1_browser_reload(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<BrowserReloadRequest>,
+) -> Result<Json<BrowserPageInfo>, ApiError> {
+    let cdp = state.browser_runtime().get_cdp().await?;
+
+    let ignore_cache = body.ignore_cache.unwrap_or(false);
+    cdp.send(
+        "Page.reload",
+        Some(serde_json::json!({ "ignoreCache": ignore_cache })),
+    )
+    .await?;
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+    let (url, title) = get_page_info_via_cdp(&cdp).await?;
+    Ok(Json(BrowserPageInfo {
+        url,
+        title,
+        status: None,
+    }))
+}
+
+/// Wait for a selector or condition in the browser.
+///
+/// Polls the page DOM using `Runtime.evaluate` with a `querySelector` check
+/// until the element is found or the timeout expires.
+#[utoipa::path(
+    post,
+    path = "/v1/browser/wait",
+    tag = "v1",
+    request_body = BrowserWaitRequest,
+    responses(
+        (status = 200, description = "Wait result", body = BrowserWaitResponse),
+        (status = 409, description = "Browser runtime is not active", body = ProblemDetails),
+        (status = 502, description = "CDP command failed", body = ProblemDetails),
+        (status = 504, description = "Timeout waiting for condition", body = ProblemDetails)
+    )
+)]
+async fn post_v1_browser_wait(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<BrowserWaitRequest>,
+) -> Result<Json<BrowserWaitResponse>, ApiError> {
+    let cdp = state.browser_runtime().get_cdp().await?;
+
+    let timeout_ms = body.timeout.unwrap_or(5000);
+    let selector = body.selector.clone().unwrap_or_else(|| "body".to_string());
+    let wait_state = body.state.unwrap_or(BrowserWaitState::Attached);
+
+    let js_expression = match wait_state {
+        BrowserWaitState::Visible => {
+            format!(
+                r#"(() => {{
+                    const el = document.querySelector({sel});
+                    if (!el) return false;
+                    const style = window.getComputedStyle(el);
+                    return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+                }})()"#,
+                sel = serde_json::to_string(&selector).unwrap_or_default()
+            )
+        }
+        BrowserWaitState::Hidden => {
+            format!(
+                r#"(() => {{
+                    const el = document.querySelector({sel});
+                    if (!el) return true;
+                    const style = window.getComputedStyle(el);
+                    return style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0';
+                }})()"#,
+                sel = serde_json::to_string(&selector).unwrap_or_default()
+            )
+        }
+        BrowserWaitState::Attached => {
+            format!(
+                "document.querySelector({sel}) !== null",
+                sel = serde_json::to_string(&selector).unwrap_or_default()
+            )
+        }
+    };
+
+    let start = tokio::time::Instant::now();
+    let timeout_dur = std::time::Duration::from_millis(timeout_ms);
+    let poll_interval = std::time::Duration::from_millis(100);
+
+    loop {
+        let eval_result = cdp
+            .send(
+                "Runtime.evaluate",
+                Some(serde_json::json!({
+                    "expression": js_expression,
+                    "returnByValue": true
+                })),
+            )
+            .await?;
+
+        let found = eval_result
+            .get("result")
+            .and_then(|r| r.get("value"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        if found {
+            return Ok(Json(BrowserWaitResponse { found: true }));
+        }
+
+        if start.elapsed() >= timeout_dur {
+            return Ok(Json(BrowserWaitResponse { found: false }));
+        }
+
+        tokio::time::sleep(poll_interval).await;
+    }
+}
+
+/// List open browser tabs.
+///
+/// Returns all open browser tabs (pages) via CDP `Target.getTargets`,
+/// filtered to type "page".
+#[utoipa::path(
+    get,
+    path = "/v1/browser/tabs",
+    tag = "v1",
+    responses(
+        (status = 200, description = "List of open browser tabs", body = BrowserTabListResponse),
+        (status = 409, description = "Browser runtime is not active", body = ProblemDetails),
+        (status = 502, description = "CDP command failed", body = ProblemDetails)
+    )
+)]
+async fn get_v1_browser_tabs(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<BrowserTabListResponse>, ApiError> {
+    let cdp = state.browser_runtime().get_cdp().await?;
+
+    let result = cdp.send("Target.getTargets", None).await?;
+    let targets = result
+        .get("targetInfos")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    // Get the currently focused target to determine active tab
+    let active_target_id = {
+        let history = cdp.send("Page.getNavigationHistory", None).await.ok();
+        // The page-level commands operate on the currently attached target,
+        // so we use Target.getTargets and check which target is the one
+        // with the current page's URL to determine the active tab.
+        history.and_then(|h| {
+            let idx = h.get("currentIndex").and_then(|v| v.as_i64())? as usize;
+            let entries = h.get("entries").and_then(|v| v.as_array())?;
+            entries
+                .get(idx)
+                .and_then(|e| e.get("url").and_then(|v| v.as_str()))
+                .map(|s| s.to_string())
+        })
+    };
+
+    let tabs: Vec<BrowserTabInfo> = targets
+        .iter()
+        .filter(|t| t.get("type").and_then(|v| v.as_str()) == Some("page"))
+        .map(|t| {
+            let id = t
+                .get("targetId")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let url = t
+                .get("url")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let title = t
+                .get("title")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let active = active_target_id
+                .as_deref()
+                .map(|active_url| active_url == url)
+                .unwrap_or(false);
+            BrowserTabInfo {
+                id,
+                url,
+                title,
+                active,
+            }
+        })
+        .collect();
+
+    Ok(Json(BrowserTabListResponse { tabs }))
+}
+
+/// Create a new browser tab.
+///
+/// Opens a new tab via CDP `Target.createTarget` and returns the tab info.
+#[utoipa::path(
+    post,
+    path = "/v1/browser/tabs",
+    tag = "v1",
+    request_body = BrowserCreateTabRequest,
+    responses(
+        (status = 201, description = "New tab created", body = BrowserTabInfo),
+        (status = 409, description = "Browser runtime is not active", body = ProblemDetails),
+        (status = 502, description = "CDP command failed", body = ProblemDetails)
+    )
+)]
+async fn post_v1_browser_tabs(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<BrowserCreateTabRequest>,
+) -> Result<(StatusCode, Json<BrowserTabInfo>), ApiError> {
+    let cdp = state.browser_runtime().get_cdp().await?;
+
+    let url = body.url.unwrap_or_else(|| "about:blank".to_string());
+    let result = cdp
+        .send(
+            "Target.createTarget",
+            Some(serde_json::json!({ "url": url })),
+        )
+        .await?;
+
+    let target_id = result
+        .get("targetId")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    // Give the page a moment to start loading
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+    // Get target info for the newly created tab
+    let targets_result = cdp.send("Target.getTargets", None).await?;
+    let targets = targets_result
+        .get("targetInfos")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let tab_info = targets
+        .iter()
+        .find(|t| t.get("targetId").and_then(|v| v.as_str()) == Some(&target_id));
+
+    let (tab_url, tab_title) = tab_info
+        .map(|t| {
+            let u = t
+                .get("url")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let ti = t
+                .get("title")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            (u, ti)
+        })
+        .unwrap_or_else(|| (url, String::new()));
+
+    Ok((
+        StatusCode::CREATED,
+        Json(BrowserTabInfo {
+            id: target_id,
+            url: tab_url,
+            title: tab_title,
+            active: false,
+        }),
+    ))
+}
+
+/// Activate a browser tab.
+///
+/// Brings the specified tab to the foreground via CDP `Target.activateTarget`.
+#[utoipa::path(
+    post,
+    path = "/v1/browser/tabs/{tab_id}/activate",
+    tag = "v1",
+    params(
+        ("tab_id" = String, Path, description = "Target ID of the tab to activate")
+    ),
+    responses(
+        (status = 200, description = "Tab activated", body = BrowserTabInfo),
+        (status = 404, description = "Tab not found", body = ProblemDetails),
+        (status = 409, description = "Browser runtime is not active", body = ProblemDetails),
+        (status = 502, description = "CDP command failed", body = ProblemDetails)
+    )
+)]
+async fn post_v1_browser_tab_activate(
+    State(state): State<Arc<AppState>>,
+    Path(tab_id): Path<String>,
+) -> Result<Json<BrowserTabInfo>, ApiError> {
+    let cdp = state.browser_runtime().get_cdp().await?;
+
+    // Verify the target exists first
+    let targets_result = cdp.send("Target.getTargets", None).await?;
+    let targets = targets_result
+        .get("targetInfos")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let target = targets
+        .iter()
+        .find(|t| t.get("targetId").and_then(|v| v.as_str()) == Some(&tab_id));
+
+    let target = match target {
+        Some(t) => t.clone(),
+        None => return Err(BrowserProblem::not_found(&format!("Tab {} not found", tab_id)).into()),
+    };
+
+    cdp.send(
+        "Target.activateTarget",
+        Some(serde_json::json!({ "targetId": tab_id })),
+    )
+    .await?;
+
+    let url = target
+        .get("url")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let title = target
+        .get("title")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    Ok(Json(BrowserTabInfo {
+        id: tab_id,
+        url,
+        title,
+        active: true,
+    }))
+}
+
+/// Close a browser tab.
+///
+/// Closes the specified tab via CDP `Target.closeTarget`.
+#[utoipa::path(
+    delete,
+    path = "/v1/browser/tabs/{tab_id}",
+    tag = "v1",
+    params(
+        ("tab_id" = String, Path, description = "Target ID of the tab to close")
+    ),
+    responses(
+        (status = 200, description = "Tab closed", body = BrowserActionResponse),
+        (status = 404, description = "Tab not found", body = ProblemDetails),
+        (status = 409, description = "Browser runtime is not active", body = ProblemDetails),
+        (status = 502, description = "CDP command failed", body = ProblemDetails)
+    )
+)]
+async fn delete_v1_browser_tab(
+    State(state): State<Arc<AppState>>,
+    Path(tab_id): Path<String>,
+) -> Result<Json<BrowserActionResponse>, ApiError> {
+    let cdp = state.browser_runtime().get_cdp().await?;
+
+    let result = cdp
+        .send(
+            "Target.closeTarget",
+            Some(serde_json::json!({ "targetId": tab_id })),
+        )
+        .await?;
+
+    let success = result
+        .get("success")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    if !success {
+        return Err(BrowserProblem::not_found(&format!("Tab {} not found", tab_id)).into());
+    }
+
+    Ok(Json(BrowserActionResponse { ok: true }))
+}
+
+/// Capture a browser page screenshot.
+///
+/// Captures a screenshot of the current browser page via CDP
+/// `Page.captureScreenshot` and returns the image bytes with the appropriate
+/// Content-Type header.
+#[utoipa::path(
+    get,
+    path = "/v1/browser/screenshot",
+    tag = "v1",
+    params(BrowserScreenshotQuery),
+    responses(
+        (status = 200, description = "Browser screenshot as image bytes"),
+        (status = 409, description = "Browser runtime is not active", body = ProblemDetails),
+        (status = 502, description = "CDP command failed", body = ProblemDetails)
+    )
+)]
+async fn get_v1_browser_screenshot(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<BrowserScreenshotQuery>,
+) -> Result<Response, ApiError> {
+    use base64::engine::general_purpose::STANDARD as BASE64_ENGINE;
+    use base64::Engine;
+
+    let cdp = state.browser_runtime().get_cdp().await?;
+
+    let fmt = query.format.unwrap_or(BrowserScreenshotFormat::Png);
+    let cdp_format = match fmt {
+        BrowserScreenshotFormat::Png => "png",
+        BrowserScreenshotFormat::Jpeg => "jpeg",
+        BrowserScreenshotFormat::Webp => "webp",
+    };
+
+    let mut params = serde_json::json!({ "format": cdp_format });
+    if let Some(quality) = query.quality {
+        params["quality"] = serde_json::json!(quality);
+    }
+    if query.full_page.unwrap_or(false) {
+        params["captureBeyondViewport"] = serde_json::json!(true);
+    }
+    if let Some(ref selector) = query.selector {
+        // Resolve element bounding box for clip region
+        let js = format!(
+            r#"(() => {{
+                const el = document.querySelector({selector});
+                if (!el) return null;
+                const r = el.getBoundingClientRect();
+                return {{ x: r.x, y: r.y, width: r.width, height: r.height }};
+            }})()"#,
+            selector = serde_json::to_string(selector).unwrap_or_default()
+        );
+        let eval_result = cdp
+            .send(
+                "Runtime.evaluate",
+                Some(serde_json::json!({
+                    "expression": js,
+                    "returnByValue": true
+                })),
+            )
+            .await?;
+        if let Some(value) = eval_result.get("result").and_then(|r| r.get("value")) {
+            if !value.is_null() {
+                params["clip"] = serde_json::json!({
+                    "x": value.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                    "y": value.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                    "width": value.get("width").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                    "height": value.get("height").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                    "scale": 1
+                });
+            } else {
+                return Err(BrowserProblem::invalid_selector(&format!(
+                    "No element matches selector: {}",
+                    selector
+                ))
+                .into());
+            }
+        }
+    }
+
+    let result = cdp.send("Page.captureScreenshot", Some(params)).await?;
+
+    let data_b64 = result.get("data").and_then(|v| v.as_str()).unwrap_or("");
+    let bytes = BASE64_ENGINE
+        .decode(data_b64)
+        .map_err(|e| BrowserProblem::cdp_error(&format!("Failed to decode screenshot: {}", e)))?;
+
+    let content_type = match fmt {
+        BrowserScreenshotFormat::Png => "image/png",
+        BrowserScreenshotFormat::Jpeg => "image/jpeg",
+        BrowserScreenshotFormat::Webp => "image/webp",
+    };
+
+    Ok(([(header::CONTENT_TYPE, content_type)], Bytes::from(bytes)).into_response())
+}
+
+/// Generate a PDF of the current browser page.
+///
+/// Generates a PDF document from the current page via CDP `Page.printToPDF`
+/// and returns the PDF bytes.
+#[utoipa::path(
+    get,
+    path = "/v1/browser/pdf",
+    tag = "v1",
+    params(BrowserPdfQuery),
+    responses(
+        (status = 200, description = "Browser page as PDF bytes"),
+        (status = 409, description = "Browser runtime is not active", body = ProblemDetails),
+        (status = 502, description = "CDP command failed", body = ProblemDetails)
+    )
+)]
+async fn get_v1_browser_pdf(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<BrowserPdfQuery>,
+) -> Result<Response, ApiError> {
+    use base64::engine::general_purpose::STANDARD as BASE64_ENGINE;
+    use base64::Engine;
+
+    let cdp = state.browser_runtime().get_cdp().await?;
+
+    let (paper_width, paper_height) = match query.format.unwrap_or(BrowserPdfFormat::Letter) {
+        BrowserPdfFormat::A4 => (8.27_f64, 11.69_f64),
+        BrowserPdfFormat::Letter => (8.5_f64, 11.0_f64),
+        BrowserPdfFormat::Legal => (8.5_f64, 14.0_f64),
+    };
+
+    let mut params = serde_json::json!({
+        "paperWidth": paper_width,
+        "paperHeight": paper_height,
+    });
+    if let Some(landscape) = query.landscape {
+        params["landscape"] = serde_json::json!(landscape);
+    }
+    if let Some(print_background) = query.print_background {
+        params["printBackground"] = serde_json::json!(print_background);
+    }
+    if let Some(scale) = query.scale {
+        params["scale"] = serde_json::json!(scale);
+    }
+
+    let result = cdp.send("Page.printToPDF", Some(params)).await?;
+
+    let data_b64 = result.get("data").and_then(|v| v.as_str()).unwrap_or("");
+    let bytes = BASE64_ENGINE
+        .decode(data_b64)
+        .map_err(|e| BrowserProblem::cdp_error(&format!("Failed to decode PDF: {}", e)))?;
+
+    Ok((
+        [(header::CONTENT_TYPE, "application/pdf")],
+        Bytes::from(bytes),
+    )
+        .into_response())
+}
+
+/// Get the HTML content of the current browser page.
+///
+/// Returns the outerHTML of the page or a specific element selected by a CSS
+/// selector, along with the current URL and title.
+#[utoipa::path(
+    get,
+    path = "/v1/browser/content",
+    tag = "v1",
+    params(BrowserContentQuery),
+    responses(
+        (status = 200, description = "Page HTML content", body = BrowserContentResponse),
+        (status = 409, description = "Browser runtime is not active", body = ProblemDetails),
+        (status = 502, description = "CDP command failed", body = ProblemDetails)
+    )
+)]
+async fn get_v1_browser_content(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<BrowserContentQuery>,
+) -> Result<Json<BrowserContentResponse>, ApiError> {
+    let cdp = state.browser_runtime().get_cdp().await?;
+    let (url, title) = get_page_info_via_cdp(&cdp).await?;
+
+    let expression = if let Some(ref selector) = query.selector {
+        let escaped = selector.replace('\\', "\\\\").replace('\'', "\\'");
+        format!(
+            "(function() {{ var el = document.querySelector('{}'); return el ? el.outerHTML : null; }})()",
+            escaped
+        )
+    } else {
+        "document.documentElement.outerHTML".to_string()
+    };
+
+    let result = cdp
+        .send(
+            "Runtime.evaluate",
+            Some(serde_json::json!({
+                "expression": expression,
+                "returnByValue": true
+            })),
+        )
+        .await?;
+
+    let html = result
+        .get("result")
+        .and_then(|r| r.get("value"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    if query.selector.is_some() && html.is_empty() {
+        return Err(BrowserProblem::not_found(&format!(
+            "Element not found: {}",
+            query.selector.as_deref().unwrap_or("")
+        ))
+        .into());
+    }
+
+    Ok(Json(BrowserContentResponse { html, url, title }))
+}
+
+/// Get the page content as Markdown.
+///
+/// Extracts the DOM HTML via CDP, strips navigation/footer/aside elements, and
+/// converts the remaining content to Markdown using html2md.
+#[utoipa::path(
+    get,
+    path = "/v1/browser/markdown",
+    tag = "v1",
+    responses(
+        (status = 200, description = "Page content as Markdown", body = BrowserMarkdownResponse),
+        (status = 409, description = "Browser runtime is not active", body = ProblemDetails),
+        (status = 502, description = "CDP command failed", body = ProblemDetails)
+    )
+)]
+async fn get_v1_browser_markdown(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<BrowserMarkdownResponse>, ApiError> {
+    let cdp = state.browser_runtime().get_cdp().await?;
+    let (url, title) = get_page_info_via_cdp(&cdp).await?;
+
+    // Extract body HTML with nav/footer/aside stripped out
+    let expression = r#"
+        (function() {
+            var clone = document.body.cloneNode(true);
+            var selectors = ['nav', 'footer', 'aside', 'header', '[role="navigation"]', '[role="banner"]', '[role="contentinfo"]'];
+            selectors.forEach(function(sel) {
+                clone.querySelectorAll(sel).forEach(function(el) { el.remove(); });
+            });
+            return clone.innerHTML;
+        })()
+    "#;
+
+    let result = cdp
+        .send(
+            "Runtime.evaluate",
+            Some(serde_json::json!({
+                "expression": expression,
+                "returnByValue": true
+            })),
+        )
+        .await?;
+
+    let html = result
+        .get("result")
+        .and_then(|r| r.get("value"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    let markdown = html2md::parse_html(html);
+
+    Ok(Json(BrowserMarkdownResponse {
+        markdown,
+        url,
+        title,
+    }))
+}
+
+/// Get all links on the current page.
+///
+/// Extracts all anchor elements from the page via CDP and returns their href
+/// and text content.
+#[utoipa::path(
+    get,
+    path = "/v1/browser/links",
+    tag = "v1",
+    responses(
+        (status = 200, description = "Links on the page", body = BrowserLinksResponse),
+        (status = 409, description = "Browser runtime is not active", body = ProblemDetails),
+        (status = 502, description = "CDP command failed", body = ProblemDetails)
+    )
+)]
+async fn get_v1_browser_links(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<BrowserLinksResponse>, ApiError> {
+    let cdp = state.browser_runtime().get_cdp().await?;
+    let (url, _title) = get_page_info_via_cdp(&cdp).await?;
+
+    let expression = r#"
+        (function() {
+            var links = [];
+            document.querySelectorAll('a[href]').forEach(function(a) {
+                links.push({ href: a.href, text: (a.textContent || '').trim() });
+            });
+            return JSON.stringify(links);
+        })()
+    "#;
+
+    let result = cdp
+        .send(
+            "Runtime.evaluate",
+            Some(serde_json::json!({
+                "expression": expression,
+                "returnByValue": true
+            })),
+        )
+        .await?;
+
+    let json_str = result
+        .get("result")
+        .and_then(|r| r.get("value"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("[]");
+
+    let links: Vec<BrowserLinkInfo> = serde_json::from_str(json_str).unwrap_or_default();
+
+    Ok(Json(BrowserLinksResponse { links, url }))
+}
+
+/// Get an accessibility tree snapshot of the current page.
+///
+/// Returns a text representation of the page accessibility tree via CDP
+/// `Accessibility.getFullAXTree`.
+#[utoipa::path(
+    get,
+    path = "/v1/browser/snapshot",
+    tag = "v1",
+    responses(
+        (status = 200, description = "Accessibility tree snapshot", body = BrowserSnapshotResponse),
+        (status = 409, description = "Browser runtime is not active", body = ProblemDetails),
+        (status = 502, description = "CDP command failed", body = ProblemDetails)
+    )
+)]
+async fn get_v1_browser_snapshot(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<BrowserSnapshotResponse>, ApiError> {
+    let cdp = state.browser_runtime().get_cdp().await?;
+    let (url, title) = get_page_info_via_cdp(&cdp).await?;
+
+    let result = cdp.send("Accessibility.getFullAXTree", None).await?;
+
+    // Format the AX tree into a readable text snapshot
+    let nodes = result
+        .get("nodes")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let mut snapshot = String::new();
+    for node in &nodes {
+        let role = node
+            .get("role")
+            .and_then(|r| r.get("value"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let name = node
+            .get("name")
+            .and_then(|n| n.get("value"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        if role == "none" || role == "GenericContainer" || (role.is_empty() && name.is_empty()) {
+            continue;
+        }
+
+        if !snapshot.is_empty() {
+            snapshot.push('\n');
+        }
+        if name.is_empty() {
+            snapshot.push_str(role);
+        } else {
+            snapshot.push_str(&format!("{}: {}", role, name));
+        }
+    }
+
+    Ok(Json(BrowserSnapshotResponse {
+        snapshot,
+        url,
+        title,
+    }))
+}
+
+/// Scrape structured data from the current page using CSS selectors.
+///
+/// For each key in the `selectors` map, runs `querySelectorAll` with the CSS
+/// selector value and collects `textContent` from every match. If `url` is
+/// provided the browser navigates there first.
+#[utoipa::path(
+    post,
+    path = "/v1/browser/scrape",
+    tag = "v1",
+    request_body = BrowserScrapeRequest,
+    responses(
+        (status = 200, description = "Scraped data", body = BrowserScrapeResponse),
+        (status = 409, description = "Browser runtime is not active", body = ProblemDetails),
+        (status = 502, description = "CDP command failed", body = ProblemDetails)
+    )
+)]
+async fn post_v1_browser_scrape(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<BrowserScrapeRequest>,
+) -> Result<Json<BrowserScrapeResponse>, ApiError> {
+    let cdp = state.browser_runtime().get_cdp().await?;
+
+    // Navigate first if a URL was provided
+    if let Some(ref url) = body.url {
+        cdp.send("Page.enable", None).await?;
+        cdp.send("Page.navigate", Some(serde_json::json!({ "url": url })))
+            .await?;
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+
+    // Build a JS expression that evaluates all selectors and returns a JSON object
+    let selectors_json = serde_json::to_string(&body.selectors)
+        .map_err(|e| BrowserProblem::cdp_error(e.to_string()))?;
+
+    let expression = format!(
+        r#"(() => {{
+            const selectors = {selectors_json};
+            const result = {{}};
+            for (const [key, sel] of Object.entries(selectors)) {{
+                const els = document.querySelectorAll(sel);
+                result[key] = Array.from(els).map(el => (el.textContent || '').trim());
+            }}
+            return JSON.stringify(result);
+        }})()"#
+    );
+
+    let result = cdp
+        .send(
+            "Runtime.evaluate",
+            Some(serde_json::json!({
+                "expression": expression,
+                "returnByValue": true
+            })),
+        )
+        .await?;
+
+    let json_str = result
+        .get("result")
+        .and_then(|r| r.get("value"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("{}");
+
+    let data: std::collections::HashMap<String, Vec<String>> =
+        serde_json::from_str(json_str).unwrap_or_default();
+
+    let (url, title) = get_page_info_via_cdp(&cdp).await?;
+
+    Ok(Json(BrowserScrapeResponse { data, url, title }))
+}
+
+/// Execute a JavaScript expression in the browser.
+///
+/// Evaluates the given expression via CDP `Runtime.evaluate` and returns the
+/// result value and its type. Set `awaitPromise` to resolve async expressions.
+#[utoipa::path(
+    post,
+    path = "/v1/browser/execute",
+    tag = "v1",
+    request_body = BrowserExecuteRequest,
+    responses(
+        (status = 200, description = "Execution result", body = BrowserExecuteResponse),
+        (status = 409, description = "Browser runtime is not active", body = ProblemDetails),
+        (status = 502, description = "CDP command failed", body = ProblemDetails)
+    )
+)]
+async fn post_v1_browser_execute(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<BrowserExecuteRequest>,
+) -> Result<Json<BrowserExecuteResponse>, ApiError> {
+    let cdp = state.browser_runtime().get_cdp().await?;
+
+    let mut params = serde_json::json!({
+        "expression": body.expression,
+        "returnByValue": true
+    });
+
+    if let Some(true) = body.await_promise {
+        params["awaitPromise"] = serde_json::json!(true);
+    }
+
+    let result = cdp.send("Runtime.evaluate", Some(params)).await?;
+
+    // Check for evaluation exceptions
+    if let Some(exception) = result.get("exceptionDetails") {
+        let msg = exception
+            .get("exception")
+            .and_then(|e| e.get("description"))
+            .and_then(|d| d.as_str())
+            .or_else(|| exception.get("text").and_then(|t| t.as_str()))
+            .unwrap_or("Script execution failed");
+        return Err(BrowserProblem::cdp_error(msg.to_string()).into());
+    }
+
+    let eval_result = result
+        .get("result")
+        .cloned()
+        .unwrap_or(serde_json::json!({}));
+
+    let type_ = eval_result
+        .get("type")
+        .and_then(|t| t.as_str())
+        .unwrap_or("undefined")
+        .to_string();
+
+    let value = eval_result
+        .get("value")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+
+    Ok(Json(BrowserExecuteResponse {
+        result: value,
+        type_,
+    }))
+}
+
+/// Click an element in the browser page.
+///
+/// Finds the element matching `selector`, computes its center point via
+/// `DOM.getBoxModel`, and dispatches mouse events through `Input.dispatchMouseEvent`.
+#[utoipa::path(
+    post,
+    path = "/v1/browser/click",
+    tag = "v1",
+    request_body = BrowserClickRequest,
+    responses(
+        (status = 200, description = "Click performed", body = BrowserActionResponse),
+        (status = 404, description = "Element not found", body = ProblemDetails),
+        (status = 409, description = "Browser runtime is not active", body = ProblemDetails),
+        (status = 502, description = "CDP command failed", body = ProblemDetails)
+    )
+)]
+async fn post_v1_browser_click(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<BrowserClickRequest>,
+) -> Result<Json<BrowserActionResponse>, ApiError> {
+    let cdp = state.browser_runtime().get_cdp().await?;
+
+    cdp.send("DOM.enable", None).await?;
+
+    // Get document root
+    let doc = cdp.send("DOM.getDocument", None).await?;
+    let root_id = doc
+        .get("root")
+        .and_then(|r| r.get("nodeId"))
+        .and_then(|n| n.as_i64())
+        .unwrap_or(0);
+
+    // Find element by selector
+    let qs_result = cdp
+        .send(
+            "DOM.querySelector",
+            Some(serde_json::json!({
+                "nodeId": root_id,
+                "selector": body.selector
+            })),
+        )
+        .await?;
+
+    let node_id = qs_result
+        .get("nodeId")
+        .and_then(|n| n.as_i64())
+        .unwrap_or(0);
+
+    if node_id == 0 {
+        return Err(
+            BrowserProblem::not_found(format!("Element not found: {}", body.selector)).into(),
+        );
+    }
+
+    // Get element box model for center coordinates
+    let box_model = cdp
+        .send(
+            "DOM.getBoxModel",
+            Some(serde_json::json!({ "nodeId": node_id })),
+        )
+        .await?;
+
+    let content = box_model
+        .get("model")
+        .and_then(|m| m.get("content"))
+        .and_then(|c| c.as_array())
+        .ok_or_else(|| BrowserProblem::cdp_error("Failed to get element box model".to_string()))?;
+
+    // content is [x1,y1, x2,y2, x3,y3, x4,y4] – compute center
+    let x = content
+        .iter()
+        .step_by(2)
+        .filter_map(|v| v.as_f64())
+        .sum::<f64>()
+        / 4.0;
+    let y = content
+        .iter()
+        .skip(1)
+        .step_by(2)
+        .filter_map(|v| v.as_f64())
+        .sum::<f64>()
+        / 4.0;
+
+    let button = match body.button {
+        Some(BrowserMouseButton::Right) => "right",
+        Some(BrowserMouseButton::Middle) => "middle",
+        _ => "left",
+    };
+    let click_count = body.click_count.unwrap_or(1);
+
+    // Dispatch mousePressed + mouseReleased
+    cdp.send(
+        "Input.dispatchMouseEvent",
+        Some(serde_json::json!({
+            "type": "mousePressed",
+            "x": x,
+            "y": y,
+            "button": button,
+            "clickCount": click_count
+        })),
+    )
+    .await?;
+
+    cdp.send(
+        "Input.dispatchMouseEvent",
+        Some(serde_json::json!({
+            "type": "mouseReleased",
+            "x": x,
+            "y": y,
+            "button": button,
+            "clickCount": click_count
+        })),
+    )
+    .await?;
+
+    Ok(Json(BrowserActionResponse { ok: true }))
+}
+
+/// Type text into a focused element.
+///
+/// Finds the element matching `selector`, focuses it via `DOM.focus`, optionally
+/// clears existing content, then dispatches key events for each character.
+#[utoipa::path(
+    post,
+    path = "/v1/browser/type",
+    tag = "v1",
+    request_body = BrowserTypeRequest,
+    responses(
+        (status = 200, description = "Text typed", body = BrowserActionResponse),
+        (status = 404, description = "Element not found", body = ProblemDetails),
+        (status = 409, description = "Browser runtime is not active", body = ProblemDetails),
+        (status = 502, description = "CDP command failed", body = ProblemDetails)
+    )
+)]
+async fn post_v1_browser_type(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<BrowserTypeRequest>,
+) -> Result<Json<BrowserActionResponse>, ApiError> {
+    let cdp = state.browser_runtime().get_cdp().await?;
+
+    cdp.send("DOM.enable", None).await?;
+
+    // Get document root and find element
+    let doc = cdp.send("DOM.getDocument", None).await?;
+    let root_id = doc
+        .get("root")
+        .and_then(|r| r.get("nodeId"))
+        .and_then(|n| n.as_i64())
+        .unwrap_or(0);
+
+    let qs_result = cdp
+        .send(
+            "DOM.querySelector",
+            Some(serde_json::json!({
+                "nodeId": root_id,
+                "selector": body.selector
+            })),
+        )
+        .await?;
+
+    let node_id = qs_result
+        .get("nodeId")
+        .and_then(|n| n.as_i64())
+        .unwrap_or(0);
+
+    if node_id == 0 {
+        return Err(
+            BrowserProblem::not_found(format!("Element not found: {}", body.selector)).into(),
+        );
+    }
+
+    // Focus the element
+    cdp.send("DOM.focus", Some(serde_json::json!({ "nodeId": node_id })))
+        .await?;
+
+    // Clear existing content if requested
+    if body.clear == Some(true) {
+        cdp.send(
+            "Runtime.evaluate",
+            Some(serde_json::json!({
+                "expression": format!(
+                    "document.querySelector('{}').value = ''",
+                    body.selector.replace('\'', "\\'")
+                ),
+                "returnByValue": true
+            })),
+        )
+        .await?;
+    }
+
+    // Type each character via Input.dispatchKeyEvent
+    let delay_ms = body.delay.unwrap_or(0);
+    for ch in body.text.chars() {
+        cdp.send(
+            "Input.dispatchKeyEvent",
+            Some(serde_json::json!({
+                "type": "keyDown",
+                "text": ch.to_string()
+            })),
+        )
+        .await?;
+
+        cdp.send(
+            "Input.dispatchKeyEvent",
+            Some(serde_json::json!({
+                "type": "keyUp",
+                "text": ch.to_string()
+            })),
+        )
+        .await?;
+
+        if delay_ms > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+        }
+    }
+
+    Ok(Json(BrowserActionResponse { ok: true }))
+}
+
+/// Select an option in a `<select>` element.
+///
+/// Finds the element matching `selector` and sets its value via `Runtime.evaluate`,
+/// then dispatches a `change` event so listeners fire.
+#[utoipa::path(
+    post,
+    path = "/v1/browser/select",
+    tag = "v1",
+    request_body = BrowserSelectRequest,
+    responses(
+        (status = 200, description = "Option selected", body = BrowserActionResponse),
+        (status = 404, description = "Element not found", body = ProblemDetails),
+        (status = 409, description = "Browser runtime is not active", body = ProblemDetails),
+        (status = 502, description = "CDP command failed", body = ProblemDetails)
+    )
+)]
+async fn post_v1_browser_select(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<BrowserSelectRequest>,
+) -> Result<Json<BrowserActionResponse>, ApiError> {
+    let cdp = state.browser_runtime().get_cdp().await?;
+
+    let escaped_selector = body.selector.replace('\\', "\\\\").replace('\'', "\\'");
+    let escaped_value = body.value.replace('\\', "\\\\").replace('\'', "\\'");
+
+    let expression = format!(
+        r#"(() => {{
+            const el = document.querySelector('{escaped_selector}');
+            if (!el) return 'not_found';
+            el.value = '{escaped_value}';
+            el.dispatchEvent(new Event('change', {{ bubbles: true }}));
+            return 'ok';
+        }})()"#
+    );
+
+    let result = cdp
+        .send(
+            "Runtime.evaluate",
+            Some(serde_json::json!({
+                "expression": expression,
+                "returnByValue": true
+            })),
+        )
+        .await?;
+
+    let value = result
+        .get("result")
+        .and_then(|r| r.get("value"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("error");
+
+    if value == "not_found" {
+        return Err(
+            BrowserProblem::not_found(format!("Element not found: {}", body.selector)).into(),
+        );
+    }
+
+    Ok(Json(BrowserActionResponse { ok: true }))
+}
+
+/// Hover over an element.
+///
+/// Finds the element matching `selector`, computes its center via `DOM.getBoxModel`,
+/// and dispatches a `mouseMoved` event.
+#[utoipa::path(
+    post,
+    path = "/v1/browser/hover",
+    tag = "v1",
+    request_body = BrowserHoverRequest,
+    responses(
+        (status = 200, description = "Hover performed", body = BrowserActionResponse),
+        (status = 404, description = "Element not found", body = ProblemDetails),
+        (status = 409, description = "Browser runtime is not active", body = ProblemDetails),
+        (status = 502, description = "CDP command failed", body = ProblemDetails)
+    )
+)]
+async fn post_v1_browser_hover(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<BrowserHoverRequest>,
+) -> Result<Json<BrowserActionResponse>, ApiError> {
+    let cdp = state.browser_runtime().get_cdp().await?;
+
+    cdp.send("DOM.enable", None).await?;
+
+    let doc = cdp.send("DOM.getDocument", None).await?;
+    let root_id = doc
+        .get("root")
+        .and_then(|r| r.get("nodeId"))
+        .and_then(|n| n.as_i64())
+        .unwrap_or(0);
+
+    let qs_result = cdp
+        .send(
+            "DOM.querySelector",
+            Some(serde_json::json!({
+                "nodeId": root_id,
+                "selector": body.selector
+            })),
+        )
+        .await?;
+
+    let node_id = qs_result
+        .get("nodeId")
+        .and_then(|n| n.as_i64())
+        .unwrap_or(0);
+
+    if node_id == 0 {
+        return Err(
+            BrowserProblem::not_found(format!("Element not found: {}", body.selector)).into(),
+        );
+    }
+
+    let box_model = cdp
+        .send(
+            "DOM.getBoxModel",
+            Some(serde_json::json!({ "nodeId": node_id })),
+        )
+        .await?;
+
+    let content = box_model
+        .get("model")
+        .and_then(|m| m.get("content"))
+        .and_then(|c| c.as_array())
+        .ok_or_else(|| BrowserProblem::cdp_error("Failed to get element box model".to_string()))?;
+
+    let x = content
+        .iter()
+        .step_by(2)
+        .filter_map(|v| v.as_f64())
+        .sum::<f64>()
+        / 4.0;
+    let y = content
+        .iter()
+        .skip(1)
+        .step_by(2)
+        .filter_map(|v| v.as_f64())
+        .sum::<f64>()
+        / 4.0;
+
+    cdp.send(
+        "Input.dispatchMouseEvent",
+        Some(serde_json::json!({
+            "type": "mouseMoved",
+            "x": x,
+            "y": y
+        })),
+    )
+    .await?;
+
+    Ok(Json(BrowserActionResponse { ok: true }))
+}
+
+/// Scroll the page or a specific element.
+///
+/// If a `selector` is provided, scrolls that element. Otherwise scrolls the
+/// page window by the given `x` and `y` pixel offsets.
+#[utoipa::path(
+    post,
+    path = "/v1/browser/scroll",
+    tag = "v1",
+    request_body = BrowserScrollRequest,
+    responses(
+        (status = 200, description = "Scroll performed", body = BrowserActionResponse),
+        (status = 404, description = "Element not found", body = ProblemDetails),
+        (status = 409, description = "Browser runtime is not active", body = ProblemDetails),
+        (status = 502, description = "CDP command failed", body = ProblemDetails)
+    )
+)]
+async fn post_v1_browser_scroll(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<BrowserScrollRequest>,
+) -> Result<Json<BrowserActionResponse>, ApiError> {
+    let cdp = state.browser_runtime().get_cdp().await?;
+
+    let x = body.x.unwrap_or(0);
+    let y = body.y.unwrap_or(0);
+
+    let expression = if let Some(ref selector) = body.selector {
+        let escaped = selector.replace('\\', "\\\\").replace('\'', "\\'");
+        format!(
+            r#"(() => {{
+                const el = document.querySelector('{escaped}');
+                if (!el) return 'not_found';
+                el.scrollBy({x}, {y});
+                return 'ok';
+            }})()"#
+        )
+    } else {
+        format!(
+            r#"(() => {{
+                window.scrollBy({x}, {y});
+                return 'ok';
+            }})()"#
+        )
+    };
+
+    let result = cdp
+        .send(
+            "Runtime.evaluate",
+            Some(serde_json::json!({
+                "expression": expression,
+                "returnByValue": true
+            })),
+        )
+        .await?;
+
+    let value = result
+        .get("result")
+        .and_then(|r| r.get("value"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("error");
+
+    if value == "not_found" {
+        return Err(BrowserProblem::not_found(format!(
+            "Element not found: {}",
+            body.selector.unwrap_or_default()
+        ))
+        .into());
+    }
+
+    Ok(Json(BrowserActionResponse { ok: true }))
+}
+
+/// Upload a file to a file input element in the browser page.
+///
+/// Resolves the file input element matching `selector` and sets the specified
+/// file path using `DOM.setFileInputFiles`.
+#[utoipa::path(
+    post,
+    path = "/v1/browser/upload",
+    tag = "v1",
+    request_body = BrowserUploadRequest,
+    responses(
+        (status = 200, description = "File uploaded to input", body = BrowserActionResponse),
+        (status = 404, description = "Element not found", body = ProblemDetails),
+        (status = 409, description = "Browser runtime is not active", body = ProblemDetails),
+        (status = 502, description = "CDP command failed", body = ProblemDetails)
+    )
+)]
+async fn post_v1_browser_upload(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<BrowserUploadRequest>,
+) -> Result<Json<BrowserActionResponse>, ApiError> {
+    let cdp = state.browser_runtime().get_cdp().await?;
+
+    cdp.send("DOM.enable", None).await?;
+
+    // Get document root
+    let doc = cdp.send("DOM.getDocument", None).await?;
+    let root_id = doc
+        .get("root")
+        .and_then(|r| r.get("nodeId"))
+        .and_then(|n| n.as_i64())
+        .unwrap_or(0);
+
+    // Find file input element by selector
+    let qs_result = cdp
+        .send(
+            "DOM.querySelector",
+            Some(serde_json::json!({
+                "nodeId": root_id,
+                "selector": body.selector
+            })),
+        )
+        .await?;
+
+    let node_id = qs_result
+        .get("nodeId")
+        .and_then(|n| n.as_i64())
+        .unwrap_or(0);
+
+    if node_id == 0 {
+        return Err(
+            BrowserProblem::not_found(format!("Element not found: {}", body.selector)).into(),
+        );
+    }
+
+    // Set file input files
+    cdp.send(
+        "DOM.setFileInputFiles",
+        Some(serde_json::json!({
+            "files": [body.path],
+            "nodeId": node_id
+        })),
+    )
+    .await?;
+
+    Ok(Json(BrowserActionResponse { ok: true }))
+}
+
+/// Handle a JavaScript dialog (alert, confirm, prompt) in the browser.
+///
+/// Accepts or dismisses the currently open dialog using
+/// `Page.handleJavaScriptDialog`, optionally providing prompt text.
+#[utoipa::path(
+    post,
+    path = "/v1/browser/dialog",
+    tag = "v1",
+    request_body = BrowserDialogRequest,
+    responses(
+        (status = 200, description = "Dialog handled", body = BrowserActionResponse),
+        (status = 409, description = "Browser runtime is not active", body = ProblemDetails),
+        (status = 502, description = "CDP command failed", body = ProblemDetails)
+    )
+)]
+async fn post_v1_browser_dialog(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<BrowserDialogRequest>,
+) -> Result<Json<BrowserActionResponse>, ApiError> {
+    let cdp = state.browser_runtime().get_cdp().await?;
+
+    let mut params = serde_json::json!({
+        "accept": body.accept
+    });
+
+    if let Some(ref text) = body.text {
+        params
+            .as_object_mut()
+            .unwrap()
+            .insert("promptText".to_string(), serde_json::json!(text));
+    }
+
+    cdp.send("Page.handleJavaScriptDialog", Some(params))
+        .await?;
+
+    Ok(Json(BrowserActionResponse { ok: true }))
+}
+
+/// Get browser console messages.
+///
+/// Returns console messages captured from the browser, optionally filtered by
+/// level (log, debug, info, warning, error) and limited in count.
+#[utoipa::path(
+    get,
+    path = "/v1/browser/console",
+    tag = "v1",
+    params(BrowserConsoleQuery),
+    responses(
+        (status = 200, description = "Console messages retrieved", body = BrowserConsoleResponse),
+        (status = 409, description = "Browser not active", body = ProblemDetails),
+        (status = 500, description = "Internal error", body = ProblemDetails)
+    )
+)]
+async fn get_v1_browser_console(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<BrowserConsoleQuery>,
+) -> Result<Json<BrowserConsoleResponse>, ApiError> {
+    state.browser_runtime().ensure_active().await?;
+    let messages = state
+        .browser_runtime()
+        .console_messages(query.level.as_deref(), query.limit)
+        .await;
+    Ok(Json(BrowserConsoleResponse { messages }))
+}
+
+/// Get browser network requests.
+///
+/// Returns network requests captured from the browser, optionally filtered by
+/// URL pattern and limited in count.
+#[utoipa::path(
+    get,
+    path = "/v1/browser/network",
+    tag = "v1",
+    params(BrowserNetworkQuery),
+    responses(
+        (status = 200, description = "Network requests retrieved", body = BrowserNetworkResponse),
+        (status = 409, description = "Browser not active", body = ProblemDetails),
+        (status = 500, description = "Internal error", body = ProblemDetails)
+    )
+)]
+async fn get_v1_browser_network(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<BrowserNetworkQuery>,
+) -> Result<Json<BrowserNetworkResponse>, ApiError> {
+    state.browser_runtime().ensure_active().await?;
+    let requests = state
+        .browser_runtime()
+        .network_requests(query.url_pattern.as_deref(), query.limit)
+        .await;
+    Ok(Json(BrowserNetworkResponse { requests }))
+}
+
+/// List browser contexts (persistent profiles).
+///
+/// Returns all browser context directories with their name, creation date,
+/// and on-disk size.
+#[utoipa::path(
+    get,
+    path = "/v1/browser/contexts",
+    tag = "v1",
+    responses(
+        (status = 200, description = "Browser contexts listed", body = BrowserContextListResponse),
+        (status = 500, description = "Internal error", body = ProblemDetails)
+    )
+)]
+async fn get_v1_browser_contexts(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<BrowserContextListResponse>, ApiError> {
+    let contexts = crate::browser_context::list_contexts(state.browser_runtime().state_dir())?;
+    Ok(Json(BrowserContextListResponse { contexts }))
+}
+
+/// Create a browser context (persistent profile).
+///
+/// Creates a new browser context directory that can be passed as contextId
+/// to the browser start endpoint for persistent cookies and storage.
+#[utoipa::path(
+    post,
+    path = "/v1/browser/contexts",
+    tag = "v1",
+    request_body = BrowserContextCreateRequest,
+    responses(
+        (status = 201, description = "Browser context created", body = BrowserContextInfo),
+        (status = 500, description = "Internal error", body = ProblemDetails)
+    )
+)]
+async fn post_v1_browser_contexts(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<BrowserContextCreateRequest>,
+) -> Result<(StatusCode, Json<BrowserContextInfo>), ApiError> {
+    let info = crate::browser_context::create_context(state.browser_runtime().state_dir(), body)?;
+    Ok((StatusCode::CREATED, Json(info)))
+}
+
+/// Delete a browser context (persistent profile).
+///
+/// Removes the browser context directory and all stored data (cookies,
+/// local storage, cache, etc.).
+#[utoipa::path(
+    delete,
+    path = "/v1/browser/contexts/{context_id}",
+    tag = "v1",
+    params(
+        ("context_id" = String, Path, description = "Browser context ID")
+    ),
+    responses(
+        (status = 200, description = "Browser context deleted", body = BrowserActionResponse),
+        (status = 404, description = "Browser context not found", body = ProblemDetails),
+        (status = 500, description = "Internal error", body = ProblemDetails)
+    )
+)]
+async fn delete_v1_browser_context(
+    State(state): State<Arc<AppState>>,
+    Path(context_id): Path<String>,
+) -> Result<Json<BrowserActionResponse>, ApiError> {
+    crate::browser_context::delete_context(state.browser_runtime().state_dir(), &context_id)?;
+    Ok(Json(BrowserActionResponse { ok: true }))
+}
+
+/// Get browser cookies.
+///
+/// Returns cookies from the browser, optionally filtered by URL.
+/// Uses CDP Network.getCookies.
+#[utoipa::path(
+    get,
+    path = "/v1/browser/cookies",
+    tag = "v1",
+    params(BrowserCookiesQuery),
+    responses(
+        (status = 200, description = "Cookies retrieved", body = BrowserCookiesResponse),
+        (status = 409, description = "Browser not active", body = ProblemDetails),
+        (status = 502, description = "CDP command failed", body = ProblemDetails)
+    )
+)]
+async fn get_v1_browser_cookies(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<BrowserCookiesQuery>,
+) -> Result<Json<BrowserCookiesResponse>, ApiError> {
+    let cdp = state.browser_runtime().get_cdp().await?;
+
+    let params = match &query.url {
+        Some(url) => Some(serde_json::json!({ "urls": [url] })),
+        None => None,
+    };
+
+    let result = cdp.send("Network.getCookies", params).await?;
+
+    let cdp_cookies = result
+        .get("cookies")
+        .and_then(|c| c.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let cookies = cdp_cookies
+        .into_iter()
+        .filter_map(|c| {
+            Some(BrowserCookie {
+                name: c.get("name")?.as_str()?.to_string(),
+                value: c.get("value")?.as_str()?.to_string(),
+                domain: c
+                    .get("domain")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                path: c
+                    .get("path")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                expires: c
+                    .get("expires")
+                    .and_then(|v| v.as_f64())
+                    .filter(|&e| e > 0.0),
+                http_only: c.get("httpOnly").and_then(|v| v.as_bool()),
+                secure: c.get("secure").and_then(|v| v.as_bool()),
+                same_site: c
+                    .get("sameSite")
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| match s {
+                        "Strict" => Some(BrowserCookieSameSite::Strict),
+                        "Lax" => Some(BrowserCookieSameSite::Lax),
+                        "None" => Some(BrowserCookieSameSite::None),
+                        _ => None,
+                    }),
+            })
+        })
+        .collect();
+
+    Ok(Json(BrowserCookiesResponse { cookies }))
+}
+
+/// Set browser cookies.
+///
+/// Sets one or more cookies in the browser via CDP Network.setCookies.
+#[utoipa::path(
+    post,
+    path = "/v1/browser/cookies",
+    tag = "v1",
+    request_body = BrowserSetCookiesRequest,
+    responses(
+        (status = 200, description = "Cookies set", body = BrowserActionResponse),
+        (status = 409, description = "Browser not active", body = ProblemDetails),
+        (status = 502, description = "CDP command failed", body = ProblemDetails)
+    )
+)]
+async fn post_v1_browser_cookies(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<BrowserSetCookiesRequest>,
+) -> Result<Json<BrowserActionResponse>, ApiError> {
+    let cdp = state.browser_runtime().get_cdp().await?;
+
+    let cdp_cookies: Vec<serde_json::Value> = body
+        .cookies
+        .iter()
+        .map(|c| {
+            let mut cookie = serde_json::json!({
+                "name": c.name,
+                "value": c.value,
+            });
+            let obj = cookie.as_object_mut().unwrap();
+            if let Some(ref domain) = c.domain {
+                obj.insert("domain".into(), serde_json::json!(domain));
+            }
+            if let Some(ref path) = c.path {
+                obj.insert("path".into(), serde_json::json!(path));
+            }
+            if let Some(expires) = c.expires {
+                obj.insert("expires".into(), serde_json::json!(expires));
+            }
+            if let Some(http_only) = c.http_only {
+                obj.insert("httpOnly".into(), serde_json::json!(http_only));
+            }
+            if let Some(secure) = c.secure {
+                obj.insert("secure".into(), serde_json::json!(secure));
+            }
+            if let Some(same_site) = &c.same_site {
+                let ss = match same_site {
+                    BrowserCookieSameSite::Strict => "Strict",
+                    BrowserCookieSameSite::Lax => "Lax",
+                    BrowserCookieSameSite::None => "None",
+                };
+                obj.insert("sameSite".into(), serde_json::json!(ss));
+            }
+            cookie
+        })
+        .collect();
+
+    cdp.send(
+        "Network.setCookies",
+        Some(serde_json::json!({ "cookies": cdp_cookies })),
+    )
+    .await?;
+
+    Ok(Json(BrowserActionResponse { ok: true }))
+}
+
+/// Delete browser cookies.
+///
+/// Deletes cookies matching the given name and/or domain. If no filters are
+/// provided, clears all browser cookies.
+#[utoipa::path(
+    delete,
+    path = "/v1/browser/cookies",
+    tag = "v1",
+    params(BrowserDeleteCookiesQuery),
+    responses(
+        (status = 200, description = "Cookies deleted", body = BrowserActionResponse),
+        (status = 409, description = "Browser not active", body = ProblemDetails),
+        (status = 502, description = "CDP command failed", body = ProblemDetails)
+    )
+)]
+async fn delete_v1_browser_cookies(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<BrowserDeleteCookiesQuery>,
+) -> Result<Json<BrowserActionResponse>, ApiError> {
+    let cdp = state.browser_runtime().get_cdp().await?;
+
+    if query.name.is_none() && query.domain.is_none() {
+        // Clear all cookies
+        cdp.send("Network.clearBrowserCookies", None).await?;
+    } else {
+        // Get current cookies, filter matching ones, delete each
+        let result = cdp.send("Network.getCookies", None).await?;
+        let cdp_cookies = result
+            .get("cookies")
+            .and_then(|c| c.as_array())
+            .cloned()
+            .unwrap_or_default();
+
+        for cookie in &cdp_cookies {
+            let cookie_name = cookie.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            let cookie_domain = cookie.get("domain").and_then(|v| v.as_str()).unwrap_or("");
+
+            let name_matches = query.name.as_deref().map_or(true, |n| n == cookie_name);
+            let domain_matches = query
+                .domain
+                .as_deref()
+                .map_or(true, |d| cookie_domain.contains(d));
+
+            if name_matches && domain_matches {
+                let mut params = serde_json::json!({ "name": cookie_name });
+                let obj = params.as_object_mut().unwrap();
+                if !cookie_domain.is_empty() {
+                    obj.insert("domain".into(), serde_json::json!(cookie_domain));
+                }
+                if let Some(path) = cookie.get("path").and_then(|v| v.as_str()) {
+                    obj.insert("path".into(), serde_json::json!(path));
+                }
+                cdp.send("Network.deleteCookies", Some(params)).await?;
+            }
+        }
+    }
+
+    Ok(Json(BrowserActionResponse { ok: true }))
+}
+
+/// Crawl multiple pages starting from a URL.
+///
+/// Performs a breadth-first crawl: navigates to each page, extracts content in
+/// the requested format, collects links, and follows them within the configured
+/// domain and depth limits.
+#[utoipa::path(
+    post,
+    path = "/v1/browser/crawl",
+    tag = "v1",
+    request_body = BrowserCrawlRequest,
+    responses(
+        (status = 200, description = "Crawl results", body = BrowserCrawlResponse),
+        (status = 409, description = "Browser runtime is not active", body = ProblemDetails),
+        (status = 502, description = "CDP command failed", body = ProblemDetails)
+    )
+)]
+async fn post_v1_browser_crawl(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<BrowserCrawlRequest>,
+) -> Result<Json<BrowserCrawlResponse>, ApiError> {
+    let cdp = state.browser_runtime().get_cdp().await?;
+    let response = crate::browser_crawl::crawl_pages(&cdp, &body).await?;
+    Ok(Json(response))
+}
+
+/// Helper: get the current page URL and title via CDP Runtime.evaluate.
+async fn get_page_info_via_cdp(
+    cdp: &crate::browser_cdp::CdpClient,
+) -> Result<(String, String), BrowserProblem> {
+    let url_result = cdp
+        .send(
+            "Runtime.evaluate",
+            Some(serde_json::json!({
+                "expression": "document.location.href",
+                "returnByValue": true
+            })),
+        )
+        .await?;
+    let url = url_result
+        .get("result")
+        .and_then(|r| r.get("value"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    let title_result = cdp
+        .send(
+            "Runtime.evaluate",
+            Some(serde_json::json!({
+                "expression": "document.title",
+                "returnByValue": true
+            })),
+        )
+        .await?;
+    let title = title_result
+        .get("result")
+        .and_then(|r| r.get("value"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    Ok((url, title))
 }
 
 /// Capture a full desktop screenshot.

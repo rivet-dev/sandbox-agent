@@ -1,0 +1,148 @@
+---
+title: "Feature Matrix"
+description: "Compare Sandbox Agent's capabilities against other sandbox and browser automation providers."
+sidebarTitle: "Feature Matrix"
+icon: "table-columns"
+---
+
+A comparison of Sandbox Agent's features against Daytona, E2B, Cloudflare (Browser Rendering), Browserbase, and common agent-browser tools (Steel, Stagehand, Browser Use).
+
+## Sandbox Lifecycle
+
+| Feature | Sandbox Agent | Daytona | E2B | Cloudflare | Browserbase |
+|---------|:---:|:---:|:---:|:---:|:---:|
+| Create sandbox | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Destroy/delete | ✓ | ✓ | ✓ | ✓ | ✓ |
+| List sandboxes | ✓ | ✓ | ✓ | - | ✓ |
+| Start/stop | ✓ | ✓ | ✓ | ✓ | - |
+| Pause/resume | - | - | ✓ | - | - |
+| Snapshots/templates | - | ✓ | ✓ | - | ✓ |
+| Auto-stop timeout | - | ✓ | ✓ | ✓ | ✓ |
+| Region selection | - | - | - | ✓ | ✓ |
+
+## Filesystem
+
+| Feature | Sandbox Agent | Daytona | E2B | Cloudflare | Browserbase |
+|---------|:---:|:---:|:---:|:---:|:---:|
+| Read file | ✓ | ✓ | ✓ | - | - |
+| Write file | ✓ | ✓ | ✓ | - | - |
+| List directory (recursive) | ✓ | ✓ | ✓ | - | - |
+| Delete file/dir | ✓ | - | ✓ | - | - |
+| Move/rename | ✓ | - | ✓ | - | - |
+| Mkdir | ✓ | - | ✓ | - | - |
+| File stat/metadata | ✓ | - | - | - | - |
+| Batch upload (tar) | ✓ | - | - | - | - |
+| File watch/events | - | - | ✓ | - | - |
+
+## Process Management
+
+| Feature | Sandbox Agent | Daytona | E2B | Cloudflare | Browserbase |
+|---------|:---:|:---:|:---:|:---:|:---:|
+| One-shot exec | ✓ | ✓ | ✓ | - | - |
+| Background processes | ✓ | - | ✓ | - | - |
+| Stream stdout/stderr | ✓ | - | ✓ | - | - |
+| Interactive PTY (WebSocket) | ✓ | ✓ | ✓ | - | - |
+| Terminal resize | ✓ | ✓ | ✓ | - | - |
+| Send stdin | ✓ | - | ✓ | - | - |
+| Kill/stop process | ✓ | - | ✓ | - | - |
+| List processes | ✓ | - | ✓ | - | - |
+| Process config (limits) | ✓ | - | - | - | - |
+
+## Desktop / Computer-Use
+
+| Feature | Sandbox Agent | Daytona | E2B | Cloudflare | Browserbase |
+|---------|:---:|:---:|:---:|:---:|:---:|
+| Virtual desktop | ✓ | - | ✓ | - | - |
+| Screenshot (full) | ✓ | - | ✓ | ✓ | - |
+| Screenshot (region) | ✓ | - | - | - | - |
+| Mouse (move/click/drag/scroll) | ✓ | - | ✓ | - | - |
+| Keyboard (type/press) | ✓ | - | ✓ | - | - |
+| Window management | ✓ | - | - | - | - |
+| Clipboard read/write | ✓ | - | - | - | - |
+| Launch application | ✓ | - | - | - | - |
+| Display info / DPI config | ✓ | - | - | - | - |
+| Desktop recording | ✓ | - | - | - | ✓ |
+
+## Live Streaming
+
+| Feature | Sandbox Agent | Daytona | E2B | Cloudflare | Browserbase |
+|---------|:---:|:---:|:---:|:---:|:---:|
+| Live desktop stream | ✓ | - | ✓ | - | - |
+| Protocol | WebRTC (Neko) | - | VNC | - | CDP screencast |
+| Video codecs | VP8, VP9, H.264 | - | - | - | JPEG |
+| Audio streaming | ✓ (Opus, G.722) | - | - | - | - |
+| Interactive input via stream | ✓ | - | ✓ | - | Limited |
+| Configurable FPS (1-60) | ✓ | - | - | - | - |
+| Multi-viewer | ✓ | - | - | - | ✓ |
+| Typical latency | 50-150ms | - | 100-500ms | - | 200-1000ms |
+
+## Browser Automation
+
+| Feature | Sandbox Agent | Cloudflare | Browserbase | Steel | Stagehand |
+|---------|:---:|:---:|:---:|:---:|:---:|
+| Start/stop browser | ✓ | ✓ | ✓ | ✓ | ✓ |
+| CDP WebSocket access | ✓ | ✓ | ✓ | ✓ | - |
+| Navigate / back / forward | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Tab management | ✓ | - | ✓ | - | - |
+| Click / type / scroll (selector) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Screenshot (browser-level) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| PDF generation | ✓ | ✓ | ✓ | ✓ | - |
+| Get page HTML | ✓ | ✓ | ✓ | - | - |
+| Get page as Markdown | ✓ | ✓ | - | - | - |
+| Scrape elements (selectors) | ✓ | ✓ | ✓ | - | - |
+| Extract all links | ✓ | ✓ | - | - | - |
+| Accessibility tree snapshot | ✓ | - | - | - | ✓ |
+| Execute JavaScript | ✓ | - | ✓ | ✓ | - |
+| Console log capture | ✓ | - | ✓ | - | - |
+| Network request capture | ✓ | - | ✓ | - | - |
+| Web crawling | ✓ | ✓ | - | - | - |
+| Persistent browser profiles | ✓ | - | ✓ | ✓ | - |
+| Cookie management | ✓ | - | ✓ | ✓ | - |
+| File upload to input | ✓ | - | ✓ | ✓ | - |
+| Dialog handling | ✓ | - | ✓ | - | - |
+| Live browser streaming | ✓ (WebRTC) | - | ✓ (CDP) | ✓ | - |
+| Anti-detection/stealth | - | - | ✓ | ✓ | - |
+| Proxy support | - | - | ✓ | ✓ | - |
+| CAPTCHA solving | - | - | ✓ | - | - |
+| Browser extensions | - | - | ✓ | - | - |
+
+## Agent Integration
+
+| Feature | Sandbox Agent | Daytona | E2B | Cloudflare | Browserbase |
+|---------|:---:|:---:|:---:|:---:|:---:|
+| Agent Client Protocol (ACP) | ✓ | - | - | - | - |
+| MCP server config | ✓ | - | - | - | - |
+| Skills config | ✓ | - | - | - | - |
+| Agent install/management | ✓ | - | - | - | - |
+| Session persistence | ✓ | - | - | - | - |
+| Permission system | ✓ | - | - | - | - |
+| Code interpreter | - | - | ✓ | - | - |
+
+## SDKs and Tooling
+
+| Feature | Sandbox Agent | Daytona | E2B | Cloudflare | Browserbase |
+|---------|:---:|:---:|:---:|:---:|:---:|
+| TypeScript SDK | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Python SDK | - | ✓ | ✓ | - | ✓ |
+| React components | ✓ | - | - | - | - |
+| Inspector UI | ✓ | - | - | - | - |
+| Provider abstraction (7+) | ✓ | - | - | - | - |
+| WebRTC client library | ✓ | - | - | - | - |
+| CLI | ✓ | ✓ | ✓ | ✓ | - |
+
+## Streaming Technology Comparison
+
+For platforms that support live desktop/browser streaming, here is how the underlying technologies compare:
+
+| Dimension | WebRTC (Neko) | VNC (noVNC) | CDP Screencast | WebSocket + JPEG |
+|-----------|:---:|:---:|:---:|:---:|
+| Typical latency | 50-150ms | 100-500ms | 200-1000ms | 150-400ms |
+| Frame rate | 30-60 fps | 10-30 fps | 1-15 fps | 5-20 fps |
+| Video quality | High | Medium | Low-Medium | Medium |
+| Audio support | Yes | No | No | No |
+| Interactive input | Full | Full | Limited | Limited |
+| Bandwidth (adaptive) | Yes | No | No | No |
+| Used by | Sandbox Agent | E2B, Gitpod | Browserbase | Various |
+
+Sandbox Agent uses [Neko](https://github.com/m1k1o/neko) (WebRTC) for streaming, which provides the lowest latency and best interactivity of any approach. The same stream serves both the full desktop and browser automation modes.
+

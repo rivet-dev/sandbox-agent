@@ -62,6 +62,15 @@ impl DesktopProblem {
         )
     }
 
+    pub fn browser_conflict() -> Self {
+        Self::new(
+            409,
+            "Browser Conflict",
+            "desktop/browser-conflict",
+            "The browser runtime is currently active. Browser and desktop modes are mutually exclusive.",
+        )
+    }
+
     pub fn runtime_starting(message: impl Into<String>) -> Self {
         Self::new(
             409,

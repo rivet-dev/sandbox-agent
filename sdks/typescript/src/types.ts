@@ -46,6 +46,71 @@ export type DesktopOpenRequest = JsonRequestBody<operations["post_v1_desktop_ope
 export type DesktopOpenResponse = JsonResponse<operations["post_v1_desktop_open"], 200>;
 export type DesktopWindowMoveRequest = JsonRequestBody<operations["post_v1_desktop_window_move"]>;
 export type DesktopWindowResizeRequest = JsonRequestBody<operations["post_v1_desktop_window_resize"]>;
+
+// Browser types
+export type BrowserState = components["schemas"]["BrowserState"];
+export type BrowserStartRequest = JsonRequestBody<operations["post_v1_browser_start"]>;
+export type BrowserStatusResponse = JsonResponse<operations["get_v1_browser_status"], 200>;
+export type BrowserNavigateRequest = JsonRequestBody<operations["post_v1_browser_navigate"]>;
+export type BrowserNavigateWaitUntil = components["schemas"]["BrowserNavigateWaitUntil"];
+export type BrowserPageInfo = JsonResponse<operations["post_v1_browser_navigate"], 200>;
+export type BrowserReloadRequest = JsonRequestBody<operations["post_v1_browser_reload"]>;
+export type BrowserWaitRequest = JsonRequestBody<operations["post_v1_browser_wait"]>;
+export type BrowserWaitState = components["schemas"]["BrowserWaitState"];
+export type BrowserWaitResponse = JsonResponse<operations["post_v1_browser_wait"], 200>;
+export type BrowserTabInfo = components["schemas"]["BrowserTabInfo"];
+export type BrowserTabListResponse = JsonResponse<operations["get_v1_browser_tabs"], 200>;
+export type BrowserCreateTabRequest = JsonRequestBody<operations["post_v1_browser_tabs"]>;
+export type BrowserScreenshotFormat = components["schemas"]["BrowserScreenshotFormat"];
+export type BrowserScreenshotQuery =
+  QueryParams<operations["get_v1_browser_screenshot"]> extends never ? Record<string, never> : QueryParams<operations["get_v1_browser_screenshot"]>;
+export type BrowserPdfFormat = components["schemas"]["BrowserPdfFormat"];
+export type BrowserPdfQuery =
+  QueryParams<operations["get_v1_browser_pdf"]> extends never ? Record<string, never> : QueryParams<operations["get_v1_browser_pdf"]>;
+export type BrowserContentQuery =
+  QueryParams<operations["get_v1_browser_content"]> extends never ? Record<string, never> : QueryParams<operations["get_v1_browser_content"]>;
+export type BrowserContentResponse = JsonResponse<operations["get_v1_browser_content"], 200>;
+export type BrowserMarkdownResponse = JsonResponse<operations["get_v1_browser_markdown"], 200>;
+export type BrowserLinkInfo = components["schemas"]["BrowserLinkInfo"];
+export type BrowserLinksResponse = JsonResponse<operations["get_v1_browser_links"], 200>;
+export type BrowserSnapshotResponse = JsonResponse<operations["get_v1_browser_snapshot"], 200>;
+export type BrowserScrapeRequest = JsonRequestBody<operations["post_v1_browser_scrape"]>;
+export type BrowserScrapeResponse = JsonResponse<operations["post_v1_browser_scrape"], 200>;
+export type BrowserExecuteRequest = JsonRequestBody<operations["post_v1_browser_execute"]>;
+export type BrowserExecuteResponse = JsonResponse<operations["post_v1_browser_execute"], 200>;
+export type BrowserMouseButton = components["schemas"]["BrowserMouseButton"];
+export type BrowserClickRequest = JsonRequestBody<operations["post_v1_browser_click"]>;
+export type BrowserTypeRequest = JsonRequestBody<operations["post_v1_browser_type"]>;
+export type BrowserSelectRequest = JsonRequestBody<operations["post_v1_browser_select"]>;
+export type BrowserHoverRequest = JsonRequestBody<operations["post_v1_browser_hover"]>;
+export type BrowserScrollRequest = JsonRequestBody<operations["post_v1_browser_scroll"]>;
+export type BrowserUploadRequest = JsonRequestBody<operations["post_v1_browser_upload"]>;
+export type BrowserDialogRequest = JsonRequestBody<operations["post_v1_browser_dialog"]>;
+export type BrowserActionResponse = JsonResponse<operations["post_v1_browser_click"], 200>;
+export type BrowserConsoleQuery =
+  QueryParams<operations["get_v1_browser_console"]> extends never ? Record<string, never> : QueryParams<operations["get_v1_browser_console"]>;
+export type BrowserConsoleMessage = components["schemas"]["BrowserConsoleMessage"];
+export type BrowserConsoleResponse = JsonResponse<operations["get_v1_browser_console"], 200>;
+export type BrowserNetworkQuery =
+  QueryParams<operations["get_v1_browser_network"]> extends never ? Record<string, never> : QueryParams<operations["get_v1_browser_network"]>;
+export type BrowserNetworkRequest = components["schemas"]["BrowserNetworkRequest"];
+export type BrowserNetworkResponse = JsonResponse<operations["get_v1_browser_network"], 200>;
+export type BrowserCrawlExtract = components["schemas"]["BrowserCrawlExtract"];
+export type BrowserCrawlRequest = JsonRequestBody<operations["post_v1_browser_crawl"]>;
+export type BrowserCrawlPage = components["schemas"]["BrowserCrawlPage"];
+export type BrowserCrawlResponse = JsonResponse<operations["post_v1_browser_crawl"], 200>;
+export type BrowserContextInfo = components["schemas"]["BrowserContextInfo"];
+export type BrowserContextListResponse = JsonResponse<operations["get_v1_browser_contexts"], 200>;
+export type BrowserContextCreateRequest = JsonRequestBody<operations["post_v1_browser_contexts"]>;
+export type BrowserCookieSameSite = components["schemas"]["BrowserCookieSameSite"];
+export type BrowserCookie = components["schemas"]["BrowserCookie"];
+export type BrowserCookiesQuery =
+  QueryParams<operations["get_v1_browser_cookies"]> extends never ? Record<string, never> : QueryParams<operations["get_v1_browser_cookies"]>;
+export type BrowserCookiesResponse = JsonResponse<operations["get_v1_browser_cookies"], 200>;
+export type BrowserSetCookiesRequest = JsonRequestBody<operations["post_v1_browser_cookies"]>;
+export type BrowserDeleteCookiesQuery =
+  QueryParams<operations["delete_v1_browser_cookies"]> extends never ? Record<string, never> : QueryParams<operations["delete_v1_browser_cookies"]>;
+
 export type AgentListResponse = JsonResponse<operations["get_v1_agents"], 200>;
 export type AgentInfo = components["schemas"]["AgentInfo"];
 export type AgentQuery = QueryParams<operations["get_v1_agents"]>;

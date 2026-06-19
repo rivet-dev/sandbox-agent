@@ -30,6 +30,48 @@ import {
   type AgentInstallRequest,
   type AgentInstallResponse,
   type AgentListResponse,
+  type BrowserActionResponse,
+  type BrowserClickRequest,
+  type BrowserConsoleQuery,
+  type BrowserConsoleResponse,
+  type BrowserContentQuery,
+  type BrowserContentResponse,
+  type BrowserContextCreateRequest,
+  type BrowserContextInfo,
+  type BrowserContextListResponse,
+  type BrowserCookiesQuery,
+  type BrowserCookiesResponse,
+  type BrowserCrawlRequest,
+  type BrowserCrawlResponse,
+  type BrowserCreateTabRequest,
+  type BrowserDeleteCookiesQuery,
+  type BrowserDialogRequest,
+  type BrowserExecuteRequest,
+  type BrowserExecuteResponse,
+  type BrowserHoverRequest,
+  type BrowserLinksResponse,
+  type BrowserMarkdownResponse,
+  type BrowserNavigateRequest,
+  type BrowserNetworkQuery,
+  type BrowserNetworkResponse,
+  type BrowserPageInfo,
+  type BrowserPdfQuery,
+  type BrowserReloadRequest,
+  type BrowserScreenshotQuery,
+  type BrowserScrollRequest,
+  type BrowserScrapeRequest,
+  type BrowserScrapeResponse,
+  type BrowserSelectRequest,
+  type BrowserSetCookiesRequest,
+  type BrowserSnapshotResponse,
+  type BrowserStartRequest,
+  type BrowserStatusResponse,
+  type BrowserTabInfo,
+  type BrowserTabListResponse,
+  type BrowserTypeRequest,
+  type BrowserUploadRequest,
+  type BrowserWaitRequest,
+  type BrowserWaitResponse,
   type DesktopActionResponse,
   type DesktopClipboardQuery,
   type DesktopClipboardResponse,
@@ -2009,6 +2051,178 @@ export class SandboxAgent {
 
   connectDesktopStream(options: DesktopStreamSessionOptions = {}): DesktopStreamSession {
     return new DesktopStreamSession(this.connectDesktopStreamWebSocket(options));
+  }
+
+  async startBrowser(request: BrowserStartRequest = {}): Promise<BrowserStatusResponse> {
+    return this.requestJson("POST", `${API_PREFIX}/browser/start`, {
+      body: request,
+    });
+  }
+
+  async stopBrowser(): Promise<BrowserStatusResponse> {
+    return this.requestJson("POST", `${API_PREFIX}/browser/stop`);
+  }
+
+  async getBrowserStatus(): Promise<BrowserStatusResponse> {
+    return this.requestJson("GET", `${API_PREFIX}/browser/status`);
+  }
+
+  getBrowserCdpUrl(options: ProcessTerminalWebSocketUrlOptions = {}): string {
+    return toWebSocketUrl(
+      this.buildUrl(`${API_PREFIX}/browser/cdp`, {
+        access_token: options.accessToken ?? this.token,
+      }),
+    );
+  }
+
+  async browserNavigate(request: BrowserNavigateRequest): Promise<BrowserPageInfo> {
+    return this.requestJson("POST", `${API_PREFIX}/browser/navigate`, {
+      body: request,
+    });
+  }
+
+  async browserBack(): Promise<BrowserPageInfo> {
+    return this.requestJson("POST", `${API_PREFIX}/browser/back`);
+  }
+
+  async browserForward(): Promise<BrowserPageInfo> {
+    return this.requestJson("POST", `${API_PREFIX}/browser/forward`);
+  }
+
+  async browserReload(request: BrowserReloadRequest = {}): Promise<BrowserPageInfo> {
+    return this.requestJson("POST", `${API_PREFIX}/browser/reload`, {
+      body: request,
+    });
+  }
+
+  async browserWait(request: BrowserWaitRequest): Promise<BrowserWaitResponse> {
+    return this.requestJson("POST", `${API_PREFIX}/browser/wait`, {
+      body: request,
+    });
+  }
+
+  async getBrowserTabs(): Promise<BrowserTabListResponse> {
+    return this.requestJson("GET", `${API_PREFIX}/browser/tabs`);
+  }
+
+  async createBrowserTab(request: BrowserCreateTabRequest = {}): Promise<BrowserTabInfo> {
+    return this.requestJson("POST", `${API_PREFIX}/browser/tabs`, {
+      body: request,
+    });
+  }
+
+  async activateBrowserTab(tabId: string): Promise<BrowserTabInfo> {
+    return this.requestJson("POST", `${API_PREFIX}/browser/tabs/${tabId}/activate`);
+  }
+
+  async closeBrowserTab(tabId: string): Promise<BrowserActionResponse> {
+    return this.requestJson("DELETE", `${API_PREFIX}/browser/tabs/${tabId}`);
+  }
+
+  async takeBrowserScreenshot(query: BrowserScreenshotQuery = {}): Promise<Uint8Array> {
+    const response = await this.requestRaw("GET", `${API_PREFIX}/browser/screenshot`, {
+      query,
+      accept: "image/*",
+    });
+    const buffer = await response.arrayBuffer();
+    return new Uint8Array(buffer);
+  }
+
+  async getBrowserPdf(query: BrowserPdfQuery = {}): Promise<Uint8Array> {
+    const response = await this.requestRaw("GET", `${API_PREFIX}/browser/pdf`, {
+      query,
+      accept: "application/pdf",
+    });
+    const buffer = await response.arrayBuffer();
+    return new Uint8Array(buffer);
+  }
+
+  async getBrowserContent(query: BrowserContentQuery = {}): Promise<BrowserContentResponse> {
+    return this.requestJson("GET", `${API_PREFIX}/browser/content`, { query });
+  }
+
+  async getBrowserMarkdown(): Promise<BrowserMarkdownResponse> {
+    return this.requestJson("GET", `${API_PREFIX}/browser/markdown`);
+  }
+
+  async scrapeBrowser(request: BrowserScrapeRequest): Promise<BrowserScrapeResponse> {
+    return this.requestJson("POST", `${API_PREFIX}/browser/scrape`, { body: request });
+  }
+
+  async getBrowserLinks(): Promise<BrowserLinksResponse> {
+    return this.requestJson("GET", `${API_PREFIX}/browser/links`);
+  }
+
+  async executeBrowserScript(request: BrowserExecuteRequest): Promise<BrowserExecuteResponse> {
+    return this.requestJson("POST", `${API_PREFIX}/browser/execute`, { body: request });
+  }
+
+  async getBrowserSnapshot(): Promise<BrowserSnapshotResponse> {
+    return this.requestJson("GET", `${API_PREFIX}/browser/snapshot`);
+  }
+
+  async browserClick(request: BrowserClickRequest): Promise<BrowserActionResponse> {
+    return this.requestJson("POST", `${API_PREFIX}/browser/click`, { body: request });
+  }
+
+  async browserType(request: BrowserTypeRequest): Promise<BrowserActionResponse> {
+    return this.requestJson("POST", `${API_PREFIX}/browser/type`, { body: request });
+  }
+
+  async browserSelect(request: BrowserSelectRequest): Promise<BrowserActionResponse> {
+    return this.requestJson("POST", `${API_PREFIX}/browser/select`, { body: request });
+  }
+
+  async browserHover(request: BrowserHoverRequest): Promise<BrowserActionResponse> {
+    return this.requestJson("POST", `${API_PREFIX}/browser/hover`, { body: request });
+  }
+
+  async browserScroll(request: BrowserScrollRequest): Promise<BrowserActionResponse> {
+    return this.requestJson("POST", `${API_PREFIX}/browser/scroll`, { body: request });
+  }
+
+  async browserUpload(request: BrowserUploadRequest): Promise<BrowserActionResponse> {
+    return this.requestJson("POST", `${API_PREFIX}/browser/upload`, { body: request });
+  }
+
+  async browserDialog(request: BrowserDialogRequest): Promise<BrowserActionResponse> {
+    return this.requestJson("POST", `${API_PREFIX}/browser/dialog`, { body: request });
+  }
+
+  async getBrowserConsole(query?: BrowserConsoleQuery): Promise<BrowserConsoleResponse> {
+    return this.requestJson("GET", `${API_PREFIX}/browser/console`, { query });
+  }
+
+  async getBrowserNetwork(query?: BrowserNetworkQuery): Promise<BrowserNetworkResponse> {
+    return this.requestJson("GET", `${API_PREFIX}/browser/network`, { query });
+  }
+
+  async crawlBrowser(request: BrowserCrawlRequest): Promise<BrowserCrawlResponse> {
+    return this.requestJson("POST", `${API_PREFIX}/browser/crawl`, { body: request });
+  }
+
+  async getBrowserContexts(): Promise<BrowserContextListResponse> {
+    return this.requestJson("GET", `${API_PREFIX}/browser/contexts`);
+  }
+
+  async createBrowserContext(request: BrowserContextCreateRequest): Promise<BrowserContextInfo> {
+    return this.requestJson("POST", `${API_PREFIX}/browser/contexts`, { body: request });
+  }
+
+  async deleteBrowserContext(contextId: string): Promise<BrowserActionResponse> {
+    return this.requestJson("DELETE", `${API_PREFIX}/browser/contexts/${contextId}`);
+  }
+
+  async getBrowserCookies(query?: BrowserCookiesQuery): Promise<BrowserCookiesResponse> {
+    return this.requestJson("GET", `${API_PREFIX}/browser/cookies`, { query });
+  }
+
+  async setBrowserCookies(request: BrowserSetCookiesRequest): Promise<BrowserActionResponse> {
+    return this.requestJson("POST", `${API_PREFIX}/browser/cookies`, { body: request });
+  }
+
+  async deleteBrowserCookies(query?: BrowserDeleteCookiesQuery): Promise<BrowserActionResponse> {
+    return this.requestJson("DELETE", `${API_PREFIX}/browser/cookies`, { query });
   }
 
   private async getLiveConnection(agent: string): Promise<LiveAcpConnection> {

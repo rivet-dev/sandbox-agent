@@ -42,6 +42,8 @@ toml_edit.workspace = true
 tar.workspace = true
 zip.workspace = true
 tokio-tungstenite = "0.24"
+html2md = "0.2"
+url.workspace = true
 tempfile = { workspace = true, optional = true }
 
 [target.'cfg(unix)'.dependencies]

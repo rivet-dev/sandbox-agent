@@ -47,6 +47,17 @@ RUN apt-get update -qq && \
       xauth \
       fonts-dejavu-core \
       xterm \
+      chromium \
+      libnss3 \
+      libatk-bridge2.0-0 \
+      libdrm2 \
+      libxcomposite1 \
+      libxdamage1 \
+      libxrandr2 \
+      libgbm1 \
+      libasound2 \
+      libpangocairo-1.0-0 \
+      libgtk-3-0 \
       > /dev/null 2>&1 && \
     rm -rf /var/lib/apt/lists/*
 

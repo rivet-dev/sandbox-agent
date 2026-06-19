@@ -47,6 +47,7 @@ Cargo.lock
 .agents/
 .claude/
 .opencode/
+.ralph/
 
 # Example temp files
 .tmp-upload/

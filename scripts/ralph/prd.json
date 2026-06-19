@@ -1,0 +1,707 @@
+{
+  "project": "SandboxAgent",
+  "branchName": "ralph/browser-automation",
+  "description": "Browser Automation - HTTP API, CLI install, TypeScript SDK, inspector UI, and Rust modules for controlling Chromium via CDP inside sandboxes",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Add browser_install.rs CLI command",
+      "description": "As a developer, I need a CLI command to install Chromium and browser dependencies into the sandbox.",
+      "acceptanceCriteria": [
+        "New file server/packages/sandbox-agent/src/browser_install.rs following desktop_install.rs pattern",
+        "BrowserInstallRequest struct with yes, print_only, package_manager fields",
+        "install_browser function: platform check (Linux only), detect/validate package manager, build package list, privilege check, display + confirm, run install",
+        "APT packages: chromium, chromium-sandbox, libnss3, libatk-bridge2.0-0, libdrm2, libxcomposite1, libxdamage1, libxrandr2, libgbm1, libasound2, libpangocairo-1.0-0, libgtk-3-0",
+        "DNF packages: chromium",
+        "APK packages: chromium, nss",
+        "detect_missing_browser_dependencies() checks for chromium/chromium-browser in PATH and desktop deps",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "Reuse detect_package_manager and DesktopPackageManager from desktop_install.rs"
+    },
+    {
+      "id": "US-002",
+      "title": "Register install browser subcommand in CLI",
+      "description": "As a developer, I need the Browser variant added to InstallCommand enum in cli.rs.",
+      "acceptanceCriteria": [
+        "Add Browser(InstallBrowserArgs) variant to InstallCommand enum in cli.rs",
+        "InstallBrowserArgs struct with --yes, --print-only, --package-manager flags",
+        "CLI dispatches to install_browser when 'install browser' is invoked",
+        "Add mod browser_install to lib.rs",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Add browser type definitions (DTOs and errors)",
+      "description": "As a developer, I need request/response types and error types for the browser API.",
+      "acceptanceCriteria": [
+        "New file server/packages/sandbox-agent/src/browser_types.rs with serde + utoipa + schemars derives",
+        "BrowserStartRequest with width, height, dpi, url, headless, contextId, streaming fields",
+        "BrowserStatusResponse with state, display, resolution, startedAt, cdpUrl, url, missingDependencies, installCommand, processes, lastError",
+        "BrowserState enum: Inactive, InstallRequired, Starting, Active, Stopping, Failed",
+        "BrowserPageInfo, BrowserTabInfo, BrowserNavigateRequest, BrowserScreenshotRequest, BrowserClickRequest, BrowserTypeRequest, BrowserCrawlRequest and all other request/response types from the spec",
+        "New file server/packages/sandbox-agent/src/browser_errors.rs with BrowserProblem enum: NotActive, AlreadyActive, DesktopConflict, InstallRequired, StartFailed, CdpError, Timeout, NotFound, InvalidSelector",
+        "All errors return application/problem+json with tag:sandboxagent.dev,2025:browser/* URIs",
+        "Add mod browser_types and mod browser_errors to lib.rs",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "Mirror DesktopProblem patterns for error handling"
+    },
+    {
+      "id": "US-004",
+      "title": "Add CdpClient for communicating with Chromium",
+      "description": "As a developer, I need a persistent WebSocket client to send CDP commands to Chromium.",
+      "acceptanceCriteria": [
+        "New file server/packages/sandbox-agent/src/browser_cdp.rs",
+        "CdpClient struct with WebSocket connection and AtomicU64 for request IDs",
+        "connect() method: connects to ws://127.0.0.1:9222/devtools/browser/{id} (discovered via http://127.0.0.1:9222/json/version)",
+        "send(method, params) method: sends CDP command and waits for matching response by ID",
+        "subscribe(event, callback) method for subscribing to CDP events like Runtime.consoleAPICalled and Network.requestWillBeSent",
+        "Add mod browser_cdp to lib.rs",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Add BrowserRuntime state machine",
+      "description": "As a developer, I need the core runtime that manages Xvfb + Chromium + Neko lifecycle.",
+      "acceptanceCriteria": [
+        "New file server/packages/sandbox-agent/src/browser_runtime.rs",
+        "BrowserRuntime struct with config, process_runtime, desktop_streaming_manager, desktop_recording_manager, cdp_client, inner state",
+        "BrowserRuntimeState with state, xvfb_process_id, chromium_process_id, display, resolution, started_at, last_error, console_messages (VecDeque max 1000), network_requests (VecDeque max 1000)",
+        "start() method: check deps, start Xvfb (reuse start_xvfb_locked), start Chromium with correct flags (--no-sandbox, --remote-debugging-port=9222, etc.), poll CDP /json/version until ready (15s timeout), optionally start Neko",
+        "stop() method: kill Chromium, stop Neko, stop Xvfb",
+        "status() method: return current BrowserStatusResponse",
+        "Check DesktopRuntime is not active before starting (mutual exclusivity), return 409 if conflict",
+        "Add BrowserRuntime to app state in state.rs",
+        "Add mod browser_runtime to lib.rs",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": "Implemented as separate BrowserRuntime (not a mode of DesktopRuntime) for cleaner separation of concerns. Shares Xvfb start logic and DesktopStreamingManager. Mutual exclusivity checked via DesktopRuntime.status()."
+    },
+    {
+      "id": "US-006",
+      "title": "Add browser lifecycle HTTP endpoints (start/stop/status)",
+      "description": "As a user, I need HTTP endpoints to start, stop, and check the browser.",
+      "acceptanceCriteria": [
+        "POST /v1/browser/start endpoint: accepts BrowserStartRequest, returns BrowserStatusResponse",
+        "POST /v1/browser/stop endpoint: stops browser, returns { state: 'inactive' }",
+        "GET /v1/browser/status endpoint: returns BrowserStatusResponse",
+        "Routes registered in router.rs following existing patterns",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Add CDP WebSocket proxy endpoint",
+      "description": "As a user, I need to connect Playwright/Puppeteer through the sandbox agent to Chromium's CDP.",
+      "acceptanceCriteria": [
+        "GET /v1/browser/cdp endpoint: WebSocket upgrade",
+        "Bidirectional WebSocket relay proxying to ws://127.0.0.1:9222/devtools/browser/{id}",
+        "Follow same pattern as Neko signaling proxy in router.rs",
+        "External Playwright can connect via ws://sandbox-host:2468/v1/browser/cdp",
+        "Returns BrowserProblem::NotActive if browser not running",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "Add browser navigation endpoints",
+      "description": "As a user, I need HTTP endpoints for navigating the browser.",
+      "acceptanceCriteria": [
+        "POST /v1/browser/navigate: accepts { url, waitUntil? }, returns { url, title, status } via CDP Page.navigate + Page.lifecycleEvent",
+        "POST /v1/browser/back: returns { url, title } via CDP Page.navigateHistory delta -1",
+        "POST /v1/browser/forward: returns { url, title } via CDP Page.navigateHistory delta 1",
+        "POST /v1/browser/reload: accepts { ignoreCache? }, returns { url, title }",
+        "POST /v1/browser/wait: accepts { selector?, timeout?, state? }, returns { found } using Runtime.evaluate with MutationObserver or DOM.querySelector polling",
+        "All routes registered in router.rs",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": "Used get_cdp() (Arc<CdpClient>) pattern instead of with_cdp() closure to avoid async lifetime issues"
+    },
+    {
+      "id": "US-009",
+      "title": "Add browser tab management endpoints",
+      "description": "As a user, I need to list, create, activate, and close browser tabs.",
+      "acceptanceCriteria": [
+        "GET /v1/browser/tabs: returns { tabs: [{ id, url, title, active }] } via Target.getTargets filtered to type page",
+        "POST /v1/browser/tabs: accepts { url? }, returns { id, url, title } (201) via Target.createTarget",
+        "POST /v1/browser/tabs/:tab_id/activate: returns { id, url, title } via Target.activateTarget",
+        "DELETE /v1/browser/tabs/:tab_id: returns { ok: true } via Target.closeTarget",
+        "All routes registered in router.rs",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": true,
+      "notes": "Used Target.getTargets for listing, Target.createTarget/activateTarget/closeTarget for CRUD. Active tab detection uses Page.getNavigationHistory URL matching."
+    },
+    {
+      "id": "US-010",
+      "title": "Add browser screenshot and PDF endpoints",
+      "description": "As a user, I need to capture screenshots and PDFs of browser pages.",
+      "acceptanceCriteria": [
+        "GET /v1/browser/screenshot: query params format (png/jpeg/webp), quality, fullPage, selector; returns image binary with correct Content-Type via Page.captureScreenshot",
+        "GET /v1/browser/pdf: query params format (a4/letter/legal), landscape, printBackground, scale; returns application/pdf via Page.printToPDF",
+        "Both routes registered in router.rs",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": true,
+      "notes": "Browser screenshot is distinct from desktop screenshot - this captures the viewport/page via CDP, not the Xvfb display. Uses Page.captureScreenshot and Page.printToPDF CDP commands with base64 decoding."
+    },
+    {
+      "id": "US-011",
+      "title": "Add browser content extraction endpoints (HTML, markdown, links, snapshot)",
+      "description": "As a user, I need to extract page content in various formats.",
+      "acceptanceCriteria": [
+        "GET /v1/browser/content: query param selector?; returns { html, url, title } via Runtime.evaluate document.documentElement.outerHTML",
+        "GET /v1/browser/markdown: returns { markdown, url, title }; extract DOM via CDP, convert with html2md crate, strip nav/footer/aside",
+        "GET /v1/browser/links: returns { links: [{ href, text }], url }",
+        "GET /v1/browser/snapshot: returns { snapshot, url, title } via Accessibility.getFullAXTree",
+        "All routes registered in router.rs",
+        "Typecheck passes"
+      ],
+      "priority": 11,
+      "passes": true,
+      "notes": "Used html2md crate for HTML-to-Markdown conversion. Accessibility.getFullAXTree for snapshot. Runtime.evaluate for content/links extraction."
+    },
+    {
+      "id": "US-012",
+      "title": "Add browser scrape and execute endpoints",
+      "description": "As a user, I need to scrape structured data and execute JavaScript in the browser.",
+      "acceptanceCriteria": [
+        "POST /v1/browser/scrape: accepts { selectors: Record<string,string>, url? }; returns { data: Record<string,string[]>, url, title } via Runtime.evaluate with querySelectorAll + textContent",
+        "POST /v1/browser/execute: accepts { expression, awaitPromise? }; returns { result, type } via Runtime.evaluate",
+        "Both routes registered in router.rs",
+        "Typecheck passes"
+      ],
+      "priority": 12,
+      "passes": true,
+      "notes": "Uses Runtime.evaluate with querySelectorAll for scrape, Runtime.evaluate with returnByValue for execute. Scrape optionally navigates first if url provided. Execute checks for exceptionDetails and returns CDP error."
+    },
+    {
+      "id": "US-013",
+      "title": "Add browser interaction endpoints (click, type, select, hover, scroll)",
+      "description": "As a user, I need to interact with page elements via CSS selectors.",
+      "acceptanceCriteria": [
+        "POST /v1/browser/click: accepts { selector, button?, clickCount?, timeout? }; uses DOM.querySelector + DOM.getBoxModel + Input.dispatchMouseEvent",
+        "POST /v1/browser/type: accepts { selector, text, delay?, clear? }; uses DOM.focus + Input.dispatchKeyEvent",
+        "POST /v1/browser/select: accepts { selector, value }",
+        "POST /v1/browser/hover: accepts { selector }",
+        "POST /v1/browser/scroll: accepts { selector?, x?, y? }",
+        "All return { ok: true } on success",
+        "All routes registered in router.rs",
+        "Typecheck passes"
+      ],
+      "priority": 13,
+      "passes": true,
+      "notes": "These are browser-level (CDP) interactions, distinct from desktop xdotool input. Click/hover use DOM.querySelector + DOM.getBoxModel + Input.dispatchMouseEvent. Type uses DOM.focus + Input.dispatchKeyEvent. Select/scroll use Runtime.evaluate."
+    },
+    {
+      "id": "US-014",
+      "title": "Add browser upload and dialog endpoints",
+      "description": "As a user, I need to upload files and handle JavaScript dialogs.",
+      "acceptanceCriteria": [
+        "POST /v1/browser/upload: accepts { selector, path }; uses DOM.setFileInputFiles; returns { ok: true }",
+        "POST /v1/browser/dialog: accepts { accept, text? }; uses Page.handleJavaScriptDialog; returns { ok: true }",
+        "Both routes registered in router.rs",
+        "Typecheck passes"
+      ],
+      "priority": 14,
+      "passes": true,
+      "notes": "DOM.setFileInputFiles for upload (requires DOM.querySelector to find node), Page.handleJavaScriptDialog for dialog with optional promptText parameter"
+    },
+    {
+      "id": "US-015",
+      "title": "Add browser console and network monitoring endpoints",
+      "description": "As a user, I need to see console logs and network requests from the browser.",
+      "acceptanceCriteria": [
+        "GET /v1/browser/console: query params level?, limit? (default 100); returns { messages: [{ level, text, url?, line?, timestamp }] }",
+        "GET /v1/browser/network: query params limit?, urlPattern?; returns { requests: [{ url, method, status, mimeType, responseSize, duration, timestamp }] }",
+        "BrowserRuntime subscribes to Runtime.consoleAPICalled and Network.requestWillBeSent + Network.responseReceived events via CdpClient",
+        "Messages/requests buffered in bounded ring buffers (max 1000 each) in BrowserRuntimeState",
+        "Both routes registered in router.rs",
+        "Typecheck passes"
+      ],
+      "priority": 15,
+      "passes": true,
+      "notes": "CDP events (Runtime.consoleAPICalled, Network.requestWillBeSent, Network.responseReceived) subscribed in start(). Network requests correlated via internal request_id field. Background tokio tasks populate ring buffers."
+    },
+    {
+      "id": "US-016",
+      "title": "Add browser context (persistent profile) management",
+      "description": "As a user, I need to create and manage persistent browser profiles for cookies/storage.",
+      "acceptanceCriteria": [
+        "New file server/packages/sandbox-agent/src/browser_context.rs",
+        "GET /v1/browser/contexts: returns { contexts: [{ id, name, createdAt, sizeBytes }] }",
+        "POST /v1/browser/contexts: accepts { name }; creates user-data-dir at $STATE_DIR/browser-contexts/{id}/; returns { id, name, createdAt } (201)",
+        "DELETE /v1/browser/contexts/:context_id: deletes context directory",
+        "POST /v1/browser/start accepts contextId to set --user-data-dir to context's directory",
+        "Add mod browser_context to lib.rs",
+        "All routes registered in router.rs",
+        "Typecheck passes"
+      ],
+      "priority": 16,
+      "passes": true,
+      "notes": "Context CRUD is pure filesystem operations (no browser needed to be active). IDs are hex-encoded random bytes (no uuid dependency). context.json metadata file stores name+createdAt per context directory. contextId integration in browser start was already implemented in US-005."
+    },
+    {
+      "id": "US-017",
+      "title": "Add browser cookie management endpoints",
+      "description": "As a user, I need to get, set, and clear cookies in the browser.",
+      "acceptanceCriteria": [
+        "GET /v1/browser/cookies: query param url?; returns { cookies: [{ name, value, domain, path, expires, httpOnly, secure, sameSite }] } via Network.getCookies",
+        "POST /v1/browser/cookies: accepts { cookies: [...] }; uses Network.setCookies; returns { ok: true }",
+        "DELETE /v1/browser/cookies: query params name?, domain?; clears matching cookies",
+        "All routes registered in router.rs",
+        "Typecheck passes"
+      ],
+      "priority": 17,
+      "passes": true,
+      "notes": "GET uses Network.getCookies with optional urls param. POST uses Network.setCookies with cookie array. DELETE uses Network.clearBrowserCookies (no filter) or Network.getCookies + Network.deleteCookies (with name/domain filter)."
+    },
+    {
+      "id": "US-018",
+      "title": "Add browser crawl endpoint",
+      "description": "As a user, I need to crawl multiple pages starting from a URL.",
+      "acceptanceCriteria": [
+        "New file server/packages/sandbox-agent/src/browser_crawl.rs",
+        "POST /v1/browser/crawl: accepts { url, maxPages? (default 10, max 100), maxDepth? (default 2), allowedDomains?, extract? (markdown|html|text|links) }",
+        "Returns { pages: [{ url, title, content, links, status, depth }], totalPages, truncated }",
+        "BFS crawl implementation: navigate, wait for load, extract content, collect links, filter by domain/depth",
+        "Add mod browser_crawl to lib.rs",
+        "Route registered in router.rs",
+        "Typecheck passes"
+      ],
+      "priority": 18,
+      "passes": true,
+      "notes": "BFS crawl uses CDP Page.navigate + Runtime.evaluate for each page. Content extraction supports 4 modes (markdown/html/text/links). URL dedup via fragment-stripped normalization. Domain filtering via url crate. Added url.workspace = true dependency."
+    },
+    {
+      "id": "US-019",
+      "title": "Add TypeScript SDK browser types",
+      "description": "As a developer, I need TypeScript type definitions for all browser API requests and responses.",
+      "acceptanceCriteria": [
+        "New file sdks/typescript/src/types/browser.ts with all interfaces: BrowserStartRequest, BrowserStatusResponse, BrowserTabInfo, BrowserPageInfo, BrowserNavigateRequest, BrowserScreenshotRequest, BrowserClickRequest, BrowserTypeRequest, BrowserCrawlRequest, BrowserCrawlResponse, BrowserContextInfo, BrowserCookie, and all other request/response types",
+        "Types exported from sdks/typescript/src/types/index.ts (or equivalent barrel)",
+        "Typecheck passes"
+      ],
+      "priority": 19,
+      "passes": true,
+      "notes": "Types added to existing types.ts (not a new types/browser.ts) following the SDK's established pattern of extracting type aliases from the generated OpenAPI types. Regenerated openapi.json and openapi.ts to include browser operations."
+    },
+    {
+      "id": "US-020",
+      "title": "Add TypeScript SDK browser lifecycle and CDP methods",
+      "description": "As a developer, I need SDK methods for browser lifecycle and CDP access.",
+      "acceptanceCriteria": [
+        "startBrowser(request?) method on SandboxAgent class calling POST /v1/browser/start",
+        "stopBrowser() method calling POST /v1/browser/stop",
+        "getBrowserStatus() method calling GET /v1/browser/status",
+        "getBrowserCdpUrl() method returning ws://host:port/v1/browser/cdp",
+        "Typecheck passes"
+      ],
+      "priority": 20,
+      "passes": true,
+      "notes": "Methods follow exact same patterns as desktop counterparts. getBrowserCdpUrl() uses toWebSocketUrl() + buildUrl() with access_token query param, same as buildDesktopStreamWebSocketUrl()."
+    },
+    {
+      "id": "US-021",
+      "title": "Add TypeScript SDK browser navigation and tab methods",
+      "description": "As a developer, I need SDK methods for navigating and managing tabs.",
+      "acceptanceCriteria": [
+        "browserNavigate(request) method calling POST /v1/browser/navigate",
+        "browserBack() method calling POST /v1/browser/back",
+        "browserForward() method calling POST /v1/browser/forward",
+        "browserReload(request?) method calling POST /v1/browser/reload",
+        "browserWait(request) method calling POST /v1/browser/wait",
+        "getBrowserTabs() method calling GET /v1/browser/tabs",
+        "createBrowserTab(request?) method calling POST /v1/browser/tabs",
+        "activateBrowserTab(tabId) method calling POST /v1/browser/tabs/:id/activate",
+        "closeBrowserTab(tabId) method calling DELETE /v1/browser/tabs/:id",
+        "Typecheck passes"
+      ],
+      "priority": 21,
+      "passes": true,
+      "notes": "Methods follow same requestJson pattern as lifecycle methods. Type imports added alphabetically. closeBrowserTab uses DELETE method. createBrowserTab and browserReload have optional request params."
+    },
+    {
+      "id": "US-022",
+      "title": "Add TypeScript SDK browser content extraction methods",
+      "description": "As a developer, I need SDK methods for extracting page content.",
+      "acceptanceCriteria": [
+        "takeBrowserScreenshot(request?) returning Promise<Uint8Array> calling GET /v1/browser/screenshot",
+        "getBrowserPdf(request?) returning Promise<Uint8Array> calling GET /v1/browser/pdf",
+        "getBrowserContent(request?) calling GET /v1/browser/content",
+        "getBrowserMarkdown() calling GET /v1/browser/markdown",
+        "scrapeBrowser(request) calling POST /v1/browser/scrape",
+        "getBrowserLinks() calling GET /v1/browser/links",
+        "executeBrowserScript(request) calling POST /v1/browser/execute",
+        "getBrowserSnapshot() calling GET /v1/browser/snapshot",
+        "Typecheck passes"
+      ],
+      "priority": 22,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-023",
+      "title": "Add TypeScript SDK browser interaction methods",
+      "description": "As a developer, I need SDK methods for interacting with page elements.",
+      "acceptanceCriteria": [
+        "browserClick(request) calling POST /v1/browser/click",
+        "browserType(request) calling POST /v1/browser/type",
+        "browserSelect(request) calling POST /v1/browser/select",
+        "browserHover(request) calling POST /v1/browser/hover",
+        "browserScroll(request) calling POST /v1/browser/scroll",
+        "browserUpload(request) calling POST /v1/browser/upload",
+        "browserDialog(request) calling POST /v1/browser/dialog",
+        "Typecheck passes"
+      ],
+      "priority": 23,
+      "passes": true,
+      "notes": "All 7 interaction methods follow the same requestJson POST pattern with BrowserActionResponse return type. Type imports added alphabetically."
+    },
+    {
+      "id": "US-024",
+      "title": "Add TypeScript SDK browser monitoring, crawl, context, and cookie methods",
+      "description": "As a developer, I need SDK methods for monitoring, crawling, contexts, and cookies.",
+      "acceptanceCriteria": [
+        "getBrowserConsole(request?) calling GET /v1/browser/console",
+        "getBrowserNetwork(request?) calling GET /v1/browser/network",
+        "crawlBrowser(request) calling POST /v1/browser/crawl",
+        "getBrowserContexts() calling GET /v1/browser/contexts",
+        "createBrowserContext(request) calling POST /v1/browser/contexts",
+        "deleteBrowserContext(contextId) calling DELETE /v1/browser/contexts/:id",
+        "getBrowserCookies(request?) calling GET /v1/browser/cookies",
+        "setBrowserCookies(request) calling POST /v1/browser/cookies",
+        "deleteBrowserCookies(request?) calling DELETE /v1/browser/cookies",
+        "Typecheck passes"
+      ],
+      "priority": 24,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-025",
+      "title": "Add BrowserViewer React component",
+      "description": "As a developer, I need a reusable React component for embedding the browser stream with navigation.",
+      "acceptanceCriteria": [
+        "New file sdks/react/src/BrowserViewer.tsx",
+        "BrowserViewerProps interface with client, className, style, height, showNavigationBar (default true), showStatusBar (default true), onNavigate, onConnect, onDisconnect, onError",
+        "BrowserViewerClient type using Pick from SandboxAgent: connectDesktopStream, browserNavigate, browserBack, browserForward, browserReload, getBrowserStatus",
+        "Wraps DesktopViewer with navigation bar (back, forward, reload buttons + URL input)",
+        "Exported from sdks/react/src/index.ts",
+        "Typecheck passes"
+      ],
+      "priority": 25,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-026",
+      "title": "Add Browser tab to Inspector UI - runtime control and live view sections",
+      "description": "As a user, I need a Browser tab in the inspector for controlling and viewing the browser.",
+      "acceptanceCriteria": [
+        "New file frontend/packages/inspector/src/components/debug/BrowserTab.tsx",
+        "Tab registered in DebugPanel.tsx with Globe icon from lucide-react, added after desktop tab",
+        "DebugTab type updated to include 'browser'",
+        "Section 1 - Runtime Control: state pill, status grid (URL, Resolution, Started), config inputs (Width, Height, URL, Context dropdown), Start/Stop buttons, auto-refresh every 5s when active",
+        "Section 2 - Live View: navigation bar (Back, Forward, Reload + URL input), DesktopViewer component for WebRTC stream, current URL display",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 26,
+      "passes": true,
+      "notes": "Follows DesktopTab.tsx patterns for card layout and state management. BrowserViewerClient used for live view with DesktopViewer component. Navigation bar with back/forward/reload + URL input. Context dropdown populated from getBrowserContexts(). Auto-refresh every 5s when active. BrowserStartRequest doesn't have 'streaming' field - removed it."
+    },
+    {
+      "id": "US-027",
+      "title": "Add Browser tab - screenshot, tabs, and console sections",
+      "description": "As a user, I need screenshot capture, tab management, and console viewing in the inspector Browser tab.",
+      "acceptanceCriteria": [
+        "Section 3 - Screenshot: format selector (PNG/JPEG/WebP), quality input, fullPage checkbox, selector input, screenshot button + preview image",
+        "Section 4 - Tabs: list of open tabs with URL and title, active tab highlighted, per-tab Activate/Close buttons, New Tab button with URL input",
+        "Section 5 - Console: level filter pills (All/Log/Warn/Error/Info), scrollable message list with level-colored indicators, auto-refresh every 3s, Clear button",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 27,
+      "passes": true,
+      "notes": "Screenshot uses createScreenshotUrl blob pattern from DesktopTab. Tabs reuse desktop-window-item/desktop-window-focused CSS classes. Console auto-refreshes every 3s with level filter pills. All three sections conditionally rendered only when isActive."
+    },
+    {
+      "id": "US-028",
+      "title": "Add Browser tab - network, content tools, recording, contexts, diagnostics sections",
+      "description": "As a user, I need network monitoring, content extraction, recording, context management, and diagnostics in the inspector.",
+      "acceptanceCriteria": [
+        "Section 6 - Network: request list (method, URL, status, size, duration), URL pattern filter, auto-refresh every 3s",
+        "Section 7 - Content Tools: Get HTML, Get Markdown, Get Links, Get Snapshot buttons with output textarea",
+        "Section 8 - Recording: reuse desktop recording UI pattern (start/stop, FPS input, recording list with download/delete)",
+        "Section 9 - Contexts: list contexts with name/date/size, create form, delete button, Use button to set contextId",
+        "Section 10 - Diagnostics: last error details, process list (Xvfb, Chromium, Neko) with PIDs and running state",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 28,
+      "passes": true,
+      "notes": "Network section auto-refreshes every 3s with URL pattern filter. Content Tools has Get HTML/Markdown/Links/Snapshot buttons with output textarea. Recording reuses desktop recording API (startDesktopRecording/stopDesktopRecording/listDesktopRecordings). Contexts section with list/create/delete/Use button sets contextId for next browser start. Diagnostics shows lastError and process list from BrowserStatusResponse."
+    },
+    {
+      "id": "US-029",
+      "title": "Add browser API integration tests",
+      "description": "As a developer, I need integration tests for the browser HTTP API.",
+      "acceptanceCriteria": [
+        "New file server/packages/sandbox-agent/tests/browser_api.rs",
+        "Test lifecycle: start, status shows active, stop, status shows inactive",
+        "Test navigation: navigate to test page, back, forward, reload",
+        "Test tabs: create tab, list shows 2 tabs, activate second, close first",
+        "Test screenshots: capture PNG, JPEG, WebP; verify non-empty binary response",
+        "Test content extraction: HTML contains expected elements, markdown is non-empty, links extracted",
+        "Test interaction: click button, type in input, verify page state changed",
+        "Test contexts: create context, list shows it, delete context",
+        "Tests use static test HTML pages served from within the sandbox (no network deps)",
+        "Update docker/test-agent/Dockerfile to include Chromium if not already present",
+        "Tests pass"
+      ],
+      "priority": 29,
+      "passes": true,
+      "notes": "Run with: cargo test -p sandbox-agent --test browser_api. Fixed CdpClient to connect to page endpoint instead of browser endpoint for Page/Runtime/DOM commands. Chromium added to test Docker image."
+    },
+    {
+      "id": "US-030",
+      "title": "Fix crawl page load: replace sleep with readyState polling",
+      "description": "As a user, I need the crawl endpoint to reliably wait for pages to load instead of using a fixed 500ms sleep.",
+      "acceptanceCriteria": [
+        "In browser_crawl.rs, replace `tokio::time::sleep(Duration::from_millis(500))` after Page.navigate with a polling loop that checks `document.readyState === 'complete'` via Runtime.evaluate",
+        "Polling should check every 100ms with a configurable timeout (default 10s)",
+        "If timeout is reached, proceed with extraction anyway (don't fail the crawl)",
+        "Typecheck passes"
+      ],
+      "priority": 30,
+      "passes": true,
+      "notes": "Current code at browser_crawl.rs:61 uses a hard-coded 500ms sleep which is too short for slow pages and wastes time on fast pages."
+    },
+    {
+      "id": "US-031",
+      "title": "Fix crawl navigation status: use real HTTP status instead of faked 200",
+      "description": "As a user, I need crawl results to report the actual HTTP status code, not always 200.",
+      "acceptanceCriteria": [
+        "In browser_crawl.rs, enable Network domain (Network.enable) before crawling",
+        "Capture the actual HTTP status from Network.responseReceived for each navigated page",
+        "Replace the faked `nav_result.get(\"frameId\").map(|_| 200u16)` with the real status",
+        "If Page.navigate returns an errorText field, record the page with status None and skip link extraction",
+        "Typecheck passes"
+      ],
+      "priority": 31,
+      "passes": true,
+      "notes": "Enabled Network domain, subscribed to Network.responseReceived events, drain buffered events after readyState complete to get real HTTP status. Handles errorText from Page.navigate by recording None status and skipping extraction. Takes last Document response to handle redirect chains."
+    },
+    {
+      "id": "US-032",
+      "title": "Remove dead cdp_client() method from BrowserRuntime",
+      "description": "As a developer, I want to remove dead code that always returns an error.",
+      "acceptanceCriteria": [
+        "Remove the `pub async fn cdp_client()` method from BrowserRuntime in browser_runtime.rs that always returns Err('Use with_cdp() to execute CDP commands')",
+        "Verify no callers reference cdp_client() (only get_cdp() and with_cdp() should be used)",
+        "If any callers exist, migrate them to get_cdp()",
+        "Typecheck passes"
+      ],
+      "priority": 32,
+      "passes": true,
+      "notes": "browser_runtime.rs:553-564 always returns an error telling callers to use with_cdp(). This is dead code that confuses the API surface."
+    },
+    {
+      "id": "US-033",
+      "title": "Fix default display dimensions to match spec (1280x720)",
+      "description": "As a developer, I need the default browser dimensions to match the spec.",
+      "acceptanceCriteria": [
+        "Change DEFAULT_WIDTH from 1440 to 1280 in browser_runtime.rs",
+        "Change DEFAULT_HEIGHT from 900 to 720 in browser_runtime.rs",
+        "Typecheck passes"
+      ],
+      "priority": 33,
+      "passes": true,
+      "notes": "Spec section 3.1 says defaults are 1280x720 but browser_runtime.rs uses 1440x900."
+    },
+    {
+      "id": "US-034",
+      "title": "Add reverse mutual exclusivity check in DesktopRuntime",
+      "description": "As a developer, I need DesktopRuntime to reject start when BrowserRuntime is active.",
+      "acceptanceCriteria": [
+        "In DesktopRuntime.start(), check if BrowserRuntime is active before proceeding",
+        "If BrowserRuntime state is Active, return a 409 Conflict error with message explaining browser and desktop modes are mutually exclusive",
+        "This mirrors the existing check in BrowserRuntime.start() that checks DesktopRuntime",
+        "BrowserRuntime may need to be added to DesktopRuntime's constructor or accessed via shared app state",
+        "Typecheck passes"
+      ],
+      "priority": 34,
+      "passes": true,
+      "notes": "Used OnceLock<Arc<BrowserRuntime>> in DesktopRuntime to break the circular construction dependency. set_browser_runtime() called in router.rs after both runtimes are created. Check mirrors BrowserRuntime's pattern: check before acquiring state lock, return 409."
+    },
+    {
+      "id": "US-035",
+      "title": "Fix BrowserProblem misuse: use correct error variants for non-startup failures",
+      "description": "As a developer, I need error variants to be used correctly so error codes are meaningful.",
+      "acceptanceCriteria": [
+        "In browser_context.rs, change delete_context's fs::remove_dir_all error from BrowserProblem::start_failed to a more appropriate variant (e.g. cdp_error or add a new internal_error variant)",
+        "In browser_context.rs, change list_contexts's fs::read_dir error from BrowserProblem::start_failed similarly",
+        "In browser_context.rs, change create_context's fs errors from BrowserProblem::start_failed similarly",
+        "Fix the no-op comment at browser_runtime.rs console event handler: 'CDP uses warning as type but we normalize to warning' (same value, comment is misleading - either remove the comment or actually normalize 'warning' to 'warn')",
+        "Typecheck passes"
+      ],
+      "priority": 35,
+      "passes": true,
+      "notes": "BrowserProblem::start_failed (500 status, browser/start-failed code) is used as a catch-all for filesystem errors in browser_context.rs which makes error codes meaningless for API consumers."
+    },
+    {
+      "id": "US-036",
+      "title": "Add integration tests for console and network monitoring",
+      "description": "As a developer, I need tests that verify console and network monitoring actually capture events.",
+      "acceptanceCriteria": [
+        "Add test v1_browser_console_monitoring to browser_api.rs",
+        "Test navigates to a page that calls console.log('test-message') and console.error('test-error')",
+        "Test calls GET /v1/browser/console and verifies the messages array contains entries with matching text and correct levels",
+        "Test calls GET /v1/browser/console?level=error and verifies only error-level messages are returned",
+        "Add test v1_browser_network_monitoring to browser_api.rs",
+        "Test navigates to a page, then calls GET /v1/browser/network and verifies at least one request entry exists with a url, method, and status",
+        "Tests pass"
+      ],
+      "priority": 36,
+      "passes": true,
+      "notes": "Console test uses HTML page with console.log/error/warn calls, verifies messages captured and level filtering works. Network test verifies navigation generates captured network requests. CDP reports console.warn level as 'warn' not 'warning'. Both tests use 1s sleep for async CDP event capture."
+    },
+    {
+      "id": "US-037",
+      "title": "Add integration tests for crawling",
+      "description": "As a developer, I need tests that verify the crawl endpoint works with multiple pages.",
+      "acceptanceCriteria": [
+        "Add test v1_browser_crawl to browser_api.rs",
+        "Write 3 test HTML pages: page-a.html links to page-b.html, page-b.html links to page-c.html, page-c.html has no links",
+        "Test POST /v1/browser/crawl with url=file:///tmp/page-a.html, maxDepth=2, extract=text",
+        "Verify response has 3 pages with correct depths (0, 1, 2)",
+        "Verify totalPages is 3 and truncated is false",
+        "Test maxPages=1 returns only 1 page and truncated is true",
+        "Tests pass"
+      ],
+      "priority": 37,
+      "passes": true,
+      "notes": "Crawl test uses 3 linked file:// HTML pages to verify BFS traversal, depth tracking, text extraction, totalPages, and truncated flag. Required fixing extract_links to also collect file:// links and the scheme filter to allow file:// URLs. Also fixed truncated detection bug: popped URL was lost when max_pages was reached."
+    },
+    {
+      "id": "US-038",
+      "title": "Fix path traversal vulnerability in browser context_id",
+      "description": "As a developer, I need to prevent path traversal attacks via context_id in browser context endpoints and browser start.",
+      "acceptanceCriteria": [
+        "In browser_context.rs delete_context(), validate that context_id matches regex ^[a-f0-9]+$ before constructing the path. Return BrowserProblem::not_found if it contains invalid characters",
+        "In browser_context.rs, after constructing context_dir via base.join(context_id), canonicalize the path and verify it starts with the base directory. Return BrowserProblem::not_found if it escapes",
+        "In browser_runtime.rs start_chromium_locked(), apply the same validation to context_id before using it in --user-data-dir",
+        "Add unit test: delete_context with context_id '../../../tmp' returns error",
+        "Add unit test: delete_context with context_id '..%2F..%2Ftmp' returns error",
+        "Add unit test: delete_context with valid hex context_id that doesn't exist returns not_found (existing behavior preserved)",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 38,
+      "passes": true,
+      "notes": "CRITICAL security issue. context_id from user input is passed directly to fs::remove_dir_all(base.join(context_id)) and to --user-data-dir with no sanitization. DELETE /v1/browser/contexts/..%2F..%2Fetc could delete arbitrary directories."
+    },
+    {
+      "id": "US-039",
+      "title": "Fix leaked background tasks on browser stop",
+      "description": "As a developer, I need background CDP listener tasks to be cancelled when the browser stops.",
+      "acceptanceCriteria": [
+        "Store the JoinHandles for the 3 spawned CDP listener tasks (console, network request, network response) in BrowserRuntimeStateData",
+        "In stop(), abort all 3 JoinHandles before closing the CDP client",
+        "Alternatively, use a tokio CancellationToken: create one in start(), pass it to each spawned task, trigger it in stop()",
+        "Verify that after stop(), no background tasks hold Arc<Mutex<BrowserRuntimeStateData>> references",
+        "Typecheck passes"
+      ],
+      "priority": 39,
+      "passes": true,
+      "notes": "Currently 3 tokio::spawn tasks are created in start() (lines ~300-455) but never cancelled in stop(). Each start/stop cycle leaks 3 zombie tasks holding Arc references to the state."
+    },
+    {
+      "id": "US-040",
+      "title": "Remove with_cdp method from BrowserRuntime",
+      "description": "As a developer, I want to remove the with_cdp method that holds the Mutex across CDP I/O to prevent future deadlock bugs.",
+      "acceptanceCriteria": [
+        "Remove the pub async fn with_cdp() method from BrowserRuntime in browser_runtime.rs",
+        "Search the codebase for any callers of with_cdp and migrate them to get_cdp()",
+        "If no callers exist, simply remove the method",
+        "Typecheck passes"
+      ],
+      "priority": 40,
+      "passes": true,
+      "notes": "with_cdp holds the state Mutex for the entire CDP round-trip (up to 30s). Background listener tasks block on the same lock. Currently unused (router uses get_cdp) but it's a public API that invites deadlock bugs."
+    },
+    {
+      "id": "US-041",
+      "title": "Restrict crawl endpoint to http/https schemes only",
+      "description": "As a developer, I need the crawl endpoint to reject file:// URLs to prevent local filesystem reading.",
+      "acceptanceCriteria": [
+        "In browser_crawl.rs crawl_pages(), validate the start URL scheme is http or https. Return BrowserProblem with 400 status if it is file:// or any other scheme",
+        "In the link filtering logic inside the crawl loop, remove 'file' from the allowed schemes list so only http and https links are followed",
+        "In extract_links(), remove the file: prefix from the href collection filter so only http/https links are collected",
+        "Update the crawl integration test (v1_browser_crawl) to use a local HTTP server inside the container instead of file:// URLs. Use the process API or write a simple HTML file served via python3 -m http.server or similar",
+        "Add a test that POST /v1/browser/crawl with a file:// URL returns 400",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 41,
+      "passes": true,
+      "notes": "SECURITY: file:// URLs combined with --no-sandbox Chromium lets anyone read arbitrary files via the crawl endpoint. The crawl link filter explicitly allows file:// scheme and extract_links collects file: hrefs."
+    },
+    {
+      "id": "US-042",
+      "title": "Handle CDP connection death on Chromium crash",
+      "description": "As a developer, I need the browser state machine to detect and handle a dead CDP connection.",
+      "acceptanceCriteria": [
+        "Store the CdpClient reader_task JoinHandle accessibly (e.g. add a method is_alive() on CdpClient that checks if the reader task has finished)",
+        "In BrowserRuntime refresh_status_locked(), check if the CDP client's reader task is still alive. If not, transition state to Failed with an appropriate error message",
+        "Change Chromium's RestartPolicy from Always to Never so that a crash transitions cleanly to Failed state instead of auto-restarting with a stale CDP connection",
+        "Typecheck passes"
+      ],
+      "priority": 42,
+      "passes": true,
+      "notes": "If Chromium crashes, RestartPolicy::Always restarts it but the CdpClient holds a dead WebSocket. State stays Active but all CDP operations fail. No recovery without manual stop+start."
+    },
+    {
+      "id": "US-043",
+      "title": "Strengthen network monitoring integration test",
+      "description": "As a developer, I need the network monitoring test to actually verify captured request data, not just field existence.",
+      "acceptanceCriteria": [
+        "Rewrite v1_browser_network_monitoring to use a test HTML page that triggers a real HTTP request (e.g. an XHR/fetch to a known URL, or navigate to an HTTP URL served by python3 -m http.server inside the container)",
+        "Assert that at least one captured network request has a url containing the expected path",
+        "Assert that the captured request has method 'GET'",
+        "Assert that the captured request has a status field with value 200",
+        "Replace the fixed 1-second sleep with a retry loop (poll GET /v1/browser/network every 200ms for up to 5s until expected entries appear)",
+        "Tests pass"
+      ],
+      "priority": 43,
+      "passes": true,
+      "notes": "Current test only checks fields exist (is_some/is_empty), never checks values. Uses file:// which may not generate real Network events. Graded D+ by adversarial review. status field from the user story requirement is never verified."
+    }
+  ]
+}

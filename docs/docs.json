@@ -97,6 +97,7 @@
               {
                 "group": "More",
                 "pages": [
+                  "browser-feature-matrix",
                   "daemon",
                   "cors",
                   "session-restoration",

@@ -21,6 +21,294 @@ export interface paths {
   "/v1/agents/{agent}/install": {
     post: operations["post_v1_agent_install"];
   };
+  "/v1/browser/back": {
+    /**
+     * Navigate the browser back in history.
+     * @description Sends a CDP `Page.navigateToHistoryEntry` command with the previous
+     * history entry and returns the resulting page URL and title.
+     */
+    post: operations["post_v1_browser_back"];
+  };
+  "/v1/browser/cdp": {
+    /**
+     * Open a CDP WebSocket proxy session.
+     * @description Upgrades the connection to a WebSocket that relays bidirectionally to
+     * Chromium's internal CDP WebSocket endpoint. External tools like Playwright
+     * or Puppeteer can connect via `ws://sandbox-host:2468/v1/browser/cdp`.
+     */
+    get: operations["get_v1_browser_cdp_ws"];
+  };
+  "/v1/browser/click": {
+    /**
+     * Click an element in the browser page.
+     * @description Finds the element matching `selector`, computes its center point via
+     * `DOM.getBoxModel`, and dispatches mouse events through `Input.dispatchMouseEvent`.
+     */
+    post: operations["post_v1_browser_click"];
+  };
+  "/v1/browser/console": {
+    /**
+     * Get browser console messages.
+     * @description Returns console messages captured from the browser, optionally filtered by
+     * level (log, debug, info, warning, error) and limited in count.
+     */
+    get: operations["get_v1_browser_console"];
+  };
+  "/v1/browser/content": {
+    /**
+     * Get the HTML content of the current browser page.
+     * @description Returns the outerHTML of the page or a specific element selected by a CSS
+     * selector, along with the current URL and title.
+     */
+    get: operations["get_v1_browser_content"];
+  };
+  "/v1/browser/contexts": {
+    /**
+     * List browser contexts (persistent profiles).
+     * @description Returns all browser context directories with their name, creation date,
+     * and on-disk size.
+     */
+    get: operations["get_v1_browser_contexts"];
+    /**
+     * Create a browser context (persistent profile).
+     * @description Creates a new browser context directory that can be passed as contextId
+     * to the browser start endpoint for persistent cookies and storage.
+     */
+    post: operations["post_v1_browser_contexts"];
+  };
+  "/v1/browser/contexts/{context_id}": {
+    /**
+     * Delete a browser context (persistent profile).
+     * @description Removes the browser context directory and all stored data (cookies,
+     * local storage, cache, etc.).
+     */
+    delete: operations["delete_v1_browser_context"];
+  };
+  "/v1/browser/cookies": {
+    /**
+     * Get browser cookies.
+     * @description Returns cookies from the browser, optionally filtered by URL.
+     * Uses CDP Network.getCookies.
+     */
+    get: operations["get_v1_browser_cookies"];
+    /**
+     * Set browser cookies.
+     * @description Sets one or more cookies in the browser via CDP Network.setCookies.
+     */
+    post: operations["post_v1_browser_cookies"];
+    /**
+     * Delete browser cookies.
+     * @description Deletes cookies matching the given name and/or domain. If no filters are
+     * provided, clears all browser cookies.
+     */
+    delete: operations["delete_v1_browser_cookies"];
+  };
+  "/v1/browser/crawl": {
+    /**
+     * Crawl multiple pages starting from a URL.
+     * @description Performs a breadth-first crawl: navigates to each page, extracts content in
+     * the requested format, collects links, and follows them within the configured
+     * domain and depth limits.
+     */
+    post: operations["post_v1_browser_crawl"];
+  };
+  "/v1/browser/dialog": {
+    /**
+     * Handle a JavaScript dialog (alert, confirm, prompt) in the browser.
+     * @description Accepts or dismisses the currently open dialog using
+     * `Page.handleJavaScriptDialog`, optionally providing prompt text.
+     */
+    post: operations["post_v1_browser_dialog"];
+  };
+  "/v1/browser/execute": {
+    /**
+     * Execute a JavaScript expression in the browser.
+     * @description Evaluates the given expression via CDP `Runtime.evaluate` and returns the
+     * result value and its type. Set `awaitPromise` to resolve async expressions.
+     */
+    post: operations["post_v1_browser_execute"];
+  };
+  "/v1/browser/forward": {
+    /**
+     * Navigate the browser forward in history.
+     * @description Sends a CDP `Page.navigateToHistoryEntry` command with the next
+     * history entry and returns the resulting page URL and title.
+     */
+    post: operations["post_v1_browser_forward"];
+  };
+  "/v1/browser/hover": {
+    /**
+     * Hover over an element.
+     * @description Finds the element matching `selector`, computes its center via `DOM.getBoxModel`,
+     * and dispatches a `mouseMoved` event.
+     */
+    post: operations["post_v1_browser_hover"];
+  };
+  "/v1/browser/links": {
+    /**
+     * Get all links on the current page.
+     * @description Extracts all anchor elements from the page via CDP and returns their href
+     * and text content.
+     */
+    get: operations["get_v1_browser_links"];
+  };
+  "/v1/browser/markdown": {
+    /**
+     * Get the page content as Markdown.
+     * @description Extracts the DOM HTML via CDP, strips navigation/footer/aside elements, and
+     * converts the remaining content to Markdown using html2md.
+     */
+    get: operations["get_v1_browser_markdown"];
+  };
+  "/v1/browser/navigate": {
+    /**
+     * Navigate the browser to a URL.
+     * @description Sends a CDP `Page.navigate` command and optionally waits for a lifecycle
+     * event before returning the resulting page URL, title, and HTTP status.
+     */
+    post: operations["post_v1_browser_navigate"];
+  };
+  "/v1/browser/network": {
+    /**
+     * Get browser network requests.
+     * @description Returns network requests captured from the browser, optionally filtered by
+     * URL pattern and limited in count.
+     */
+    get: operations["get_v1_browser_network"];
+  };
+  "/v1/browser/pdf": {
+    /**
+     * Generate a PDF of the current browser page.
+     * @description Generates a PDF document from the current page via CDP `Page.printToPDF`
+     * and returns the PDF bytes.
+     */
+    get: operations["get_v1_browser_pdf"];
+  };
+  "/v1/browser/reload": {
+    /**
+     * Reload the current browser page.
+     * @description Sends a CDP `Page.reload` command with an optional cache bypass flag
+     * and returns the resulting page URL and title.
+     */
+    post: operations["post_v1_browser_reload"];
+  };
+  "/v1/browser/scrape": {
+    /**
+     * Scrape structured data from the current page using CSS selectors.
+     * @description For each key in the `selectors` map, runs `querySelectorAll` with the CSS
+     * selector value and collects `textContent` from every match. If `url` is
+     * provided the browser navigates there first.
+     */
+    post: operations["post_v1_browser_scrape"];
+  };
+  "/v1/browser/screenshot": {
+    /**
+     * Capture a browser page screenshot.
+     * @description Captures a screenshot of the current browser page via CDP
+     * `Page.captureScreenshot` and returns the image bytes with the appropriate
+     * Content-Type header.
+     */
+    get: operations["get_v1_browser_screenshot"];
+  };
+  "/v1/browser/scroll": {
+    /**
+     * Scroll the page or a specific element.
+     * @description If a `selector` is provided, scrolls that element. Otherwise scrolls the
+     * page window by the given `x` and `y` pixel offsets.
+     */
+    post: operations["post_v1_browser_scroll"];
+  };
+  "/v1/browser/select": {
+    /**
+     * Select an option in a `<select>` element.
+     * @description Finds the element matching `selector` and sets its value via `Runtime.evaluate`,
+     * then dispatches a `change` event so listeners fire.
+     */
+    post: operations["post_v1_browser_select"];
+  };
+  "/v1/browser/snapshot": {
+    /**
+     * Get an accessibility tree snapshot of the current page.
+     * @description Returns a text representation of the page accessibility tree via CDP
+     * `Accessibility.getFullAXTree`.
+     */
+    get: operations["get_v1_browser_snapshot"];
+  };
+  "/v1/browser/start": {
+    /**
+     * Start the browser runtime.
+     * @description Launches Chromium with remote debugging, optionally starts Xvfb for
+     * non-headless mode, and returns the resulting browser status snapshot.
+     */
+    post: operations["post_v1_browser_start"];
+  };
+  "/v1/browser/status": {
+    /**
+     * Get browser runtime status.
+     * @description Returns the current browser state, display information, CDP URL,
+     * and managed process details.
+     */
+    get: operations["get_v1_browser_status"];
+  };
+  "/v1/browser/stop": {
+    /**
+     * Stop the browser runtime.
+     * @description Terminates Chromium, the CDP client, and any associated Xvfb/Neko
+     * processes, then returns the resulting status snapshot.
+     */
+    post: operations["post_v1_browser_stop"];
+  };
+  "/v1/browser/tabs": {
+    /**
+     * List open browser tabs.
+     * @description Returns all open browser tabs (pages) via CDP `Target.getTargets`,
+     * filtered to type "page".
+     */
+    get: operations["get_v1_browser_tabs"];
+    /**
+     * Create a new browser tab.
+     * @description Opens a new tab via CDP `Target.createTarget` and returns the tab info.
+     */
+    post: operations["post_v1_browser_tabs"];
+  };
+  "/v1/browser/tabs/{tab_id}": {
+    /**
+     * Close a browser tab.
+     * @description Closes the specified tab via CDP `Target.closeTarget`.
+     */
+    delete: operations["delete_v1_browser_tab"];
+  };
+  "/v1/browser/tabs/{tab_id}/activate": {
+    /**
+     * Activate a browser tab.
+     * @description Brings the specified tab to the foreground via CDP `Target.activateTarget`.
+     */
+    post: operations["post_v1_browser_tab_activate"];
+  };
+  "/v1/browser/type": {
+    /**
+     * Type text into a focused element.
+     * @description Finds the element matching `selector`, focuses it via `DOM.focus`, optionally
+     * clears existing content, then dispatches key events for each character.
+     */
+    post: operations["post_v1_browser_type"];
+  };
+  "/v1/browser/upload": {
+    /**
+     * Upload a file to a file input element in the browser page.
+     * @description Resolves the file input element matching `selector` and sets the specified
+     * file path using `DOM.setFileInputFiles`.
+     */
+    post: operations["post_v1_browser_upload"];
+  };
+  "/v1/browser/wait": {
+    /**
+     * Wait for a selector or condition in the browser.
+     * @description Polls the page DOM using `Runtime.evaluate` with a `querySelector` check
+     * until the element is found or the timeout expires.
+     */
+    post: operations["post_v1_browser_wait"];
+  };
   "/v1/config/mcp": {
     get: operations["get_v1_config_mcp"];
     put: operations["put_v1_config_mcp"];
@@ -503,6 +791,285 @@ export interface components {
     AgentListResponse: {
       agents: components["schemas"]["AgentInfo"][];
     };
+    BrowserActionResponse: {
+      ok: boolean;
+    };
+    BrowserClickRequest: {
+      button?: components["schemas"]["BrowserMouseButton"] | null;
+      /** Format: int32 */
+      clickCount?: number | null;
+      selector: string;
+      /** Format: int64 */
+      timeout?: number | null;
+    };
+    BrowserConsoleMessage: {
+      level: string;
+      /** Format: int32 */
+      line?: number | null;
+      text: string;
+      timestamp: string;
+      url?: string | null;
+    };
+    BrowserConsoleQuery: {
+      level?: string | null;
+      /** Format: int32 */
+      limit?: number | null;
+    };
+    BrowserConsoleResponse: {
+      messages: components["schemas"]["BrowserConsoleMessage"][];
+    };
+    BrowserContentQuery: {
+      selector?: string | null;
+    };
+    BrowserContentResponse: {
+      html: string;
+      title: string;
+      url: string;
+    };
+    BrowserContextCreateRequest: {
+      name: string;
+    };
+    BrowserContextInfo: {
+      createdAt: string;
+      id: string;
+      name: string;
+      /** Format: int64 */
+      sizeBytes?: number | null;
+    };
+    BrowserContextListResponse: {
+      contexts: components["schemas"]["BrowserContextInfo"][];
+    };
+    BrowserCookie: {
+      domain?: string | null;
+      /** Format: double */
+      expires?: number | null;
+      httpOnly?: boolean | null;
+      name: string;
+      path?: string | null;
+      sameSite?: components["schemas"]["BrowserCookieSameSite"] | null;
+      secure?: boolean | null;
+      value: string;
+    };
+    /** @enum {string} */
+    BrowserCookieSameSite: "Strict" | "Lax" | "None";
+    BrowserCookiesQuery: {
+      url?: string | null;
+    };
+    BrowserCookiesResponse: {
+      cookies: components["schemas"]["BrowserCookie"][];
+    };
+    /** @enum {string} */
+    BrowserCrawlExtract: "markdown" | "html" | "text" | "links";
+    BrowserCrawlPage: {
+      content: string;
+      /** Format: int32 */
+      depth: number;
+      links?: string[];
+      /** Format: int32 */
+      status?: number | null;
+      title: string;
+      url: string;
+    };
+    BrowserCrawlRequest: {
+      allowedDomains?: string[] | null;
+      extract?: components["schemas"]["BrowserCrawlExtract"] | null;
+      /** Format: int32 */
+      maxDepth?: number | null;
+      /** Format: int32 */
+      maxPages?: number | null;
+      url: string;
+    };
+    BrowserCrawlResponse: {
+      pages: components["schemas"]["BrowserCrawlPage"][];
+      /** Format: int32 */
+      totalPages: number;
+      truncated: boolean;
+    };
+    BrowserCreateTabRequest: {
+      url?: string | null;
+    };
+    BrowserDeleteCookiesQuery: {
+      domain?: string | null;
+      name?: string | null;
+    };
+    BrowserDialogRequest: {
+      accept: boolean;
+      text?: string | null;
+    };
+    BrowserExecuteRequest: {
+      awaitPromise?: boolean | null;
+      expression: string;
+    };
+    BrowserExecuteResponse: {
+      result: unknown;
+      type: string;
+    };
+    BrowserHoverRequest: {
+      selector: string;
+    };
+    BrowserLinkInfo: {
+      href: string;
+      text: string;
+    };
+    BrowserLinksResponse: {
+      links: components["schemas"]["BrowserLinkInfo"][];
+      url: string;
+    };
+    BrowserMarkdownResponse: {
+      markdown: string;
+      title: string;
+      url: string;
+    };
+    /** @enum {string} */
+    BrowserMouseButton: "left" | "right" | "middle";
+    BrowserNavigateRequest: {
+      url: string;
+      waitUntil?: components["schemas"]["BrowserNavigateWaitUntil"] | null;
+    };
+    /** @enum {string} */
+    BrowserNavigateWaitUntil: "load" | "domcontentloaded" | "networkidle";
+    BrowserNetworkQuery: {
+      /** Format: int32 */
+      limit?: number | null;
+      urlPattern?: string | null;
+    };
+    BrowserNetworkRequest: {
+      /** Format: int64 */
+      duration?: number | null;
+      method: string;
+      mimeType?: string | null;
+      /** Format: int64 */
+      responseSize?: number | null;
+      /** Format: int32 */
+      status?: number | null;
+      timestamp: string;
+      url: string;
+    };
+    BrowserNetworkResponse: {
+      requests: components["schemas"]["BrowserNetworkRequest"][];
+    };
+    BrowserPageInfo: {
+      /** Format: int32 */
+      status?: number | null;
+      title: string;
+      url: string;
+    };
+    /** @enum {string} */
+    BrowserPdfFormat: "a4" | "letter" | "legal";
+    BrowserPdfQuery: {
+      format?: components["schemas"]["BrowserPdfFormat"] | null;
+      landscape?: boolean | null;
+      printBackground?: boolean | null;
+      /** Format: float */
+      scale?: number | null;
+    };
+    BrowserReloadRequest: {
+      ignoreCache?: boolean | null;
+    };
+    BrowserScrapeRequest: {
+      selectors: {
+        [key: string]: string;
+      };
+      url?: string | null;
+    };
+    BrowserScrapeResponse: {
+      data: {
+        [key: string]: string[];
+      };
+      title: string;
+      url: string;
+    };
+    /** @enum {string} */
+    BrowserScreenshotFormat: "png" | "jpeg" | "webp";
+    BrowserScreenshotQuery: {
+      format?: components["schemas"]["BrowserScreenshotFormat"] | null;
+      fullPage?: boolean | null;
+      /** Format: int32 */
+      quality?: number | null;
+      selector?: string | null;
+    };
+    BrowserScrollRequest: {
+      selector?: string | null;
+      /** Format: int32 */
+      x?: number | null;
+      /** Format: int32 */
+      y?: number | null;
+    };
+    BrowserSelectRequest: {
+      selector: string;
+      value: string;
+    };
+    BrowserSetCookiesRequest: {
+      cookies: components["schemas"]["BrowserCookie"][];
+    };
+    BrowserSnapshotResponse: {
+      snapshot: string;
+      title: string;
+      url: string;
+    };
+    BrowserStartRequest: {
+      contextId?: string | null;
+      /** Format: int32 */
+      dpi?: number | null;
+      headless?: boolean | null;
+      /** Format: int32 */
+      height?: number | null;
+      /** Format: int32 */
+      recordingFps?: number | null;
+      streamAudioCodec?: string | null;
+      /** Format: int32 */
+      streamFrameRate?: number | null;
+      streamVideoCodec?: string | null;
+      url?: string | null;
+      webrtcPortRange?: string | null;
+      /** Format: int32 */
+      width?: number | null;
+    };
+    /** @enum {string} */
+    BrowserState: "inactive" | "install_required" | "starting" | "active" | "stopping" | "failed";
+    BrowserStatusResponse: {
+      cdpUrl?: string | null;
+      display?: string | null;
+      installCommand?: string | null;
+      lastError?: components["schemas"]["DesktopErrorInfo"] | null;
+      missingDependencies?: string[];
+      processes?: components["schemas"]["DesktopProcessInfo"][];
+      resolution?: components["schemas"]["DesktopResolution"] | null;
+      startedAt?: string | null;
+      state: components["schemas"]["BrowserState"];
+      url?: string | null;
+    };
+    BrowserTabInfo: {
+      active: boolean;
+      id: string;
+      title: string;
+      url: string;
+    };
+    BrowserTabListResponse: {
+      tabs: components["schemas"]["BrowserTabInfo"][];
+    };
+    BrowserTypeRequest: {
+      clear?: boolean | null;
+      /** Format: int64 */
+      delay?: number | null;
+      selector: string;
+      text: string;
+    };
+    BrowserUploadRequest: {
+      path: string;
+      selector: string;
+    };
+    BrowserWaitRequest: {
+      selector?: string | null;
+      state?: components["schemas"]["BrowserWaitState"] | null;
+      /** Format: int64 */
+      timeout?: number | null;
+    };
+    BrowserWaitResponse: {
+      found: boolean;
+    };
+    /** @enum {string} */
+    BrowserWaitState: "visible" | "hidden" | "attached";
     DesktopActionResponse: {
       ok: boolean;
     };
@@ -1224,6 +1791,1188 @@ export interface operations {
       };
       /** @description Install failed */
       500: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  /**
+   * Navigate the browser back in history.
+   * @description Sends a CDP `Page.navigateToHistoryEntry` command with the previous
+   * history entry and returns the resulting page URL and title.
+   */
+  post_v1_browser_back: {
+    responses: {
+      /** @description Page info after navigating back */
+      200: {
+        content: {
+          "application/json": components["schemas"]["BrowserPageInfo"];
+        };
+      };
+      /** @description Browser runtime is not active */
+      409: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description CDP command failed */
+      502: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  /**
+   * Open a CDP WebSocket proxy session.
+   * @description Upgrades the connection to a WebSocket that relays bidirectionally to
+   * Chromium's internal CDP WebSocket endpoint. External tools like Playwright
+   * or Puppeteer can connect via `ws://sandbox-host:2468/v1/browser/cdp`.
+   */
+  get_v1_browser_cdp_ws: {
+    responses: {
+      /** @description WebSocket upgraded */
+      101: {
+        content: never;
+      };
+      /** @description Browser runtime is not active */
+      409: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description CDP connection failed */
+      502: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  /**
+   * Click an element in the browser page.
+   * @description Finds the element matching `selector`, computes its center point via
+   * `DOM.getBoxModel`, and dispatches mouse events through `Input.dispatchMouseEvent`.
+   */
+  post_v1_browser_click: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["BrowserClickRequest"];
+      };
+    };
+    responses: {
+      /** @description Click performed */
+      200: {
+        content: {
+          "application/json": components["schemas"]["BrowserActionResponse"];
+        };
+      };
+      /** @description Element not found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Browser runtime is not active */
+      409: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description CDP command failed */
+      502: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  /**
+   * Get browser console messages.
+   * @description Returns console messages captured from the browser, optionally filtered by
+   * level (log, debug, info, warning, error) and limited in count.
+   */
+  get_v1_browser_console: {
+    parameters: {
+      query?: {
+        level?: string | null;
+        limit?: number | null;
+      };
+    };
+    responses: {
+      /** @description Console messages retrieved */
+      200: {
+        content: {
+          "application/json": components["schemas"]["BrowserConsoleResponse"];
+        };
+      };
+      /** @description Browser not active */
+      409: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Internal error */
+      500: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  /**
+   * Get the HTML content of the current browser page.
+   * @description Returns the outerHTML of the page or a specific element selected by a CSS
+   * selector, along with the current URL and title.
+   */
+  get_v1_browser_content: {
+    parameters: {
+      query?: {
+        selector?: string | null;
+      };
+    };
+    responses: {
+      /** @description Page HTML content */
+      200: {
+        content: {
+          "application/json": components["schemas"]["BrowserContentResponse"];
+        };
+      };
+      /** @description Browser runtime is not active */
+      409: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description CDP command failed */
+      502: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  /**
+   * List browser contexts (persistent profiles).
+   * @description Returns all browser context directories with their name, creation date,
+   * and on-disk size.
+   */
+  get_v1_browser_contexts: {
+    responses: {
+      /** @description Browser contexts listed */
+      200: {
+        content: {
+          "application/json": components["schemas"]["BrowserContextListResponse"];
+        };
+      };
+      /** @description Internal error */
+      500: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  /**
+   * Create a browser context (persistent profile).
+   * @description Creates a new browser context directory that can be passed as contextId
+   * to the browser start endpoint for persistent cookies and storage.
+   */
+  post_v1_browser_contexts: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["BrowserContextCreateRequest"];
+      };
+    };
+    responses: {
+      /** @description Browser context created */
+      201: {
+        content: {
+          "application/json": components["schemas"]["BrowserContextInfo"];
+        };
+      };
+      /** @description Internal error */
+      500: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  /**
+   * Delete a browser context (persistent profile).
+   * @description Removes the browser context directory and all stored data (cookies,
+   * local storage, cache, etc.).
+   */
+  delete_v1_browser_context: {
+    parameters: {
+      path: {
+        /** @description Browser context ID */
+        context_id: string;
+      };
+    };
+    responses: {
+      /** @description Browser context deleted */
+      200: {
+        content: {
+          "application/json": components["schemas"]["BrowserActionResponse"];
+        };
+      };
+      /** @description Browser context not found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Internal error */
+      500: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  /**
+   * Get browser cookies.
+   * @description Returns cookies from the browser, optionally filtered by URL.
+   * Uses CDP Network.getCookies.
+   */
+  get_v1_browser_cookies: {
+    parameters: {
+      query?: {
+        url?: string | null;
+      };
+    };
+    responses: {
+      /** @description Cookies retrieved */
+      200: {
+        content: {
+          "application/json": components["schemas"]["BrowserCookiesResponse"];
+        };
+      };
+      /** @description Browser not active */
+      409: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description CDP command failed */
+      502: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  /**
+   * Set browser cookies.
+   * @description Sets one or more cookies in the browser via CDP Network.setCookies.
+   */
+  post_v1_browser_cookies: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["BrowserSetCookiesRequest"];
+      };
+    };
+    responses: {
+      /** @description Cookies set */
+      200: {
+        content: {
+          "application/json": components["schemas"]["BrowserActionResponse"];
+        };
+      };
+      /** @description Browser not active */
+      409: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description CDP command failed */
+      502: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  /**
+   * Delete browser cookies.
+   * @description Deletes cookies matching the given name and/or domain. If no filters are
+   * provided, clears all browser cookies.
+   */
+  delete_v1_browser_cookies: {
+    parameters: {
+      query?: {
+        name?: string | null;
+        domain?: string | null;
+      };
+    };
+    responses: {
+      /** @description Cookies deleted */
+      200: {
+        content: {
+          "application/json": components["schemas"]["BrowserActionResponse"];
+        };
+      };
+      /** @description Browser not active */
+      409: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description CDP command failed */
+      502: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  /**
+   * Crawl multiple pages starting from a URL.
+   * @description Performs a breadth-first crawl: navigates to each page, extracts content in
+   * the requested format, collects links, and follows them within the configured
+   * domain and depth limits.
+   */
+  post_v1_browser_crawl: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["BrowserCrawlRequest"];
+      };
+    };
+    responses: {
+      /** @description Crawl results */
+      200: {
+        content: {
+          "application/json": components["schemas"]["BrowserCrawlResponse"];
+        };
+      };
+      /** @description Browser runtime is not active */
+      409: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description CDP command failed */
+      502: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  /**
+   * Handle a JavaScript dialog (alert, confirm, prompt) in the browser.
+   * @description Accepts or dismisses the currently open dialog using
+   * `Page.handleJavaScriptDialog`, optionally providing prompt text.
+   */
+  post_v1_browser_dialog: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["BrowserDialogRequest"];
+      };
+    };
+    responses: {
+      /** @description Dialog handled */
+      200: {
+        content: {
+          "application/json": components["schemas"]["BrowserActionResponse"];
+        };
+      };
+      /** @description Browser runtime is not active */
+      409: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description CDP command failed */
+      502: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  /**
+   * Execute a JavaScript expression in the browser.
+   * @description Evaluates the given expression via CDP `Runtime.evaluate` and returns the
+   * result value and its type. Set `awaitPromise` to resolve async expressions.
+   */
+  post_v1_browser_execute: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["BrowserExecuteRequest"];
+      };
+    };
+    responses: {
+      /** @description Execution result */
+      200: {
+        content: {
+          "application/json": components["schemas"]["BrowserExecuteResponse"];
+        };
+      };
+      /** @description Browser runtime is not active */
+      409: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description CDP command failed */
+      502: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  /**
+   * Navigate the browser forward in history.
+   * @description Sends a CDP `Page.navigateToHistoryEntry` command with the next
+   * history entry and returns the resulting page URL and title.
+   */
+  post_v1_browser_forward: {
+    responses: {
+      /** @description Page info after navigating forward */
+      200: {
+        content: {
+          "application/json": components["schemas"]["BrowserPageInfo"];
+        };
+      };
+      /** @description Browser runtime is not active */
+      409: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description CDP command failed */
+      502: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  /**
+   * Hover over an element.
+   * @description Finds the element matching `selector`, computes its center via `DOM.getBoxModel`,
+   * and dispatches a `mouseMoved` event.
+   */
+  post_v1_browser_hover: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["BrowserHoverRequest"];
+      };
+    };
+    responses: {
+      /** @description Hover performed */
+      200: {
+        content: {
+          "application/json": components["schemas"]["BrowserActionResponse"];
+        };
+      };
+      /** @description Element not found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Browser runtime is not active */
+      409: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description CDP command failed */
+      502: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  /**
+   * Get all links on the current page.
+   * @description Extracts all anchor elements from the page via CDP and returns their href
+   * and text content.
+   */
+  get_v1_browser_links: {
+    responses: {
+      /** @description Links on the page */
+      200: {
+        content: {
+          "application/json": components["schemas"]["BrowserLinksResponse"];
+        };
+      };
+      /** @description Browser runtime is not active */
+      409: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description CDP command failed */
+      502: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  /**
+   * Get the page content as Markdown.
+   * @description Extracts the DOM HTML via CDP, strips navigation/footer/aside elements, and
+   * converts the remaining content to Markdown using html2md.
+   */
+  get_v1_browser_markdown: {
+    responses: {
+      /** @description Page content as Markdown */
+      200: {
+        content: {
+          "application/json": components["schemas"]["BrowserMarkdownResponse"];
+        };
+      };
+      /** @description Browser runtime is not active */
+      409: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description CDP command failed */
+      502: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  /**
+   * Navigate the browser to a URL.
+   * @description Sends a CDP `Page.navigate` command and optionally waits for a lifecycle
+   * event before returning the resulting page URL, title, and HTTP status.
+   */
+  post_v1_browser_navigate: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["BrowserNavigateRequest"];
+      };
+    };
+    responses: {
+      /** @description Navigation result */
+      200: {
+        content: {
+          "application/json": components["schemas"]["BrowserPageInfo"];
+        };
+      };
+      /** @description Browser runtime is not active */
+      409: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description CDP command failed */
+      502: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  /**
+   * Get browser network requests.
+   * @description Returns network requests captured from the browser, optionally filtered by
+   * URL pattern and limited in count.
+   */
+  get_v1_browser_network: {
+    parameters: {
+      query?: {
+        limit?: number | null;
+        urlPattern?: string | null;
+      };
+    };
+    responses: {
+      /** @description Network requests retrieved */
+      200: {
+        content: {
+          "application/json": components["schemas"]["BrowserNetworkResponse"];
+        };
+      };
+      /** @description Browser not active */
+      409: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Internal error */
+      500: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  /**
+   * Generate a PDF of the current browser page.
+   * @description Generates a PDF document from the current page via CDP `Page.printToPDF`
+   * and returns the PDF bytes.
+   */
+  get_v1_browser_pdf: {
+    parameters: {
+      query?: {
+        format?: components["schemas"]["BrowserPdfFormat"] | null;
+        landscape?: boolean | null;
+        printBackground?: boolean | null;
+        scale?: number | null;
+      };
+    };
+    responses: {
+      /** @description Browser page as PDF bytes */
+      200: {
+        content: never;
+      };
+      /** @description Browser runtime is not active */
+      409: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description CDP command failed */
+      502: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  /**
+   * Reload the current browser page.
+   * @description Sends a CDP `Page.reload` command with an optional cache bypass flag
+   * and returns the resulting page URL and title.
+   */
+  post_v1_browser_reload: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["BrowserReloadRequest"];
+      };
+    };
+    responses: {
+      /** @description Page info after reload */
+      200: {
+        content: {
+          "application/json": components["schemas"]["BrowserPageInfo"];
+        };
+      };
+      /** @description Browser runtime is not active */
+      409: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description CDP command failed */
+      502: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  /**
+   * Scrape structured data from the current page using CSS selectors.
+   * @description For each key in the `selectors` map, runs `querySelectorAll` with the CSS
+   * selector value and collects `textContent` from every match. If `url` is
+   * provided the browser navigates there first.
+   */
+  post_v1_browser_scrape: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["BrowserScrapeRequest"];
+      };
+    };
+    responses: {
+      /** @description Scraped data */
+      200: {
+        content: {
+          "application/json": components["schemas"]["BrowserScrapeResponse"];
+        };
+      };
+      /** @description Browser runtime is not active */
+      409: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description CDP command failed */
+      502: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  /**
+   * Capture a browser page screenshot.
+   * @description Captures a screenshot of the current browser page via CDP
+   * `Page.captureScreenshot` and returns the image bytes with the appropriate
+   * Content-Type header.
+   */
+  get_v1_browser_screenshot: {
+    parameters: {
+      query?: {
+        format?: components["schemas"]["BrowserScreenshotFormat"] | null;
+        quality?: number | null;
+        fullPage?: boolean | null;
+        selector?: string | null;
+      };
+    };
+    responses: {
+      /** @description Browser screenshot as image bytes */
+      200: {
+        content: never;
+      };
+      /** @description Browser runtime is not active */
+      409: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description CDP command failed */
+      502: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  /**
+   * Scroll the page or a specific element.
+   * @description If a `selector` is provided, scrolls that element. Otherwise scrolls the
+   * page window by the given `x` and `y` pixel offsets.
+   */
+  post_v1_browser_scroll: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["BrowserScrollRequest"];
+      };
+    };
+    responses: {
+      /** @description Scroll performed */
+      200: {
+        content: {
+          "application/json": components["schemas"]["BrowserActionResponse"];
+        };
+      };
+      /** @description Element not found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Browser runtime is not active */
+      409: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description CDP command failed */
+      502: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  /**
+   * Select an option in a `<select>` element.
+   * @description Finds the element matching `selector` and sets its value via `Runtime.evaluate`,
+   * then dispatches a `change` event so listeners fire.
+   */
+  post_v1_browser_select: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["BrowserSelectRequest"];
+      };
+    };
+    responses: {
+      /** @description Option selected */
+      200: {
+        content: {
+          "application/json": components["schemas"]["BrowserActionResponse"];
+        };
+      };
+      /** @description Element not found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Browser runtime is not active */
+      409: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description CDP command failed */
+      502: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  /**
+   * Get an accessibility tree snapshot of the current page.
+   * @description Returns a text representation of the page accessibility tree via CDP
+   * `Accessibility.getFullAXTree`.
+   */
+  get_v1_browser_snapshot: {
+    responses: {
+      /** @description Accessibility tree snapshot */
+      200: {
+        content: {
+          "application/json": components["schemas"]["BrowserSnapshotResponse"];
+        };
+      };
+      /** @description Browser runtime is not active */
+      409: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description CDP command failed */
+      502: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  /**
+   * Start the browser runtime.
+   * @description Launches Chromium with remote debugging, optionally starts Xvfb for
+   * non-headless mode, and returns the resulting browser status snapshot.
+   */
+  post_v1_browser_start: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["BrowserStartRequest"];
+      };
+    };
+    responses: {
+      /** @description Browser runtime status after start */
+      200: {
+        content: {
+          "application/json": components["schemas"]["BrowserStatusResponse"];
+        };
+      };
+      /** @description Invalid browser start request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Browser or desktop runtime conflict */
+      409: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Browser dependencies not installed */
+      424: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Browser runtime could not be started */
+      500: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  /**
+   * Get browser runtime status.
+   * @description Returns the current browser state, display information, CDP URL,
+   * and managed process details.
+   */
+  get_v1_browser_status: {
+    responses: {
+      /** @description Browser runtime status */
+      200: {
+        content: {
+          "application/json": components["schemas"]["BrowserStatusResponse"];
+        };
+      };
+      /** @description Authentication required */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  /**
+   * Stop the browser runtime.
+   * @description Terminates Chromium, the CDP client, and any associated Xvfb/Neko
+   * processes, then returns the resulting status snapshot.
+   */
+  post_v1_browser_stop: {
+    responses: {
+      /** @description Browser runtime status after stop */
+      200: {
+        content: {
+          "application/json": components["schemas"]["BrowserStatusResponse"];
+        };
+      };
+      /** @description Browser runtime is not active */
+      409: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  /**
+   * List open browser tabs.
+   * @description Returns all open browser tabs (pages) via CDP `Target.getTargets`,
+   * filtered to type "page".
+   */
+  get_v1_browser_tabs: {
+    responses: {
+      /** @description List of open browser tabs */
+      200: {
+        content: {
+          "application/json": components["schemas"]["BrowserTabListResponse"];
+        };
+      };
+      /** @description Browser runtime is not active */
+      409: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description CDP command failed */
+      502: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  /**
+   * Create a new browser tab.
+   * @description Opens a new tab via CDP `Target.createTarget` and returns the tab info.
+   */
+  post_v1_browser_tabs: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["BrowserCreateTabRequest"];
+      };
+    };
+    responses: {
+      /** @description New tab created */
+      201: {
+        content: {
+          "application/json": components["schemas"]["BrowserTabInfo"];
+        };
+      };
+      /** @description Browser runtime is not active */
+      409: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description CDP command failed */
+      502: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  /**
+   * Close a browser tab.
+   * @description Closes the specified tab via CDP `Target.closeTarget`.
+   */
+  delete_v1_browser_tab: {
+    parameters: {
+      path: {
+        /** @description Target ID of the tab to close */
+        tab_id: string;
+      };
+    };
+    responses: {
+      /** @description Tab closed */
+      200: {
+        content: {
+          "application/json": components["schemas"]["BrowserActionResponse"];
+        };
+      };
+      /** @description Tab not found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Browser runtime is not active */
+      409: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description CDP command failed */
+      502: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  /**
+   * Activate a browser tab.
+   * @description Brings the specified tab to the foreground via CDP `Target.activateTarget`.
+   */
+  post_v1_browser_tab_activate: {
+    parameters: {
+      path: {
+        /** @description Target ID of the tab to activate */
+        tab_id: string;
+      };
+    };
+    responses: {
+      /** @description Tab activated */
+      200: {
+        content: {
+          "application/json": components["schemas"]["BrowserTabInfo"];
+        };
+      };
+      /** @description Tab not found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Browser runtime is not active */
+      409: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description CDP command failed */
+      502: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  /**
+   * Type text into a focused element.
+   * @description Finds the element matching `selector`, focuses it via `DOM.focus`, optionally
+   * clears existing content, then dispatches key events for each character.
+   */
+  post_v1_browser_type: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["BrowserTypeRequest"];
+      };
+    };
+    responses: {
+      /** @description Text typed */
+      200: {
+        content: {
+          "application/json": components["schemas"]["BrowserActionResponse"];
+        };
+      };
+      /** @description Element not found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Browser runtime is not active */
+      409: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description CDP command failed */
+      502: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  /**
+   * Upload a file to a file input element in the browser page.
+   * @description Resolves the file input element matching `selector` and sets the specified
+   * file path using `DOM.setFileInputFiles`.
+   */
+  post_v1_browser_upload: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["BrowserUploadRequest"];
+      };
+    };
+    responses: {
+      /** @description File uploaded to input */
+      200: {
+        content: {
+          "application/json": components["schemas"]["BrowserActionResponse"];
+        };
+      };
+      /** @description Element not found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Browser runtime is not active */
+      409: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description CDP command failed */
+      502: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  /**
+   * Wait for a selector or condition in the browser.
+   * @description Polls the page DOM using `Runtime.evaluate` with a `querySelector` check
+   * until the element is found or the timeout expires.
+   */
+  post_v1_browser_wait: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["BrowserWaitRequest"];
+      };
+    };
+    responses: {
+      /** @description Wait result */
+      200: {
+        content: {
+          "application/json": components["schemas"]["BrowserWaitResponse"];
+        };
+      };
+      /** @description Browser runtime is not active */
+      409: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description CDP command failed */
+      502: {
+        content: {
+          "application/json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Timeout waiting for condition */
+      504: {
         content: {
           "application/json": components["schemas"]["ProblemDetails"];
         };

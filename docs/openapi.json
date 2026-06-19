@@ -396,6 +396,1903 @@
         }
       }
     },
+    "/v1/browser/back": {
+      "post": {
+        "tags": ["v1"],
+        "summary": "Navigate the browser back in history.",
+        "description": "Sends a CDP `Page.navigateToHistoryEntry` command with the previous\nhistory entry and returns the resulting page URL and title.",
+        "operationId": "post_v1_browser_back",
+        "responses": {
+          "200": {
+            "description": "Page info after navigating back",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserPageInfo"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Browser runtime is not active",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "CDP command failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/browser/cdp": {
+      "get": {
+        "tags": ["v1"],
+        "summary": "Open a CDP WebSocket proxy session.",
+        "description": "Upgrades the connection to a WebSocket that relays bidirectionally to\nChromium's internal CDP WebSocket endpoint. External tools like Playwright\nor Puppeteer can connect via `ws://sandbox-host:2468/v1/browser/cdp`.",
+        "operationId": "get_v1_browser_cdp_ws",
+        "responses": {
+          "101": {
+            "description": "WebSocket upgraded"
+          },
+          "409": {
+            "description": "Browser runtime is not active",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "CDP connection failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/browser/click": {
+      "post": {
+        "tags": ["v1"],
+        "summary": "Click an element in the browser page.",
+        "description": "Finds the element matching `selector`, computes its center point via\n`DOM.getBoxModel`, and dispatches mouse events through `Input.dispatchMouseEvent`.",
+        "operationId": "post_v1_browser_click",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BrowserClickRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Click performed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserActionResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Element not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Browser runtime is not active",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "CDP command failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/browser/console": {
+      "get": {
+        "tags": ["v1"],
+        "summary": "Get browser console messages.",
+        "description": "Returns console messages captured from the browser, optionally filtered by\nlevel (log, debug, info, warning, error) and limited in count.",
+        "operationId": "get_v1_browser_console",
+        "parameters": [
+          {
+            "name": "level",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "nullable": true,
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Console messages retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserConsoleResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Browser not active",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/browser/content": {
+      "get": {
+        "tags": ["v1"],
+        "summary": "Get the HTML content of the current browser page.",
+        "description": "Returns the outerHTML of the page or a specific element selected by a CSS\nselector, along with the current URL and title.",
+        "operationId": "get_v1_browser_content",
+        "parameters": [
+          {
+            "name": "selector",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page HTML content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserContentResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Browser runtime is not active",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "CDP command failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/browser/contexts": {
+      "get": {
+        "tags": ["v1"],
+        "summary": "List browser contexts (persistent profiles).",
+        "description": "Returns all browser context directories with their name, creation date,\nand on-disk size.",
+        "operationId": "get_v1_browser_contexts",
+        "responses": {
+          "200": {
+            "description": "Browser contexts listed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserContextListResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": ["v1"],
+        "summary": "Create a browser context (persistent profile).",
+        "description": "Creates a new browser context directory that can be passed as contextId\nto the browser start endpoint for persistent cookies and storage.",
+        "operationId": "post_v1_browser_contexts",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BrowserContextCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Browser context created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserContextInfo"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/browser/contexts/{context_id}": {
+      "delete": {
+        "tags": ["v1"],
+        "summary": "Delete a browser context (persistent profile).",
+        "description": "Removes the browser context directory and all stored data (cookies,\nlocal storage, cache, etc.).",
+        "operationId": "delete_v1_browser_context",
+        "parameters": [
+          {
+            "name": "context_id",
+            "in": "path",
+            "description": "Browser context ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Browser context deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserActionResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Browser context not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/browser/cookies": {
+      "get": {
+        "tags": ["v1"],
+        "summary": "Get browser cookies.",
+        "description": "Returns cookies from the browser, optionally filtered by URL.\nUses CDP Network.getCookies.",
+        "operationId": "get_v1_browser_cookies",
+        "parameters": [
+          {
+            "name": "url",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cookies retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserCookiesResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Browser not active",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "CDP command failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": ["v1"],
+        "summary": "Set browser cookies.",
+        "description": "Sets one or more cookies in the browser via CDP Network.setCookies.",
+        "operationId": "post_v1_browser_cookies",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BrowserSetCookiesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Cookies set",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserActionResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Browser not active",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "CDP command failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": ["v1"],
+        "summary": "Delete browser cookies.",
+        "description": "Deletes cookies matching the given name and/or domain. If no filters are\nprovided, clears all browser cookies.",
+        "operationId": "delete_v1_browser_cookies",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "domain",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cookies deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserActionResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Browser not active",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "CDP command failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/browser/crawl": {
+      "post": {
+        "tags": ["v1"],
+        "summary": "Crawl multiple pages starting from a URL.",
+        "description": "Performs a breadth-first crawl: navigates to each page, extracts content in\nthe requested format, collects links, and follows them within the configured\ndomain and depth limits.",
+        "operationId": "post_v1_browser_crawl",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BrowserCrawlRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Crawl results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserCrawlResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Browser runtime is not active",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "CDP command failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/browser/dialog": {
+      "post": {
+        "tags": ["v1"],
+        "summary": "Handle a JavaScript dialog (alert, confirm, prompt) in the browser.",
+        "description": "Accepts or dismisses the currently open dialog using\n`Page.handleJavaScriptDialog`, optionally providing prompt text.",
+        "operationId": "post_v1_browser_dialog",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BrowserDialogRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Dialog handled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserActionResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Browser runtime is not active",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "CDP command failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/browser/execute": {
+      "post": {
+        "tags": ["v1"],
+        "summary": "Execute a JavaScript expression in the browser.",
+        "description": "Evaluates the given expression via CDP `Runtime.evaluate` and returns the\nresult value and its type. Set `awaitPromise` to resolve async expressions.",
+        "operationId": "post_v1_browser_execute",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BrowserExecuteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Execution result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserExecuteResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Browser runtime is not active",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "CDP command failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/browser/forward": {
+      "post": {
+        "tags": ["v1"],
+        "summary": "Navigate the browser forward in history.",
+        "description": "Sends a CDP `Page.navigateToHistoryEntry` command with the next\nhistory entry and returns the resulting page URL and title.",
+        "operationId": "post_v1_browser_forward",
+        "responses": {
+          "200": {
+            "description": "Page info after navigating forward",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserPageInfo"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Browser runtime is not active",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "CDP command failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/browser/hover": {
+      "post": {
+        "tags": ["v1"],
+        "summary": "Hover over an element.",
+        "description": "Finds the element matching `selector`, computes its center via `DOM.getBoxModel`,\nand dispatches a `mouseMoved` event.",
+        "operationId": "post_v1_browser_hover",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BrowserHoverRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Hover performed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserActionResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Element not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Browser runtime is not active",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "CDP command failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/browser/links": {
+      "get": {
+        "tags": ["v1"],
+        "summary": "Get all links on the current page.",
+        "description": "Extracts all anchor elements from the page via CDP and returns their href\nand text content.",
+        "operationId": "get_v1_browser_links",
+        "responses": {
+          "200": {
+            "description": "Links on the page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserLinksResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Browser runtime is not active",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "CDP command failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/browser/markdown": {
+      "get": {
+        "tags": ["v1"],
+        "summary": "Get the page content as Markdown.",
+        "description": "Extracts the DOM HTML via CDP, strips navigation/footer/aside elements, and\nconverts the remaining content to Markdown using html2md.",
+        "operationId": "get_v1_browser_markdown",
+        "responses": {
+          "200": {
+            "description": "Page content as Markdown",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserMarkdownResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Browser runtime is not active",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "CDP command failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/browser/navigate": {
+      "post": {
+        "tags": ["v1"],
+        "summary": "Navigate the browser to a URL.",
+        "description": "Sends a CDP `Page.navigate` command and optionally waits for a lifecycle\nevent before returning the resulting page URL, title, and HTTP status.",
+        "operationId": "post_v1_browser_navigate",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BrowserNavigateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Navigation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserPageInfo"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Browser runtime is not active",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "CDP command failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/browser/network": {
+      "get": {
+        "tags": ["v1"],
+        "summary": "Get browser network requests.",
+        "description": "Returns network requests captured from the browser, optionally filtered by\nURL pattern and limited in count.",
+        "operationId": "get_v1_browser_network",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "nullable": true,
+              "minimum": 0
+            }
+          },
+          {
+            "name": "urlPattern",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Network requests retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserNetworkResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Browser not active",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/browser/pdf": {
+      "get": {
+        "tags": ["v1"],
+        "summary": "Generate a PDF of the current browser page.",
+        "description": "Generates a PDF document from the current page via CDP `Page.printToPDF`\nand returns the PDF bytes.",
+        "operationId": "get_v1_browser_pdf",
+        "parameters": [
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/BrowserPdfFormat"
+                }
+              ],
+              "nullable": true
+            }
+          },
+          {
+            "name": "landscape",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "nullable": true
+            }
+          },
+          {
+            "name": "printBackground",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "nullable": true
+            }
+          },
+          {
+            "name": "scale",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "format": "float",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Browser page as PDF bytes"
+          },
+          "409": {
+            "description": "Browser runtime is not active",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "CDP command failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/browser/reload": {
+      "post": {
+        "tags": ["v1"],
+        "summary": "Reload the current browser page.",
+        "description": "Sends a CDP `Page.reload` command with an optional cache bypass flag\nand returns the resulting page URL and title.",
+        "operationId": "post_v1_browser_reload",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BrowserReloadRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Page info after reload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserPageInfo"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Browser runtime is not active",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "CDP command failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/browser/scrape": {
+      "post": {
+        "tags": ["v1"],
+        "summary": "Scrape structured data from the current page using CSS selectors.",
+        "description": "For each key in the `selectors` map, runs `querySelectorAll` with the CSS\nselector value and collects `textContent` from every match. If `url` is\nprovided the browser navigates there first.",
+        "operationId": "post_v1_browser_scrape",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BrowserScrapeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Scraped data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserScrapeResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Browser runtime is not active",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "CDP command failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/browser/screenshot": {
+      "get": {
+        "tags": ["v1"],
+        "summary": "Capture a browser page screenshot.",
+        "description": "Captures a screenshot of the current browser page via CDP\n`Page.captureScreenshot` and returns the image bytes with the appropriate\nContent-Type header.",
+        "operationId": "get_v1_browser_screenshot",
+        "parameters": [
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/BrowserScreenshotFormat"
+                }
+              ],
+              "nullable": true
+            }
+          },
+          {
+            "name": "quality",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "nullable": true,
+              "minimum": 0
+            }
+          },
+          {
+            "name": "fullPage",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "nullable": true
+            }
+          },
+          {
+            "name": "selector",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Browser screenshot as image bytes"
+          },
+          "409": {
+            "description": "Browser runtime is not active",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "CDP command failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/browser/scroll": {
+      "post": {
+        "tags": ["v1"],
+        "summary": "Scroll the page or a specific element.",
+        "description": "If a `selector` is provided, scrolls that element. Otherwise scrolls the\npage window by the given `x` and `y` pixel offsets.",
+        "operationId": "post_v1_browser_scroll",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BrowserScrollRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Scroll performed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserActionResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Element not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Browser runtime is not active",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "CDP command failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/browser/select": {
+      "post": {
+        "tags": ["v1"],
+        "summary": "Select an option in a `<select>` element.",
+        "description": "Finds the element matching `selector` and sets its value via `Runtime.evaluate`,\nthen dispatches a `change` event so listeners fire.",
+        "operationId": "post_v1_browser_select",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BrowserSelectRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Option selected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserActionResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Element not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Browser runtime is not active",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "CDP command failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/browser/snapshot": {
+      "get": {
+        "tags": ["v1"],
+        "summary": "Get an accessibility tree snapshot of the current page.",
+        "description": "Returns a text representation of the page accessibility tree via CDP\n`Accessibility.getFullAXTree`.",
+        "operationId": "get_v1_browser_snapshot",
+        "responses": {
+          "200": {
+            "description": "Accessibility tree snapshot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserSnapshotResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Browser runtime is not active",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "CDP command failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/browser/start": {
+      "post": {
+        "tags": ["v1"],
+        "summary": "Start the browser runtime.",
+        "description": "Launches Chromium with remote debugging, optionally starts Xvfb for\nnon-headless mode, and returns the resulting browser status snapshot.",
+        "operationId": "post_v1_browser_start",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BrowserStartRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Browser runtime status after start",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserStatusResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid browser start request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Browser or desktop runtime conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "424": {
+            "description": "Browser dependencies not installed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Browser runtime could not be started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/browser/status": {
+      "get": {
+        "tags": ["v1"],
+        "summary": "Get browser runtime status.",
+        "description": "Returns the current browser state, display information, CDP URL,\nand managed process details.",
+        "operationId": "get_v1_browser_status",
+        "responses": {
+          "200": {
+            "description": "Browser runtime status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserStatusResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/browser/stop": {
+      "post": {
+        "tags": ["v1"],
+        "summary": "Stop the browser runtime.",
+        "description": "Terminates Chromium, the CDP client, and any associated Xvfb/Neko\nprocesses, then returns the resulting status snapshot.",
+        "operationId": "post_v1_browser_stop",
+        "responses": {
+          "200": {
+            "description": "Browser runtime status after stop",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserStatusResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Browser runtime is not active",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/browser/tabs": {
+      "get": {
+        "tags": ["v1"],
+        "summary": "List open browser tabs.",
+        "description": "Returns all open browser tabs (pages) via CDP `Target.getTargets`,\nfiltered to type \"page\".",
+        "operationId": "get_v1_browser_tabs",
+        "responses": {
+          "200": {
+            "description": "List of open browser tabs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserTabListResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Browser runtime is not active",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "CDP command failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": ["v1"],
+        "summary": "Create a new browser tab.",
+        "description": "Opens a new tab via CDP `Target.createTarget` and returns the tab info.",
+        "operationId": "post_v1_browser_tabs",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BrowserCreateTabRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "New tab created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserTabInfo"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Browser runtime is not active",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "CDP command failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/browser/tabs/{tab_id}": {
+      "delete": {
+        "tags": ["v1"],
+        "summary": "Close a browser tab.",
+        "description": "Closes the specified tab via CDP `Target.closeTarget`.",
+        "operationId": "delete_v1_browser_tab",
+        "parameters": [
+          {
+            "name": "tab_id",
+            "in": "path",
+            "description": "Target ID of the tab to close",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Tab closed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserActionResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Tab not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Browser runtime is not active",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "CDP command failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/browser/tabs/{tab_id}/activate": {
+      "post": {
+        "tags": ["v1"],
+        "summary": "Activate a browser tab.",
+        "description": "Brings the specified tab to the foreground via CDP `Target.activateTarget`.",
+        "operationId": "post_v1_browser_tab_activate",
+        "parameters": [
+          {
+            "name": "tab_id",
+            "in": "path",
+            "description": "Target ID of the tab to activate",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Tab activated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserTabInfo"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Tab not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Browser runtime is not active",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "CDP command failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/browser/type": {
+      "post": {
+        "tags": ["v1"],
+        "summary": "Type text into a focused element.",
+        "description": "Finds the element matching `selector`, focuses it via `DOM.focus`, optionally\nclears existing content, then dispatches key events for each character.",
+        "operationId": "post_v1_browser_type",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BrowserTypeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Text typed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserActionResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Element not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Browser runtime is not active",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "CDP command failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/browser/upload": {
+      "post": {
+        "tags": ["v1"],
+        "summary": "Upload a file to a file input element in the browser page.",
+        "description": "Resolves the file input element matching `selector` and sets the specified\nfile path using `DOM.setFileInputFiles`.",
+        "operationId": "post_v1_browser_upload",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BrowserUploadRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "File uploaded to input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserActionResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Element not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Browser runtime is not active",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "CDP command failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/browser/wait": {
+      "post": {
+        "tags": ["v1"],
+        "summary": "Wait for a selector or condition in the browser.",
+        "description": "Polls the page DOM using `Runtime.evaluate` with a `querySelector` check\nuntil the element is found or the timeout expires.",
+        "operationId": "post_v1_browser_wait",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BrowserWaitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Wait result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserWaitResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Browser runtime is not active",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "CDP command failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Timeout waiting for condition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/config/mcp": {
       "get": {
         "tags": ["v1"],
@@ -3756,6 +5653,921 @@
             }
           }
         }
+      },
+      "BrowserActionResponse": {
+        "type": "object",
+        "required": ["ok"],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          }
+        }
+      },
+      "BrowserClickRequest": {
+        "type": "object",
+        "required": ["selector"],
+        "properties": {
+          "button": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BrowserMouseButton"
+              }
+            ],
+            "nullable": true
+          },
+          "clickCount": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true,
+            "minimum": 0
+          },
+          "selector": {
+            "type": "string"
+          },
+          "timeout": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true,
+            "minimum": 0
+          }
+        }
+      },
+      "BrowserConsoleMessage": {
+        "type": "object",
+        "required": ["level", "text", "timestamp"],
+        "properties": {
+          "level": {
+            "type": "string"
+          },
+          "line": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true,
+            "minimum": 0
+          },
+          "text": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "BrowserConsoleQuery": {
+        "type": "object",
+        "properties": {
+          "level": {
+            "type": "string",
+            "nullable": true
+          },
+          "limit": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true,
+            "minimum": 0
+          }
+        }
+      },
+      "BrowserConsoleResponse": {
+        "type": "object",
+        "required": ["messages"],
+        "properties": {
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BrowserConsoleMessage"
+            }
+          }
+        }
+      },
+      "BrowserContentQuery": {
+        "type": "object",
+        "properties": {
+          "selector": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "BrowserContentResponse": {
+        "type": "object",
+        "required": ["html", "url", "title"],
+        "properties": {
+          "html": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        }
+      },
+      "BrowserContextCreateRequest": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "BrowserContextInfo": {
+        "type": "object",
+        "required": ["id", "name", "createdAt"],
+        "properties": {
+          "createdAt": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true,
+            "minimum": 0
+          }
+        }
+      },
+      "BrowserContextListResponse": {
+        "type": "object",
+        "required": ["contexts"],
+        "properties": {
+          "contexts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BrowserContextInfo"
+            }
+          }
+        }
+      },
+      "BrowserCookie": {
+        "type": "object",
+        "required": ["name", "value"],
+        "properties": {
+          "domain": {
+            "type": "string",
+            "nullable": true
+          },
+          "expires": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "httpOnly": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "name": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string",
+            "nullable": true
+          },
+          "sameSite": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BrowserCookieSameSite"
+              }
+            ],
+            "nullable": true
+          },
+          "secure": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "value": {
+            "type": "string"
+          }
+        }
+      },
+      "BrowserCookieSameSite": {
+        "type": "string",
+        "enum": ["Strict", "Lax", "None"]
+      },
+      "BrowserCookiesQuery": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "BrowserCookiesResponse": {
+        "type": "object",
+        "required": ["cookies"],
+        "properties": {
+          "cookies": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BrowserCookie"
+            }
+          }
+        }
+      },
+      "BrowserCrawlExtract": {
+        "type": "string",
+        "enum": ["markdown", "html", "text", "links"]
+      },
+      "BrowserCrawlPage": {
+        "type": "object",
+        "required": ["url", "title", "content", "depth"],
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "depth": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "links": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true,
+            "minimum": 0
+          },
+          "title": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        }
+      },
+      "BrowserCrawlRequest": {
+        "type": "object",
+        "required": ["url"],
+        "properties": {
+          "allowedDomains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
+          },
+          "extract": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BrowserCrawlExtract"
+              }
+            ],
+            "nullable": true
+          },
+          "maxDepth": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true,
+            "minimum": 0
+          },
+          "maxPages": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true,
+            "minimum": 0
+          },
+          "url": {
+            "type": "string"
+          }
+        }
+      },
+      "BrowserCrawlResponse": {
+        "type": "object",
+        "required": ["pages", "totalPages", "truncated"],
+        "properties": {
+          "pages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BrowserCrawlPage"
+            }
+          },
+          "totalPages": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        }
+      },
+      "BrowserCreateTabRequest": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "BrowserDeleteCookiesQuery": {
+        "type": "object",
+        "properties": {
+          "domain": {
+            "type": "string",
+            "nullable": true
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "BrowserDialogRequest": {
+        "type": "object",
+        "required": ["accept"],
+        "properties": {
+          "accept": {
+            "type": "boolean"
+          },
+          "text": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "BrowserExecuteRequest": {
+        "type": "object",
+        "required": ["expression"],
+        "properties": {
+          "awaitPromise": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "expression": {
+            "type": "string"
+          }
+        }
+      },
+      "BrowserExecuteResponse": {
+        "type": "object",
+        "required": ["result", "type"],
+        "properties": {
+          "result": {},
+          "type": {
+            "type": "string"
+          }
+        }
+      },
+      "BrowserHoverRequest": {
+        "type": "object",
+        "required": ["selector"],
+        "properties": {
+          "selector": {
+            "type": "string"
+          }
+        }
+      },
+      "BrowserLinkInfo": {
+        "type": "object",
+        "required": ["href", "text"],
+        "properties": {
+          "href": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        }
+      },
+      "BrowserLinksResponse": {
+        "type": "object",
+        "required": ["links", "url"],
+        "properties": {
+          "links": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BrowserLinkInfo"
+            }
+          },
+          "url": {
+            "type": "string"
+          }
+        }
+      },
+      "BrowserMarkdownResponse": {
+        "type": "object",
+        "required": ["markdown", "url", "title"],
+        "properties": {
+          "markdown": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        }
+      },
+      "BrowserMouseButton": {
+        "type": "string",
+        "enum": ["left", "right", "middle"]
+      },
+      "BrowserNavigateRequest": {
+        "type": "object",
+        "required": ["url"],
+        "properties": {
+          "url": {
+            "type": "string"
+          },
+          "waitUntil": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BrowserNavigateWaitUntil"
+              }
+            ],
+            "nullable": true
+          }
+        }
+      },
+      "BrowserNavigateWaitUntil": {
+        "type": "string",
+        "enum": ["load", "domcontentloaded", "networkidle"]
+      },
+      "BrowserNetworkQuery": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true,
+            "minimum": 0
+          },
+          "urlPattern": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "BrowserNetworkRequest": {
+        "type": "object",
+        "required": ["url", "method", "timestamp"],
+        "properties": {
+          "duration": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true,
+            "minimum": 0
+          },
+          "method": {
+            "type": "string"
+          },
+          "mimeType": {
+            "type": "string",
+            "nullable": true
+          },
+          "responseSize": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true,
+            "minimum": 0
+          },
+          "status": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true,
+            "minimum": 0
+          },
+          "timestamp": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        }
+      },
+      "BrowserNetworkResponse": {
+        "type": "object",
+        "required": ["requests"],
+        "properties": {
+          "requests": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BrowserNetworkRequest"
+            }
+          }
+        }
+      },
+      "BrowserPageInfo": {
+        "type": "object",
+        "required": ["url", "title"],
+        "properties": {
+          "status": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true,
+            "minimum": 0
+          },
+          "title": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        }
+      },
+      "BrowserPdfFormat": {
+        "type": "string",
+        "enum": ["a4", "letter", "legal"]
+      },
+      "BrowserPdfQuery": {
+        "type": "object",
+        "properties": {
+          "format": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BrowserPdfFormat"
+              }
+            ],
+            "nullable": true
+          },
+          "landscape": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "printBackground": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "scale": {
+            "type": "number",
+            "format": "float",
+            "nullable": true
+          }
+        }
+      },
+      "BrowserReloadRequest": {
+        "type": "object",
+        "properties": {
+          "ignoreCache": {
+            "type": "boolean",
+            "nullable": true
+          }
+        }
+      },
+      "BrowserScrapeRequest": {
+        "type": "object",
+        "required": ["selectors"],
+        "properties": {
+          "selectors": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "url": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "BrowserScrapeResponse": {
+        "type": "object",
+        "required": ["data", "url", "title"],
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "title": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        }
+      },
+      "BrowserScreenshotFormat": {
+        "type": "string",
+        "enum": ["png", "jpeg", "webp"]
+      },
+      "BrowserScreenshotQuery": {
+        "type": "object",
+        "properties": {
+          "format": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BrowserScreenshotFormat"
+              }
+            ],
+            "nullable": true
+          },
+          "fullPage": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "quality": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true,
+            "minimum": 0
+          },
+          "selector": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "BrowserScrollRequest": {
+        "type": "object",
+        "properties": {
+          "selector": {
+            "type": "string",
+            "nullable": true
+          },
+          "x": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "y": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          }
+        }
+      },
+      "BrowserSelectRequest": {
+        "type": "object",
+        "required": ["selector", "value"],
+        "properties": {
+          "selector": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        }
+      },
+      "BrowserSetCookiesRequest": {
+        "type": "object",
+        "required": ["cookies"],
+        "properties": {
+          "cookies": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BrowserCookie"
+            }
+          }
+        }
+      },
+      "BrowserSnapshotResponse": {
+        "type": "object",
+        "required": ["snapshot", "url", "title"],
+        "properties": {
+          "snapshot": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        }
+      },
+      "BrowserStartRequest": {
+        "type": "object",
+        "properties": {
+          "contextId": {
+            "type": "string",
+            "nullable": true
+          },
+          "dpi": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true,
+            "minimum": 0
+          },
+          "headless": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "height": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true,
+            "minimum": 0
+          },
+          "recordingFps": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true,
+            "minimum": 0
+          },
+          "streamAudioCodec": {
+            "type": "string",
+            "nullable": true
+          },
+          "streamFrameRate": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true,
+            "minimum": 0
+          },
+          "streamVideoCodec": {
+            "type": "string",
+            "nullable": true
+          },
+          "url": {
+            "type": "string",
+            "nullable": true
+          },
+          "webrtcPortRange": {
+            "type": "string",
+            "nullable": true
+          },
+          "width": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true,
+            "minimum": 0
+          }
+        }
+      },
+      "BrowserState": {
+        "type": "string",
+        "enum": ["inactive", "install_required", "starting", "active", "stopping", "failed"]
+      },
+      "BrowserStatusResponse": {
+        "type": "object",
+        "required": ["state"],
+        "properties": {
+          "cdpUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "display": {
+            "type": "string",
+            "nullable": true
+          },
+          "installCommand": {
+            "type": "string",
+            "nullable": true
+          },
+          "lastError": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DesktopErrorInfo"
+              }
+            ],
+            "nullable": true
+          },
+          "missingDependencies": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "processes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DesktopProcessInfo"
+            }
+          },
+          "resolution": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DesktopResolution"
+              }
+            ],
+            "nullable": true
+          },
+          "startedAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "state": {
+            "$ref": "#/components/schemas/BrowserState"
+          },
+          "url": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "BrowserTabInfo": {
+        "type": "object",
+        "required": ["id", "url", "title", "active"],
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        }
+      },
+      "BrowserTabListResponse": {
+        "type": "object",
+        "required": ["tabs"],
+        "properties": {
+          "tabs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BrowserTabInfo"
+            }
+          }
+        }
+      },
+      "BrowserTypeRequest": {
+        "type": "object",
+        "required": ["selector", "text"],
+        "properties": {
+          "clear": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "delay": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true,
+            "minimum": 0
+          },
+          "selector": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        }
+      },
+      "BrowserUploadRequest": {
+        "type": "object",
+        "required": ["selector", "path"],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "selector": {
+            "type": "string"
+          }
+        }
+      },
+      "BrowserWaitRequest": {
+        "type": "object",
+        "properties": {
+          "selector": {
+            "type": "string",
+            "nullable": true
+          },
+          "state": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BrowserWaitState"
+              }
+            ],
+            "nullable": true
+          },
+          "timeout": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true,
+            "minimum": 0
+          }
+        }
+      },
+      "BrowserWaitResponse": {
+        "type": "object",
+        "required": ["found"],
+        "properties": {
+          "found": {
+            "type": "boolean"
+          }
+        }
+      },
+      "BrowserWaitState": {
+        "type": "string",
+        "enum": ["visible", "hidden", "attached"]
       },
       "DesktopActionResponse": {
         "type": "object",

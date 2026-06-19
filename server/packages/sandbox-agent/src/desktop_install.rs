@@ -85,7 +85,7 @@ pub fn install_desktop(request: DesktopInstallRequest) -> Result<(), String> {
     Ok(())
 }
 
-fn detect_package_manager() -> Option<DesktopPackageManager> {
+pub(crate) fn detect_package_manager() -> Option<DesktopPackageManager> {
     if find_binary("apt-get").is_some() {
         return Some(DesktopPackageManager::Apt);
     }
@@ -149,7 +149,7 @@ fn desktop_packages(package_manager: DesktopPackageManager, no_fonts: bool) -> V
     packages
 }
 
-fn render_install_command(
+pub(crate) fn render_install_command(
     package_manager: DesktopPackageManager,
     used_sudo: bool,
     packages: &[String],
@@ -169,7 +169,7 @@ fn render_install_command(
     }
 }
 
-fn run_install_commands(
+pub(crate) fn run_install_commands(
     package_manager: DesktopPackageManager,
     used_sudo: bool,
     packages: &[String],
@@ -233,7 +233,7 @@ fn run_command((program, args): (String, Vec<String>)) -> Result<(), String> {
     Ok(())
 }
 
-fn prompt_yes_no(prompt: &str) -> Result<bool, String> {
+pub(crate) fn prompt_yes_no(prompt: &str) -> Result<bool, String> {
     print!("{prompt}");
     io::stdout()
         .flush()
@@ -246,7 +246,7 @@ fn prompt_yes_no(prompt: &str) -> Result<bool, String> {
     Ok(matches!(normalized.as_str(), "y" | "yes"))
 }
 
-fn running_as_root() -> bool {
+pub(crate) fn running_as_root() -> bool {
     #[cfg(unix)]
     unsafe {
         return libc::geteuid() == 0;
@@ -257,7 +257,7 @@ fn running_as_root() -> bool {
     }
 }
 
-fn find_binary(name: &str) -> Option<PathBuf> {
+pub(crate) fn find_binary(name: &str) -> Option<PathBuf> {
     let path_env = std::env::var_os("PATH")?;
     for path in std::env::split_paths(&path_env) {
         let candidate = path.join(name);

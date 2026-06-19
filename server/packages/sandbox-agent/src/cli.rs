@@ -11,6 +11,7 @@ mod build_version {
     include!(concat!(env!("OUT_DIR"), "/version.rs"));
 }
 
+use crate::browser_install::{install_browser, BrowserInstallRequest};
 use crate::desktop_install::{install_desktop, DesktopInstallRequest, DesktopPackageManager};
 use crate::router::{
     build_router_with_state, shutdown_servers, AppState, AuthConfig, BrandingMode,
@@ -169,6 +170,8 @@ pub struct DaemonArgs {
 pub enum InstallCommand {
     /// Install desktop runtime dependencies.
     Desktop(InstallDesktopArgs),
+    /// Install browser (Chromium) dependencies.
+    Browser(InstallBrowserArgs),
 }
 
 #[derive(Subcommand, Debug)]
@@ -338,6 +341,16 @@ pub struct InstallDesktopArgs {
 }
 
 #[derive(Args, Debug)]
+pub struct InstallBrowserArgs {
+    #[arg(long, default_value_t = false)]
+    yes: bool,
+    #[arg(long, default_value_t = false)]
+    print_only: bool,
+    #[arg(long, value_enum)]
+    package_manager: Option<DesktopPackageManager>,
+}
+
+#[derive(Args, Debug)]
 pub struct CredentialsExtractArgs {
     #[arg(long, short = 'a', value_enum)]
     agent: Option<CredentialAgent>,
@@ -444,6 +457,7 @@ pub fn run_command(command: &Command, cli: &CliConfig) -> Result<(), CliError> {
 fn run_install(command: &InstallCommand) -> Result<(), CliError> {
     match command {
         InstallCommand::Desktop(args) => install_desktop_local(args),
+        InstallCommand::Browser(args) => install_browser_local(args),
     }
 }
 
@@ -519,6 +533,15 @@ fn install_desktop_local(args: &InstallDesktopArgs) -> Result<(), CliError> {
         no_fonts: args.no_fonts,
     })
     .map(|_| ())
+    .map_err(CliError::Server)
+}
+
+fn install_browser_local(args: &InstallBrowserArgs) -> Result<(), CliError> {
+    install_browser(BrowserInstallRequest {
+        yes: args.yes,
+        print_only: args.print_only,
+        package_manager: args.package_manager,
+    })
     .map_err(CliError::Server)
 }
 

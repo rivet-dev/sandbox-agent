@@ -1,5 +1,6 @@
 export { AgentConversation } from "./AgentConversation.tsx";
 export { AgentTranscript } from "./AgentTranscript.tsx";
+export { BrowserViewer } from "./BrowserViewer.tsx";
 export { ChatComposer } from "./ChatComposer.tsx";
 export { DesktopViewer } from "./DesktopViewer.tsx";
 export { ProcessTerminal } from "./ProcessTerminal.tsx";
@@ -23,6 +24,11 @@ export type {
   ChatComposerClassNames,
   ChatComposerProps,
 } from "./ChatComposer.tsx";
+
+export type {
+  BrowserViewerClient,
+  BrowserViewerProps,
+} from "./BrowserViewer.tsx";
 
 export type {
   DesktopViewerClient,
