@@ -3,12 +3,7 @@
 import type { FitAddon as GhosttyFitAddon, Terminal as GhosttyTerminal } from "ghostty-web";
 import type { CSSProperties } from "react";
 import { useEffect, useRef, useState } from "react";
-import type {
-  SandboxAgent,
-  TerminalErrorStatus,
-  TerminalExitStatus,
-  TerminalReadyStatus,
-} from "sandbox-agent";
+import type { SandboxAgent, TerminalErrorStatus, TerminalExitStatus, TerminalReadyStatus } from "sandbox-agent";
 
 type ConnectionState = "connecting" | "ready" | "closed" | "error";
 
@@ -23,6 +18,15 @@ export interface ProcessTerminalProps {
   statusBarStyleOverride?: CSSProperties;
   height?: number | string;
   showStatusBar?: boolean;
+  /**
+   * Forwarded to `ghostty.Terminal`. Defaults to `true`. Opt out with
+   * `false` to work around a canvas-rendering bug in ghostty-web@0.4.0
+   * where transparent-background rendering skips `clearRect` before
+   * `fillRect`, causing stale cells to accumulate on screen. Fix is
+   * merged upstream (coder/ghostty-web#116) but not yet released
+   * (coder/ghostty-web#137).
+   */
+  allowTransparency?: boolean;
   onExit?: (status: TerminalExitStatus) => void;
   onError?: (error: TerminalErrorStatus | Error) => void;
 }
@@ -106,6 +110,7 @@ export const ProcessTerminal = ({
   statusBarStyleOverride,
   height = 360,
   showStatusBar = true,
+  allowTransparency = true,
   onExit,
   onError,
 }: ProcessTerminalProps) => {
@@ -148,7 +153,7 @@ export const ProcessTerminal = ({
         }
 
         terminal = new ghostty.Terminal({
-          allowTransparency: true,
+          allowTransparency,
           cursorBlink: true,
           cursorStyle: "block",
           fontFamily: "ui-monospace, SFMono-Regular, SF Mono, Menlo, monospace",
@@ -253,7 +258,7 @@ export const ProcessTerminal = ({
       session?.close();
       terminal?.dispose();
     };
-  }, [client, onError, onExit, processId]);
+  }, [allowTransparency, client, onError, onExit, processId]);
 
   return (
     <div className={className} style={{ ...shellStyle, ...style }}>
