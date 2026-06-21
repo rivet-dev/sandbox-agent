@@ -56,13 +56,13 @@
                   "deploy/local",
                   "deploy/e2b",
                   "deploy/daytona",
-                  "deploy/agentcomputer",
                   "deploy/vercel",
                   "deploy/cloudflare",
                   "deploy/docker",
                   "deploy/modal",
                   "deploy/boxlite",
-                  "deploy/computesdk"
+                  "deploy/computesdk",
+                  "deploy/agentcomputer"
                 ]
               }
             ]

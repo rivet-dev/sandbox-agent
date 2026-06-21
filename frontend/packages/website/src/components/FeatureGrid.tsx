@@ -83,7 +83,7 @@ export function FeatureGrid() {
               <h4 className="text-base font-normal text-white">Runs Inside Any Sandbox</h4>
             </div>
             <p className="text-zinc-500 text-sm leading-relaxed">
-              Lightweight static binary. One curl command to install inside E2B, Daytona, Vercel Sandboxes, or Docker.
+              Lightweight static binary. One curl command to install inside E2B, Daytona, Vercel Sandboxes, Agent Computer, or Docker.
             </p>
           </div>
 

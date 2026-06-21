@@ -68,6 +68,13 @@ icon: "rocket"
           server --no-token --host 0.0.0.0 --port 2468
         ```
       </Tab>
+
+      <Tab title="Agent Computer">
+        ```bash
+        export COMPUTER_API_KEY="ac_live_..."
+        # Agent auth usually stays inside your managed-worker image or default machine source.
+        ```
+      </Tab>
     </Tabs>
 
     <AccordionGroup>
@@ -173,7 +180,7 @@ icon: "rocket"
 
     <AccordionGroup>
       <Accordion title="Configuring token">
-        Tokens are usually not required. Most sandbox providers (E2B, Daytona, etc.) already secure networking at the infrastructure layer.
+        Tokens are usually not required. Most sandbox providers (E2B, Daytona, Agent Computer, etc.) already secure networking at the infrastructure layer.
 
         If you expose the server publicly, use `--token "$SANDBOX_TOKEN"` to require authentication:
 
@@ -298,7 +305,7 @@ icon: "rocket"
     Configure in-memory, Rivet Actor state, IndexedDB, SQLite, and Postgres persistence.
   </Card>
   <Card title="Deploy to a Sandbox" icon="box" href="/deploy/local">
-    Deploy your agent to E2B, Daytona, Docker, Vercel, or Cloudflare.
+    Deploy your agent to E2B, Daytona, Docker, Vercel, Cloudflare, or Agent Computer.
   </Card>
   <Card title="SDK Overview" icon="compass" href="/sdk-overview">
     Use the latest TypeScript SDK API.
