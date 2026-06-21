@@ -6,6 +6,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use time::OffsetDateTime;
 
+#[cfg(target_os = "macos")]
+use std::process::Command;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProviderCredentials {
     pub api_key: String,
@@ -19,6 +22,7 @@ pub struct ProviderCredentials {
 pub enum AuthType {
     ApiKey,
     Oauth,
+    ApiKeyHelper,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -90,18 +94,29 @@ pub fn extract_claude_credentials(
                 Some(value) => value,
                 None => continue,
             };
-            let access = read_string_field(&data, &["claudeAiOauth", "accessToken"]);
-            if let Some(token) = access {
-                if let Some(expires_at) = read_string_field(&data, &["claudeAiOauth", "expiresAt"])
-                {
-                    if is_expired_rfc3339(&expires_at) {
-                        continue;
-                    }
-                }
+            if let Some(cred) = extract_claude_oauth_from_json(&data) {
+                return Some(cred);
+            }
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            if let Some(cred) = extract_claude_oauth_from_keychain() {
+                return Some(cred);
+            }
+        }
+    }
+
+    // Check for apiKeyHelper in Claude Code settings — if configured, Claude Code
+    // can obtain credentials dynamically via an external command (e.g. a corporate proxy)
+    let settings_path = home_dir.join(".claude").join("settings.json");
+    if let Some(settings) = read_json_file(&settings_path) {
+        if let Some(helper) = read_string_field(&settings, &["apiKeyHelper"]) {
+            if !helper.is_empty() {
                 return Some(ProviderCredentials {
-                    api_key: token,
-                    source: "claude-code".to_string(),
-                    auth_type: AuthType::Oauth,
+                    api_key: String::new(),
+                    source: "claude-code-api-key-helper".to_string(),
+                    auth_type: AuthType::ApiKeyHelper,
                     provider: "anthropic".to_string(),
                 });
             }
@@ -109,6 +124,56 @@ pub fn extract_claude_credentials(
     }
 
     None
+}
+
+fn extract_claude_oauth_from_json(data: &Value) -> Option<ProviderCredentials> {
+    let access = read_string_field(data, &["claudeAiOauth", "accessToken"])?;
+    if access.is_empty() {
+        return None;
+    }
+
+    // Check expiry — the field can be an RFC 3339 string or an epoch-millis number
+    if let Some(expires_str) = read_string_field(data, &["claudeAiOauth", "expiresAt"]) {
+        if is_expired_rfc3339(&expires_str) {
+            return None;
+        }
+    } else if let Some(expires_ms) = data
+        .get("claudeAiOauth")
+        .and_then(|v| v.get("expiresAt"))
+        .and_then(Value::as_i64)
+    {
+        if expires_ms < current_epoch_millis() {
+            return None;
+        }
+    }
+
+    Some(ProviderCredentials {
+        api_key: access,
+        source: "claude-code".to_string(),
+        auth_type: AuthType::Oauth,
+        provider: "anthropic".to_string(),
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn extract_claude_oauth_from_keychain() -> Option<ProviderCredentials> {
+    let output = Command::new("security")
+        .args([
+            "find-generic-password",
+            "-s",
+            "Claude Code-credentials",
+            "-w",
+        ])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let json_str = String::from_utf8(output.stdout).ok()?;
+    let data: Value = serde_json::from_str(json_str.trim()).ok()?;
+    extract_claude_oauth_from_json(&data)
 }
 
 pub fn extract_codex_credentials(
@@ -359,7 +424,11 @@ pub fn get_openai_api_key(options: &CredentialExtractionOptions) -> Option<Strin
 
 pub fn set_credentials_as_env_vars(credentials: &ExtractedCredentials) {
     if let Some(cred) = &credentials.anthropic {
-        std::env::set_var("ANTHROPIC_API_KEY", &cred.api_key);
+        // ApiKeyHelper credentials don't have a static key to set —
+        // the agent obtains its own token via the helper command
+        if cred.auth_type != AuthType::ApiKeyHelper {
+            std::env::set_var("ANTHROPIC_API_KEY", &cred.api_key);
+        }
     }
     if let Some(cred) = &credentials.openai {
         std::env::set_var("OPENAI_API_KEY", &cred.api_key);
@@ -495,6 +564,174 @@ mod tests {
                 assert!(
                     creds.anthropic.is_none(),
                     "oauth env should be ignored when include_oauth is false"
+                );
+            },
+        );
+    }
+
+    #[test]
+    fn extract_claude_oauth_from_json_with_epoch_millis_expiry() {
+        let future_ms = current_epoch_millis() + 3_600_000; // 1 hour from now
+        let data = serde_json::json!({
+            "claudeAiOauth": {
+                "accessToken": "sk-ant-oat01-test-token",
+                "expiresAt": future_ms,
+            }
+        });
+        let cred = extract_claude_oauth_from_json(&data).expect("should extract valid oauth");
+        assert_eq!(cred.api_key, "sk-ant-oat01-test-token");
+        assert_eq!(cred.source, "claude-code");
+        assert_eq!(cred.auth_type, AuthType::Oauth);
+        assert_eq!(cred.provider, "anthropic");
+    }
+
+    #[test]
+    fn extract_claude_oauth_from_json_expired_epoch_millis() {
+        let past_ms = current_epoch_millis() - 3_600_000; // 1 hour ago
+        let data = serde_json::json!({
+            "claudeAiOauth": {
+                "accessToken": "sk-ant-oat01-expired",
+                "expiresAt": past_ms,
+            }
+        });
+        assert!(
+            extract_claude_oauth_from_json(&data).is_none(),
+            "should reject expired token"
+        );
+    }
+
+    #[test]
+    fn extract_claude_oauth_from_json_with_rfc3339_expiry() {
+        let data = serde_json::json!({
+            "claudeAiOauth": {
+                "accessToken": "sk-ant-oat01-rfc-token",
+                "expiresAt": "2099-01-01T00:00:00Z",
+            }
+        });
+        let cred = extract_claude_oauth_from_json(&data).expect("should extract valid oauth");
+        assert_eq!(cred.api_key, "sk-ant-oat01-rfc-token");
+    }
+
+    #[test]
+    fn extract_claude_oauth_from_json_expired_rfc3339() {
+        let data = serde_json::json!({
+            "claudeAiOauth": {
+                "accessToken": "sk-ant-oat01-old",
+                "expiresAt": "2020-01-01T00:00:00Z",
+            }
+        });
+        assert!(
+            extract_claude_oauth_from_json(&data).is_none(),
+            "should reject expired rfc3339 token"
+        );
+    }
+
+    #[test]
+    fn extract_claude_oauth_from_json_empty_access_token() {
+        let data = serde_json::json!({
+            "claudeAiOauth": {
+                "accessToken": "",
+                "expiresAt": 9999999999999_i64,
+            }
+        });
+        assert!(
+            extract_claude_oauth_from_json(&data).is_none(),
+            "should reject empty access token"
+        );
+    }
+
+    #[test]
+    fn extract_claude_oauth_from_json_no_expiry() {
+        let data = serde_json::json!({
+            "claudeAiOauth": {
+                "accessToken": "sk-ant-oat01-no-expiry",
+            }
+        });
+        let cred =
+            extract_claude_oauth_from_json(&data).expect("should accept token without expiry");
+        assert_eq!(cred.api_key, "sk-ant-oat01-no-expiry");
+    }
+
+    #[test]
+    fn extract_claude_oauth_from_json_with_extra_fields() {
+        let future_ms = current_epoch_millis() + 3_600_000;
+        let data = serde_json::json!({
+            "claudeAiOauth": {
+                "accessToken": "sk-ant-oat01-full",
+                "refreshToken": "sk-ant-ort01-refresh",
+                "expiresAt": future_ms,
+                "scopes": ["user:inference"],
+                "subscriptionType": "max",
+            },
+            "mcpOAuth": {}
+        });
+        let cred = extract_claude_oauth_from_json(&data).expect("should extract oauth");
+        assert_eq!(cred.api_key, "sk-ant-oat01-full");
+    }
+
+    #[test]
+    fn extract_claude_credentials_detects_api_key_helper() {
+        with_env(
+            &[
+                ("ANTHROPIC_API_KEY", None),
+                ("CLAUDE_API_KEY", None),
+                ("CLAUDE_CODE_OAUTH_TOKEN", None),
+                ("ANTHROPIC_AUTH_TOKEN", None),
+            ],
+            || {
+                let home = empty_home_dir();
+                let claude_dir = home.join(".claude");
+                fs::create_dir_all(&claude_dir).unwrap();
+                fs::write(
+                    claude_dir.join("settings.json"),
+                    r#"{"apiKeyHelper": "/opt/dev/bin/user/devx llm-gateway print-token --key"}"#,
+                )
+                .unwrap();
+
+                let options = CredentialExtractionOptions {
+                    home_dir: Some(home),
+                    include_oauth: true,
+                };
+                let creds = extract_all_credentials(&options);
+                let anthropic = creds
+                    .anthropic
+                    .expect("expected anthropic credentials from apiKeyHelper");
+
+                assert_eq!(anthropic.source, "claude-code-api-key-helper");
+                assert_eq!(anthropic.auth_type, AuthType::ApiKeyHelper);
+                assert_eq!(anthropic.provider, "anthropic");
+                assert!(anthropic.api_key.is_empty());
+            },
+        );
+    }
+
+    #[test]
+    fn extract_claude_credentials_ignores_empty_api_key_helper() {
+        with_env(
+            &[
+                ("ANTHROPIC_API_KEY", None),
+                ("CLAUDE_API_KEY", None),
+                ("CLAUDE_CODE_OAUTH_TOKEN", None),
+                ("ANTHROPIC_AUTH_TOKEN", None),
+            ],
+            || {
+                let home = empty_home_dir();
+                let claude_dir = home.join(".claude");
+                fs::create_dir_all(&claude_dir).unwrap();
+                fs::write(
+                    claude_dir.join("settings.json"),
+                    r#"{"apiKeyHelper": ""}"#,
+                )
+                .unwrap();
+
+                let options = CredentialExtractionOptions {
+                    home_dir: Some(home),
+                    include_oauth: true,
+                };
+                let creds = extract_all_credentials(&options);
+                assert!(
+                    creds.anthropic.is_none(),
+                    "empty apiKeyHelper should not produce credentials"
                 );
             },
         );

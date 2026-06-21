@@ -207,6 +207,11 @@ fn health_check_anthropic(credentials: &ProviderCredentials) -> Result<(), TestA
                     })?,
                 );
             }
+            AuthType::ApiKeyHelper => {
+                // The agent obtains its own credentials via apiKeyHelper;
+                // we don't have a static token to health-check with.
+                return Ok(());
+            }
         }
         headers.insert(
             "anthropic-version",
