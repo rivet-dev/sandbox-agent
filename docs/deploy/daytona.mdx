@@ -50,14 +50,44 @@ The `daytona` provider uses the `rivetdev/sandbox-agent:0.4.2-full` image by def
 
 ```typescript
 import { Daytona, Image } from "@daytonaio/sdk";
+import { SandboxAgent } from "sandbox-agent";
+import { daytona } from "sandbox-agent/daytona";
 
-const daytona = new Daytona();
+class DaytonaSnapshotNotFoundError extends Error {
+  constructor(snapshotName: string, options?: ErrorOptions) {
+    super(`daytona snapshot not found: ${snapshotName}`, options);
+    this.name = "DaytonaSnapshotNotFoundError";
+  }
+}
+
+async function ensureDaytonaSnapshotExists(client: Daytona, snapshotName: string): Promise<void> {
+  try {
+    await client.snapshot.get(snapshotName);
+  } catch (error) {
+    if (typeof error === "object" && error !== null && "statusCode" in error && error.statusCode === 404) {
+      throw new DaytonaSnapshotNotFoundError(snapshotName, { cause: error });
+    }
+    throw error;
+  }
+}
+
+const client = new Daytona();
 const SNAPSHOT = "sandbox-agent-ready";
+const envVars: Record<string, string> = {};
 
-const hasSnapshot = await daytona.snapshot.get(SNAPSHOT).then(() => true, () => false);
+if (process.env.ANTHROPIC_API_KEY) envVars.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+if (process.env.OPENAI_API_KEY) envVars.OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+
+const hasSnapshot = await ensureDaytonaSnapshotExists(client, SNAPSHOT).then(
+  () => true,
+  (error) => {
+    if (error instanceof DaytonaSnapshotNotFoundError) return false;
+    throw error;
+  },
+);
 
 if (!hasSnapshot) {
-  await daytona.snapshot.create({
+  await client.snapshot.create({
     name: SNAPSHOT,
     image: Image.base("ubuntu:22.04").runCommands(
       "apt-get update && apt-get install -y curl ca-certificates",
@@ -67,4 +97,15 @@ if (!hasSnapshot) {
     ),
   });
 }
+
+const sdk = await SandboxAgent.start({
+  sandbox: daytona({
+    create: {
+      snapshot: SNAPSHOT,
+      envVars,
+    },
+  }),
+});
 ```
+
+When `create.snapshot` is provided, the Daytona provider starts from that existing snapshot instead of forcing the default image.

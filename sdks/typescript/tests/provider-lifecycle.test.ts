@@ -29,6 +29,11 @@ const computeSdkMocks = vi.hoisted(() => ({
   getById: vi.fn(),
 }));
 
+const daytonaMocks = vi.hoisted(() => ({
+  create: vi.fn(),
+  get: vi.fn(),
+}));
+
 const spritesMocks = vi.hoisted(() => ({
   createSprite: vi.fn(),
   getSprite: vi.fn(),
@@ -64,6 +69,13 @@ vi.mock("computesdk", () => ({
   },
 }));
 
+vi.mock("@daytonaio/sdk", () => ({
+  Daytona: class MockDaytona {
+    create = daytonaMocks.create;
+    get = daytonaMocks.get;
+  },
+}));
+
 vi.mock("@fly/sprites", () => ({
   SpritesClient: class MockSpritesClient {
     readonly token: string;
@@ -85,6 +97,7 @@ import { modal } from "../src/providers/modal.ts";
 import { computesdk } from "../src/providers/computesdk.ts";
 import { agentcomputer } from "../src/providers/agentcomputer.ts";
 import { sprites } from "../src/providers/sprites.ts";
+import { daytona } from "../src/providers/daytona.ts";
 
 function createFetch(): typeof fetch {
   return async () => new Response(null, { status: 200 });
@@ -135,6 +148,17 @@ function createMockModalImage() {
   };
 }
 
+function createMockDaytonaSandbox() {
+  return {
+    id: "daytona-123",
+    process: {
+      executeCommand: vi.fn(async () => ({ result: "" })),
+    },
+    delete: vi.fn(async () => undefined),
+    getSignedPreviewUrl: vi.fn(async () => ({ url: "https://daytona.example" })),
+  };
+}
+
 beforeEach(() => {
   e2bMocks.betaCreate.mockReset();
   e2bMocks.connect.mockReset();
@@ -145,6 +169,8 @@ beforeEach(() => {
   modalMocks.sandboxFromId.mockReset();
   computeSdkMocks.create.mockReset();
   computeSdkMocks.getById.mockReset();
+  daytonaMocks.create.mockReset();
+  daytonaMocks.get.mockReset();
   spritesMocks.createSprite.mockReset();
   spritesMocks.getSprite.mockReset();
   spritesMocks.deleteSprite.mockReset();
@@ -339,6 +365,61 @@ describe("e2b provider", () => {
         timeoutMs: 3_600_000,
       }),
     );
+  });
+});
+
+describe("daytona provider", () => {
+  it("creates sandboxes from snapshots without injecting the default image", async () => {
+    const sandbox = createMockDaytonaSandbox();
+    daytonaMocks.create.mockResolvedValue(sandbox);
+
+    const provider = daytona({
+      create: {
+        snapshot: "sandbox-agent-ready",
+        envVars: { ANTHROPIC_API_KEY: "test" },
+      },
+    });
+
+    await expect(provider.create()).resolves.toBe("daytona-123");
+
+    expect(daytonaMocks.create).toHaveBeenCalledWith({
+      autoStopInterval: 0,
+      snapshot: "sandbox-agent-ready",
+      envVars: { ANTHROPIC_API_KEY: "test" },
+    });
+  });
+
+  it("creates sandboxes from the configured image when no snapshot is provided", async () => {
+    const sandbox = createMockDaytonaSandbox();
+    daytonaMocks.create.mockResolvedValue(sandbox);
+
+    const provider = daytona({
+      image: "ghcr.io/example/custom-image:latest",
+      create: {
+        envVars: { OPENAI_API_KEY: "test" },
+      },
+    });
+
+    await provider.create();
+
+    expect(daytonaMocks.create).toHaveBeenCalledWith({
+      image: "ghcr.io/example/custom-image:latest",
+      autoStopInterval: 0,
+      envVars: { OPENAI_API_KEY: "test" },
+    });
+  });
+
+  it("rejects combining snapshot and image inputs", async () => {
+    const provider = daytona({
+      image: "ghcr.io/example/custom-image:latest",
+      create: {
+        snapshot: "sandbox-agent-ready",
+      },
+    });
+
+    await expect(provider.create()).rejects.toThrow("daytona provider does not support combining snapshot with image; pass only create.snapshot or image");
+
+    expect(daytonaMocks.create).not.toHaveBeenCalled();
   });
 });
 

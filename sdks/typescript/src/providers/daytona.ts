@@ -1,4 +1,4 @@
-import { Daytona } from "@daytonaio/sdk";
+import { Daytona, type CreateSandboxFromImageParams, type CreateSandboxFromSnapshotParams } from "@daytonaio/sdk";
 import type { SandboxProvider } from "./types.ts";
 import { DEFAULT_SANDBOX_AGENT_IMAGE, buildServerStartCommand } from "./shared.ts";
 
@@ -6,13 +6,11 @@ const DEFAULT_AGENT_PORT = 3000;
 const DEFAULT_PREVIEW_TTL_SECONDS = 4 * 60 * 60;
 const DEFAULT_CWD = "/home/sandbox";
 
-type DaytonaCreateParams = NonNullable<Parameters<Daytona["create"]>[0]>;
-
-type DaytonaCreateOverrides = Partial<DaytonaCreateParams>;
+type DaytonaCreateOverrides = Partial<CreateSandboxFromImageParams | CreateSandboxFromSnapshotParams>;
 
 export interface DaytonaProviderOptions {
   create?: DaytonaCreateOverrides | (() => DaytonaCreateOverrides | Promise<DaytonaCreateOverrides>);
-  image?: DaytonaCreateParams["image"];
+  image?: CreateSandboxFromImageParams["image"];
   agentPort?: number;
   cwd?: string;
   previewTtlSeconds?: number;
@@ -23,6 +21,14 @@ async function resolveCreateOptions(value: DaytonaProviderOptions["create"]): Pr
   if (!value) return undefined;
   if (typeof value === "function") return await value();
   return value;
+}
+
+function getSnapshotName(createOpts: DaytonaCreateOverrides | undefined): string | undefined {
+  if (!createOpts || !Object.prototype.hasOwnProperty.call(createOpts, "snapshot")) {
+    return undefined;
+  }
+  const snapshot = (createOpts as CreateSandboxFromSnapshotParams).snapshot;
+  return typeof snapshot === "string" && snapshot.length > 0 ? snapshot : undefined;
 }
 
 export function daytona(options: DaytonaProviderOptions = {}): SandboxProvider {
@@ -37,11 +43,24 @@ export function daytona(options: DaytonaProviderOptions = {}): SandboxProvider {
     defaultCwd: cwd,
     async create(): Promise<string> {
       const createOpts = await resolveCreateOptions(options.create);
-      const sandbox = await client.create({
-        image,
-        autoStopInterval: 0,
-        ...createOpts,
-      } as DaytonaCreateParams);
+      const snapshot = getSnapshotName(createOpts);
+      const hasSnapshot = snapshot !== undefined;
+      const createImage = createOpts && "image" in createOpts ? createOpts.image : undefined;
+
+      if (hasSnapshot && (options.image !== undefined || createImage !== undefined)) {
+        throw new Error("daytona provider does not support combining snapshot with image; pass only create.snapshot or image");
+      }
+
+      const sandbox = hasSnapshot
+        ? await client.create({
+            autoStopInterval: 0,
+            ...createOpts,
+          } as CreateSandboxFromSnapshotParams)
+        : await client.create({
+            image,
+            autoStopInterval: 0,
+            ...createOpts,
+          } as CreateSandboxFromImageParams);
       await sandbox.process.executeCommand(buildServerStartCommand(agentPort));
       return sandbox.id;
     },
