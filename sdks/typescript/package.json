@@ -121,7 +121,7 @@
     "test:watch": "vitest"
   },
   "devDependencies": {
-    "@nodeops-createos/sandbox": ">=0.6.0",
+    "@nodeops-createos/sandbox": ">=0.6.1",
     "@cloudflare/sandbox": ">=0.1.0",
     "@daytonaio/sdk": ">=0.12.0",
     "@e2b/code-interpreter": ">=1.0.0",
