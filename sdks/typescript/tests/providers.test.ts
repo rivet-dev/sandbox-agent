@@ -17,6 +17,7 @@ import { vercel } from "../src/providers/vercel.ts";
 import { modal } from "../src/providers/modal.ts";
 import { computesdk } from "../src/providers/computesdk.ts";
 import { sprites } from "../src/providers/sprites.ts";
+import { createos } from "../src/providers/createos.ts";
 import { prepareMockAgentDataHome } from "./helpers/mock-agent.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -299,6 +300,26 @@ function buildProviders(): ProviderEntry[] {
           env: collectApiKeys(),
           installAgents: ["claude"],
           serviceStartDuration: "10m",
+        });
+      },
+    });
+  }
+
+  // --- createos ---
+  {
+    entries.push({
+      name: "createos",
+      skipReasons: [...missingEnvVars("CREATEOS_API_KEY"), ...missingModules("@nodeops-createos/sandbox")],
+      agent: "claude",
+      startTimeoutMs: 300_000,
+      canVerifyDestroyedSandbox: false,
+      sessionSkipReasons: missingEnvVars("ANTHROPIC_API_KEY"),
+      sessionCwd: "/root",
+      sessionTestsEnabled: true,
+      createProvider() {
+        return createos({
+          client: { apiKey: process.env.CREATEOS_API_KEY },
+          create: { envs: collectApiKeys() },
         });
       },
     });

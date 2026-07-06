@@ -54,9 +54,14 @@
     "./sprites": {
       "types": "./dist/providers/sprites.d.ts",
       "import": "./dist/providers/sprites.js"
+    },
+    "./createos": {
+      "types": "./dist/providers/createos.d.ts",
+      "import": "./dist/providers/createos.js"
     }
   },
   "peerDependencies": {
+    "@nodeops-createos/sandbox": ">=0.6.1",
     "@cloudflare/sandbox": ">=0.1.0",
     "@daytonaio/sdk": ">=0.12.0",
     "@e2b/code-interpreter": ">=1.0.0",
@@ -68,6 +73,9 @@
     "computesdk": ">=0.1.0"
   },
   "peerDependenciesMeta": {
+    "@nodeops-createos/sandbox": {
+      "optional": true
+    },
     "@cloudflare/sandbox": {
       "optional": true
     },
@@ -113,6 +121,7 @@
     "test:watch": "vitest"
   },
   "devDependencies": {
+    "@nodeops-createos/sandbox": ">=0.6.1",
     "@cloudflare/sandbox": ">=0.1.0",
     "@daytonaio/sdk": ">=0.12.0",
     "@e2b/code-interpreter": ">=1.0.0",
