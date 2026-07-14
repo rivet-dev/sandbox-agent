@@ -99,6 +99,9 @@ pub struct ServerArgs {
     #[arg(long, short = 'p', default_value_t = DEFAULT_PORT)]
     port: u16,
 
+    #[arg(long = "inspector-default-cwd")]
+    inspector_default_cwd: Option<String>,
+
     #[arg(long = "cors-allow-origin", short = 'O')]
     cors_allow_origin: Vec<String>,
 
@@ -462,6 +465,8 @@ fn run_server(cli: &CliConfig, server: &ServerArgs) -> Result<(), CliError> {
 
     let agent_manager = AgentManager::new(default_install_dir())
         .map_err(|err| CliError::Server(err.to_string()))?;
+    ui::configure_default_cwd(server.inspector_default_cwd.clone());
+
     let state = Arc::new(AppState::with_branding(auth, agent_manager, branding));
     let (mut router, state) = build_router_with_state(state);
 

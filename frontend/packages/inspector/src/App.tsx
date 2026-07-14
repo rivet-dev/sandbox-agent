@@ -819,7 +819,7 @@ export default function App() {
     setSessionError(null);
   };
 
-  const createNewSession = async (nextAgentId: string, config: { agentMode: string; model: string }) => {
+  const createNewSession = async (nextAgentId: string, config: { agentMode: string; model: string; cwd: string }) => {
     console.log("[createNewSession] Creating session for agent:", nextAgentId, "config:", config);
     setSessionError(null);
     creatingSessionRef.current = true;
@@ -830,7 +830,7 @@ export default function App() {
       const createSessionPromise = getClient().createSession({
         agent: nextAgentId,
         sessionInit: {
-          cwd: "/",
+          cwd: config.cwd,
           mcpServers: [],
         },
       });

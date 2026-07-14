@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::sync::OnceLock;
 
 use axum::body::Body;
 use axum::extract::Path as AxumPath;
@@ -9,8 +10,16 @@ use axum::Router;
 
 include!(concat!(env!("OUT_DIR"), "/inspector_assets.rs"));
 
+static INSPECTOR_DEFAULT_CWD: OnceLock<String> = OnceLock::new();
+
 pub fn is_enabled() -> bool {
     INSPECTOR_ENABLED
+}
+
+pub fn configure_default_cwd(value: Option<String>) {
+    if let Some(value) = normalize_cwd(value) {
+        let _ = INSPECTOR_DEFAULT_CWD.set(value);
+    }
 }
 
 pub fn router() -> Router {
@@ -72,12 +81,68 @@ fn serve_path(path: &str) -> Response {
 }
 
 fn file_response(file: &include_dir::File) -> Response {
+    if file.path().file_name().and_then(|name| name.to_str()) == Some("index.html") {
+        return index_response(file);
+    }
+
     let mut response = Response::new(Body::from(file.contents().to_vec()));
     *response.status_mut() = StatusCode::OK;
     let content_type = content_type_for(file.path());
     let value = HeaderValue::from_static(content_type);
     response.headers_mut().insert(header::CONTENT_TYPE, value);
     response
+}
+
+fn index_response(file: &include_dir::File) -> Response {
+    let html = String::from_utf8_lossy(file.contents());
+    let config_json = serde_json::json!({
+        "defaultCwd": resolve_default_cwd(),
+    })
+    .to_string();
+    let config_script = format!(
+        r#"<script>window.__SANDBOX_AGENT_INSPECTOR_CONFIG__={};</script>"#,
+        config_json
+    );
+
+    let body = if let Some(position) = html.find("</head>") {
+        let mut injected = String::with_capacity(html.len() + config_script.len());
+        injected.push_str(&html[..position]);
+        injected.push_str(&config_script);
+        injected.push_str(&html[position..]);
+        injected
+    } else {
+        let mut injected = html.into_owned();
+        injected.push_str(&config_script);
+        injected
+    };
+
+    let mut response = Response::new(Body::from(body));
+    *response.status_mut() = StatusCode::OK;
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("text/html; charset=utf-8"),
+    );
+    response
+}
+
+fn resolve_default_cwd() -> String {
+    INSPECTOR_DEFAULT_CWD
+        .get()
+        .cloned()
+        .or_else(|| normalize_cwd(std::env::var("SANDBOX_AGENT_INSPECTOR_DEFAULT_CWD").ok()))
+        .or_else(|| normalize_cwd(std::env::var("HOME").ok()))
+        .unwrap_or_else(|| "/".to_string())
+}
+
+fn normalize_cwd(value: Option<String>) -> Option<String> {
+    value.and_then(|value| {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    })
 }
 
 fn content_type_for(path: &Path) -> &'static str {

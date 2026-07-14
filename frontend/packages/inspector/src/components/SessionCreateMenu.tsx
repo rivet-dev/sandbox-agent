@@ -8,9 +8,16 @@ type AgentModelInfo = { id: string; name?: string };
 export type SessionConfig = {
   agentMode: string;
   model: string;
+  cwd: string;
 };
 
 const CUSTOM_MODEL_VALUE = "__custom__";
+const DEFAULT_CWD = "/";
+const LAST_CWD_KEY = "sandbox-agent-inspector-last-cwd";
+
+type InspectorRuntimeConfig = {
+  defaultCwd?: string;
+};
 
 const agentLabels: Record<string, string> = {
   claude: "Claude Code",
@@ -28,6 +35,56 @@ const agentLogos: Record<string, string> = {
   amp: `${import.meta.env.BASE_URL}logos/amp.svg`,
   pi: `${import.meta.env.BASE_URL}logos/pi.svg`,
 };
+
+function normalizeCwd(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function getQueryDefaultCwd() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  return normalizeCwd(params.get("cwd")) ?? normalizeCwd(params.get("defaultCwd"));
+}
+
+function getRuntimeDefaultCwd() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const runtimeWindow = window as typeof window & {
+    __SANDBOX_AGENT_INSPECTOR_CONFIG__?: InspectorRuntimeConfig;
+  };
+  return normalizeCwd(runtimeWindow.__SANDBOX_AGENT_INSPECTOR_CONFIG__?.defaultCwd);
+}
+
+function getStoredCwd() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    return normalizeCwd(window.localStorage.getItem(LAST_CWD_KEY));
+  } catch {}
+
+  return null;
+}
+
+function getInitialCwd() {
+  return (
+    getQueryDefaultCwd() ??
+    getRuntimeDefaultCwd() ??
+    getStoredCwd() ??
+    DEFAULT_CWD
+  );
+}
 
 const SessionCreateMenu = ({
   agents,
@@ -58,6 +115,7 @@ const SessionCreateMenu = ({
   const [selectedModel, setSelectedModel] = useState("");
   const [customModel, setCustomModel] = useState("");
   const [isCustomModel, setIsCustomModel] = useState(false);
+  const [cwd, setCwd] = useState(getInitialCwd);
   const [creating, setCreating] = useState(false);
 
   // Reset state when menu closes
@@ -69,6 +127,7 @@ const SessionCreateMenu = ({
       setSelectedModel("");
       setCustomModel("");
       setIsCustomModel(false);
+      setCwd(getInitialCwd());
       setCreating(false);
     }
   }, [open]);
@@ -138,12 +197,17 @@ const SessionCreateMenu = ({
   };
 
   const resolvedModel = isCustomModel ? customModel : selectedModel;
+  const resolvedCwd = cwd.trim() || getInitialCwd();
 
   const handleCreate = async () => {
     if (!selectedAgent) return;
     setCreating(true);
     try {
-      await onCreateSession(selectedAgent, { agentMode, model: resolvedModel });
+      try {
+        window.localStorage.setItem(LAST_CWD_KEY, resolvedCwd);
+      } catch {}
+
+      await onCreateSession(selectedAgent, { agentMode, model: resolvedModel, cwd: resolvedCwd });
       onClose();
     } catch (error) {
       console.error("[SessionCreateMenu] Failed to create session:", error);
@@ -265,6 +329,19 @@ const SessionCreateMenu = ({
             </select>
           </div>
         )}
+        <div className="setup-field">
+          <span className="setup-label">Working directory</span>
+          <input
+            className="setup-input mono"
+            type="text"
+            value={cwd}
+            onChange={(e) => setCwd(e.target.value)}
+            placeholder={DEFAULT_CWD}
+            spellCheck={false}
+            autoCapitalize="off"
+            autoCorrect="off"
+          />
+        </div>
       </div>
 
       <div className="session-create-actions">
