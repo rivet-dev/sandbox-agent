@@ -287,3 +287,14 @@ Update this file continuously during the migration.
 - Owner: Unassigned.
 - Status: resolved
 - Links: `server/packages/sandbox-agent/src/router.rs`, `server/packages/sandbox-agent/src/desktop_runtime.rs`, `sdks/typescript/src/client.ts`, `frontend/packages/inspector/src/components/debug/DesktopTab.tsx`
+
+- Date: 2026-07-16
+- Area: ACP direct-response and SSE terminal ordering
+- Issue: The adapter completed the waiting HTTP `POST` before assigning and broadcasting the same JSON-RPC response on SSE. A client consuming both paths could therefore persist `stopReason=end_turn` before earlier `session/update` chunks reached its SSE callback.
+- Impact: Durable event indexes could place terminal completion before the final assistant chunks even though agent stdout itself was ordered.
+- Proposed direction: Assign the response's monotonic SSE sequence first, expose it as `result._meta["sandboxagent.dev"].streamFence.sequence`, put the exact fenced response in the replay ring and broadcast it, and only then release the HTTP waiter. Consumers use the SSE copy as the authoritative terminal boundary.
+- Decision: Accepted and implemented as additive transport metadata. Consumer correctness must also
+  hold with legacy adapters by treating their existing correlated SSE response as authoritative.
+- Owner: Unassigned.
+- Status: resolved
+- Links: `server/packages/acp-http-adapter/src/process.rs`, `server/packages/acp-http-adapter/tests/e2e.rs`, `research/acp/simplify-server.md`

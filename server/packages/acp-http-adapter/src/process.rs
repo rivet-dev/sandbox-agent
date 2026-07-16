@@ -401,23 +401,26 @@ impl AdapterRuntime {
                 if is_response {
                     let key = id_key(payload.get("id").expect("checked"));
                     let has_error = payload.get("error").is_some();
-                    if let Some(tx) = pending.lock().await.remove(&key) {
+                    let response_waiter = {
+                        let mut pending = pending.lock().await;
+                        pending.remove(&key)
+                    };
+                    if let Some(tx) = response_waiter {
                         tracing::debug!(
                             id = %key,
                             has_error = has_error,
                             age_ms = spawned_at.elapsed().as_millis() as u64,
                             "agent stdout: response matched to pending request"
                         );
-                        let _ = tx.send(payload.clone());
-                        // Also broadcast the response so SSE/notification subscribers
-                        // see it in order after preceding notifications. This lets the
-                        // SSE translation task detect turn completion after all
-                        // session/update events have been processed.
                         let seq = sequence.fetch_add(1, Ordering::SeqCst) + 1;
+                        let payload = attach_stream_fence(payload, seq);
                         let message = StreamMessage {
                             sequence: seq,
-                            payload,
+                            payload: payload.clone(),
                         };
+                        // The SSE ring is the authoritative ordering boundary. Publish the fenced
+                        // response there before releasing the HTTP waiter, so a direct terminal
+                        // response can never claim completion ahead of preceding notifications.
                         {
                             let mut guard = ring.lock().await;
                             guard.push_back(message.clone());
@@ -426,6 +429,7 @@ impl AdapterRuntime {
                             }
                         }
                         let _ = sender.send(message);
+                        let _ = tx.send(payload);
                         continue;
                     } else {
                         tracing::warn!(
@@ -622,4 +626,81 @@ impl AdapterRuntime {
 
 fn id_key(value: &Value) -> String {
     serde_json::to_string(value).unwrap_or_else(|_| "null".to_string())
+}
+
+/// Adds the response's authoritative SSE sequence without disturbing existing ACP metadata.
+fn attach_stream_fence(mut payload: Value, sequence: u64) -> Value {
+    let Some(result) = payload.get_mut("result").and_then(Value::as_object_mut) else {
+        return payload;
+    };
+    let metadata = result.entry("_meta").or_insert_with(|| json!({}));
+    if !metadata.is_object() {
+        tracing::warn!(
+            sequence,
+            "response _meta is not an object; replacing it to attach stream fence"
+        );
+        *metadata = json!({});
+    }
+    let metadata = metadata
+        .as_object_mut()
+        .expect("metadata normalized to object");
+    let namespace = metadata
+        .entry("sandboxagent.dev")
+        .or_insert_with(|| json!({}));
+    if !namespace.is_object() {
+        tracing::warn!(
+            sequence,
+            "response sandboxagent.dev metadata is not an object; replacing it to attach stream fence"
+        );
+        *namespace = json!({});
+    }
+    let namespace = namespace
+        .as_object_mut()
+        .expect("sandboxagent.dev metadata normalized to object");
+    namespace.insert("streamFence".to_string(), json!({ "sequence": sequence }));
+    payload
+}
+
+#[cfg(test)]
+mod tests {
+    use super::attach_stream_fence;
+    use serde_json::json;
+
+    #[test]
+    fn stream_fence_preserves_existing_metadata() {
+        let fenced = attach_stream_fence(
+            json!({
+                "result": {
+                    "_meta": {
+                        "existing": true,
+                        "sandboxagent.dev": {"existing": "value"}
+                    }
+                }
+            }),
+            42,
+        );
+
+        assert_eq!(fenced["result"]["_meta"]["existing"], true);
+        assert_eq!(
+            fenced["result"]["_meta"]["sandboxagent.dev"]["existing"],
+            "value"
+        );
+        assert_eq!(
+            fenced["result"]["_meta"]["sandboxagent.dev"]["streamFence"]["sequence"],
+            42
+        );
+    }
+
+    #[test]
+    fn stream_fence_replaces_malformed_metadata_to_keep_the_contract() {
+        let fenced = attach_stream_fence(
+            json!({"result": {"_meta": {"sandboxagent.dev": "invalid"}}}),
+            7,
+        );
+
+        assert_eq!(
+            fenced["result"]["_meta"]["sandboxagent.dev"]["streamFence"]["sequence"],
+            7
+        );
+    }
 }

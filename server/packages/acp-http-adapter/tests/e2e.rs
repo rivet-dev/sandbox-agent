@@ -37,6 +37,15 @@ async fn health_and_request_response_round_trip() {
     let health_json: Value = health.json().await.expect("health json");
     assert_eq!(health_json["ok"], true);
 
+    let sse_response = client
+        .get(format!("{}/v1/rpc", adapter.base_url))
+        .header("accept", "text/event-stream")
+        .send()
+        .await
+        .expect("open sse");
+    assert_eq!(sse_response.status(), StatusCode::OK);
+    let mut sse = SseReader::new(sse_response);
+
     let payload = json!({
         "jsonrpc": "2.0",
         "id": 1,
@@ -59,6 +68,21 @@ async fn health_and_request_response_round_trip() {
     assert_eq!(body["id"], 1);
     assert_eq!(body["result"]["echoed"]["method"], "mock/ping");
     assert_eq!(body["result"]["echoed"]["params"]["text"], "hello");
+
+    let fence_sequence = body["result"]["_meta"]["sandboxagent.dev"]["streamFence"]["sequence"]
+        .as_u64()
+        .expect("terminal response stream fence");
+    let notification = sse
+        .next_event(Duration::from_secs(3))
+        .await
+        .expect("notification before terminal");
+    assert_eq!(notification.data["method"], "mock/echo");
+    let terminal = sse
+        .next_event(Duration::from_secs(3))
+        .await
+        .expect("terminal response event");
+    assert_eq!(terminal.id, Some(fence_sequence));
+    assert_eq!(terminal.data, body);
 }
 
 #[tokio::test]
@@ -154,6 +178,11 @@ struct SseReader {
     buffer: Vec<u8>,
 }
 
+struct ParsedSseEvent {
+    id: Option<u64>,
+    data: Value,
+}
+
 impl SseReader {
     fn new(response: reqwest::Response) -> Self {
         Self {
@@ -163,6 +192,10 @@ impl SseReader {
     }
 
     async fn next_json(&mut self, timeout: Duration) -> io::Result<Value> {
+        Ok(self.next_event(timeout).await?.data)
+    }
+
+    async fn next_event(&mut self, timeout: Duration) -> io::Result<ParsedSseEvent> {
         let deadline = Instant::now() + timeout;
 
         loop {
@@ -197,7 +230,7 @@ impl SseReader {
         }
     }
 
-    fn try_parse_event(&mut self) -> io::Result<Option<Value>> {
+    fn try_parse_event(&mut self) -> io::Result<Option<ParsedSseEvent>> {
         let split = self
             .buffer
             .windows(2)
@@ -231,6 +264,15 @@ impl SseReader {
             return Ok(None);
         }
 
+        let id = text
+            .lines()
+            .find_map(|line| line.strip_prefix("id: "))
+            .map(str::parse::<u64>)
+            .transpose()
+            .map_err(|err| {
+                io::Error::new(io::ErrorKind::InvalidData, format!("invalid sse id: {err}"))
+            })?;
+
         let value: Value = serde_json::from_str(&data).map_err(|err| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -238,7 +280,7 @@ impl SseReader {
             )
         })?;
 
-        Ok(Some(value))
+        Ok(Some(ParsedSseEvent { id, data: value }))
     }
 }
 

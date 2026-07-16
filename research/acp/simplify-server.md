@@ -62,6 +62,9 @@ Sandbox Agent does not inspect ACP method semantics.
 
 - `POST` accepts one JSON-RPC envelope.
 - If envelope is request (`method` + `id`): wait for matching stdio response and return `200` + JSON body.
+- Before completing a request whose response has an object `result`, assign its SSE sequence and add
+  `result._meta["sandboxagent.dev"].streamFence.sequence`. Store and broadcast that exact fenced
+  response before releasing the waiting `POST`.
 - If envelope is notification or response without `method`: forward and return `202` empty.
 - `GET` streams agent->client messages as SSE.
 - Replay semantics remain: `Last-Event-ID` supported using in-memory ring buffer per `{server_id}`.
@@ -75,6 +78,12 @@ Same framing as current transport profile:
 - `id: <monotonic sequence per server_id>`
 - `data: <single JSON-RPC object>`
 - keepalive comment heartbeat every 15s
+
+The SSE copy is the authoritative ordering path for clients that consume both channels. Existing
+adapter versions already broadcast the response after preceding notifications, so clients can use
+the correlated SSE response without requiring this metadata. The response fence additionally makes
+the terminal sequence explicit: when the fenced SSE envelope arrives, all lower sequences have
+already entered the replay ring.
 
 ### 3.5 Process Model
 
