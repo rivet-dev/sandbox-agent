@@ -404,8 +404,22 @@ class StreamableHttpAcpTransport {
       await response.text().catch(() => {});
     } catch (error) {
       console.error("ACP write error:", error);
-      this.failReadable(error);
+      this.handleDetachedRequestError(message, error);
     }
+  }
+
+  private handleDetachedRequestError(message: AnyMessage, error: unknown): void {
+    const id = requestIdFromMessage(message);
+    if (id === undefined) {
+      this.failReadable(error);
+      return;
+    }
+
+    this.pushInbound({
+      jsonrpc: "2.0",
+      id,
+      error: toRpcError(error),
+    } as AnyMessage);
   }
 
   private ensureSseLoop(): void {
@@ -675,6 +689,37 @@ function responseEnvelopeId(message: AnyMessage): string | null {
     return null;
   }
   return String(id);
+}
+
+function requestIdFromMessage(message: AnyMessage): number | string | null | undefined {
+  if (typeof message !== "object" || message === null || !Object.hasOwn(message, "id")) {
+    return undefined;
+  }
+  const id = (message as Record<string, unknown>).id;
+  if (typeof id === "string" || typeof id === "number" || id === null) {
+    return id;
+  }
+  return undefined;
+}
+
+function toRpcError(error: unknown): RpcErrorResponse {
+  if (error instanceof AcpHttpError) {
+    return {
+      code: -32003,
+      message: error.problem?.title ?? `HTTP ${error.status}`,
+      data: error.problem ?? { status: error.status },
+    };
+  }
+  if (error instanceof Error) {
+    return {
+      code: -32603,
+      message: error.message,
+    };
+  }
+  return {
+    code: -32603,
+    message: String(error),
+  };
 }
 
 async function readProblem(response: Response): Promise<ProblemDetails | undefined> {
