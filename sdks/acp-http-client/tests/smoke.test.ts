@@ -181,4 +181,50 @@ describe("AcpHttpClient integration", () => {
 
     await client.disconnect();
   });
+
+  it("keeps the SSE connection usable after a request POST fails", async () => {
+    const serverId = `acp-http-client-post-failure-${Date.now().toString(36)}`;
+    let failNextPrompt = true;
+    const faultInjectingFetch: typeof fetch = async (input, init) => {
+      if (failNextPrompt && init?.method === "POST" && typeof init.body === "string") {
+        const envelope = JSON.parse(init.body) as { method?: string };
+        if (envelope.method === "session/prompt") {
+          failNextPrompt = false;
+          throw new TypeError("simulated request POST failure");
+        }
+      }
+      return globalThis.fetch(input, init);
+    };
+
+    const client = new AcpHttpClient({
+      baseUrl,
+      token,
+      fetch: faultInjectingFetch,
+      transport: {
+        path: `/v1/acp/${encodeURIComponent(serverId)}`,
+        bootstrapQuery: { agent: "mock" },
+      },
+    });
+
+    await client.initialize();
+    const session = await client.newSession({
+      cwd: process.cwd(),
+      mcpServers: [],
+    });
+
+    await expect(
+      client.prompt({
+        sessionId: session.sessionId,
+        prompt: [{ type: "text", text: "fail this request" }],
+      }),
+    ).rejects.toThrow("simulated request POST failure");
+
+    const prompt = await client.prompt({
+      sessionId: session.sessionId,
+      prompt: [{ type: "text", text: "connection still works" }],
+    });
+    expect(prompt.stopReason).toBe("end_turn");
+
+    await client.disconnect();
+  });
 });
