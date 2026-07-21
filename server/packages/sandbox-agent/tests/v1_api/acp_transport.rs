@@ -154,21 +154,24 @@ async fn acp_round_trip_and_replay() {
         &[],
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(
-        parse_json(&body)["result"]["echoedMethod"],
-        "session/prompt"
-    );
+    assert_eq!(status, StatusCode::ACCEPTED);
+    assert!(body.is_empty());
 
-    let first_chunk = read_first_sse_data_with_last_id(&test_app.app, "server-replay", 0).await;
-    let first_event_id = parse_sse_event_id(&first_chunk);
-    let first_event = parse_sse_data(&first_chunk);
-    assert_eq!(first_event["method"], "server/echo");
+    let mut last_event_id = 0;
+    let mut events = Vec::new();
+    for _ in 0..4 {
+        let chunk =
+            read_first_sse_data_with_last_id(&test_app.app, "server-replay", last_event_id).await;
+        let event_id = parse_sse_event_id(&chunk);
+        assert!(event_id > last_event_id);
+        last_event_id = event_id;
+        events.push(parse_sse_data(&chunk));
+    }
 
-    let second_chunk =
-        read_first_sse_data_with_last_id(&test_app.app, "server-replay", first_event_id).await;
-    let second_event_id = parse_sse_event_id(&second_chunk);
-    assert!(second_event_id > first_event_id);
+    assert_eq!(events[0]["method"], "server/echo");
+    assert!(events
+        .iter()
+        .any(|event| { event["id"] == 2 && event["result"]["echoedMethod"] == "session/prompt" }));
 }
 
 #[cfg(unix)]

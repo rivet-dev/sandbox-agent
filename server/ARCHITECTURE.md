@@ -104,11 +104,10 @@ Each session tracks:
 POST /v1/acp/{serverId}?agent=... initialize ACP server, auto-install agent
         ↓
 POST /v1/acp/{serverId}           session/new
-POST /v1/acp/{serverId}           session/prompt
-        ↓
 GET /v1/acp/{serverId}            Subscribe to ACP SSE stream
+POST /v1/acp/{serverId}           session/prompt → 202 Accepted
         ↓
-JSON-RPC response envelopes       Answer questions / reply to permissions
+JSON-RPC response over SSE        Answer questions / reply to permissions
         ↓
 DELETE /v1/acp/{serverId}         Close ACP server
 ```

@@ -17,6 +17,9 @@ use crate::registry::LaunchSpec;
 
 const RING_BUFFER_SIZE: usize = 1024;
 const STDERR_TAIL_SIZE: usize = 16;
+// These requests can outlive ordinary HTTP response-header timeouts. Their JSON-RPC
+// response is correlated by id and delivered through the existing SSE stream.
+const ASYNC_RESPONSE_METHODS: &[&str] = &["session/prompt"];
 
 #[derive(Debug, Error)]
 pub enum AdapterError {
@@ -184,6 +187,11 @@ impl AdapterRuntime {
                 "post: stdin write complete, waiting for response"
             );
 
+            if ASYNC_RESPONSE_METHODS.contains(&method.as_str()) {
+                self.spawn_async_response_waiter(method, key, id_value.clone(), rx, write_ms);
+                return Ok(PostOutcome::Accepted);
+            }
+
             let wait_start = Instant::now();
             match tokio::time::timeout(self.request_timeout, rx).await {
                 Ok(Ok(response)) => {
@@ -252,6 +260,65 @@ impl AdapterRuntime {
             self.send_to_subprocess(&payload).await?;
             Ok(PostOutcome::Accepted)
         }
+    }
+
+    fn spawn_async_response_waiter(
+        &self,
+        method: String,
+        key: String,
+        id: Value,
+        rx: oneshot::Receiver<Value>,
+        write_ms: u64,
+    ) {
+        let pending = self.pending.clone();
+        let sender = self.sender.clone();
+        let ring = self.ring.clone();
+        let sequence = self.sequence.clone();
+        let request_timeout = self.request_timeout;
+
+        tracing::info!(
+            method = %method,
+            id = %key,
+            write_ms = write_ms,
+            "post: request accepted; response will be delivered over SSE"
+        );
+
+        tokio::spawn(async move {
+            match tokio::time::timeout(request_timeout, rx).await {
+                Ok(Ok(_)) => {
+                    tracing::info!(
+                        method = %method,
+                        id = %key,
+                        "post: asynchronous response delivered over SSE"
+                    );
+                }
+                Ok(Err(_)) => {
+                    tracing::error!(
+                        method = %method,
+                        id = %key,
+                        "post: response channel dropped before asynchronous response"
+                    );
+                }
+                Err(_) => {
+                    let removed = pending.lock().await.remove(&key).is_some();
+                    tracing::error!(
+                        method = %method,
+                        id = %key,
+                        timeout_ms = request_timeout.as_millis() as u64,
+                        "post: TIMEOUT waiting for asynchronous agent response"
+                    );
+                    if removed {
+                        broadcast_payload(
+                            &sender,
+                            &ring,
+                            &sequence,
+                            json_rpc_error(id, "timed out waiting for agent response"),
+                        )
+                        .await;
+                    }
+                }
+            }
+        });
     }
 
     async fn subscribe(
@@ -413,19 +480,7 @@ impl AdapterRuntime {
                         // see it in order after preceding notifications. This lets the
                         // SSE translation task detect turn completion after all
                         // session/update events have been processed.
-                        let seq = sequence.fetch_add(1, Ordering::SeqCst) + 1;
-                        let message = StreamMessage {
-                            sequence: seq,
-                            payload,
-                        };
-                        {
-                            let mut guard = ring.lock().await;
-                            guard.push_back(message.clone());
-                            while guard.len() > RING_BUFFER_SIZE {
-                                guard.pop_front();
-                            }
-                        }
-                        let _ = sender.send(message);
+                        broadcast_payload(&sender, &ring, &sequence, payload).await;
                         continue;
                     } else {
                         tracing::warn!(
@@ -446,21 +501,7 @@ impl AdapterRuntime {
                     "agent stdout: notification/event → SSE broadcast"
                 );
 
-                let seq = sequence.fetch_add(1, Ordering::SeqCst) + 1;
-                let message = StreamMessage {
-                    sequence: seq,
-                    payload,
-                };
-
-                {
-                    let mut guard = ring.lock().await;
-                    guard.push_back(message.clone());
-                    while guard.len() > RING_BUFFER_SIZE {
-                        guard.pop_front();
-                    }
-                }
-
-                let _ = sender.send(message);
+                broadcast_payload(&sender, &ring, &sequence, payload).await;
             }
 
             tracing::info!(
@@ -519,7 +560,23 @@ impl AdapterRuntime {
             };
 
             let age_ms = spawned_at.elapsed().as_millis() as u64;
-            let pending_count = pending.lock().await.len();
+            let pending_ids = {
+                let mut pending = pending.lock().await;
+                pending.drain().map(|(id, _)| id).collect::<Vec<_>>()
+            };
+            let pending_count = pending_ids.len();
+
+            for id in pending_ids {
+                if let Ok(id) = serde_json::from_str(&id) {
+                    broadcast_payload(
+                        &sender,
+                        &ring,
+                        &sequence,
+                        json_rpc_error(id, "agent process stopped before responding"),
+                    )
+                    .await;
+                }
+            }
 
             if let Some(status) = status {
                 tracing::warn!(
@@ -539,21 +596,7 @@ impl AdapterRuntime {
                     }
                 });
 
-                let seq = sequence.fetch_add(1, Ordering::SeqCst) + 1;
-                let message = StreamMessage {
-                    sequence: seq,
-                    payload,
-                };
-
-                {
-                    let mut guard = ring.lock().await;
-                    guard.push_back(message.clone());
-                    while guard.len() > RING_BUFFER_SIZE {
-                        guard.pop_front();
-                    }
-                }
-
-                let _ = sender.send(message);
+                broadcast_payload(&sender, &ring, &sequence, payload).await;
             } else {
                 tracing::error!(
                     age_ms = age_ms,
@@ -620,6 +663,166 @@ impl AdapterRuntime {
     }
 }
 
+async fn broadcast_payload(
+    sender: &broadcast::Sender<StreamMessage>,
+    ring: &Mutex<VecDeque<StreamMessage>>,
+    sequence: &AtomicU64,
+    payload: Value,
+) {
+    let sequence = sequence.fetch_add(1, Ordering::SeqCst) + 1;
+    let message = StreamMessage { sequence, payload };
+
+    {
+        let mut guard = ring.lock().await;
+        guard.push_back(message.clone());
+        while guard.len() > RING_BUFFER_SIZE {
+            guard.pop_front();
+        }
+    }
+
+    let _ = sender.send(message);
+}
+
+fn json_rpc_error(id: Value, message: &str) -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "error": {
+            "code": -32603,
+            "message": message,
+        }
+    })
+}
+
 fn id_key(value: &Value) -> String {
     serde_json::to_string(value).unwrap_or_else(|_| "null".to_string())
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn asynchronous_request_response_is_delivered_on_stream() {
+        let runtime = Arc::new(
+            AdapterRuntime::start(
+                LaunchSpec {
+                    program: PathBuf::from("sh"),
+                    args: vec![
+                        "-c".to_string(),
+                        concat!(
+                            "IFS= read -r line; ",
+                            "printf '%s\\n' ",
+                            "'{\"jsonrpc\":\"2.0\",\"id\":7,\"result\":{\"ok\":true}}'"
+                        )
+                        .to_string(),
+                    ],
+                    env: HashMap::new(),
+                },
+                Duration::from_secs(1),
+            )
+            .await
+            .expect("start adapter"),
+        );
+        let mut stream = Box::pin(runtime.clone().value_stream(Some(0)).await);
+
+        let outcome = runtime
+            .post(json!({
+                "jsonrpc": "2.0",
+                "id": 7,
+                "method": "session/prompt",
+                "params": {}
+            }))
+            .await
+            .expect("accept request");
+        assert!(matches!(outcome, PostOutcome::Accepted));
+
+        let response = tokio::time::timeout(Duration::from_secs(1), stream.next())
+            .await
+            .expect("stream response before timeout")
+            .expect("response event");
+        assert_eq!(response["id"], 7);
+        assert_eq!(response["result"]["ok"], true);
+    }
+
+    #[tokio::test]
+    async fn asynchronous_request_timeout_is_delivered_on_stream() {
+        let runtime = Arc::new(
+            AdapterRuntime::start(
+                LaunchSpec {
+                    program: PathBuf::from("sh"),
+                    args: vec!["-c".to_string(), "IFS= read -r line; sleep 0.1".to_string()],
+                    env: HashMap::new(),
+                },
+                Duration::from_millis(25),
+            )
+            .await
+            .expect("start adapter"),
+        );
+        let mut stream = Box::pin(runtime.clone().value_stream(Some(0)).await);
+
+        let outcome = runtime
+            .post(json!({
+                "jsonrpc": "2.0",
+                "id": 42,
+                "method": "session/prompt",
+                "params": {}
+            }))
+            .await
+            .expect("accept request");
+        assert!(matches!(outcome, PostOutcome::Accepted));
+
+        let response = tokio::time::timeout(Duration::from_secs(1), stream.next())
+            .await
+            .expect("stream response before timeout")
+            .expect("response event");
+        assert_eq!(response["id"], 42);
+        assert_eq!(response["error"]["code"], -32603);
+        assert_eq!(
+            response["error"]["message"],
+            "timed out waiting for agent response"
+        );
+    }
+
+    #[tokio::test]
+    async fn asynchronous_request_process_exit_is_delivered_on_stream() {
+        let runtime = Arc::new(
+            AdapterRuntime::start(
+                LaunchSpec {
+                    program: PathBuf::from("sh"),
+                    args: vec!["-c".to_string(), "IFS= read -r line; exit 1".to_string()],
+                    env: HashMap::new(),
+                },
+                Duration::from_secs(1),
+            )
+            .await
+            .expect("start adapter"),
+        );
+        let mut stream = Box::pin(runtime.clone().value_stream(Some(0)).await);
+
+        let outcome = runtime
+            .post(json!({
+                "jsonrpc": "2.0",
+                "id": 99,
+                "method": "session/prompt",
+                "params": {}
+            }))
+            .await
+            .expect("accept request");
+        assert!(matches!(outcome, PostOutcome::Accepted));
+
+        let response = tokio::time::timeout(Duration::from_secs(1), stream.next())
+            .await
+            .expect("stream response before timeout")
+            .expect("response event");
+        assert_eq!(response["id"], 99);
+        assert_eq!(response["error"]["code"], -32603);
+        assert_eq!(
+            response["error"]["message"],
+            "agent process stopped before responding"
+        );
+    }
 }

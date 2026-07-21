@@ -3141,7 +3141,7 @@ async fn get_v1_acp_servers(
     request_body = AcpEnvelope,
     responses(
         (status = 200, description = "JSON-RPC response envelope", body = AcpEnvelope),
-        (status = 202, description = "JSON-RPC notification accepted"),
+        (status = 202, description = "JSON-RPC notification accepted, or long-running request accepted with its response delivered over SSE"),
         (status = 406, description = "Client does not accept JSON responses", body = ProblemDetails),
         (status = 415, description = "Unsupported media type", body = ProblemDetails),
         (status = 400, description = "Invalid ACP envelope", body = ProblemDetails),
