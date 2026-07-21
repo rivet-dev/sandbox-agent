@@ -324,45 +324,54 @@ impl AdapterRuntime {
     async fn subscribe(
         &self,
         last_event_id: Option<u64>,
-    ) -> (Vec<(u64, Value)>, broadcast::Receiver<StreamMessage>) {
-        let replay = {
+    ) -> (Vec<(u64, Value)>, u64, broadcast::Receiver<StreamMessage>) {
+        // Subscribe before taking the replay snapshot so a concurrently published
+        // message is guaranteed to appear in at least one source. The watermark
+        // below removes messages that appear in both.
+        let receiver = self.sender.subscribe();
+        let (replay, replay_watermark) = {
             let ring = self.ring.lock().await;
-            ring.iter()
+            let replay_watermark = ring.back().map(|message| message.sequence).unwrap_or(0);
+            let replay = ring
+                .iter()
                 .filter(|message| {
-                    if let Some(last_event_id) = last_event_id {
-                        message.sequence > last_event_id
-                    } else {
-                        true
-                    }
+                    last_event_id.is_none_or(|last_event_id| message.sequence > last_event_id)
                 })
                 .map(|message| (message.sequence, message.payload.clone()))
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>();
+            (replay, replay_watermark)
         };
-        (replay, self.sender.subscribe())
+        (replay, replay_watermark, receiver)
     }
 
     pub async fn sse_stream(
         self: Arc<Self>,
         last_event_id: Option<u64>,
     ) -> impl Stream<Item = Result<Event, Infallible>> + Send + 'static {
-        let (replay, rx) = self.subscribe(last_event_id).await;
-        let replay_stream = stream::iter(replay.into_iter().map(|(sequence, payload)| {
-            let event = Event::default()
-                .event("message")
-                .id(sequence.to_string())
-                .data(payload.to_string());
-            Ok(event)
-        }));
+        self.payload_stream(last_event_id)
+            .await
+            .map(|(sequence, payload)| {
+                Ok(Event::default()
+                    .event("message")
+                    .id(sequence.to_string())
+                    .data(payload.to_string()))
+            })
+    }
 
-        let live_stream = BroadcastStream::new(rx).filter_map(|item| async move {
+    /// Stream of sequenced raw JSON-RPC payloads.
+    pub async fn payload_stream(
+        self: Arc<Self>,
+        last_event_id: Option<u64>,
+    ) -> impl Stream<Item = (u64, Value)> + Send + 'static {
+        let (replay, replay_watermark, rx) = self.subscribe(last_event_id).await;
+        let replay_stream = stream::iter(replay);
+
+        let live_stream = BroadcastStream::new(rx).filter_map(move |item| async move {
             match item {
-                Ok(message) => {
-                    let event = Event::default()
-                        .event("message")
-                        .id(message.sequence.to_string())
-                        .data(message.payload.to_string());
-                    Some(Ok(event))
+                Ok(message) if message.sequence > replay_watermark => {
+                    Some((message.sequence, message.payload))
                 }
+                Ok(_) => None,
                 Err(_) => None,
             }
         });
@@ -377,15 +386,9 @@ impl AdapterRuntime {
         self: Arc<Self>,
         last_event_id: Option<u64>,
     ) -> impl Stream<Item = Value> + Send + 'static {
-        let (replay, rx) = self.subscribe(last_event_id).await;
-        let replay_stream = stream::iter(replay.into_iter().map(|(_sequence, payload)| payload));
-        let live_stream = BroadcastStream::new(rx).filter_map(|item| async move {
-            match item {
-                Ok(message) => Some(message.payload),
-                Err(_) => None,
-            }
-        });
-        replay_stream.chain(live_stream)
+        self.payload_stream(last_event_id)
+            .await
+            .map(|(_sequence, payload)| payload)
     }
 
     pub async fn shutdown(&self) {
@@ -398,7 +401,22 @@ impl AdapterRuntime {
             "shutting down agent process"
         );
 
-        self.pending.lock().await.clear();
+        let pending_ids = {
+            let mut pending = self.pending.lock().await;
+            pending.drain().map(|(id, _)| id).collect::<Vec<_>>()
+        };
+        for id in pending_ids {
+            if let Ok(id) = serde_json::from_str(&id) {
+                broadcast_payload(
+                    &self.sender,
+                    &self.ring,
+                    &self.sequence,
+                    json_rpc_error(id, "agent process stopped before responding"),
+                )
+                .await;
+            }
+        }
+
         let mut child = self.child.lock().await;
         match child.try_wait() {
             Ok(Some(_)) => {}
@@ -488,6 +506,7 @@ impl AdapterRuntime {
                             has_error = has_error,
                             "agent stdout: response has no matching pending request (orphan)"
                         );
+                        continue;
                     }
                 }
 
@@ -554,9 +573,16 @@ impl AdapterRuntime {
         let pending = self.pending.clone();
 
         tokio::spawn(async move {
-            let status = {
-                let mut guard = child.lock().await;
-                guard.wait().await.ok()
+            let status = loop {
+                let status = {
+                    let mut guard = child.lock().await;
+                    guard.try_wait()
+                };
+                match status {
+                    Ok(Some(status)) => break Some(status),
+                    Ok(None) => tokio::time::sleep(Duration::from_millis(50)).await,
+                    Err(_) => break None,
+                }
             };
 
             let age_ms = spawned_at.elapsed().as_millis() as u64;
@@ -669,17 +695,16 @@ async fn broadcast_payload(
     sequence: &AtomicU64,
     payload: Value,
 ) {
+    // Keep sequence allocation, replay insertion, and live publication ordered.
+    // Otherwise concurrent timeout, exit, and stdout tasks can publish a newer
+    // sequence before an older one and break Last-Event-ID replay.
+    let mut guard = ring.lock().await;
     let sequence = sequence.fetch_add(1, Ordering::SeqCst) + 1;
     let message = StreamMessage { sequence, payload };
-
-    {
-        let mut guard = ring.lock().await;
-        guard.push_back(message.clone());
-        while guard.len() > RING_BUFFER_SIZE {
-            guard.pop_front();
-        }
+    guard.push_back(message.clone());
+    while guard.len() > RING_BUFFER_SIZE {
+        guard.pop_front();
     }
-
     let _ = sender.send(message);
 }
 
@@ -754,7 +779,15 @@ mod tests {
             AdapterRuntime::start(
                 LaunchSpec {
                     program: PathBuf::from("sh"),
-                    args: vec!["-c".to_string(), "IFS= read -r line; sleep 0.1".to_string()],
+                    args: vec![
+                        "-c".to_string(),
+                        concat!(
+                            "IFS= read -r line; sleep 0.1; ",
+                            "printf '%s\\n' ",
+                            "'{\"jsonrpc\":\"2.0\",\"id\":42,\"result\":{\"late\":true}}'"
+                        )
+                        .to_string(),
+                    ],
                     env: HashMap::new(),
                 },
                 Duration::from_millis(25),
@@ -785,6 +818,19 @@ mod tests {
             response["error"]["message"],
             "timed out waiting for agent response"
         );
+
+        let mut saw_late_response = false;
+        for _ in 0..2 {
+            let Ok(Some(event)) =
+                tokio::time::timeout(Duration::from_millis(250), stream.next()).await
+            else {
+                break;
+            };
+            if event["id"] == 42 && event.get("result").is_some() {
+                saw_late_response = true;
+            }
+        }
+        assert!(!saw_late_response);
     }
 
     #[tokio::test]
@@ -820,6 +866,47 @@ mod tests {
             .expect("response event");
         assert_eq!(response["id"], 99);
         assert_eq!(response["error"]["code"], -32603);
+        assert_eq!(
+            response["error"]["message"],
+            "agent process stopped before responding"
+        );
+    }
+
+    #[tokio::test]
+    async fn asynchronous_request_shutdown_is_delivered_on_stream() {
+        let runtime = Arc::new(
+            AdapterRuntime::start(
+                LaunchSpec {
+                    program: PathBuf::from("sh"),
+                    args: vec!["-c".to_string(), "IFS= read -r line; sleep 10".to_string()],
+                    env: HashMap::new(),
+                },
+                Duration::from_secs(30),
+            )
+            .await
+            .expect("start adapter"),
+        );
+        let mut stream = Box::pin(runtime.clone().value_stream(Some(0)).await);
+
+        let outcome = runtime
+            .post(json!({
+                "jsonrpc": "2.0",
+                "id": 100,
+                "method": "session/prompt",
+                "params": {}
+            }))
+            .await
+            .expect("accept request");
+        assert!(matches!(outcome, PostOutcome::Accepted));
+
+        tokio::time::timeout(Duration::from_secs(1), runtime.shutdown())
+            .await
+            .expect("shutdown completes");
+        let response = tokio::time::timeout(Duration::from_secs(1), stream.next())
+            .await
+            .expect("stream response before timeout")
+            .expect("response event");
+        assert_eq!(response["id"], 100);
         assert_eq!(
             response["error"]["message"],
             "agent process stopped before responding"
