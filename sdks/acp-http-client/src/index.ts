@@ -454,9 +454,9 @@ class StreamableHttpAcpTransport {
           return;
         }
 
-        // SSE failure is non-fatal: the POST request/response flow still works.
-        // Exiting the loop allows ensureSseLoop() to restart it on the next POST.
-        return;
+        // Prompt responses can be delivered exclusively over SSE after a 202.
+        // Reconnect without waiting for another POST, replaying from Last-Event-ID.
+        await delay(150);
       }
     }
   }

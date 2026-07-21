@@ -181,4 +181,41 @@ describe("AcpHttpClient integration", () => {
 
     await client.disconnect();
   });
+
+  it("reconnects SSE without another POST while a prompt is in flight", async () => {
+    const serverId = `acp-http-client-reconnect-${Date.now().toString(36)}`;
+    let remainingSseFailures = 3;
+    const reconnectingFetch: typeof fetch = async (input, init) => {
+      if (init?.method === "GET" && remainingSseFailures > 0) {
+        remainingSseFailures -= 1;
+        throw new TypeError("simulated SSE connection failure");
+      }
+      return globalThis.fetch(input, init);
+    };
+
+    const client = new AcpHttpClient({
+      baseUrl,
+      token,
+      fetch: reconnectingFetch,
+      transport: {
+        path: `/v1/acp/${encodeURIComponent(serverId)}`,
+        bootstrapQuery: { agent: "mock" },
+      },
+    });
+
+    await client.initialize();
+    const session = await client.newSession({
+      cwd: process.cwd(),
+      mcpServers: [],
+    });
+    const prompt = await client.prompt({
+      sessionId: session.sessionId,
+      prompt: [{ type: "text", text: "reconnect the event stream" }],
+    });
+
+    expect(remainingSseFailures).toBe(0);
+    expect(prompt.stopReason).toBe("end_turn");
+
+    await client.disconnect();
+  });
 });

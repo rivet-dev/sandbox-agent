@@ -133,7 +133,7 @@
             }
           },
           "202": {
-            "description": "JSON-RPC notification accepted"
+            "description": "JSON-RPC notification accepted, or long-running request accepted with its response delivered over SSE"
           },
           "400": {
             "description": "Invalid ACP envelope",

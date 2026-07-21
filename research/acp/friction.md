@@ -287,3 +287,13 @@ Update this file continuously during the migration.
 - Owner: Unassigned.
 - Status: resolved
 - Links: `server/packages/sandbox-agent/src/router.rs`, `server/packages/sandbox-agent/src/desktop_runtime.rs`, `sdks/typescript/src/client.ts`, `frontend/packages/inspector/src/components/debug/DesktopTab.tsx`
+
+- Date: 2026-07-20
+- Area: Long-running ACP requests over streamable HTTP
+- Issue: `session/prompt` kept its POST open until the agent completed the turn, making successful execution depend on client and proxy response-header timeouts despite an existing SSE response channel.
+- Impact: Long turns could lose their POST connection after several minutes, terminate request handling, or require downstream clients to configure unusually long HTTP timeouts.
+- Proposed direction: Return `202 Accepted` after `session/prompt` is written to the agent, then deliver its correlated JSON-RPC result or error through the existing SSE stream. Keep short requests synchronous and preserve immediate HTTP errors before acceptance.
+- Decision: Proposed and implemented for review.
+- Owner: Unassigned.
+- Status: in_progress
+- Links: `server/packages/acp-http-adapter/src/process.rs`, `server/packages/sandbox-agent/tests/v1_api/acp_transport.rs`, https://github.com/rivet-dev/sandbox-agent/issues/305

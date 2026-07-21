@@ -1005,6 +1005,15 @@ export interface components {
       directory: string;
       skillName: string;
     };
+    McpCommand: string | string[];
+    /** @enum {string} */
+    McpRemoteTransport: "http" | "sse";
+    McpOAuthConfig: {
+      clientId?: string | null;
+      clientSecret?: string | null;
+      scope?: string | null;
+    };
+    McpOAuthConfigOrDisabled: components["schemas"]["McpOAuthConfig"] | boolean;
   };
   responses: never;
   parameters: never;
@@ -1083,7 +1092,7 @@ export interface operations {
           "application/json": components["schemas"]["AcpEnvelope"];
         };
       };
-      /** @description JSON-RPC notification accepted */
+      /** @description JSON-RPC notification accepted, or long-running request accepted with its response delivered over SSE */
       202: {
         content: never;
       };
