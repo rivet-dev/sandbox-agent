@@ -5273,6 +5273,50 @@
             "type": "string"
           }
         }
+      },
+      "McpCommand": {
+        "oneOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "McpRemoteTransport": {
+        "type": "string",
+        "enum": ["http", "sse"]
+      },
+      "McpOAuthConfig": {
+        "type": "object",
+        "properties": {
+          "clientId": {
+            "type": "string",
+            "nullable": true
+          },
+          "clientSecret": {
+            "type": "string",
+            "nullable": true
+          },
+          "scope": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "McpOAuthConfigOrDisabled": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/McpOAuthConfig"
+          },
+          {
+            "type": "boolean"
+          }
+        ]
       }
     }
   },
