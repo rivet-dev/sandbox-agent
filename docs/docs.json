@@ -56,6 +56,7 @@
                   "deploy/local",
                   "deploy/e2b",
                   "deploy/daytona",
+                  "deploy/sprites",
                   "deploy/agentcomputer",
                   "deploy/vercel",
                   "deploy/cloudflare",

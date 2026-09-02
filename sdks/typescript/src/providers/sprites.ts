@@ -1,12 +1,16 @@
-import { ExecError, SpritesClient, type ClientOptions as SpritesClientOptions, type SpriteConfig } from "@fly/sprites";
+import { ExecError, type SpriteConfig, SpritesClient, type ClientOptions as SpritesClientOptions } from "@fly/sprites";
 import { SandboxDestroyedError } from "../client.ts";
+import { SANDBOX_AGENT_INSTALL_SCRIPT } from "./shared.ts";
 import type { SandboxProvider } from "./types.ts";
-import { SANDBOX_AGENT_NPX_SPEC } from "./shared.ts";
 
 const DEFAULT_AGENT_PORT = 8080;
 const DEFAULT_SERVICE_NAME = "sandbox-agent";
 const DEFAULT_NAME_PREFIX = "sandbox-agent";
 const DEFAULT_SERVICE_START_DURATION = "10m";
+const DEFAULT_INSTALL_TIMEOUT_MS = 5 * 60_000;
+const DEFAULT_AGENT_INSTALL_TIMEOUT_MS = 10 * 60_000;
+const SANDBOX_AGENT_PATH_EXPORT = 'export PATH="/usr/local/bin:$HOME/.local/bin:$PATH"';
+const SANDBOX_AGENT_INSTALL_COMMAND = `command -v sandbox-agent >/dev/null 2>&1 || curl -fsSL ${SANDBOX_AGENT_INSTALL_SCRIPT} | sh`;
 
 export interface SpritesCreateOverrides {
   name?: string;
@@ -25,6 +29,10 @@ export interface SpritesProviderOptions {
   serviceName?: string;
   serviceStartDuration?: string;
   namePrefix?: string;
+  /** Timeout for installing the sandbox-agent binary inside the Sprite. */
+  installTimeoutMs?: number;
+  /** Timeout for each `install-agent` invocation inside the Sprite. */
+  agentInstallTimeoutMs?: number;
 }
 
 type SpritesSandboxProvider = SandboxProvider & {
@@ -51,9 +59,9 @@ async function resolveValue<T>(value: T | (() => T | Promise<T>) | undefined, fa
 }
 
 async function resolveToken(value: SpritesProviderOptions["token"]): Promise<string> {
-  const token = await resolveValue(value, process.env.SPRITES_API_KEY ?? process.env.SPRITE_TOKEN ?? process.env.SPRITES_TOKEN ?? "");
+  const token = await resolveValue(value, process.env.SPRITES_TOKEN ?? process.env.SPRITES_API_KEY ?? process.env.SPRITE_TOKEN ?? "");
   if (!token) {
-    throw new Error("sprites provider requires a token. Set SPRITES_API_KEY (or SPRITE_TOKEN) or pass `token`.");
+    throw new Error("sprites provider requires a token. Set SPRITES_TOKEN (or SPRITES_API_KEY) or pass `token`.");
   }
   return token;
 }
@@ -79,7 +87,7 @@ function shellQuote(value: string): string {
 }
 
 function buildServiceCommand(env: Record<string, string>, port: number): string {
-  const exportParts: string[] = [];
+  const exportParts: string[] = [SANDBOX_AGENT_PATH_EXPORT];
   for (const [key, value] of Object.entries(env)) {
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
       throw new Error(`sprites provider received an invalid environment variable name: ${key}`);
@@ -87,25 +95,48 @@ function buildServiceCommand(env: Record<string, string>, port: number): string 
     exportParts.push(`export ${key}=${shellQuote(value)}`);
   }
 
-  exportParts.push(`exec npx -y ${SANDBOX_AGENT_NPX_SPEC} server --no-token --host 0.0.0.0 --port ${port}`);
+  exportParts.push(`exec sandbox-agent server --no-token --host 0.0.0.0 --port ${port}`);
   return exportParts.join("; ");
 }
 
-async function runSpriteCommand(sprite: ReturnType<SpritesClient["sprite"]>, file: string, args: string[], env?: Record<string, string>): Promise<void> {
+type SpriteHandle = Pick<ReturnType<SpritesClient["sprite"]>, "execFileHTTP">;
+
+/**
+ * Run a non-interactive command inside the Sprite over the HTTP exec endpoint.
+ *
+ * The WebSocket exec path keeps stdin attached, which makes some agent
+ * installers (their `--help` probe) block forever, so non-interactive setup
+ * commands always go through HTTP exec.
+ */
+async function runSpriteCommand(sprite: SpriteHandle, command: string, options: { env?: Record<string, string>; timeoutMs: number }): Promise<void> {
+  const shellCommand = `${SANDBOX_AGENT_PATH_EXPORT}; ${command}`;
   try {
-    const result = await sprite.execFile(file, args, env ? { env } : undefined);
+    const result = await sprite.execFileHTTP("bash", ["-lc", shellCommand], {
+      env: options.env,
+      timeout: options.timeoutMs,
+    });
     if (result.exitCode !== 0) {
-      throw new Error(`sprites command failed: ${file} ${args.join(" ")}`);
+      throw new Error(`sprites command failed: ${command} (exit ${result.exitCode})\nstdout:\n${String(result.stdout)}\nstderr:\n${String(result.stderr)}`);
     }
   } catch (error) {
     if (error instanceof ExecError) {
-      throw new Error(
-        `sprites command failed: ${file} ${args.join(" ")} (exit ${error.exitCode})\nstdout:\n${String(error.stdout)}\nstderr:\n${String(error.stderr)}`,
-        { cause: error },
-      );
+      throw new Error(`sprites command failed: ${command} (exit ${error.exitCode})\nstdout:\n${String(error.stdout)}\nstderr:\n${String(error.stderr)}`, {
+        cause: error,
+      });
     }
     throw error;
   }
+}
+
+async function installSandboxAgent(sprite: SpriteHandle, timeoutMs: number): Promise<void> {
+  await runSpriteCommand(sprite, SANDBOX_AGENT_INSTALL_COMMAND, { timeoutMs });
+}
+
+async function installAgent(sprite: SpriteHandle, agent: string, env: Record<string, string>, timeoutMs: number): Promise<void> {
+  if (!/^[A-Za-z0-9_-]+$/.test(agent)) {
+    throw new Error(`sprites provider received an invalid agent name: ${agent}`);
+  }
+  await runSpriteCommand(sprite, `sandbox-agent install-agent ${agent}`, { env, timeoutMs });
 }
 
 async function fetchService(client: SpritesClient, spriteName: string, serviceName: string): Promise<SpritesService | undefined> {
@@ -195,6 +226,8 @@ export function sprites(options: SpritesProviderOptions = {}): SandboxProvider {
   const serviceStartDuration = options.serviceStartDuration ?? DEFAULT_SERVICE_START_DURATION;
   const namePrefix = options.namePrefix ?? DEFAULT_NAME_PREFIX;
   const installAgents = [...(options.installAgents ?? [])];
+  const installTimeoutMs = options.installTimeoutMs ?? DEFAULT_INSTALL_TIMEOUT_MS;
+  const agentInstallTimeoutMs = options.agentInstallTimeoutMs ?? DEFAULT_AGENT_INSTALL_TIMEOUT_MS;
 
   const getClient = async (): Promise<SpritesClient> => {
     const token = await resolveToken(options.token);
@@ -216,8 +249,9 @@ export function sprites(options: SpritesProviderOptions = {}): SandboxProvider {
       const sprite = await client.createSprite(spriteName, createOptions.config);
 
       const serverEnv = await getServerEnv();
+      await installSandboxAgent(sprite, installTimeoutMs);
       for (const agent of installAgents) {
-        await runSpriteCommand(sprite, "bash", ["-lc", `npx -y ${SANDBOX_AGENT_NPX_SPEC} install-agent ${agent}`], serverEnv);
+        await installAgent(sprite, agent, serverEnv, agentInstallTimeoutMs);
       }
 
       await ensureService(client, spriteName, serviceName, agentPort, serviceStartDuration, serverEnv);
@@ -256,6 +290,8 @@ export function sprites(options: SpritesProviderOptions = {}): SandboxProvider {
     },
     async ensureServer(sandboxId: string): Promise<void> {
       const client = await getClient();
+      const sprite = await client.getSprite(sandboxId);
+      await installSandboxAgent(sprite, installTimeoutMs);
       await ensureService(client, sandboxId, serviceName, agentPort, serviceStartDuration, await getServerEnv());
     },
     async getToken(): Promise<string> {

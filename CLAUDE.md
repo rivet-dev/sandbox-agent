@@ -70,6 +70,7 @@
   - `docs/deploy/vercel.mdx`
   - `docs/deploy/daytona.mdx`
   - `docs/deploy/e2b.mdx`
+  - `docs/deploy/sprites.mdx`
   - `docs/deploy/docker.mdx`
   - `frontend/packages/website/src/components/GetStarted.tsx`
   - `.claude/commands/post-release-testing.md`
@@ -78,6 +79,7 @@
   - `examples/shared/src/docker.ts`
   - `examples/docker/src/index.ts`
   - `examples/e2b/src/index.ts`
+  - `examples/sprites/src/index.ts`
   - `examples/vercel/src/index.ts`
   - `scripts/release/main.ts`
   - `scripts/release/promote-artifacts.ts`

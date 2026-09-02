@@ -60,12 +60,12 @@
     "@cloudflare/sandbox": ">=0.1.0",
     "@daytonaio/sdk": ">=0.12.0",
     "@e2b/code-interpreter": ">=1.0.0",
-    "@fly/sprites": ">=0.0.1",
+    "@fly/sprites": ">=0.2.2",
     "@vercel/sandbox": ">=0.1.0",
+    "computesdk": ">=0.1.0",
     "dockerode": ">=4.0.0",
     "get-port": ">=7.0.0",
-    "modal": ">=0.1.0",
-    "computesdk": ">=0.1.0"
+    "modal": ">=0.1.0"
   },
   "peerDependenciesMeta": {
     "@cloudflare/sandbox": {
@@ -116,15 +116,15 @@
     "@cloudflare/sandbox": ">=0.1.0",
     "@daytonaio/sdk": ">=0.12.0",
     "@e2b/code-interpreter": ">=1.0.0",
-    "@fly/sprites": ">=0.0.1",
+    "@fly/sprites": "^0.2.2",
     "@types/dockerode": "^4.0.0",
     "@types/node": "^22.0.0",
     "@types/ws": "^8.18.1",
     "@vercel/sandbox": ">=0.1.0",
+    "computesdk": ">=0.1.0",
     "dockerode": ">=4.0.0",
     "get-port": ">=7.0.0",
     "modal": ">=0.1.0",
-    "computesdk": ">=0.1.0",
     "openapi-typescript": "^6.7.0",
     "tsup": "^8.0.0",
     "typescript": "^5.7.0",

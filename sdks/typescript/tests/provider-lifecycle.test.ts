@@ -80,10 +80,10 @@ vi.mock("@fly/sprites", () => ({
   },
 }));
 
+import { agentcomputer } from "../src/providers/agentcomputer.ts";
+import { computesdk } from "../src/providers/computesdk.ts";
 import { e2b } from "../src/providers/e2b.ts";
 import { modal } from "../src/providers/modal.ts";
-import { computesdk } from "../src/providers/computesdk.ts";
-import { agentcomputer } from "../src/providers/agentcomputer.ts";
 import { sprites } from "../src/providers/sprites.ts";
 
 function createFetch(): typeof fetch {
@@ -490,7 +490,7 @@ describe("sprites provider", () => {
   it("creates a sprite, installs sandbox-agent, and configures the managed service", async () => {
     const sprite = {
       name: "sprite-1",
-      execFile: vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 0 })),
+      execFileHTTP: vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 0 })),
     };
     spritesMocks.createSprite.mockResolvedValue(sprite);
 
@@ -515,7 +515,8 @@ describe("sprites provider", () => {
     await expect(provider.create()).resolves.toBe("sprite-1");
 
     expect(spritesMocks.createSprite).toHaveBeenCalledWith("sprite-1", undefined);
-    expect(sprite.execFile).not.toHaveBeenCalled();
+    expect(sprite.execFileHTTP).toHaveBeenCalledTimes(1);
+    expect(String(sprite.execFileHTTP.mock.calls[0]?.[1]?.[1])).toContain("curl -fsSL https://releases.rivet.dev/sandbox-agent/0.5.0-rc.2/install.sh | sh");
 
     const putCall = fetchMock.mock.calls.find(([url, init]) => String(url).includes("/services/sandbox-agent") && init?.method === "PUT");
     expect(putCall).toBeDefined();
@@ -525,14 +526,14 @@ describe("sprites provider", () => {
       "Content-Type": "application/json",
     });
     const serviceRequest = JSON.parse(String(putCall?.[1]?.body)) as { args: string[] };
-    expect(serviceRequest.args[1]).toContain("exec npx -y @sandbox-agent/cli@0.5.0-rc.2 server --no-token --host 0.0.0.0 --port 8080");
+    expect(serviceRequest.args[1]).toContain("exec sandbox-agent server --no-token --host 0.0.0.0 --port 8080");
     expect(serviceRequest.args[1]).toContain("OPENAI_API_KEY='test'\\''value'");
   });
 
-  it("optionally installs agents through npx when requested", async () => {
+  it("optionally installs agents through HTTP exec when requested", async () => {
     const sprite = {
       name: "sprite-1",
-      execFile: vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 0 })),
+      execFileHTTP: vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 0 })),
     };
     spritesMocks.createSprite.mockResolvedValue(sprite);
 
@@ -553,12 +554,11 @@ describe("sprites provider", () => {
 
     await provider.create();
 
-    expect(sprite.execFile).toHaveBeenCalledWith("bash", ["-lc", "npx -y @sandbox-agent/cli@0.5.0-rc.2 install-agent claude"], {
-      env: { OPENAI_API_KEY: "test" },
-    });
-    expect(sprite.execFile).toHaveBeenCalledWith("bash", ["-lc", "npx -y @sandbox-agent/cli@0.5.0-rc.2 install-agent codex"], {
-      env: { OPENAI_API_KEY: "test" },
-    });
+    const commands = sprite.execFileHTTP.mock.calls.map((call) => String(call[1]?.[1]));
+    expect(commands[0]).toContain("curl -fsSL");
+    expect(commands[1]).toContain("sandbox-agent install-agent claude");
+    expect(commands[2]).toContain("sandbox-agent install-agent codex");
+    expect(sprite.execFileHTTP.mock.calls[1]?.[2]).toMatchObject({ env: { OPENAI_API_KEY: "test" } });
   });
 
   it("returns the sprite URL and provider token for authenticated access", async () => {
@@ -591,7 +591,7 @@ describe("sprites provider", () => {
         new Response(
           JSON.stringify({
             cmd: "bash",
-            args: ["-lc", "exec npx -y @sandbox-agent/cli@0.5.0-rc.2 server --no-token --host 0.0.0.0 --port 8080"],
+            args: ["-lc", 'export PATH="/usr/local/bin:$HOME/.local/bin:$PATH"; exec sandbox-agent server --no-token --host 0.0.0.0 --port 8080'],
             http_port: 8080,
             state: { status: "running" },
           }),
@@ -602,7 +602,7 @@ describe("sprites provider", () => {
         new Response(
           JSON.stringify({
             cmd: "bash",
-            args: ["-lc", "exec npx -y @sandbox-agent/cli@0.5.0-rc.2 server --no-token --host 0.0.0.0 --port 8080"],
+            args: ["-lc", 'export PATH="/usr/local/bin:$HOME/.local/bin:$PATH"; exec sandbox-agent server --no-token --host 0.0.0.0 --port 8080'],
             http_port: 8080,
             state: { status: "running" },
           }),
@@ -610,12 +610,19 @@ describe("sprites provider", () => {
         ),
       );
     vi.stubGlobal("fetch", fetchMock);
+    const sprite = {
+      name: "sprite-1",
+      execFileHTTP: vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 0 })),
+    };
+    spritesMocks.getSprite.mockResolvedValue(sprite);
 
     const provider = sprites({
       token: "sprite-token",
     });
 
     await provider.ensureServer?.("sprite-1");
+
+    expect(sprite.execFileHTTP).toHaveBeenCalledTimes(1);
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls.every(([, init]) => init?.method === "GET")).toBe(true);

@@ -1,0 +1,66 @@
+---
+title: "Sprites"
+description: "Deploy Sandbox Agent inside a Fly.io Sprite."
+---
+
+[Sprites](https://fly.io/sprites) are persistent Linux VMs from Fly.io that boot in seconds, sleep when idle, and keep their filesystem across restarts.
+
+## Prerequisites
+
+- `SPRITES_TOKEN` (run `sprite org auth`, or create a token in the [Fly.io dashboard](https://fly.io/dashboard))
+- `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`
+
+## TypeScript example
+
+```bash
+npm install sandbox-agent@0.4.x @fly/sprites
+```
+
+```typescript
+import { SandboxAgent } from "sandbox-agent";
+import { sprites } from "sandbox-agent/sprites";
+
+const env: Record<string, string> = {};
+if (process.env.ANTHROPIC_API_KEY) env.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+if (process.env.OPENAI_API_KEY) env.OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+
+const sdk = await SandboxAgent.start({
+  sandbox: sprites({
+    token: process.env.SPRITES_TOKEN,
+    env,
+    installAgents: ["claude"],
+  }),
+});
+
+try {
+  const session = await sdk.createSession({ agent: "claude" });
+  const response = await session.prompt([
+    { type: "text", text: "Summarize this repository" },
+  ]);
+  console.log(response.stopReason);
+} finally {
+  await sdk.destroySandbox();
+}
+```
+
+The `sprites` provider creates a Sprite, registers Sandbox Agent as a managed service on the Sprite, and starts it. The service is reachable at the Sprite's public URL (`https://<name>.sprites.app`), and the SDK authenticates to it with your Sprites token. Sessions default to `/home/sprite` as their working directory.
+
+Sprites sleep when idle. Reconnecting with the same `sandboxId` wakes the Sprite and restarts the service if needed, and the filesystem (including installed agents and session state) is preserved.
+
+## Options
+
+| Option | Description |
+| --- | --- |
+| `token` | Sprites API token. Defaults to `SPRITES_TOKEN` (also accepts `SPRITES_API_KEY` or `SPRITE_TOKEN`). |
+| `env` | Environment variables passed to the Sandbox Agent service (for example LLM credentials). |
+| `installAgents` | Agents to install when the Sprite is created (for example `["claude"]`). |
+| `create.name` | Explicit Sprite name. Defaults to `sandbox-agent-<random>`. |
+| `create.config` | Sprite configuration (`ramMB`, `cpus`, `region`). |
+| `serviceStartDuration` | How long the service stays awake before the Sprite can sleep. Defaults to `10m`. |
+| `agentPort` | Port Sandbox Agent listens on inside the Sprite. Defaults to `8080`. |
+| `installTimeoutMs` | Timeout for installing the Sandbox Agent binary. Defaults to 5 minutes. |
+| `agentInstallTimeoutMs` | Timeout for each agent install. Defaults to 10 minutes. |
+
+## Faster cold starts
+
+Create a Sprite once with `installAgents`, then create a [checkpoint](https://docs.sprites.dev/concepts/checkpoints/) with `sprite checkpoint create`. Restoring from that checkpoint gives you a warm Sprite with Sandbox Agent and agents already installed.

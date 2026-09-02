@@ -59,6 +59,15 @@ icon: "rocket"
         ```
       </Tab>
 
+      <Tab title="Sprites">
+        ```typescript
+        import { SpritesClient } from "@fly/sprites";
+
+        const client = new SpritesClient(process.env.SPRITES_TOKEN!);
+        const sprite = await client.createSprite("my-agent");
+        ```
+      </Tab>
+
       <Tab title="Docker">
         ```bash
         docker run -p 2468:2468 \
@@ -298,7 +307,7 @@ icon: "rocket"
     Configure in-memory, Rivet Actor state, IndexedDB, SQLite, and Postgres persistence.
   </Card>
   <Card title="Deploy to a Sandbox" icon="box" href="/deploy/local">
-    Deploy your agent to E2B, Daytona, Docker, Vercel, or Cloudflare.
+    Deploy your agent to E2B, Daytona, Fly.io Sprites, Docker, Vercel, or Cloudflare.
   </Card>
   <Card title="SDK Overview" icon="compass" href="/sdk-overview">
     Use the latest TypeScript SDK API.

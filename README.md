@@ -32,7 +32,7 @@ Sandbox Agent solves three problems:
 
 - **Universal Agent API**: Single interface to control Claude Code, Codex, OpenCode, Cursor, Amp, and Pi with full feature coverage
 - **Universal Session Schema**: Standardized schema that normalizes all agent event formats for storage and replay
-- **Runs Inside Any Sandbox**: Lightweight static Rust binary. One curl command to install inside E2B, Daytona, Modal, Cloudflare Containers, Agent Computer, or Docker
+- **Runs Inside Any Sandbox**: Lightweight static Rust binary. One curl command to install inside E2B, Daytona, Fly.io Sprites, Modal, Cloudflare Containers, Agent Computer, or Docker
 - **Server or SDK Mode**: Run as an HTTP server or embed with the TypeScript SDK
 - **OpenAPI Spec**: [Well documented](https://sandboxagent.dev/docs/api-reference) and easy to integrate from any language
 - **OpenCode SDK & UI Support** *(Experimental)*: [Connect OpenCode CLI, SDK, or web UI](https://sandboxagent.dev/docs/opencode-compatibility) to control agents through familiar OpenCode tooling
@@ -131,7 +131,7 @@ for await (const event of client.streamEvents("demo", { offset: 0 })) {
 
 ### HTTP Server
 
-Run as an HTTP server and connect from any language. Deploy to E2B, Daytona, Vercel, or your own infrastructure.
+Run as an HTTP server and connect from any language. Deploy to E2B, Daytona, Fly.io Sprites, Vercel, or your own infrastructure.
 
 ```bash
 # Install it
@@ -233,13 +233,13 @@ This SDK does not handle persisting session data. Events stream in a universal J
 <details>
 <summary><strong>Can I run this locally or does it require a sandbox provider?</strong></summary>
 
-Both. Run locally for development, deploy to E2B, Daytona, or Vercel Sandboxes for production.
+Both. Run locally for development, deploy to E2B, Daytona, Fly.io Sprites, or Vercel Sandboxes for production.
 </details>
 
 <details>
 <summary><strong>Does it support [platform]?</strong></summary>
 
-The server is a single Rust binary that runs anywhere with a curl install. If your platform can run Linux binaries (Docker, VMs, etc.), it works. See the deployment guides for E2B, Daytona, and Vercel Sandboxes.
+The server is a single Rust binary that runs anywhere with a curl install. If your platform can run Linux binaries (Docker, VMs, etc.), it works. See the deployment guides for E2B, Daytona, Fly.io Sprites, and Vercel Sandboxes.
 </details>
 
 <details>

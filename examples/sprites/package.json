@@ -7,7 +7,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@fly/sprites": "latest",
+    "@fly/sprites": "^0.2.2",
     "@sandbox-agent/example-shared": "workspace:*",
     "sandbox-agent": "workspace:*"
   },

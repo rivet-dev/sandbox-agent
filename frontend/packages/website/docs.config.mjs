@@ -73,6 +73,7 @@ export const siteConfig = {
             { slug: "docs/deploy/local", label: "Local", attrs: { "data-icon": "hexagon" } },
             { slug: "docs/deploy/e2b", label: "E2B", attrs: { "data-icon": "box" } },
             { slug: "docs/deploy/daytona", label: "Daytona", attrs: { "data-icon": "box" } },
+            { slug: "docs/deploy/sprites", label: "Sprites", attrs: { "data-icon": "box" } },
             { slug: "docs/deploy/agentcomputer", label: "AgentComputer", attrs: { "data-icon": "server" } },
             { slug: "docs/deploy/vercel", label: "Vercel", attrs: { "data-icon": "globe" } },
             { slug: "docs/deploy/cloudflare", label: "Cloudflare", attrs: { "data-icon": "cloud" } },
